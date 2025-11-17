@@ -23,9 +23,9 @@ export const geminiService = {
         })
       });
 
-      const data = await response.json();
+      const data: any = await response.json();
       
-      if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+      if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
         return {
           text: data.candidates[0].content.parts[0].text.trim(),
           success: true
