@@ -1,8 +1,39 @@
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { saraPrompt } from './saraPrompt.js';
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+
 export const geminiService = {
   async generateResponse(userMessage: string, conversationHistory: any[] = []) {
-    return {
-      text: '¡Hola! Soy SARA, tu asistente inmobiliaria 🏠\n\nGracias por contactarme. Tenemos increíbles propiedades disponibles:\n\n🏢 Andes Residencial - Desde $2,200,000\n🏡 Vista Real - Desde $1,850,000\n🌳 Hacienda del Bosque - Desde $3,500,000\n\n¿Cuál te interesa? 😊',
-      success: true
-    };
+    try {
+      const model = genAI.getGenerativeModel({ 
+        model: 'models/gemini-1.5-flash'
+      });
+
+      const chat = model.startChat({
+        history: [],
+      });
+
+      const context = conversationHistory
+        .slice(-5)
+        .map((msg: any) => `${msg.sender}: ${msg.content}`)
+        .join('\n');
+
+      const fullPrompt = `${saraPrompt}\n\nHistorial:\n${context}\n\nCliente: ${userMessage}`;
+
+      const result = await chat.sendMessage(fullPrompt);
+      const text = result.response.text();
+
+      return {
+        text: text.trim(),
+        success: true
+      };
+    } catch (error) {
+      console.error('Error Gemini:', error);
+      return {
+        text: '¡Hola! Soy SARA 🏠 Tenemos propiedades increíbles. ¿Qué te interesa?',
+        success: false
+      };
+    }
   }
 };
