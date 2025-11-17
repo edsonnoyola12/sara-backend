@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { supabaseService } from './supabaseService.js';
@@ -17,7 +17,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Health check
-app.get('/health', (req, res) => {
+app.get('/health', (req: Request, res: Response) => {
   res.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
@@ -26,7 +26,7 @@ app.get('/health', (req, res) => {
 });
 
 // Main WhatsApp webhook
-app.post('/webhook/whatsapp', async (req, res) => {
+app.post('/webhook/whatsapp', async (req: Request, res: Response) => {
   try {
     console.log('📱 Incoming WhatsApp message:', req.body);
 
