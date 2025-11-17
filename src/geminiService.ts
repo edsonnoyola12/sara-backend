@@ -1,37 +1,42 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { saraPrompt } from './saraPrompt.js';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 export const geminiService = {
   async generateResponse(userMessage: string, conversationHistory: any[] = []) {
     try {
-      const model = genAI.getGenerativeModel({ 
-        model: 'models/gemini-1.5-flash'
-      });
-
-      const chat = model.startChat({
-        history: [],
-      });
+      const apiKey = process.env.GEMINI_API_KEY;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
 
       const context = conversationHistory
         .slice(-5)
         .map((msg: any) => `${msg.sender}: ${msg.content}`)
         .join('\n');
 
-      const fullPrompt = `${saraPrompt}\n\nHistorial:\n${context}\n\nCliente: ${userMessage}`;
+      const fullPrompt = `${saraPrompt}\n\nHistorial:\n${context}\n\nCliente: ${userMessage}\n\nSARA:`;
 
-      const result = await chat.sendMessage(fullPrompt);
-      const text = result.response.text();
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: fullPrompt }]
+          }]
+        })
+      });
 
-      return {
-        text: text.trim(),
-        success: true
-      };
+      const data = await response.json();
+      
+      if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+        return {
+          text: data.candidates[0].content.parts[0].text.trim(),
+          success: true
+        };
+      }
+
+      throw new Error('Invalid response');
     } catch (error) {
       console.error('Error Gemini:', error);
       return {
-        text: '¡Hola! Soy SARA 🏠 Tenemos propiedades increíbles. ¿Qué te interesa?',
+        text: '¡Hola! Soy SARA 🏠 ¿En qué te puedo ayudar?',
         success: false
       };
     }
