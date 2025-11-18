@@ -36,21 +36,23 @@ app.post('/webhook/whatsapp', async (req: Request, res: Response) => {
     const messageText = Body.trim();
 
     let lead = await supabaseService.getLeadByPhone(userPhone);
-    let oldScore = 0;
+    let isNewLead = false;
     
     if (!lead) {
       lead = await supabaseService.createLead({
         name: ProfileName || 'Cliente WhatsApp',
         phone: userPhone
       });
-    } else {
-      const history = await supabaseService.getConversationHistory(lead.id);
-      oldScore = leadScoringService.calculateScore(lead, history);
+      isNewLead = true;
     }
 
     if (!lead) {
       console.error('❌ Failed to create/get lead');
       return res.status(500).send('Error processing lead');
+    }
+
+    if (isNewLead) {
+      await notificationService.notifyNewLead(lead);
     }
 
     await supabaseService.saveMessage({
@@ -70,17 +72,12 @@ app.post('/webhook/whatsapp', async (req: Request, res: Response) => {
 
     await twilioService.sendMessage(userPhone, aiResponse.text);
 
-    // 🔥 CALCULAR SCORE DEL LEAD
-    const newScore = leadScoringService.calculateScore(lead, history);
+    const score = leadScoringService.calculateScore(lead, history);
+    const category = leadScoringService.getCategory(score);
     
-    console.log(`📊 Lead Score: ${oldScore} → ${newScore}`);
+    await supabaseService.updateLeadScore(lead.id, score, category);
 
-    // 🚨 NOTIFICAR SI SCORE CAMBIÓ SIGNIFICATIVAMENTE
-    if (leadScoringService.shouldNotifyTeam(oldScore, newScore)) {
-      await notificationService.notifyLeadScoreUpdate(lead, newScore, history);
-    }
-
-    console.log('✅ Message processed successfully');
+    console.log(`✅ Message processed - Lead score: ${score} (${category})`);
     res.status(200).send('OK');
   } catch (error) {
     console.error('❌ Error in webhook:', error);
