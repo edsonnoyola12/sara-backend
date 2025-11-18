@@ -3,30 +3,34 @@ export const leadScoringService = {
     let score = 0;
     const allText = history.map(m => m.content.toLowerCase()).join(' ');
 
-    // Crédito pre-aprobado (40 pts)
-    if (allText.includes('pre-aprobado') || allText.includes('ya tengo credito')) {
+    console.log('📊 Calculating score for text:', allText.substring(0, 200));
+
+    // Crédito (40 pts)
+    if (allText.includes('pre-aprobado') || allText.includes('preaprobado') || 
+        allText.includes('tengo credito') || allText.includes('tengo crédito') ||
+        allText.includes('ya tengo credito')) {
       score += 40;
-    } else if (allText.includes('tramite') || allText.includes('banco')) {
-      score += 25;
+      console.log('✅ +40 pts: Tiene crédito');
     }
 
     // Urgencia (30 pts)
-    if (allText.includes('urgente') || allText.includes('ya') || allText.includes('inmediato')) {
+    if (allText.includes('este mes') || allText.includes('urgente') || 
+        allText.includes('ya') || allText.includes('inmediato')) {
       score += 30;
-    } else if (allText.includes('pronto') || allText.includes('mes')) {
-      score += 20;
+      console.log('✅ +30 pts: Urgencia alta');
     }
 
-    // Presupuesto (20 pts)
-    if (lead.budget && lead.budget >= 1800000) score += 20;
-
     // Propiedad específica (15 pts)
-    if (lead.property_interest) score += 15;
+    if (allText.includes('andes') || allText.includes('vista real') || 
+        allText.includes('hacienda') || lead.property_interest) {
+      score += 15;
+      console.log('✅ +15 pts: Propiedad específica');
+    }
 
     // Engagement (15 pts)
-    if (history.length > 10) score += 15;
-    else if (history.length > 5) score += 10;
+    if (history.length > 5) score += 15;
 
+    console.log(`🎯 SCORE FINAL: ${score}/100`);
     return Math.min(score, 100);
   },
 
