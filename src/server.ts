@@ -5,6 +5,7 @@ import { supabaseService } from './supabaseService.js';
 import { geminiService } from './geminiService.js';
 import { twilioService } from './twilioService.js';
 import { notificationService } from './notificationService.js';
+import { leadScoringService } from './leadScoringService.js';
 import type { WhatsAppIncomingMessage } from './types.js';
 
 dotenv.config();
@@ -35,24 +36,21 @@ app.post('/webhook/whatsapp', async (req: Request, res: Response) => {
     const messageText = Body.trim();
 
     let lead = await supabaseService.getLeadByPhone(userPhone);
-    let isNewLead = false;
+    let oldScore = 0;
     
     if (!lead) {
       lead = await supabaseService.createLead({
         name: ProfileName || 'Cliente WhatsApp',
         phone: userPhone
       });
-      isNewLead = true;
+    } else {
+      const history = await supabaseService.getConversationHistory(lead.id);
+      oldScore = leadScoringService.calculateScore(lead, history);
     }
 
     if (!lead) {
       console.error('❌ Failed to create/get lead');
       return res.status(500).send('Error processing lead');
-    }
-
-    // 🚨 NOTIFICAR NUEVO LEAD INMEDIATAMENTE
-    if (isNewLead) {
-      await notificationService.notifyNewLead(lead);
     }
 
     await supabaseService.saveMessage({
@@ -72,16 +70,14 @@ app.post('/webhook/whatsapp', async (req: Request, res: Response) => {
 
     await twilioService.sendMessage(userPhone, aiResponse.text);
 
-    // 🎯 DETECTAR LEAD CALIFICADO (tiene nombre real + presupuesto/propiedad)
-    const msgs = await supabaseService.getConversationHistory(lead.id);
-    const allText = msgs.map((m: any) => m.content).join(' ').toLowerCase();
+    // 🔥 CALCULAR SCORE DEL LEAD
+    const newScore = leadScoringService.calculateScore(lead, history);
     
-    const hasRealName = lead.name !== 'Cliente WhatsApp' && lead.name.length > 2;
-    const hasBudget = allText.includes('presupuesto') || allText.includes('millones') || allText.includes('$');
-    const hasProperty = allText.includes('andes') || allText.includes('vista') || allText.includes('hacienda');
-    
-    if (hasRealName && (hasBudget || hasProperty) && msgs.length > 3) {
-      await notificationService.notifyQualifiedLead(lead);
+    console.log(`📊 Lead Score: ${oldScore} → ${newScore}`);
+
+    // 🚨 NOTIFICAR SI SCORE CAMBIÓ SIGNIFICATIVAMENTE
+    if (leadScoringService.shouldNotifyTeam(oldScore, newScore)) {
+      await notificationService.notifyLeadScoreUpdate(lead, newScore, history);
     }
 
     console.log('✅ Message processed successfully');
