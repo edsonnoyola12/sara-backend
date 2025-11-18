@@ -25,6 +25,8 @@ export const geminiService = {
 
       const data: any = await response.json();
       
+      console.log('Gemini response:', JSON.stringify(data, null, 2));
+      
       if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
         return {
           text: data.candidates[0].content.parts[0].text.trim(),
@@ -32,6 +34,7 @@ export const geminiService = {
         };
       }
 
+      console.error('Invalid Gemini structure:', data);
       throw new Error('Invalid response');
     } catch (error) {
       console.error('Error Gemini:', error);
