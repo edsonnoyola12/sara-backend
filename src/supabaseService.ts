@@ -94,3 +94,57 @@ class SupabaseService {
 }
 
 export const supabaseService = new SupabaseService();
+
+  async getLeadByName(name: string) {
+    const { data, error } = await this.supabase
+      .from('leads')
+      .select('*')
+      .ilike('name', `%${name}%`)
+      .limit(5);
+    
+    if (error) throw error;
+    return data;
+  },
+
+  async updateLeadStatus(leadId: string, status: string) {
+    const { error } = await this.supabase
+      .from('leads')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', leadId);
+    
+    if (error) throw error;
+  },
+
+  async addNoteToLead(leadId: string, note: string, teamMemberPhone: string) {
+    const { data: member } = await this.supabase
+      .from('team_members')
+      .select('id')
+      .eq('phone', teamMemberPhone)
+      .single();
+
+    if (member) {
+      const { error } = await this.supabase
+        .from('lead_notes')
+        .insert({
+          lead_id: leadId,
+          team_member_id: member.id,
+          note
+        });
+      
+      if (error) throw error;
+    }
+  },
+
+  async updateLeadScore(leadId: string, score: number, category: string) {
+    const { error } = await this.supabase
+      .from('leads')
+      .update({ 
+        lead_score: score,
+        lead_category: category,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', leadId);
+    
+    if (error) throw error;
+  }
+};
