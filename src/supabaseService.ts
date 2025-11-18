@@ -1,18 +1,40 @@
 import { createClient } from '@supabase/supabase-js';
-import type { Lead, Message } from './types.js';
+import dotenv from 'dotenv';
 
-class SupabaseService {
-  private supabase;
+dotenv.config();
 
-  constructor() {
-    const supabaseUrl = process.env.SUPABASE_URL!;
-    const supabaseKey = process.env.SUPABASE_KEY!;
-    this.supabase = createClient(supabaseUrl, supabaseKey);
-  }
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_KEY || '';
 
-  // ===== LEADS =====
-  async getLeadByPhone(phone: string): Promise<Lead | null> {
-    const { data, error } = await this.supabase
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+export const supabaseService = {
+  supabase,
+
+  async createLead(leadData: { name: string; phone: string; property_interest?: string; budget?: number }) {
+    const { data, error } = await supabase
+      .from('leads')
+      .insert({
+        name: leadData.name,
+        phone: leadData.phone,
+        property_interest: leadData.property_interest,
+        budget: leadData.budget,
+        status: 'New',
+        source: 'whatsapp'
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating lead:', error);
+      return null;
+    }
+
+    return data;
+  },
+
+  async getLeadByPhone(phone: string) {
+    const { data, error } = await supabase
       .from('leads')
       .select('*')
       .eq('phone', phone)
@@ -22,81 +44,12 @@ class SupabaseService {
       console.log('Lead not found:', phone);
       return null;
     }
+
     return data;
-  }
-
-  async createLead(leadData: Partial<Lead>): Promise<Lead | null> {
-    const { data, error } = await this.supabase
-      .from('leads')
-      .insert({
-        ...leadData,
-        status: 'New',
-        urgency: 'medium',
-        source: 'whatsapp',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error creating lead:', error);
-      return null;
-    }
-    return data;
-  }
-
-  async updateLeadStatus(leadId: string, status: Lead['status']): Promise<boolean> {
-    const { error } = await this.supabase
-      .from('leads')
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq('id', leadId);
-
-    if (error) {
-      console.error('Error updating lead status:', error);
-      return false;
-    }
-    return true;
-  }
-
-  // ===== MESSAGES =====
-  async saveMessage(messageData: Partial<Message>): Promise<Message | null> {
-    const { data, error } = await this.supabase
-      .from('messages')
-      .insert({
-        ...messageData,
-        timestamp: new Date().toISOString()
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error saving message:', error);
-      return null;
-    }
-    return data;
-  }
-
-  async getConversationHistory(leadId: string, limit: number = 20): Promise<Message[]> {
-    const { data, error } = await this.supabase
-      .from('messages')
-      .select('*')
-      .eq('lead_id', leadId)
-      .order('timestamp', { ascending: false })
-      .limit(limit);
-
-    if (error) {
-      console.error('Error fetching conversation:', error);
-      return [];
-    }
-    return data.reverse();
-  }
-}
-
-export const supabaseService = new SupabaseService();
+  },
 
   async getLeadByName(name: string) {
-    const { data, error } = await this.supabase
+    const { data, error } = await supabase
       .from('leads')
       .select('*')
       .ilike('name', `%${name}%`)
@@ -107,7 +60,7 @@ export const supabaseService = new SupabaseService();
   },
 
   async updateLeadStatus(leadId: string, status: string) {
-    const { error } = await this.supabase
+    const { error } = await supabase
       .from('leads')
       .update({ status, updated_at: new Date().toISOString() })
       .eq('id', leadId);
@@ -115,28 +68,8 @@ export const supabaseService = new SupabaseService();
     if (error) throw error;
   },
 
-  async addNoteToLead(leadId: string, note: string, teamMemberPhone: string) {
-    const { data: member } = await this.supabase
-      .from('team_members')
-      .select('id')
-      .eq('phone', teamMemberPhone)
-      .single();
-
-    if (member) {
-      const { error } = await this.supabase
-        .from('lead_notes')
-        .insert({
-          lead_id: leadId,
-          team_member_id: member.id,
-          note
-        });
-      
-      if (error) throw error;
-    }
-  },
-
   async updateLeadScore(leadId: string, score: number, category: string) {
-    const { error } = await this.supabase
+    const { error } = await supabase
       .from('leads')
       .update({ 
         lead_score: score,
@@ -146,5 +79,50 @@ export const supabaseService = new SupabaseService();
       .eq('id', leadId);
     
     if (error) throw error;
+  },
+
+  async saveMessage(messageData: { lead_id: string; content: string; sender: string }) {
+    const { error } = await supabase
+      .from('messages')
+      .insert(messageData);
+
+    if (error) {
+      console.error('Error saving message:', error);
+    }
+  },
+
+  async getConversationHistory(leadId: string) {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('lead_id', leadId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Error getting conversation history:', error);
+      return [];
+    }
+
+    return data || [];
+  },
+
+  async addNoteToLead(leadId: string, note: string, teamMemberPhone: string) {
+    const { data: member } = await supabase
+      .from('team_members')
+      .select('id')
+      .eq('phone', teamMemberPhone)
+      .single();
+
+    if (member) {
+      const { error } = await supabase
+        .from('lead_notes')
+        .insert({
+          lead_id: leadId,
+          team_member_id: member.id,
+          note
+        });
+      
+      if (error) throw error;
+    }
   }
 };
