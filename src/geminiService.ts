@@ -4,7 +4,7 @@ export const geminiService = {
   async generateResponse(userMessage: string, conversationHistory: any[] = []) {
     try {
       const apiKey = process.env.GEMINI_API_KEY;
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
       const context = conversationHistory
         .slice(-5)
@@ -25,8 +25,6 @@ export const geminiService = {
 
       const data: any = await response.json();
       
-      console.log('Gemini response:', JSON.stringify(data, null, 2));
-      
       if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
         return {
           text: data.candidates[0].content.parts[0].text.trim(),
@@ -34,7 +32,7 @@ export const geminiService = {
         };
       }
 
-      console.error('Invalid Gemini structure:', data);
+      console.error('Gemini error:', data);
       throw new Error('Invalid response');
     } catch (error) {
       console.error('Error Gemini:', error);
