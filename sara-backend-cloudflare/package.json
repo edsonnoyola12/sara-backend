@@ -1,0 +1,16 @@
+{
+  "name": "sara-backend",
+  "version": "1.0.0",
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@google/genai": "^1.30.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "hono": "^4.0.0",
+    "itty-router": "^5.0.22"
+  },
+  "devDependencies": {
+    "wrangler": "^4.49.0"
+  }
+}

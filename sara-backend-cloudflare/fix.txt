@@ -1,0 +1,21 @@
+    // WhatsApp Webhook - Respuesta vacía para que Twilio no envíe nada
+    if (url.pathname === '/webhook' && request.method === 'POST') {
+      try {
+        const formData = await request.formData();
+        const body = Object.fromEntries(formData);
+        await whatsappHandler.handleIncomingMessage(body.From as string, body.Body as string);
+        
+        // Respuesta vacía - NO enviar "OK"
+        return new Response('', { 
+          status: 200,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      } catch (error: any) {
+        console.error('Webhook Error:', error);
+        // Incluso en error, respuesta vacía
+        return new Response('', { 
+          status: 200,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
+    }

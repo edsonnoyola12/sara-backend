@@ -1,0 +1,7 @@
+    // Automation endpoint
+    if (url.pathname === '/api/automation' && request.method === 'POST') {
+      const { handleAutomation } = await import('./routes/automation');
+      return handleAutomation(request, env);
+    }
+
+    return new Response('SARA Backend', { headers: corsHeaders });
