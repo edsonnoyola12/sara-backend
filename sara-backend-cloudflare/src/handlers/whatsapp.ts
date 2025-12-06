@@ -263,10 +263,7 @@ export class WhatsAppHandler {
         return;
       }
 
-      const incomeMatch = body.match(/(?:gano|ingreso|sueldo|salario).*?(\d[\d,\.]*)/i);
-      const debtMatch = body.match(/(?:debo|deuda|pago mensual).*?(\d[\d,\.]*)/i);
-      const downPaymentMatch = body.match(/(?:enganche|ahorro|tengo).*?(\d[\d,\.]*)/i);
-      
+      // Parsing con multiplicadores
       const needsMortgage = /(?:si|sí|necesito|quiero|me interesa).*(?:crédito|hipoteca|financiamiento)/i.test(body) ||
                            /(?:no tengo|sin).*(?:efectivo|dinero|recursos)/i.test(body);
       const hasMortgage = /(?:ya tengo|tengo aprobado|cuento con).*(?:crédito|hipoteca)/i.test(body);
@@ -275,15 +272,56 @@ export class WhatsAppHandler {
       let mortgageData = lead.mortgage_data || {};
       let needsMortgageStatus = lead.needs_mortgage;
 
+      // INGRESO
+      const incomeMatch = body.match(/(?:gano|ingreso|sueldo|salario)[^\d]{0,20}(\d[\d,\.]*)\s*(mil|millones?|millón(?:es)?)?/i);
       if (incomeMatch) {
-        mortgageData.monthly_income = parseFloat(incomeMatch[1].replace(/,/g, ''));
+        let amount = parseFloat(incomeMatch[1].replace(/,/g, ''));
+        const mult = incomeMatch[2];
+        if (mult && /millón(?:es)?/i.test(mult)) amount *= 1000000;
+        else if (mult && /mil/i.test(mult)) amount *= 1000;
+        mortgageData.monthly_income = amount;
       }
-      if (debtMatch) {
-        mortgageData.current_debt = parseFloat(debtMatch[1].replace(/,/g, ''));
+
+      // DEUDAS
+      const hasNoDebt = /(?:no|sin|cero)\s+(?:tengo)?\s*(?:deuda|adeudo)/i.test(body);
+      if (hasNoDebt) {
+        mortgageData.current_debt = 0;
+      } else {
+        const debtMatch = body.match(/(\d[\d,\.]*)\s*(mil|millones?|millón(?:es)?)?[^\d]{0,30}(?:de\s+)?(?:deuda|adeudo)/i);
+        if (debtMatch) {
+          let amount = parseFloat(debtMatch[1].replace(/,/g, ''));
+          const mult = debtMatch[2];
+          if (mult && /millón(?:es)?/i.test(mult)) amount *= 1000000;
+          else if (mult && /mil/i.test(mult)) amount *= 1000;
+          mortgageData.current_debt = amount;
+        }
       }
+
+      // ENGANCHE - Debug mejorado
+      const downPaymentMatch = body.match(/(\d[\d,\.]*)\s*(millones?|millón(?:es)?|mil)?[^\d]{0,30}(?:de\s+)?(?:enganche|ahorro)/i);
       if (downPaymentMatch) {
-        mortgageData.down_payment = parseFloat(downPaymentMatch[1].replace(/,/g, ''));
+        let amount = parseFloat(downPaymentMatch[1].replace(/,/g, ''));
+        const mult = downPaymentMatch[2];
+        console.log('🔍 Enganche capturado:', { numero: downPaymentMatch[1], multiplicador: mult, texto: downPaymentMatch[0] });
+        
+        if (mult) {
+          const multLower = mult.toLowerCase();
+          if (multLower.includes('millon') || multLower.includes('millón')) {
+            amount *= 1000000;
+            console.log('✅ Multiplicando por 1,000,000');
+          } else if (multLower === 'mil') {
+            amount *= 1000;
+            console.log('✅ Multiplicando por 1,000');
+          }
+        }
+        mortgageData.down_payment = amount;
       }
+
+      console.log('💰 PARSEADO:', {
+        ingreso: mortgageData.monthly_income,
+        deudas: mortgageData.current_debt,
+        enganche: mortgageData.down_payment
+      });
       if (needsMortgage) {
         needsMortgageStatus = true;
       }
@@ -328,7 +366,7 @@ export class WhatsAppHandler {
           if (assignedAsesor?.phone) {
             await this.twilio.sendWhatsAppMessage(
               'whatsapp:' + assignedAsesor.phone,
-              `🏦 Nueva solicitud hipotecaria!\n\n👤 ${clientName}\n📱 ${cleanPhone}\n🏠 ${matchedProperty.name}\n💰 Ingreso: $${mortgageData.monthly_income?.toLocaleString()}/mes\n\n¡Contactar pronto!`
+              `🏦 *NUEVA SOLICITUD HIPOTECARIA*\n\n👤 Cliente: ${clientName}\n📱 Teléfono: ${cleanPhone}\n🏠 Propiedad: ${matchedProperty.name}\n\n💰 *DATOS FINANCIEROS:*\n• Ingreso mensual: $${(mortgageData.monthly_income || 0).toLocaleString()}\n• Deudas actuales: $${(mortgageData.current_debt || 0).toLocaleString()}\n• Enganche disponible: $${(mortgageData.down_payment || 0).toLocaleString()}\n\n¡Contactar pronto!`
             );
           }
 
@@ -336,7 +374,7 @@ export class WhatsAppHandler {
             if (v.phone) {
               await this.twilio.sendWhatsAppMessage(
                 'whatsapp:' + v.phone,
-                `🏦 ${clientName} necesita crédito hipotecario\n🏠 ${matchedProperty.name}\nAsesor: ${assignedAsesor?.name || 'Sin asignar'}`
+                `🏦 *LEAD CON CRÉDITO*\n\n👤 ${clientName}\n📱 ${cleanPhone}\n🏠 ${matchedProperty.name}\n\n💰 Ingreso: $${(mortgageData.monthly_income || 0).toLocaleString()}\nDeudas: $${(mortgageData.current_debt || 0).toLocaleString()}\nEnganche: $${(mortgageData.down_payment || 0).toLocaleString()}\n\nAsesor: ${assignedAsesor?.name || 'Sin asignar'}`
               );
             }
           }
