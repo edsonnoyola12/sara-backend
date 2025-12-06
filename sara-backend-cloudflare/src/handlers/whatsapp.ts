@@ -242,7 +242,11 @@ export class WhatsAppHandler {
         matchedProperty = properties.find(p => p.name.toLowerCase() === lead.property_interest.toLowerCase());
       }
 
-      if (wantsVideo && matchedProperty) {
+      // Video SOLO si NO pidió datos financieros ni cita
+      const mencionaFinanciamiento = /(?:crédito|financiamiento|apoyo|gano|ingreso|deuda|enganche)/i.test(body);
+      const mencionaCita = /(?:mañana|hoy|lunes|martes|miércoles|jueves|viernes|am|pm|ver)/i.test(body);
+      
+      if (wantsVideo && matchedProperty && !mencionaFinanciamiento && !mencionaCita) {
         console.log('🎬 Video para:', clientName, '-', matchedProperty.name);
         
         await this.twilio.sendWhatsAppMessage(from, '🎬 Generando tu video de ' + matchedProperty.name + ', ' + clientName + '... Te lo envío en 2 min ⏳');
@@ -322,6 +326,34 @@ export class WhatsAppHandler {
         deudas: mortgageData.current_debt,
         enganche: mortgageData.down_payment
       });
+
+      // DETECTAR CITA
+      const timeMatch = body.match(/(\d{1,2})(?::(\d{2}))?\s*(?:am|pm)/i);
+      const dateMatch = body.match(/(?:mañana|hoy|lunes|martes|miércoles|jueves|viernes|sábado|domingo)/i);
+      
+      let citaData = null;
+      if (timeMatch && dateMatch) {
+        let appointmentDate = new Date();
+        const dateText = dateMatch[0].toLowerCase();
+        
+        if (dateText === 'mañana') appointmentDate.setDate(appointmentDate.getDate() + 1);
+        
+        let hour = parseInt(timeMatch[1]);
+        const meridiem = timeMatch[0].toLowerCase();
+        if (meridiem.includes('pm') && hour < 12) hour += 12;
+        if (meridiem.includes('am') && hour === 12) hour = 0;
+        
+        appointmentDate.setHours(hour, timeMatch[2] ? parseInt(timeMatch[2]) : 0, 0, 0);
+        
+        citaData = {
+          date: appointmentDate.toISOString().split('T')[0],
+          time: `${hour.toString().padStart(2, '0')}:${(timeMatch[2] || '00').padStart(2, '0')}:00`,
+          dateText: dateText,
+          timeText: timeMatch[0]
+        };
+        console.log('📅 CITA DETECTADA:', citaData);
+      }
+
       if (needsMortgage) {
         needsMortgageStatus = true;
       }
@@ -363,10 +395,27 @@ export class WhatsAppHandler {
 
           console.log('🏦 Solicitud hipotecaria creada para:', clientName);
 
+          if (citaData && lead.assigned_to && matchedProperty) {
+            const { data: appt } = await this.supabase.client.from('appointments').insert([{
+              lead_id: lead.id,
+              lead_phone: cleanPhone,
+              property_id: matchedProperty.id,
+              property_name: matchedProperty.name,
+              vendedor_id: lead.assigned_to,
+              scheduled_date: citaData.date,
+              scheduled_time: citaData.time,
+              status: 'scheduled',
+              appointment_type: 'property_viewing',
+              duration_minutes: 60
+            }]).select().single();
+            console.log('📅 CITA GUARDADA:', appt?.id);
+          }
+
+
           if (assignedAsesor?.phone) {
             await this.twilio.sendWhatsAppMessage(
               'whatsapp:' + assignedAsesor.phone,
-              `🏦 *NUEVA SOLICITUD HIPOTECARIA*\n\n👤 Cliente: ${clientName}\n📱 Teléfono: ${cleanPhone}\n🏠 Propiedad: ${matchedProperty.name}\n\n💰 *DATOS FINANCIEROS:*\n• Ingreso mensual: $${(mortgageData.monthly_income || 0).toLocaleString()}\n• Deudas actuales: $${(mortgageData.current_debt || 0).toLocaleString()}\n• Enganche disponible: $${(mortgageData.down_payment || 0).toLocaleString()}\n\n¡Contactar pronto!`
+              `🏦 *NUEVA SOLICITUD HIPOTECARIA*\n\n👤 Cliente: ${clientName}\n📱 Teléfono: ${cleanPhone}\n🏠 Propiedad: ${matchedProperty.name}\n\n💰 *DATOS FINANCIEROS:*\n• Ingreso mensual: $${(mortgageData.monthly_income || 0).toLocaleString()}\n• Deudas actuales: $${(mortgageData.current_debt || 0).toLocaleString()}\n• Enganche disponible: $${(mortgageData.down_payment || 0).toLocaleString()}${citaData ? `\n\n📅 CITA: ${citaData.dateText} a las ${citaData.timeText}` : ''}\n\n¡Contactar pronto!`
             );
           }
 
@@ -374,7 +423,7 @@ export class WhatsAppHandler {
             if (v.phone) {
               await this.twilio.sendWhatsAppMessage(
                 'whatsapp:' + v.phone,
-                `🏦 *LEAD CON CRÉDITO*\n\n👤 ${clientName}\n📱 ${cleanPhone}\n🏠 ${matchedProperty.name}\n\n💰 Ingreso: $${(mortgageData.monthly_income || 0).toLocaleString()}\nDeudas: $${(mortgageData.current_debt || 0).toLocaleString()}\nEnganche: $${(mortgageData.down_payment || 0).toLocaleString()}\n\nAsesor: ${assignedAsesor?.name || 'Sin asignar'}`
+                `🏦 *LEAD CON CRÉDITO*\n\n👤 ${clientName}\n📱 ${cleanPhone}\n🏠 ${matchedProperty.name}\n\n💰 Ingreso: $${(mortgageData.monthly_income || 0).toLocaleString()}\nDeudas: $${(mortgageData.current_debt || 0).toLocaleString()}\nEnganche: $${(mortgageData.down_payment || 0).toLocaleString()}${citaData ? `\n\n📅 CITA: ${citaData.dateText} a las ${citaData.timeText}` : ''}\n\nAsesor: ${assignedAsesor?.name || 'Sin asignar'}`
               );
             }
           }
