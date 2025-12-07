@@ -1,0 +1,26 @@
+
+ ⛅️ wrangler 4.49.0 (update available 4.53.0)
+─────────────────────────────────────────────
+Version ID:  aeb8e412-eae8-458c-ae76-a0df8bf74349
+Created:     2025-12-06T18:18:45.265Z
+Author:      edson@marketingtdi.com
+Source:      Unknown (version_upload)
+Tag:         -
+Message:     -
+
+Handlers:             fetch
+Compatibility Date:   2024-11-18
+Compatibility Flags:  nodejs_compat
+Secrets:
+Secret Name:  GEMINI_API_KEY
+Secret Name:  GOOGLE_API_KEY
+Secret Name:  GOOGLE_CALENDAR_ID
+Secret Name:  GOOGLE_PRIVATE_KEY
+Secret Name:  GOOGLE_SERVICE_ACCOUNT_EMAIL
+Secret Name:  OPENAI_API_KEY
+Secret Name:  SUPABASE_ANON_KEY
+Secret Name:  SUPABASE_URL
+Secret Name:  TWILIO_ACCOUNT_SID
+Secret Name:  TWILIO_AUTH_TOKEN
+Secret Name:  TWILIO_PHONE_NUMBER
+Secret Name:  TWILIO_WHATSAPP_NUMBER

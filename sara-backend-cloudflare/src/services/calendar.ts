@@ -208,4 +208,45 @@ export class CalendarService {
       return false;
     }
   }
+
+  async findAvailableTeam(
+    startTime: string,
+    endTime: string,
+    vendedores: any[],
+    asesores: any[]
+  ): Promise<{ vendedores: any[], asesores: any[] }> {
+    try {
+      const accessToken = await this.getAccessToken();
+      if (!accessToken) return { vendedores: [], asesores: [] };
+
+      const response = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(this.calendarId)}/events?timeMin=${encodeURIComponent(startTime)}&timeMax=${encodeURIComponent(endTime)}&singleEvents=true`,
+        { headers: { 'Authorization': `Bearer ${accessToken}` } }
+      );
+
+      const data = await response.json();
+      const busyNames = new Set<string>();
+
+      if (data.items && data.items.length > 0) {
+        data.items.forEach((event: any) => {
+          if (event.summary) {
+            vendedores.forEach(v => {
+              if (event.summary.includes(v.name)) busyNames.add(v.name);
+            });
+            asesores.forEach(a => {
+              if (event.summary.includes(a.name)) busyNames.add(a.name);
+            });
+          }
+        });
+      }
+
+      const availableVendedores = vendedores.filter(v => !busyNames.has(v.name) && v.active);
+      const availableAsesores = asesores.filter(a => !busyNames.has(a.name) && a.active);
+
+      return { vendedores: availableVendedores, asesores: availableAsesores };
+    } catch (error) {
+      console.error('❌ Error finding available team:', error);
+      return { vendedores, asesores };
+    }
+  }
 }

@@ -1,398 +1,201 @@
-import { WhatsAppHandler } from './handlers/whatsapp';
 import { SupabaseService } from './services/supabase';
 import { OpenAIService } from './services/openai';
 import { TwilioService } from './services/twilio';
 import { CalendarService } from './services/calendar';
+import { WhatsAppHandler } from './handlers/whatsapp';
+import { handleCalendarRoutes } from './routes/calendar-routes';
 
-export interface Env {
-  SUPABASE_URL: string;
-  SUPABASE_ANON_KEY: string;
-  GEMINI_API_KEY: string;
-  TWILIO_ACCOUNT_SID: string;
-  TWILIO_AUTH_TOKEN: string;
-  TWILIO_PHONE_NUMBER: string;
-  GOOGLE_SERVICE_ACCOUNT_EMAIL: string;
-  GOOGLE_PRIVATE_KEY: string;
-  GOOGLE_CALENDAR_ID: string;
-}
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    };
-
+  async fetch(request: Request, env: any): Promise<Response> {
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
     }
 
+    const url = new URL(request.url);
     const supabase = new SupabaseService(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
-    const openai = new OpenAIService(env.GEMINI_API_KEY);
-    const twilio = new TwilioService(
-      env.TWILIO_ACCOUNT_SID,
-      env.TWILIO_AUTH_TOKEN,
-      env.TWILIO_PHONE_NUMBER
-    );
+    const openai = new OpenAIService(env.OPENAI_API_KEY);
+    const twilio = new TwilioService(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN, env.TWILIO_WHATSAPP_NUMBER);
     const calendar = new CalendarService(
       env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
       env.GOOGLE_PRIVATE_KEY,
       env.GOOGLE_CALENDAR_ID
     );
+    const whatsappHandler = new WhatsAppHandler(supabase, openai, twilio);
 
-    const whatsappHandler = new WhatsAppHandler(supabase, openai, twilio, calendar);
+    // Calendar routes
+    const calendarResponse = await handleCalendarRoutes(request, env, calendar);
+    if (calendarResponse) return calendarResponse;
 
-    // WhatsApp Webhook - Respuesta vacía para que Twilio no envíe nada
+    // Webhook WhatsApp
     if (url.pathname === '/webhook/whatsapp' && request.method === 'POST') {
-      try {
-        const formData = await request.formData();
-        const body = Object.fromEntries(formData);
-        await whatsappHandler.handleIncomingMessage(body);
-        
-        // Respuesta vacía - NO enviar "OK"
-        return new Response('', { 
-          status: 200,
-          headers: { 'Content-Type': 'text/plain' }
-        });
-      } catch (error: any) {
-        console.error('Webhook Error:', error);
-        // Incluso en error, respuesta vacía
-        return new Response('', { 
-          status: 200,
-          headers: { 'Content-Type': 'text/plain' }
-        });
-      }
-    }
+      const formData = await request.formData();
+      const from = formData.get('From') as string;
+      const body = formData.get('Body') as string;
 
-    // API: Get all leads
-    if (url.pathname === '/api/leads' && request.method === 'GET') {
-      const { data, error } = await supabase.client
-        .from('leads')
-        .select('*')
-        .order('created_at', { ascending: false });
+      await whatsappHandler.handleIncomingMessage(from, body);
 
-      return new Response(JSON.stringify(data || []), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
+        headers: { 'Content-Type': 'text/xml', ...corsHeaders }
       });
     }
 
-    // API: Get lead by ID
-    if (url.pathname.match(/^\/api\/leads\/[^\/]+$/) && request.method === 'GET') {
-      const id = url.pathname.split('/').pop();
-      const { data } = await supabase.client
-        .from('leads')
-        .select('*')
-        .eq('id', id)
-        .single();
-
-      return new Response(JSON.stringify(data || {}), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    // API: Update lead
-    if (url.pathname.match(/^\/api\/leads\/[^\/]+$/) && request.method === 'PUT') {
-      const id = url.pathname.split('/').pop();
-      const body = await request.json();
-      
-      const { data, error } = await supabase.client
-        .from('leads')
-        .update(body)
-        .eq('id', id)
-        .select()
-        .single();
-
-      return new Response(JSON.stringify(data || {}), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    // API: Get dashboard KPIs
-    if (url.pathname === '/api/dashboard/kpis' && request.method === 'GET') {
-      const { data: leads } = await supabase.client
-        .from('leads')
-        .select('*');
-
-      const kpis = {
-        total: leads?.length || 0,
-        new: leads?.filter(l => l.status === 'new').length || 0,
-        contacted: leads?.filter(l => l.status === 'contacted').length || 0,
-        qualified: leads?.filter(l => l.status === 'qualified').length || 0,
-        appointment_scheduled: leads?.filter(l => l.status === 'appointment_scheduled').length || 0,
-        converted: leads?.filter(l => l.status === 'converted').length || 0
-      };
-
-      return new Response(JSON.stringify(kpis), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    // API: Get properties
-    if (url.pathname === '/api/properties' && request.method === 'GET') {
-      const { data } = await supabase.client
-        .from('properties')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      return new Response(JSON.stringify(data || []), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    // API: Get team members
-    if (url.pathname === '/api/team' && request.method === 'GET') {
-      const { data } = await supabase.client
-        .from('team_members')
-        .select('*')
-        .order('name', { ascending: true });
-
-      return new Response(JSON.stringify(data || []), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-
-
-    // API: Generate property video with Veo 3
-    if (url.pathname === '/api/videos/generate' && request.method === 'POST') {
-      try {
-        const body = await request.json();
-        const { propertyId, clientName } = body;
-
-        // Obtener propiedad completa
-        const { data: property, error } = await supabase.client
-          .from('properties')
-          .select('*')
-          .eq('id', propertyId)
-          .single();
-
-        if (error || !property) {
-          return new Response(
-            JSON.stringify({ error: 'Propiedad no encontrada' }),
-            { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
-
-        // Importar y usar el servicio Veo3
-        const { generatePropertyVideo } = await import('./services/veo3Service');
-        
-        const videoData = await generatePropertyVideo(
-          property,
-          clientName || 'Cliente',
-          env.GOOGLE_API_KEY
-        );
-
-        // En producción, aquí guardaríamos el video_url en la BD
-        // await supabase.client
-        //   .from('properties')
-        //   .update({ video_url: videoData.videoUrl })
-        //   .eq('id', propertyId);
-
-        return new Response(
-          JSON.stringify(videoData),
-          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-
-      } catch (error: any) {
-        return new Response(
-          JSON.stringify({ 
-            error: error.message,
-            details: 'Error generating video with Veo 3'
-          }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-    }
-
-    // API: Get all properties
-    if (url.pathname === '/api/properties' && request.method === 'GET') {
-      const { data, error } = await supabase.client
-        .from('properties')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      return new Response(JSON.stringify(data || []), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    // API: Get property by ID
-    if (url.pathname.startsWith('/api/properties/') && request.method === 'GET') {
-      const id = url.pathname.split('/')[3];
-      
-      const { data, error } = await supabase.client
-        .from('properties')
-        .select('*')
-        .eq('id', id)
-        .single();
-
-      if (error || !data) {
-        return new Response(JSON.stringify({ error: 'Property not found' }), {
-          status: 404,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-
-      return new Response(JSON.stringify(data), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    // API: Create property
-    if (url.pathname === '/api/properties' && request.method === 'POST') {
-      try {
-        const body = await request.json();
-        
-        const { data, error } = await supabase.client
-          .from('properties')
-          .insert([body])
-          .select()
-          .single();
-
-        if (error) {
-          return new Response(JSON.stringify({ error: error.message }), {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
-        }
-
-        return new Response(JSON.stringify(data), {
-          status: 201,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      } catch (error: any) {
-        return new Response(JSON.stringify({ error: error.message }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-    }
-
-    // API: Update property
-    if (url.pathname.startsWith('/api/properties/') && request.method === 'PUT') {
-      try {
-        const id = url.pathname.split('/')[3];
-        const body = await request.json();
-        
-        const { data, error } = await supabase.client
-          .from('properties')
-          .update(body)
-          .eq('id', id)
-          .select()
-          .single();
-
-        if (error) {
-          return new Response(JSON.stringify({ error: error.message }), {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
-        }
-
-        return new Response(JSON.stringify(data), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      } catch (error: any) {
-        return new Response(JSON.stringify({ error: error.message }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-    }
-
-
-    // API: Upload property files (photos/brochures)
-    if (url.pathname === '/api/properties/upload' && request.method === 'POST') {
-      try {
-        const formData = await request.formData();
-        const file = formData.get('file');
-        const propertyId = formData.get('propertyId');
-        const fileType = formData.get('fileType'); // 'gallery' or 'brochure'
-
-        if (!file || !propertyId) {
-          return new Response(JSON.stringify({ error: 'Missing file or propertyId' }), {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
-        }
-
-        // Generar nombre único para el archivo
-        const timestamp = Date.now();
-        const fileName = `${propertyId}/${fileType}/${timestamp}_${file.name}`;
-
-        // Subir a Supabase Storage
-        const { data: uploadData, error: uploadError } = await supabase.client.storage
-          .from('properties')
-          .upload(fileName, file, {
-            contentType: file.type,
-            upsert: false
-          });
-
-        if (uploadError) {
-          return new Response(JSON.stringify({ error: uploadError.message }), {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          });
-        }
-
-        // Obtener URL pública
-        const { data: urlData } = supabase.client.storage
-          .from('properties')
-          .getPublicUrl(fileName);
-
-        const fileUrl = urlData.publicUrl;
-
-        // Actualizar property en BD
-        const { data: property } = await supabase.client
-          .from('properties')
-          .select('gallery_urls, brochure_urls')
-          .eq('id', propertyId)
-          .single();
-
-        const currentUrls = fileType === 'gallery' 
-          ? (property?.gallery_urls || [])
-          : (property?.brochure_urls || []);
-
-        const updatedUrls = [...currentUrls, fileUrl];
-
-        const updateField = fileType === 'gallery' ? 'gallery_urls' : 'brochure_urls';
-        
-        await supabase.client
-          .from('properties')
-          .update({ [updateField]: updatedUrls })
-          .eq('id', propertyId);
-
-        return new Response(JSON.stringify({ 
-          success: true, 
-          url: fileUrl,
-          fileName: fileName 
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-
-      } catch (error: any) {
-        return new Response(JSON.stringify({ error: error.message }), {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-    }
-
-    // Automation endpoint
+    // Automatizaciones
     if (url.pathname === '/api/automation' && request.method === 'POST') {
-      const { handleAutomation } = await import('./routes/automation');
-      return handleAutomation(request, env);
+      try {
+        console.log('🤖 Ejecutando automatizaciones...');
+
+        const [leadsRes, teamRes] = await Promise.all([
+          supabase.client.from('leads').select('*'),
+          supabase.client.from('team_members').select('*').eq('role', 'vendedor').eq('active', true)
+        ]);
+
+        const leads = leadsRes.data || [];
+        const vendedores = teamRes.data || [];
+
+        let encuestasEnviadas = 0;
+        let alertasLeadOlvidado = 0;
+        let recordatoriosSeguimiento = 0;
+
+        for (const lead of leads) {
+          const now = new Date();
+          const updatedAt = new Date(lead.updated_at || lead.created_at);
+          const horasSinActividad = (now.getTime() - updatedAt.getTime()) / (1000 * 60 * 60);
+
+          if (lead.status === 'appointment_completed' && !lead.survey_sent && horasSinActividad >= 2) {
+            await twilio.sendWhatsAppMessage('whatsapp:' + lead.phone, '¡Hola! ¿Qué te pareció tu cita con nuestro asesor? Tu opinión es muy importante 😊');
+            await supabase.client.from('leads').update({ survey_sent: true }).eq('id', lead.id);
+            encuestasEnviadas++;
+          }
+
+          if (['new', 'contacted'].includes(lead.status) && !lead.alerta_enviada_24h && horasSinActividad >= 24) {
+            for (const v of vendedores) {
+              if (v.phone) {
+                await twilio.sendWhatsAppMessage('whatsapp:' + v.phone, `🚨 URGENTE: Lead sin atención por 24h\n👤 ${lead.name || 'Sin nombre'}\n📱 ${lead.phone}\n🏠 Interés: ${lead.property_interest || 'Sin definir'}`);
+              }
+            }
+            await supabase.client.from('leads').update({ alerta_enviada_24h: true }).eq('id', lead.id);
+            alertasLeadOlvidado++;
+          }
+
+          if (!lead.recordatorio_5dias && horasSinActividad >= 120) {
+            for (const v of vendedores) {
+              if (v.phone) {
+                await twilio.sendWhatsAppMessage('whatsapp:' + v.phone, `⏰ Recordatorio: Cliente sin contacto por 5 días\n👤 ${lead.name || 'Sin nombre'}\n📱 ${lead.phone}\n💡 Considera hacer seguimiento`);
+              }
+            }
+            await supabase.client.from('leads').update({ recordatorio_5dias: true }).eq('id', lead.id);
+            recordatoriosSeguimiento++;
+          }
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          timestamp: new Date().toISOString(),
+          results: { encuestasEnviadas, alertasLeadOlvidado, recordatoriosSeguimiento }
+        }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      } catch (error) {
+        console.error('❌ Error:', error);
+        return new Response(JSON.stringify({ success: false, error: String(error) }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+    }
+
+    // Alertas de marketing
+    if (url.pathname === '/api/marketing-alerts' && request.method === 'POST') {
+      try {
+        console.log('🔔 Ejecutando alertas de marketing...');
+
+        const [campaignsRes, teamRes] = await Promise.all([
+          supabase.client.from('marketing_campaigns').select('*').eq('status', 'active'),
+          supabase.client.from('team_members').select('*').eq('role', 'agencia').eq('active', true)
+        ]);
+
+        const campaigns = campaignsRes.data || [];
+        const marketingTeam = teamRes.data || [];
+
+        if (marketingTeam.length === 0) {
+          return new Response(JSON.stringify({ success: false, message: 'No hay personal de marketing' }), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+          });
+        }
+
+        const alerts: string[] = [];
+
+        for (const campaign of campaigns) {
+          const cpl = campaign.leads_generated > 0 ? campaign.spent / campaign.leads_generated : 0;
+          const roi = campaign.spent > 0 ? ((campaign.revenue_generated - campaign.spent) / campaign.spent * 100) : 0;
+          const budgetUsed = campaign.budget > 0 ? (campaign.spent / campaign.budget * 100) : 0;
+
+          if (cpl > 1000 && campaign.leads_generated > 5) {
+            alerts.push(`⚠️ ALERTA: Campaña "${campaign.name}"\n📊 CPL: $${cpl.toFixed(0)} (muy alto)\n💡 Revisar segmentación`);
+          }
+
+          if (roi < -10 && campaign.spent > 10000) {
+            alerts.push(`📉 ALERTA: Campaña "${campaign.name}"\n💰 ROI: ${roi.toFixed(0)}% (negativo)\n💸 Invertido: $${campaign.spent.toLocaleString()}`);
+          }
+
+          if (budgetUsed > 90 && budgetUsed < 100) {
+            alerts.push(`⚠️ Campaña "${campaign.name}"\n💰 Presupuesto al ${budgetUsed.toFixed(0)}%`);
+          }
+
+          if (campaign.impressions > 1000 && campaign.leads_generated === 0) {
+            alerts.push(`🚨 URGENTE: Campaña "${campaign.name}"\n📊 ${campaign.impressions} impresiones pero 0 leads`);
+          }
+        }
+
+        for (const person of marketingTeam) {
+          if (person.phone && alerts.length > 0) {
+            const message = `📊 REPORTE DE MARKETING\n\n${alerts.join('\n\n---\n\n')}`;
+            await twilio.sendWhatsAppMessage('whatsapp:' + person.phone, message);
+            console.log('✅ Alertas enviadas a:', person.name);
+          }
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          alertasSent: alerts.length,
+          recipients: marketingTeam.length
+        }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+
+      } catch (error) {
+        console.error('❌ Error:', error);
+        return new Response(JSON.stringify({ success: false, error: String(error) }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
     }
 
     return new Response('SARA Backend', { headers: corsHeaders });
+  },
+
+  async scheduled(event: any, env: any, ctx: any) {
+    console.log('⏰ Cron ejecutado:', new Date().toISOString());
+
+    await fetch('https://sara-backend.edson-633.workers.dev/api/automation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const hour = new Date().getHours();
+    if (hour === 9) {
+      await fetch('https://sara-backend.edson-633.workers.dev/api/marketing-alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      console.log('📊 Alertas de marketing enviadas');
+    }
   },
 };

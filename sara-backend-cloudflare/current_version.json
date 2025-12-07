@@ -1,0 +1,80 @@
+{
+  "id": "aeb8e412-eae8-458c-ae76-a0df8bf74349",
+  "number": 247,
+  "metadata": {
+    "created_on": "2025-12-06T18:18:45.265206Z",
+    "source": "wrangler",
+    "author_id": "5fe12bc29b8b66823a324c1d1d57daba",
+    "author_email": "edson@marketingtdi.com",
+    "has_preview": true
+  },
+  "annotations": {
+    "workers/triggered_by": "version_upload"
+  },
+  "resources": {
+    "script": {
+      "etag": "6e87296245a9adf1cba818421d8539c89206b1304a09a4e3d6f1ff6be4dde582",
+      "handlers": [
+        "fetch"
+      ],
+      "last_deployed_from": "wrangler"
+    },
+    "script_runtime": {
+      "compatibility_date": "2024-11-18",
+      "compatibility_flags": [
+        "nodejs_compat"
+      ],
+      "usage_model": "standard"
+    },
+    "bindings": [
+      {
+        "name": "GEMINI_API_KEY",
+        "type": "secret_text"
+      },
+      {
+        "name": "GOOGLE_API_KEY",
+        "type": "secret_text"
+      },
+      {
+        "name": "GOOGLE_CALENDAR_ID",
+        "type": "secret_text"
+      },
+      {
+        "name": "GOOGLE_PRIVATE_KEY",
+        "type": "secret_text"
+      },
+      {
+        "name": "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+        "type": "secret_text"
+      },
+      {
+        "name": "OPENAI_API_KEY",
+        "type": "secret_text"
+      },
+      {
+        "name": "SUPABASE_ANON_KEY",
+        "type": "secret_text"
+      },
+      {
+        "name": "SUPABASE_URL",
+        "type": "secret_text"
+      },
+      {
+        "name": "TWILIO_ACCOUNT_SID",
+        "type": "secret_text"
+      },
+      {
+        "name": "TWILIO_AUTH_TOKEN",
+        "type": "secret_text"
+      },
+      {
+        "name": "TWILIO_PHONE_NUMBER",
+        "type": "secret_text"
+      },
+      {
+        "name": "TWILIO_WHATSAPP_NUMBER",
+        "type": "secret_text"
+      }
+    ]
+  }
+}
