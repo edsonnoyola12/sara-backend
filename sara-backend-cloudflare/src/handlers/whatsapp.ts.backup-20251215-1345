@@ -1,7 +1,6 @@
 import { SupabaseService } from '../services/supabase';
 import { OpenAIService } from '../services/openai';
 import { TwilioService } from '../services/twilio';
-import { FollowupService } from '../services/followupService';
 
 const VIDEO_SERVER_URL = 'https://sara-videos.onrender.com';
 
@@ -31,7 +30,6 @@ interface AIAnalysis {
   send_gps?: boolean;
   send_video_desarrollo?: boolean;
   send_contactos?: boolean;
-  contactar_vendedor?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -151,7 +149,7 @@ export class WhatsAppHandler {
   // MÉTODO PRINCIPAL
   // ═══════════════════════════════════════════════════════════
 
-  async handleIncomingMessage(from: string, body: string, rawRequest?: any, env?: any): Promise<void> {
+  async handleIncomingMessage(from: string, body: string, rawRequest?: any): Promise<void> {
     try {
       const trimmedBody = (body || '').trim();
       
@@ -266,21 +264,14 @@ export class WhatsAppHandler {
       const analysis = await this.analyzeWithAI(body, lead, properties);
       console.log('🧠 AI Analysis:', JSON.stringify(analysis, null, 2));
 
-      // Si la IA detectó nombre y el lead no lo tenía, actualizar en memoria Y en DB
+      // Si la IA detectó nombre y el lead no lo tenía, actualizar en memoria
       if (analysis.extracted_data?.nombre && !lead.name) {
         lead.name = analysis.extracted_data.nombre;
         console.log('✅ Nombre actualizado en memoria:', lead.name);
-        
-        // GUARDAR EN DB TAMBIÉN
-        await this.supabase.client
-          .from('leads')
-          .update({ name: lead.name })
-          .eq('id', lead.id);
-        console.log('✅ Nombre guardado en DB:', lead.name);
       }
 
       // Ejecutar
-      await this.executeAIDecision(analysis, from, cleanPhone, lead, properties, teamMembers, body, env);
+      await this.executeAIDecision(analysis, from, cleanPhone, lead, properties, teamMembers, body);
 
     } catch (error) {
       console.error('❌ Error:', error);
@@ -1366,7 +1357,7 @@ ${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
         if (vendedor?.phone) {
           const vendedorPhone = vendedor.phone.replace(/\D/g, '');
           await this.twilio.sendWhatsAppMessage(
-            vendedorPhone,
+            `whatsapp:+${vendedorPhone}`,
             `🎉 *¡Buenas noticias!*\n\n*${sol.lead_name}* fue APROBADO por ${sol.bank || 'el banco'}!\n\n💰 Monto: $${sol.requested_amount?.toLocaleString() || 'N/A'}\n\n¡Coordina la firma! 🏠`
           );
         }
@@ -1461,7 +1452,7 @@ ${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
         if (vendedor?.phone) {
           const vendedorPhone = vendedor.phone.replace(/\D/g, '');
           await this.twilio.sendWhatsAppMessage(
-            vendedorPhone,
+            `whatsapp:+${vendedorPhone}`,
             `❌ *${sol.lead_name}* fue rechazado definitivamente.\n\nBusca otras opciones de pago o propiedad.`
           );
         }
@@ -1581,7 +1572,7 @@ ${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
       .from('appointments')
       .insert({
         lead_name: leadName,
-        lead_phone: leadPhone.replace(/\D/g, ''),
+        lead_phone: leadPhone,
         property_name: lugar,
         asesor_id: asesor.id,
         asesor_name: asesor.name,
@@ -1766,15 +1757,6 @@ ${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
       })
       .eq('id', lead.id);
 
-    // PROGRAMAR FOLLOW-UPS automáticos según nuevo status
-    try {
-      const followupService = new FollowupService(this.supabase);
-      await followupService.programarFollowups(lead.id, 'status_change', nuevaEtapa);
-      console.log(`📬 Follow-ups programados para ${lead.name} (${nuevaEtapa})`);
-    } catch (e) {
-      console.log('⚠️ Error programando follow-ups:', e);
-    }
-
     let respuesta = `✅ *${lead.name}* movido a ${etapaTexto}`;
 
     // Si es entregado, es VENTA REAL
@@ -1876,7 +1858,7 @@ ${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
       .from('team_members')
       .select('*')
       .eq('role', 'asesor')
-      .select('*')  // TEMP: removed active filter
+      .eq('active', true)
       .ilike('name', '%' + bancoEncontrado + '%');
 
     let asesorAsignado = asesores?.[0] || null;
@@ -1887,7 +1869,7 @@ ${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
         .from('team_members')
         .select('*')
         .eq('role', 'asesor')
-        .select('*')  // TEMP: removed active filter
+        .eq('active', true)
         .limit(1);
       asesorAsignado = cualquierAsesor?.[0];
     }
@@ -1930,7 +1912,7 @@ ${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
     if (asesorAsignado?.phone) {
       const asesorPhone = asesorAsignado.phone.replace(/\D/g, '');
       await this.twilio.sendWhatsAppMessage(
-        asesorPhone,
+        `whatsapp:+${asesorPhone.startsWith('52') ? '' : '52'}${asesorPhone.slice(-10)}`,
         `🆕 *Nueva solicitud de crédito*\n\n👤 ${lead.name}\n📱 ${lead.phone}\n🏦 ${bancoEncontrado}\n💰 ${lead.budget ? '$' + lead.budget.toLocaleString() : 'Por definir'}\n\nVendedor: ${vendedor.name}`
       );
     }
@@ -2718,7 +2700,7 @@ Escribe el nombre completo para continuar.`;
         location: desarrollo,
         start: { dateTime: formatDate(fecha), timeZone: 'America/Mexico_City' },
         end: { dateTime: formatDate(endFecha), timeZone: 'America/Mexico_City' },
-        attendees: []
+        attendees: vendedor?.email ? [{ email: vendedor.email }] : []
       };
 
       const eventResult = await this.calendar.createEvent(eventData);
@@ -3079,7 +3061,7 @@ Te confirmamos tu cita:
 Te esperamos. ¿Tienes alguna duda? 😊`;
 
     try {
-      await this.twilio.sendWhatsAppMessage(leadPhone, msgLead);
+      await this.twilio.sendWhatsAppMessage(`whatsapp:+52${leadPhone}`, msgLead);
       
       // Limpiar confirmación pendiente
       const notasLimpias = { ...(lead.notes || {}) };
@@ -3224,7 +3206,7 @@ Soy SARA, tu asistente. Puedo ayudarte con:
       .from('team_members')
       .select('*')
       .eq('role', 'vendedor')
-      .select('*')  // TEMP: removed active filter;
+      .eq('active', true);
 
     if (!vendedores?.length) return null;
 
@@ -3239,56 +3221,6 @@ Soy SARA, tu asistente. Puedo ayudarte con:
 
     conCarga.sort((a, b) => a.carga - b.carga);
     return conCarga[0];
-  }
-
-
-  // ═══════════════════════════════════════════════════════════════
-  // HELPER: Obtener URL del brochure
-  // ═══════════════════════════════════════════════════════════════
-  private getBrochureUrl(desarrollo: string, modelo?: string): string {
-    const brochureBase = 'https://brochures-santarita.pages.dev';
-    
-    // Mapeo de desarrollo a archivo
-    const devToFile: Record<string, string> = {
-      'alpes': 'alpes',
-      'andes': 'andes',
-      'distrito falco': 'distrito_falco',
-      'falco': 'distrito_falco',
-      'los encinos': 'los_encinos',
-      'encinos': 'los_encinos',
-      'miravalle': 'miravalle',
-      'monte real': 'monte_real',
-      'monte verde': 'monte_verde',
-      'villa campelo': 'villa_campelo',
-      'campelo': 'villa_campelo'
-    };
-    
-    // Buscar el archivo correcto
-    const devLower = desarrollo.toLowerCase();
-    let fileName = '';
-    for (const [key, value] of Object.entries(devToFile)) {
-      if (devLower.includes(key)) {
-        fileName = value;
-        break;
-      }
-    }
-    
-    if (!fileName) return '';
-    
-    // Si hay modelo, agregar ancla
-    if (modelo) {
-      const anchor = modelo.toLowerCase()
-        .replace(/\s+/g, '_')
-        .replace(/í/g, 'i')
-        .replace(/á/g, 'a')
-        .replace(/é/g, 'e')
-        .replace(/ó/g, 'o')
-        .replace(/ú/g, 'u')
-        .replace(/ñ/g, 'n');
-      return `${brochureBase}/${fileName}.html#${anchor}`;
-    }
-    
-    return `${brochureBase}/${fileName}.html`;
   }
 
   private async getAllProperties(): Promise<any[]> {
@@ -3308,8 +3240,9 @@ Soy SARA, tu asistente. Puedo ayudarte con:
   private async getAllTeamMembers(): Promise<any[]> {
     const { data } = await this.supabase.client
       .from('team_members')
-      .select("*");
-    console.log("🔍 getAllTeamMembers RAW:", JSON.stringify(data)); return data || [];
+      .select('*')
+      .eq('active', true);
+    return data || [];
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -3364,118 +3297,6 @@ Tu objetivo:
 
 Respondes SIEMPRE en español neutro mexicano, con tono cálido, cercano y profesional.
 Usa emojis con moderación: máximo 1–2 por mensaje, solo donde sumen emoción.
-
-────────────────────────
-SOBRE GRUPO SANTA RITA (INFORMACIÓN DE LA EMPRESA)
-────────────────────────
-🏢 **QUIÉNES SOMOS:**
-- Constructora líder en Zacatecas desde 1972 (más de 50 años de experiencia)
-- Slogan: "Construyendo confianza desde 1972"
-- #OrgulloZacatecano #ConstruimosZacatecas
-- Pioneros en desarrollos habitacionales que se han convertido en centros productivos
-
-📍 **OFICINA:**
-- Av. Cumbres No. 110, Fracc. Colinas del Vergel, Zacatecas, Zac. C.P. 98085
-- Tel: (492) 924 77 78
-- WhatsApp: (492) 173 09 05
-
-🎯 **FILOSOFÍA:**
-- Desarrollos que trascienden más allá de la construcción
-- Elevar la calidad de vida de la comunidad
-- Innovación tecnológica constante
-- Compromiso con el medio ambiente (proyectos sostenibles)
-- Estudios detallados del entorno antes de construir
-- Armonía con el paisaje y diseño arquitectónico único
-
-🏆 **¿POR QUÉ ELEGIRNOS? (usa esto cuando pregunten):**
-- 50+ años construyendo en Zacatecas
-- Materiales de primera calidad
-- Diseños que superan expectativas
-- Ubicaciones estratégicas con plusvalía
-- Acabados premium en cada casa
-- Privadas con seguridad y amenidades
-- Financiamiento flexible (Infonavit, Fovissste, bancario)
-- Equipo de asesores VIP personalizados
-
-🔧 **CALIDAD DE CONSTRUCCIÓN (usa esto cuando pregunten por materiales/calidad):**
-- Análisis del suelo antes de construir
-- Cimientos y estructuras reforzadas
-- Instalaciones eléctricas e hidráulicas de alta calidad
-- Acabados de lujo (pisos, cocinas, baños)
-- Garantía de construcción
-- Supervisión constante de obra
-
-💡 **SI PREGUNTAN POR QUÉ EL PRECIO:**
-"Nuestros precios reflejan 50 años de experiencia, materiales premium, ubicaciones con plusvalía, y el respaldo de la constructora más confiable de Zacatecas. No solo compras una casa, compras tranquilidad y un patrimonio que crece."
-
-────────────────────────
-CUANDO PIDE INFORMACIÓN GENERAL (sin mencionar desarrollo específico)
-────────────────────────
-⚠️ Si el cliente dice:
-- "quiero información"
-- "qué tienen disponible"
-- "qué casas venden"
-- "cuánto cuestan sus casas"
-- "info"
-- "hola quiero comprar casa"
-
-DEBES responder con la lista de TODOS los desarrollos disponibles:
-
-"¡Hola! 😊 Soy SARA de Grupo Santa Rita, constructora líder en Zacatecas desde 1972.
-
-Te presento nuestros desarrollos:
-
-🏡 *Los Encinos* - Desde $2.4M
-→ Casas amplias en privada, ideal para familias.
-
-🏡 *Miravalle* - Desde $3.5M
-→ Diseño moderno con roof garden.
-
-🏡 *Distrito Falco* - Desde $3.6M
-→ Zona de alta plusvalía en Guadalupe.
-
-🏡 *Monte Verde* - Desde $1.3M
-→ Ambiente familiar y naturaleza.
-
-🏡 *Andes* - Desde $1.5M
-→ Excelente ubicación en Guadalupe.
-
-🏡 *Villa Campelo* - Desde $1.8M
-→ Privada con amenidades.
-
-¿Cuál te gustaría conocer más a detalle? 😊"
-
-────────────────────────
-⚠️⚠️⚠️ DIFERENCIA CRÍTICA: VENDEDOR vs ASESOR DE CRÉDITO ⚠️⚠️⚠️
-────────────────────────
-SON ROLES DIFERENTES:
-- VENDEDOR = Vende casas, muestra desarrollos, atiende visitas
-- ASESOR DE CRÉDITO/ASESOR VIP = Solo para trámites de crédito hipotecario con bancos
-
-⚠️ NUNCA confundas estos roles. Si pide vendedor, NO le ofrezcas asesor VIP.
-
-────────────────────────
-CUANDO QUIERE HABLAR CON VENDEDOR/PERSONA REAL
-────────────────────────
-⚠️ Si el cliente dice:
-- "quiero hablar con un vendedor"
-- "pásame con una persona real"
-- "prefiero hablar por teléfono"
-- "hay alguien que me pueda atender?"
-- "me pueden llamar?"
-- "quiero que me llamen"
-- "mejor llámame"
-
-DEBES:
-1) Si NO tienes nombre → Pedir nombre: "¡Claro! Para conectarte con un vendedor, ¿me das tu nombre?"
-2) Si NO tienes celular → Pedir celular: "¡Perfecto [nombre]! ¿Me das tu número para que el vendedor te contacte?"
-3) Si tienes nombre Y celular → Responder:
-   "¡Listo [nombre]! Ya notifiqué a nuestro equipo de ventas para que te contacten pronto.
-   
-   ¿Hay algún desarrollo en particular que te interese para pasarle el dato al vendedor?"
-4) Activar contactar_vendedor: true en el JSON (NO send_contactos)
-
-⚠️ IMPORTANTE: Después de conectar con vendedor, NO preguntes si quiere asesor VIP ni menciones crédito.
 
 ────────────────────────
 ESTILO DE RESPUESTA Y FORMATO VISUAL
@@ -3552,30 +3373,25 @@ PASO 4: Recomienda desarrollo + modelos con frases vendedoras
   3) Por qué encajan con lo que dijo la persona.
 
 PASO 5: CUANDO QUIERA VISITAR/CONOCER → Verificar datos antes de agendar
-⚠️ CRÍTICO: Antes de confirmar una cita DEBES tener LOS 3:
+⚠️ CRÍTICO: Antes de confirmar una cita DEBES tener:
   1) NOMBRE del cliente
-  2) CELULAR del cliente
-  3) FECHA Y HORA de la visita
+  2) CELULAR del cliente (si no lo tienes, pídelo)
+  3) Fecha y hora
 
-SECUENCIA OBLIGATORIA (sigue este orden EXACTO):
-1. Si NO tienes nombre → Pide nombre: "¡Con gusto! Para agendarte, ¿me compartes tu nombre?"
-2. Si tienes nombre pero NO celular → Pide celular: "¡Perfecto [nombre]! ¿Me compartes tu celular para confirmarte?"
-3. Si tienes nombre Y celular pero NO fecha/hora → ⚠️ OBLIGATORIO pedir fecha/hora: "¡Listo [nombre]! ¿Qué día y hora te gustaría visitarnos?"
-4. SOLO cuando tengas nombre + celular + fecha + hora → Confirma cita
+Si NO tienes nombre → Pide nombre primero: "¡Con gusto! Para agendarte, ¿me compartes tu nombre?"
+Si tienes nombre pero NO celular → Pide celular: "¡Perfecto [nombre]! ¿Me compartes tu número de celular para confirmarte la cita?"
+Si tienes nombre Y celular → Pregunta fecha/hora: "¡Listo [nombre]! ¿Qué día y hora te gustaría visitarnos?"
 
-🚫🚫🚫 PROHIBIDO 🚫🚫🚫
-- NUNCA digas "¡Listo! Te agendo..." si NO tienes fecha y hora
-- NUNCA confirmes cita sin los 3 datos completos
-- NUNCA saltes a preguntar por crédito sin haber confirmado la cita primero
+⚠️ NUNCA confirmes una cita sin tener nombre y celular.
 
 PASO 6: AL CONFIRMAR CITA → SIEMPRE pregunta por crédito
 ⚠️ OBLIGATORIO: Cuando confirmes la cita, SIEMPRE termina con:
-"¿Te gustaría que te ayudemos con el crédito hipotecario? Responde *SÍ* para orientarte 😊"
+"Por cierto, ¿ya tienes crédito hipotecario aprobado o te gustaría que te orientáramos?"
 
 Ejemplo de confirmación completa:
 "¡Listo [nombre]! Te agendo para [fecha] a las [hora] en *[desarrollo]*. Te esperamos con mucho gusto. 😊
 
-¿Te gustaría que te ayudemos con el crédito hipotecario? Responde *SÍ* para orientarte 😊"
+Por cierto, ¿ya tienes crédito hipotecario aprobado o te gustaría que te orientáramos?"
 
 ────────────────────────
 INTERPRETACIÓN DE CRÉDITO
@@ -3627,51 +3443,6 @@ Entonces el cliente QUIERE ASESOR. Tu respuesta debe ser:
 - "Si tienes alguna pregunta..."
 - "Estoy aquí para ayudarte..."
 - "Házmelo saber..."
-
-────────────────────────
-⚠️⚠️⚠️ DETECCIÓN DE RESPUESTAS FUERA DE CONTEXTO ⚠️⚠️⚠️
-────────────────────────
-ERES INTELIGENTE. Si el usuario responde algo que NO corresponde a lo que preguntaste, DEBES:
-
-1) DETECTAR el error amablemente
-2) ACLARAR qué esperabas  
-3) REPETIR la pregunta correcta
-
-EJEMPLOS:
-
-📌 Si preguntaste NOMBRE y responde con fecha/hora:
-Usuario: "mañana a las 10"
-Tú: "¡Esa es una excelente hora! 😊 Pero primero necesito tu nombre para agendarte. ¿Cómo te llamas?"
-
-📌 Si preguntaste CELULAR y responde con nombre:
-Usuario: "Juan Pérez"
-Tú: "¡Mucho gusto Juan! 😊 Ahora sí, ¿me pasas tu número de celular para confirmarte la cita?"
-
-📌 Si preguntaste FECHA/HORA y responde con otra cosa:
-Usuario: "el modelo chipre"
-Tú: "¡El Chipre es excelente! 😊 Para que lo conozcas, ¿qué día y hora te gustaría visitarnos?"
-
-📌 Si preguntaste BANCO y responde número:
-Usuario: "50 mil"
-Tú: "¡Perfecto! Ese dato lo usaremos después 😊 Primero dime, ¿con qué banco te gustaría trabajar tu crédito? (Scotiabank, BBVA, Santander, etc.)"
-
-📌 Si preguntaste INGRESO y responde banco:
-Usuario: "bbva"
-Tú: "¡BBVA es buena opción! 😊 Pero ya tenía tu banco. Lo que necesito ahora es: ¿más o menos cuánto ganas al mes?"
-
-📌 Si preguntaste ENGANCHE y responde otra cosa:
-Usuario: "quiero el de 3 recámaras"
-Tú: "¡Excelente elección! 😊 Para calcular tu capacidad, ¿cuánto tienes ahorrado para el enganche?"
-
-📌 Si preguntaste MODALIDAD (1, 2, 3) y responde otra cosa:
-Usuario: "el viernes"
-Tú: "¡El viernes está bien para la cita con el vendedor! 😊 Pero para el asesor de crédito, ¿cómo prefieres que te contacte? 1️⃣ Llamada, 2️⃣ Videollamada, o 3️⃣ Presencial"
-
-⚠️ IMPORTANTE: 
-- NO guardes datos incorrectos (no guardes "mañana a las 10" como nombre)
-- Siempre sé amable al corregir
-- Mantén el contexto de la conversación
-- Si el usuario parece confundido, ofrece ayuda
 
 ────────────────────────
 ESCENARIOS ESPECIALES
@@ -3730,22 +3501,8 @@ CUANDO PIDA "UBICACIÓN", "MAPA", "DÓNDE ESTÁ":
 - Da una explicación corta de la zona.
 - Marca send_gps: true en el JSON.
 
-CUANDO PIDA INFO DE UN DESARROLLO (genérico):
-- Si dice "info de Los Encinos", "cuéntame de Andes", "qué tienen en Miravalle"
-- Lista los modelos con precios y características
-- Al final OFRECE: "¿Te mando el brochure con videos, recorrido 3D y ubicación? O si te interesa algún modelo te platico de ese 🏠"
-- ⚠️ NO actives send_video_desarrollo, espera a que confirme
-
-CUANDO PIDA UN MODELO ESPECÍFICO:
-- Si dice "quiero ver el Ascendente", "info del modelo Gardenia", "cuéntame del Fresno"
-- Responde con info del modelo
-- ⚠️ SÍ activa send_video_desarrollo: true (enviará video + matterport + GPS + brochure automático)
-- Termina con: "¿Qué te parece? ¿Te gustaría visitarlo? 😊"
-
-CUANDO CONFIRME QUE QUIERE BROCHURE/VIDEO:
-- Si responde "sí", "mándamelo", "dale", "va", "el brochure", "el video" a tu oferta
-- ⚠️ SÍ activa send_video_desarrollo: true
-- Termina con: "¿Qué te parece? ¿Te gustaría visitarlo? 😊"
+CUANDO PIDA "VIDEO", "RECORRIDO", "VER LA CASA":
+- Habla del desarrollo y activa send_video_desarrollo: true.
 
 CUANDO QUIERA "HABLAR CON ASESOR":
 - Explícale que con gusto un asesor humano lo va a contactar.
@@ -3903,10 +3660,7 @@ INTENTS
 - "otro": dudas generales
 
 Flags:
-- "send_video_desarrollo": true SOLO cuando:
-  * Pide un MODELO específico (ej. "el Ascendente", "modelo Gardenia")
-  * Confirma que quiere brochure/video (ej. "sí mándamelo", "dale", "el brochure")
-  * ⚠️ NO lo actives solo porque pregunta por un desarrollo genérico
+- "send_video_desarrollo": true si pide video, recorrido, tour.
 - "send_gps": true si pide ubicación, mapa, cómo llegar.
 - "send_contactos": true SOLO cuando:
   * El cliente dice EXPLÍCITAMENTE "sí quiero asesor", "conéctame", "sí", "dale" EN RESPUESTA a tu pregunta sobre asesor
@@ -3955,8 +3709,7 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
   "response": "Tu respuesta conversacional para WhatsApp",
   "send_video_desarrollo": false,
   "send_gps": false,
-  "send_contactos": false,
-  "contactar_vendedor": false
+  "send_contactos": false
 }
 
 ⚠️ EXTRACCIÓN DE MÚLTIPLES DESARROLLOS Y MODELOS:
@@ -4042,8 +3795,7 @@ RECUERDA:
         response: parsed.response || '¡Hola! ¿En qué puedo ayudarte?',
         send_gps: parsed.send_gps || false,
         send_video_desarrollo: parsed.send_video_desarrollo || false,
-        send_contactos: parsed.send_contactos || false,
-        contactar_vendedor: parsed.contactar_vendedor || false
+        send_contactos: parsed.send_contactos || false
       };
       
     } catch (e) {
@@ -4211,14 +3963,8 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
     lead: any,
     properties: any[],
     teamMembers: any[],
-    originalMessage: string,
-    env: any
+    originalMessage: string
   ): Promise<void> {
-
-    // 🔍 DEBUG: Verificar qué recibe executeAIDecision
-    console.log('🔍 executeAIDecision RECIBE:');
-    console.log('   - properties:', Array.isArray(properties) ? `Array[${properties.length}]` : typeof properties);
-    console.log('   - teamMembers:', Array.isArray(teamMembers) ? `Array[${teamMembers.length}]` : typeof teamMembers);
 
     // ═══════════════════════════════════════════════════════════
     // RE-FETCH: Obtener historial FRESCO para evitar race conditions
@@ -4304,10 +4050,9 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
     }
     
     // Detectar contextos del último mensaje de SARA
-    const preguntabaBanco = (ultimoMsgSara?.content?.includes('Scotiabank') &&
-                            ultimoMsgSara?.content?.includes('BBVA')) ||
-                            ultimoMsgSara?.content?.includes('Con cuál te gustaría trabajar') ||
-                            ultimoMsgSara?.content?.includes('¿Cuál banco es de tu preferencia');
+    const preguntabaBanco = ultimoMsgSara?.content?.includes('Scotiabank') &&
+                            ultimoMsgSara?.content?.includes('BBVA') &&
+                            ultimoMsgSara?.content?.includes('cuál');
     
     const preguntabaIngreso = ultimoMsgSara?.content?.includes('cuánto ganas') ||
                               ultimoMsgSara?.content?.includes('ingreso mensual') ||
@@ -4317,24 +4062,10 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
                                (ultimoMsgSara?.content?.includes('ahorrado') || 
                                 ultimoMsgSara?.content?.includes('tienes algo'));
     
-    // Detectar si SARA preguntó sobre crédito (después de crear cita)
-    const preguntabaCredito = ultimoMsgSara?.content?.includes('ya tienes crédito') ||
-                              ultimoMsgSara?.content?.includes('crédito hipotecario aprobado') ||
-                              ultimoMsgSara?.content?.includes('te gustaría que te orientáramos') ||
-                              ultimoMsgSara?.content?.includes('ayudemos con el crédito');
-    
     const preguntabaAsesorVIP = ultimoMsgSara?.content?.toLowerCase()?.includes('asesor vip') ||
                                 ultimoMsgSara?.content?.includes('te conecte con') ||
                                 ultimoMsgSara?.content?.includes('te gustaría que te conecte') ||
                                 (ultimoMsgSara?.content?.includes('asesor') && ultimoMsgSara?.content?.includes('?'));
-    
-    // PRIORIDAD: Detectar si preguntó por VISITA (buscar en últimos 3 mensajes de SARA)
-    const ultimos3MsgSara = mensajesSara.slice(-3);
-    const preguntabaVisita = ultimos3MsgSara.some((msg: any) => 
-                             msg?.content?.includes('CONOCERLO EN PERSONA') || 
-                             msg?.content?.includes('gustaría visitarlos') ||
-                             msg?.content?.includes('Puedo agendarte') ||
-                             msg?.content?.includes('agendar una cita'));
     
     const contenidoLower = ultimoMsgSara?.content?.toLowerCase() || '';
     const preguntabaModalidad = (contenidoLower.includes('llamada telef') || contenidoLower.includes('1️⃣')) &&
@@ -4346,12 +4077,10 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
     
     const respuestaNegativa = /^(no|nel|nop|nope|negativo|para nada)$/i.test(originalMessage.trim());
     
-    console.log('🔍 DEBUG - preguntabaCredito:', preguntabaCredito);
     console.log('🔍 DEBUG - preguntabaBanco:', preguntabaBanco);
     console.log('🔍 DEBUG - preguntabaIngreso:', preguntabaIngreso);
     console.log('🔍 DEBUG - preguntabaEnganche:', preguntabaEnganche);
     console.log('🔍 DEBUG - preguntabaAsesorVIP:', preguntabaAsesorVIP);
-    console.log('🔍 DEBUG - preguntabaVisita:', preguntabaVisita);
     console.log('🔍 DEBUG - preguntabaModalidad:', preguntabaModalidad);
     // ═══════════════════════════════════════════════════════════
     // FALLBACK INTELIGENTE: Si el regex no detectó, usar lo que OpenAI extrajo
@@ -4359,26 +4088,26 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
     
     // Banco: si regex no detectó pero OpenAI sí
     if (!bancoDetectado && analysis.extracted_data?.banco_preferido) {
-      const bancoAI = analysis.extracted_data?.banco_preferido;
+      const bancoAI = analysis.extracted_data.banco_preferido;
       bancoDetectado = bancosDisponibles.find(b => b.nombre.toLowerCase() === bancoAI.toLowerCase()) || { nombre: bancoAI };
       console.log('🤖 Banco detectado por OpenAI:', bancoAI);
     }
     
     // Ingreso: si regex no detectó pero OpenAI sí
     if (ingresoDetectado === 0 && analysis.extracted_data?.ingreso_mensual) {
-      ingresoDetectado = analysis.extracted_data?.ingreso_mensual;
+      ingresoDetectado = analysis.extracted_data.ingreso_mensual;
       console.log('🤖 Ingreso detectado por OpenAI:', ingresoDetectado);
     }
     
     // Enganche: si regex no detectó pero OpenAI sí
     if (engancheDetectado === 0 && analysis.extracted_data?.enganche_disponible) {
-      engancheDetectado = analysis.extracted_data?.enganche_disponible;
+      engancheDetectado = analysis.extracted_data.enganche_disponible;
       console.log('🤖 Enganche detectado por OpenAI:', engancheDetectado);
     }
     
     // Modalidad: si regex no detectó pero OpenAI sí
     if (!modalidadDetectada && analysis.extracted_data?.modalidad_contacto) {
-      const modAI = (analysis.extracted_data?.modalidad_contacto || '').toLowerCase();
+      const modAI = analysis.extracted_data.modalidad_contacto.toLowerCase();
       if (modAI.includes('telefon') || modAI === 'telefonica') {
         modalidadDetectada = { nombre: 'Telefónica', tipo: 'llamada' };
       } else if (modAI.includes('video') || modAI === 'videollamada') {
@@ -4404,64 +4133,6 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
     const nombreCliente = lead.name || analysis.extracted_data?.nombre || 'amigo';
     
     // ═══════════════════════════════════════════════════════════
-    // PRIORIDAD MÁXIMA: Si preguntó por visita y cliente dice SÍ → Agendar cita
-    // ═══════════════════════════════════════════════════════════
-    // Detectar respuesta negativa (no tengo, no, aún no, todavía no)
-    
-    // ═══════════════════════════════════════════════════════════
-    // PRIORIDAD: Si SARA preguntó sobre crédito y cliente dice NO → Preguntar BANCO
-    // ═══════════════════════════════════════════════════════════
-    if (preguntabaCredito && respuestaAfirmativa) {
-      console.log('🏦 FLUJO CRÉDITO INICIO: Cliente necesita crédito → Preguntar BANCO');
-      analysis.intent = 'info_credito';
-      analysis.response = `¡Claro ${nombreCliente}! 😊 Te ayudo con tu crédito hipotecario.
-
-¿Cuál banco es de tu preferencia?
-🏦 Scotiabank
-🏦 BBVA
-🏦 Santander
-🏦 Banorte
-🏦 HSBC
-🏦 Banamex
-🏦 Banregio
-🏦 Infonavit
-🏦 Fovissste
-
-¿Con cuál te gustaría trabajar?`;
-    }
-    
-    // Si preguntó crédito y cliente dice NO → Cerrar amigablemente
-    if (preguntabaCredito && respuestaNegativa) {
-      console.log('🏦 Cliente NO quiere ayuda con crédito → Cierre amigable');
-      analysis.response = `¡Perfecto ${nombreCliente}! Si más adelante necesitas ayuda con el crédito, aquí estoy. 😊
-
-¡Te esperamos en tu cita! 🏠`;
-    }
-    
-    let forzandoCita = false;
-    if (preguntabaVisita && respuestaAfirmativa) {
-      console.log('🏠 FORZANDO CITA - Cliente dijo SÍ a visita');
-      analysis.intent = 'solicitar_cita';
-      forzandoCita = true;
-      
-      // Verificar si tiene nombre válido
-      const tieneNombreValido = lead.name && lead.name.length > 2 && 
-                                !['test', 'prueba', 'cliente'].some(inv => lead.name.toLowerCase().includes(inv));
-      const tieneCelular = lead.phone && lead.phone.length >= 10;
-      
-      if (!tieneNombreValido) {
-        console.log('📝 Pidiendo NOMBRE para cita');
-        analysis.response = `¡Perfecto! 😊 Para agendarte, ¿me compartes tu nombre completo?`;
-      } else if (!tieneCelular) {
-        console.log('📱 Pidiendo CELULAR para cita');
-        analysis.response = `¡Perfecto ${nombreCliente}! 😊 ¿Me compartes tu número de celular para agendarte?`;
-      } else {
-        console.log('📅 Tiene nombre y celular, pidiendo FECHA');
-        analysis.response = `¡Perfecto ${nombreCliente}! 😊 ¿Qué día y hora te gustaría visitarnos?`;
-      }
-    }
-    
-    // ═══════════════════════════════════════════════════════════
     // FLUJO CRÉDITO PASO 1: Cliente pide crédito → Preguntar BANCO
     // ═══════════════════════════════════════════════════════════
     // Detectar si es solicitud de crédito: intent de OpenAI O mensaje contiene palabras clave
@@ -4478,7 +4149,7 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
                          !preguntabaIngreso &&
                          !preguntabaEnganche;
     
-    if (pidioCredito && !bancoDetectado && !preguntabaVisita) {
+    if (pidioCredito && !bancoDetectado) {
       console.log('🏦 FLUJO CRÉDITO PASO 1: Preguntando BANCO');
       
       analysis.send_contactos = false;
@@ -4503,7 +4174,7 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
     // ═══════════════════════════════════════════════════════════
     // FLUJO CRÉDITO PASO 2: Cliente eligió BANCO → Dar info + Preguntar INGRESO
     // ═══════════════════════════════════════════════════════════
-    else if (bancoDetectado && (preguntabaBanco || pidioCredito || preguntabaCredito)) {
+    else if ((preguntabaBanco || (pidioCredito && bancoDetectado)) && bancoDetectado) {
       console.log('🏦 FLUJO CRÉDITO PASO 2: Banco elegido:', bancoDetectado.nombre, '→ Info + Preguntar INGRESO');
       
       // Guardar banco en lead
@@ -4558,17 +4229,6 @@ Para darte una corrida personalizada, ¿más o menos cuánto ganas al mes?`;
     // ═══════════════════════════════════════════════════════════
     else if (preguntabaIngreso && ingresoDetectado > 0) {
       console.log('🏦 FLUJO CRÉDITO PASO 3: Ingreso detectado:', ingresoDetectado, '→ Corrida + Preguntar ENGANCHE');
-      
-      // GUARDAR INGRESO EN DB
-      try {
-        await this.supabase.client
-          .from('leads')
-          .update({ ingreso_mensual: ingresoDetectado })
-          .eq('id', lead.id);
-        console.log('✅ Ingreso guardado en DB:', ingresoDetectado);
-      } catch (e) {
-        console.log('⚠️ Error guardando ingreso:', e);
-      }
       
       // Obtener banco del lead
       let bancoPreferido = lead.banco_preferido;
@@ -4795,52 +4455,23 @@ Con ${formatMoney(engancheDetectado)} de enganche más el crédito, tienes buena
     }
     
     // ═══════════════════════════════════════════════════════════
-    // FLUJO CRÉDITO PASO 1.5: Cliente dijo SÍ a asesor → Verificar si ya tiene banco
+    // FLUJO CRÉDITO PASO 5: Cliente dijo SÍ a asesor → Pedir NOMBRE y CELULAR
     // ═══════════════════════════════════════════════════════════
-    else if (preguntabaAsesorVIP && respuestaAfirmativa && !preguntabaVisita) {
-      console.log('🏦 FLUJO CRÉDITO PASO 1.5: Quiere asesor');
+    else if (preguntabaAsesorVIP && respuestaAfirmativa) {
+      console.log('🏦 FLUJO CRÉDITO PASO 5: Quiere asesor');
       
-      const nombreCliente = lead.name || 'amigo';
-      
-      // Verificar si YA tiene banco elegido
-      let bancoYaElegido = lead.banco_preferido;
-      if (!bancoYaElegido) {
-        try {
-          const { data: leadDB } = await this.supabase.client
-            .from('leads')
-            .select('banco_preferido')
-            .eq('id', lead.id)
-            .single();
-          bancoYaElegido = leadDB?.banco_preferido;
-        } catch (e) {}
-      }
-      
-      if (bancoYaElegido) {
-        // Ya tiene banco → ir directo a MODALIDAD
-        console.log('🏦 Ya tiene banco:', bancoYaElegido, '→ Preguntar MODALIDAD');
-        analysis.response = `¡Perfecto ${nombreCliente}! 😊 ¿Cómo prefieres que te contacte el asesor de ${bancoYaElegido}?
+      // Si ya tenemos nombre, saltar directo a modalidad
+      if (lead.name) {
+        console.log('🏦 FLUJO CRÉDITO PASO 5: Ya tenemos nombre, saltando a MODALIDAD');
+        analysis.response = `¡Perfecto ${lead.name}! 😊 ¿Cómo prefieres que te contacte el asesor?
 
 1️⃣ *Llamada telefónica*
 2️⃣ *Videollamada* (Zoom/Meet)
 3️⃣ *Presencial* (en oficina)`;
       } else {
-        // No tiene banco → preguntar banco
-        console.log('🏦 No tiene banco → Preguntar BANCO');
-        analysis.response = `¡Claro ${nombreCliente}! 😊 Te ayudo con tu crédito hipotecario.
-
-¿Cuál banco es de tu preferencia?
-
-🏦 Scotiabank
-🏦 BBVA
-🏦 Santander
-🏦 Banorte
-🏦 HSBC
-🏦 Banamex
-🏦 Banregio
-🏦 Infonavit
-🏦 Fovissste
-
-¿Con cuál te gustaría trabajar?`;
+        // Solo pedir nombre (WhatsApp ya lo tenemos)
+        console.log('🏦 FLUJO CRÉDITO PASO 5: Pidiendo solo NOMBRE');
+        analysis.response = `¡Perfecto! 😊 ¿Me compartes tu *nombre completo* para conectarte con el asesor?`;
       }
       
       analysis.send_contactos = false;
@@ -4858,7 +4489,7 @@ Con ${formatMoney(engancheDetectado)} de enganche más el crédito, tienes buena
     const textoSinNumeros = originalMessage.replace(/[\d\-\+\(\)]/g, '').trim();
     const pareceNombre = textoSinNumeros.length > 3;
     
-    if (preguntabaNombreCelular && (telefonoEnMensaje || pareceNombre) && analysis.intent !== 'solicitar_cita' && !preguntabaVisita) {
+    if (preguntabaNombreCelular && (telefonoEnMensaje || pareceNombre)) {
       console.log('🏦 FLUJO CRÉDITO PASO 5.5: Nombre/Celular recibido → Preguntar MODALIDAD');
       
       // Extraer y guardar nombre (preferir el extraído por OpenAI, ya limpio)
@@ -5000,7 +4631,7 @@ Con ${formatMoney(engancheDetectado)} de enganche más el crédito, tienes buena
 ⚡ *¡CONTACTAR A LA BREVEDAD!* ⚡`;
 
         await this.twilio.sendWhatsAppMessage(
-          asesorBanco.phone,
+          `whatsapp:${asesorBanco.phone}`,
           msgAsesorBanco
         );
         console.log('📤 Notificación enviada a asesor de', bancoPreferido);
@@ -5067,6 +4698,18 @@ Un asesor te contactará muy pronto. ¿Hay algo más en lo que pueda ayudarte?`;
       analysis.intent = 'info_credito';
     }
     
+    // ═══════════════════════════════════════════════════════════
+    // DETECCIÓN FORZADA: Si último mensaje fue "¿QUIERES CONOCERLO?" y cliente dice "sí"
+    // ═══════════════════════════════════════════════════════════
+    const preguntabaVisita = ultimoMsgSara?.content?.includes('CONOCERLO EN PERSONA') || 
+                             ultimoMsgSara?.content?.includes('gustaría visitarlos') ||
+                             ultimoMsgSara?.content?.includes('agendar una cita');
+    
+    if (preguntabaVisita && respuestaAfirmativa && analysis.intent !== 'solicitar_cita') {
+      console.log('🔄 FORZANDO solicitar_cita - Cliente dijo SÍ a visita');
+      analysis.intent = 'solicitar_cita';
+    }
+
     // 1. Enviar respuesta principal
     let respuestaPrincipal = analysis.response;
     
@@ -5093,81 +4736,25 @@ Un asesor te contactará muy pronto. ¿Hay algo más en lo que pueda ayudarte?`;
     
     // Si es confirmar_cita, quitar la pregunta de crédito del mensaje principal
     const esConfirmarCita = analysis.intent === 'confirmar_cita' && 
-                            analysis.extracted_data?.fecha && 
-                            analysis.extracted_data?.hora;
+                            analysis.extracted_data.fecha && 
+                            analysis.extracted_data.hora;
     
-    if (esConfirmarCita && respuestaPrincipal.includes('crédito')) {
+    if (esConfirmarCita && respuestaPrincipal.includes('crédito hipotecario')) {
       respuestaPrincipal = respuestaPrincipal
         .replace(/\n*Por cierto,.*crédito hipotecario.*\?/gi, '')
         .replace(/\n*¿Ya tienes crédito.*\?/gi, '')
-        .replace(/\n*¿Te gustaría que te ayudemos con el crédito hipotecario\?.*😊/gi, '')
-        .replace(/\n*Responde \*?SÍ\*? para orientarte.*😊/gi, '')
-        .replace(/\n*¿Te gustaría que te ayudemos con el crédito.*$/gi, '')
         .trim();
-      console.log('🧹 Limpiado mensaje de crédito de respuesta de cita');
     }
     
     await this.twilio.sendWhatsAppMessage(from, respuestaPrincipal);
     console.log('✅ Respuesta enviada');
     
-    // ═══════════════════════════════════════════════════════════
-    // NOTIFICAR A VENDEDOR - Solo cuando SARA confirma notificación
-    // ═══════════════════════════════════════════════════════════
-    const saraConfirmoNotificacion = respuestaPrincipal.includes('Ya notifiqué') || 
-                                      respuestaPrincipal.includes('equipo de ventas');
-    const nombreParaVendedor = analysis.extracted_data?.nombre || lead.name;
-    
-    if (saraConfirmoNotificacion && nombreParaVendedor) {
-      console.log('📞 CONTACTAR VENDEDOR - Notificando...');
-      
-      // Guardar nombre si no está guardado
-      if (analysis.extracted_data?.nombre && !lead.name) {
-        try {
-          await this.supabase.client
-            .from('leads')
-            .update({ name: analysis.extracted_data?.nombre })
-            .eq('id', lead.id);
-          console.log('✅ Nombre guardado:', analysis.extracted_data?.nombre);
-        } catch (e) {
-          console.log('⚠️ Error guardando nombre');
-        }
-      }
-      
-      // Buscar vendedor
-      let vendedor = teamMembers.find((tm: any) => tm.id === lead.assigned_to && tm.role === 'vendedor');
-      if (!vendedor) {
-        vendedor = teamMembers.find((tm: any) => tm.role === 'vendedor' && tm.active);
-      }
-      
-      if (vendedor?.phone) {
-        const telefonoCliente = lead.phone || from;
-        const desarrolloInteres = analysis.extracted_data?.desarrollo || lead.property_interest || 'Por definir';
-        
-        const msgVendedor = `🔔 *LEAD QUIERE CONTACTO DIRECTO*
-
-👤 *${nombreParaVendedor}*
-📱 ${telefonoCliente}
-🏠 Interés: ${desarrolloInteres}
-
-El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
-        
-        try {
-          await this.twilio.sendWhatsAppMessage(vendedor.phone, msgVendedor);
-          console.log('✅ Vendedor notificado:', vendedor.name);
-        } catch (e) {
-          console.log('⚠️ Error enviando WhatsApp a vendedor');
-        }
-      } else {
-        console.log('⚠️ No hay vendedor disponible');
-      }
-    }
-    
     // NOTA: Ya NO enviamos mensaje separado de ASESOR VIP
     // El flujo nuevo de bancos maneja todo en los PASOS 1-6 arriba
 
     // Obtener desarrollo(s) - considerar array de desarrollos si existe
-    const desarrollosArray = analysis.extracted_data?.desarrollos || [];
-    const desarrolloSingle = analysis.extracted_data?.desarrollo;
+    const desarrollosArray = analysis.extracted_data.desarrollos || [];
+    const desarrolloSingle = analysis.extracted_data.desarrollo;
     const desarrollo = desarrolloSingle || desarrollosArray[0] || lead.property_interest;
     const desarrollosParaCita = desarrollosArray.length > 0 ? desarrollosArray.join(' y ') : desarrollo;
     
@@ -5175,36 +4762,26 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       properties.filter(p => p.development?.toLowerCase().includes(desarrollo.toLowerCase())) : [];
 
     // 2. CITA: Solo si intent es confirmar_cita Y tiene fecha+hora Y tenemos nombre
-    const tieneNombre = lead.name || analysis.extracted_data?.nombre;
-    const preguntamosCredito = lead.needs_mortgage !== null || analysis.extracted_data?.necesita_credito !== null;
+    const tieneNombre = lead.name || analysis.extracted_data.nombre;
+    const preguntamosCredito = lead.needs_mortgage !== null || analysis.extracted_data.necesita_credito !== null;
     
-    // Verificar si ya tiene cita para el MISMO desarrollo
+    // Verificar si ya tiene cita antes de intentar crear otra
     let yaExisteCita = false;
-    let citaPreviaDesarrollo = '';
     try {
       const { data: citaPrevia } = await this.supabase.client
         .from('appointments')
-        .select('id, property_name')
+        .select('id')
         .eq('lead_id', lead.id)
         .eq('status', 'scheduled')
         .limit(1);
-      if (citaPrevia && citaPrevia.length > 0) {
-        citaPreviaDesarrollo = citaPrevia[0].property_name || '';
-        // Solo bloquear si es el MISMO desarrollo
-        const desarrolloActual = desarrollosParaCita || desarrollo || analysis.extracted_data?.desarrollo || '';
-        yaExisteCita = citaPreviaDesarrollo.toLowerCase().includes(desarrolloActual.toLowerCase()) ||
-                       desarrolloActual.toLowerCase().includes(citaPreviaDesarrollo.toLowerCase());
-        if (!yaExisteCita && citaPrevia.length > 0) {
-          console.log('📅 Tiene cita en', citaPreviaDesarrollo, 'pero quiere cita en', desarrolloActual, '- SE PERMITE');
-        }
-      }
+      yaExisteCita = citaPrevia && citaPrevia.length > 0;
     } catch (e) {
       console.log('⚠️ Error verificando cita previa');
     }
     
     if (analysis.intent === 'confirmar_cita' && 
-        analysis.extracted_data?.fecha && 
-        analysis.extracted_data?.hora) {
+        analysis.extracted_data.fecha && 
+        analysis.extracted_data.hora) {
       
       // Determinar el desarrollo final
       const desarrolloFinal = desarrollosParaCita || desarrollo;
@@ -5228,30 +4805,27 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       // Si tenemos nombre, desarrollo válido y NO tiene cita previa, crear cita
       else {
         console.log('✅ CREANDO CITA COMPLETA...');
-        console.log('🔍 PASANDO A crearCitaCompleta:');
-        console.log('   - properties:', Array.isArray(properties) ? `Array[${properties.length}]` : typeof properties);
-        console.log('   - teamMembers:', Array.isArray(teamMembers) ? `Array[${teamMembers.length}]` : typeof teamMembers);
         if (!preguntamosCredito) {
           console.log('⚠️ Nota: Cita creada sin info de crédito');
         }
         await this.crearCitaCompleta(
           from, cleanPhone, lead, desarrolloFinal,
-          analysis.extracted_data?.fecha || '',
-          analysis.extracted_data?.hora || '',
-          teamMembers, analysis, properties, env
+          analysis.extracted_data.fecha,
+          analysis.extracted_data.hora,
+          teamMembers, analysis
         );
       }
     }
 
     // 3. Enviar recursos si aplica (MÚLTIPLES DESARROLLOS Y MODELOS)
-    const clientName = analysis.extracted_data?.nombre || lead.name || 'Cliente';
+    const clientName = analysis.extracted_data.nombre || lead.name || 'Cliente';
     
     // Parsear desarrollos y modelos del mensaje original
     const { desarrollos: desarrollosDetectados, modelos: modelosDetectados } = this.parsearDesarrollosYModelos(originalMessage);
     
     // También considerar lo que extrajo OpenAI
-    const desarrollosOpenAI = analysis.extracted_data?.desarrollos || [];
-    const modelosOpenAI = analysis.extracted_data?.modelos || [];
+    const desarrollosOpenAI = analysis.extracted_data.desarrollos || [];
+    const modelosOpenAI = analysis.extracted_data.modelos || [];
     
     // Combinar todas las fuentes de desarrollos (usar 'desarrollo' ya definido arriba)
     const todosDesarrollos = [...new Set([
@@ -5295,8 +4869,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
                              lead.property_interest?.toLowerCase().includes(d.toLowerCase())
                            );
     
-    // Solo bloquear si realmente se enviaron videos/matterports en el historial
-    const recursosYaEnviados = recursosEnHistorial;
+    const recursosYaEnviados = recursosEnHistorial || mismoDesarrollo;
     
     console.log('🔍 ¿Recursos ya enviados?', recursosYaEnviados, 
                 '| En historial:', recursosEnHistorial, 
@@ -5304,15 +4877,8 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
                 '| Preguntó visita:', preguntoPorVisita);
     
     // Solo enviar recursos si hay interés Y NO se enviaron antes
-    // FORZAR envío si hay modelos específicos detectados
-    const tieneModelosEspecificos = todosModelos.length > 0;
-    if (tieneModelosEspecificos) {
-      console.log('🎯 MODELOS ESPECÍFICOS DETECTADOS:', todosModelos, '→ FORZANDO ENVÍO DE RECURSOS');
-    }
-    
     const debeEnviarRecursos = (analysis.send_video_desarrollo || 
-                               analysis.intent === 'interes_desarrollo' ||
-                               tieneModelosEspecificos) &&
+                               analysis.intent === 'interes_desarrollo') &&
                                !recursosYaEnviados;
     
     // NO enviar recursos duplicados
@@ -5358,8 +4924,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       }
       
       // CASO 2: Desarrollos (ej. "Los Encinos y Andes")
-      // ⚠️ Solo si NO se enviaron recursos en CASO 1 (modelos específicos)
-      if (todosDesarrollos.length > 0 && videosEnviados.size === 0 && matterportsEnviados.size === 0) {
+      if (todosDesarrollos.length > 0) {
         for (const dev of todosDesarrollos) {
           const propsDelDesarrollo = properties.filter(p => 
             p.development?.toLowerCase().includes(dev.toLowerCase())
@@ -5423,21 +4988,6 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
         
         await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5 segundos
         
-        // Enviar brochure del desarrollo PRIMERO
-        const desarrolloParaBrochure = todosDesarrollos[0] || '';
-        if (desarrolloParaBrochure) {
-          const brochureUrl = this.getBrochureUrl(desarrolloParaBrochure);
-          if (brochureUrl) {
-            const msgBrochure = `📄 *Brochure completo de ${desarrolloParaBrochure}:*
-${brochureUrl}
-
-Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
-            await this.twilio.sendWhatsAppMessage(from, msgBrochure);
-            console.log(`✅ Brochure enviado: ${desarrolloParaBrochure}`);
-          }
-        }
-        
-        // Luego pregunta de visita
         const msgSeguimiento = `🏠 *¿QUIERES CONOCERLO EN PERSONA?* 🏠
 
 Puedo agendarte una cita para que visites *${desarrollosMencionados}*. ¿Qué dices? 😊`;
@@ -5477,8 +5027,8 @@ Puedo agendarte una cita para que visites *${desarrollosMencionados}*. ¿Qué di
         .single();
       
       if (leadActualizado?.data?.banco_preferido && leadActualizado?.data?.modalidad_asesoria) {
-        console.log('✅ Lead tiene banco/modalidad - notificación ya se envió en PASO 6');
-        // NO hacer return - continuar con el resto del código
+        console.log('⏭️ Ya se procesó con flujo de BANCO/MODALIDAD, saltando flujo viejo');
+        return;
       }
       
       // Verificar si ya se envió notificación al asesor (evitar duplicados)
@@ -5495,32 +5045,12 @@ Puedo agendarte una cita para que visites *${desarrollosMencionados}*. ¿Qué di
         return;
       }
       
-      // PRIMERO buscar asesor del banco elegido
-      const bancoPreferidoLead = lead.banco_preferido || leadActualizado?.data?.banco_preferido;
-      console.log('🏦 Banco preferido del lead:', bancoPreferidoLead || 'NO ESPECIFICADO');
-      
-      let asesorHipotecario = null;
-      
-      // Si tiene banco preferido, buscar asesor de ese banco
-      if (bancoPreferidoLead) {
-        asesorHipotecario = teamMembers.find(t => 
-          (t.role?.toLowerCase().includes('asesor') || t.role?.toLowerCase().includes('hipotec')) &&
-          t.banco?.toLowerCase().includes(bancoPreferidoLead.toLowerCase())
-        );
-        console.log('🔍 Buscando asesor de', bancoPreferidoLead, '→', asesorHipotecario?.name || 'NO ENCONTRADO');
-      }
-      
-      // Si no encontró por banco, buscar cualquier asesor
-      if (!asesorHipotecario) {
-        asesorHipotecario = teamMembers.find(t => 
-          t.role?.toLowerCase().includes('hipotec') || 
-          t.role?.toLowerCase().includes('credito') ||
-          t.role?.toLowerCase().includes('crédito') ||
-          t.role?.toLowerCase().includes('asesor')
-        );
-        console.log('🔍 Usando asesor genérico:', asesorHipotecario?.name || 'NO');
-      }
-      
+      const asesorHipotecario = teamMembers.find(t => 
+        t.role?.toLowerCase().includes('hipotec') || 
+        t.role?.toLowerCase().includes('credito') ||
+        t.role?.toLowerCase().includes('crédito') ||
+        t.role?.toLowerCase().includes('asesor')
+      );
       console.log('👤 Asesor encontrado:', asesorHipotecario?.name || 'NO', '| Tel:', asesorHipotecario?.phone || 'NO');
       
       // Obtener datos de ubicación
@@ -5531,55 +5061,56 @@ Puedo agendarte una cita para que visites *${desarrollosMencionados}*. ¿Qué di
       const direccionAsesor = propDesarrollo?.address || propDesarrollo?.location || `Fraccionamiento ${desarrolloInteres}, Zacatecas`;
       const gpsAsesor = propDesarrollo?.gps_link || '';
       
-      // OBTENER INGRESO DE LA DB PRIMERO (fuente de verdad)
+      // Obtener ingreso del historial Y del mensaje actual
+      const historialConversacion = lead.conversation_history || [];
       let ingresoMensual = 'No especificado';
-      try {
-        const { data: leadActualizado } = await this.supabase.client
-          .from('leads')
-          .select('ingreso_mensual')
-          .eq('id', lead.id)
-          .single();
-        
-        if (leadActualizado?.ingreso_mensual) {
-          ingresoMensual = `$${Number(leadActualizado.ingreso_mensual).toLocaleString('es-MX')}/mes`;
-          console.log('💰 Ingreso obtenido de DB:', ingresoMensual);
+      
+      // Buscar en todos los mensajes del historial
+      for (const msg of historialConversacion) {
+        if (msg.content) {
+          // Buscar patrones como "gano 56 mil", "56,000", "$56000", etc.
+          const matchMil = msg.content.match(/(\d+)\s*mil/i);
+          const matchPesos = msg.content.match(/\$?\s*(\d{1,3}(?:,\d{3})+)/);
+          const matchNumero = msg.content.match(/(?:gano|ingreso|sueldo|cobro).*?(\d+)/i);
+          
+          if (matchMil) {
+            ingresoMensual = `$${matchMil[1]},000/mes`;
+            console.log('💰 Ingreso detectado en historial (mil):', ingresoMensual);
+          } else if (matchPesos) {
+            ingresoMensual = `$${matchPesos[1]}/mes`;
+            console.log('💰 Ingreso detectado en historial (pesos):', ingresoMensual);
+          } else if (matchNumero) {
+            const num = parseInt(matchNumero[1]);
+            if (num > 1000) {
+              ingresoMensual = `$${num.toLocaleString()}/mes`;
+            } else {
+              ingresoMensual = `$${num},000/mes`;
+            }
+            console.log('💰 Ingreso detectado en historial (número):', ingresoMensual);
+          }
         }
-      } catch (e) {
-        console.log('⚠️ Error obteniendo ingreso de DB:', e);
       }
       
-      // Solo buscar en historial si no hay ingreso en DB
-      if (ingresoMensual === 'No especificado') {
-        const historialConversacion = lead.conversation_history || [];
+      // También buscar en el mensaje original actual
+      if (originalMessage) {
+        const matchMil = originalMessage.match(/(\d+)\s*mil/i);
+        const matchPesos = originalMessage.match(/\$?\s*(\d{1,3}(?:,\d{3})+)/);
         
-        // Buscar mensajes donde SARA preguntaba por ingreso Y el siguiente es respuesta del cliente
-        for (let i = 0; i < historialConversacion.length - 1; i++) {
-          const msgSara = historialConversacion[i];
-          const msgCliente = historialConversacion[i + 1];
-          
-          // Solo si SARA preguntaba por ingreso
-          const preguntabaIngreso = msgSara.role === 'assistant' && 
-            (msgSara.content?.includes('cuánto ganas') || 
-             msgSara.content?.includes('ingreso') ||
-             msgSara.content?.includes('sueldo'));
-          
-          if (preguntabaIngreso && msgCliente.role === 'user') {
-            const matchMil = msgCliente.content?.match(/(\d+)\s*mil/i);
-            const matchNumero = msgCliente.content?.match(/(\d+)/);
-            
-            if (matchMil) {
-              ingresoMensual = `$${matchMil[1]},000/mes`;
-              console.log('💰 Ingreso detectado en historial CON CONTEXTO (mil):', ingresoMensual);
-              break;
-            } else if (matchNumero) {
-              const num = parseInt(matchNumero[1]);
-              if (num > 1000 && num < 1000000) { // Rango razonable de ingreso
-                ingresoMensual = `$${num.toLocaleString('es-MX')}/mes`;
-                console.log('💰 Ingreso detectado en historial CON CONTEXTO (número):', ingresoMensual);
-                break;
-              }
-            }
-          }
+        if (matchMil) {
+          ingresoMensual = `$${matchMil[1]},000/mes`;
+          console.log('💰 Ingreso detectado en mensaje actual (mil):', ingresoMensual);
+        } else if (matchPesos) {
+          ingresoMensual = `$${matchPesos[1]}/mes`;
+          console.log('💰 Ingreso detectado en mensaje actual (pesos):', ingresoMensual);
+        }
+      }
+      
+      // Buscar en la respuesta de SARA si mencionó el ingreso
+      if (ingresoMensual === 'No especificado' && analysis.response) {
+        const matchRespuesta = analysis.response.match(/\$(\d{1,3}(?:,\d{3})*)/);
+        if (matchRespuesta) {
+          ingresoMensual = `$${matchRespuesta[1]}/mes (calculado)`;
+          console.log('💰 Ingreso detectado en respuesta SARA:', ingresoMensual);
         }
       }
       
@@ -5658,21 +5189,6 @@ Puedo agendarte una cita para que visites *${desarrollosMencionados}*. ¿Qué di
       
       const temp = lead.lead_score >= 70 ? 'HOT 🔥' : lead.lead_score >= 40 ? 'WARM 🌡️' : 'COLD ❄️';
       
-      // Definir nombre del cliente
-      const clientName = lead.name || analysis.extracted_data?.nombre || 'Cliente';
-      const cleanPhone = from.replace('whatsapp:+', '').replace('whatsapp:', '');
-      
-      // Formatear ingreso y enganche para mostrar
-      let ingresoReal = ingresoMensual; // Ya viene formateado de la lógica anterior
-      let engancheReal = 'No especificado';
-      
-      // Si hay enganche en la DB, formatearlo
-      if (lead.enganche_disponible) {
-        engancheReal = `$${Number(lead.enganche_disponible).toLocaleString('es-MX')}`;
-      }
-      
-      console.log('📊 Datos para asesor - Nombre:', clientName, '| Ingreso:', ingresoReal, '| Enganche:', engancheReal);
-      
       if (asesorHipotecario?.phone) {
         // 1. MENSAJE COMPLETO AL ASESOR (incluye GPS)
         const msgAsesor = `🔥🔥🔥 *¡NUEVO LEAD VIP!* 🔥🔥🔥
@@ -5685,8 +5201,7 @@ Puedo agendarte una cita para que visites *${desarrollosMencionados}*. ¿Qué di
 👤 *Cliente:* ${clientName}
 📱 *Tel:* ${cleanPhone}
 🏠 *Interés:* ${desarrolloInteres}
-💰 *Ingreso mensual:* ${ingresoReal}
-💵 *Enganche ahorrado:* ${engancheReal}
+💰 *Ingreso:* ${ingresoMensual}
 ${citaExistente ? `📅 *Cita:* ${citaExistente}` : '📅 *Cita:* Por agendar'}
 📊 *Score:* ${lead.lead_score || 0}/100 ${temp}
 
@@ -5701,7 +5216,7 @@ ${gpsAsesor ? `🗺️ ${gpsAsesor}` : ''}
         console.log('📨 MENSAJE A ASESOR:', msgAsesor);
         
         await this.twilio.sendWhatsAppMessage(
-          asesorHipotecario.phone,
+          `whatsapp:${asesorHipotecario.phone}`,
           msgAsesor
         );
         console.log('📤 Notificación enviada a asesor (solicitud directa)');
@@ -5710,24 +5225,12 @@ ${gpsAsesor ? `🗺️ ${gpsAsesor}` : ''}
         const nombreAsesor = asesorHipotecario.name?.replace(/ - Asesor.*$/i, '') || 'Nuestro asesor';
         const telAsesor = asesorHipotecario.phone;
         
-        // Obtener modalidad elegida
-        const modalidadElegida = lead.modalidad_asesoria || leadActualizado?.data?.modalidad_asesoria || '';
-        let msgContacto = 'Se pondrá en contacto contigo pronto';
-        
-        if (modalidadElegida.toLowerCase().includes('telefon') || modalidadElegida.toLowerCase().includes('llamada')) {
-          msgContacto = 'Te llamará pronto para orientarte con tu crédito';
-        } else if (modalidadElegida.toLowerCase().includes('video')) {
-          msgContacto = 'Te contactará para agendar tu videollamada';
-        } else if (modalidadElegida.toLowerCase().includes('presencial')) {
-          msgContacto = citaLegible ? `Te verá ${citaLegible}` : 'Te contactará para agendar una cita presencial';
-        }
-        
         const msgConfirmacionCliente = `✅ *¡Listo ${clientName}!* Tu asesor hipotecario es:
 
 👤 *${nombreAsesor}*
 📱 ${telAsesor}
 
-${msgContacto}`;
+${citaLegible ? `Te verá ${citaLegible}` : 'Él se pondrá en contacto contigo pronto'}`;
 
         await this.twilio.sendWhatsAppMessage(from, msgConfirmacionCliente);
         console.log('📤 Confirmación de asesor enviada al cliente');
@@ -5793,95 +5296,6 @@ ${msgContacto}`;
   // CREAR CITA COMPLETA
   // ═══════════════════════════════════════════════════════════
 
-
-  // ═══════════════════════════════════════════════════════════
-  // GENERAR VIDEO DE BIENVENIDA CON VEO 3
-  // ═══════════════════════════════════════════════════════════
-  private async generarVideoBienvenida(leadPhone: string, 
-    nombreCliente: string,
-    desarrollo: string,
-    photoUrl: string,
-    env: any
-  ): Promise<string | null> {
-    try {
-      console.log('🎬 Generando video de bienvenida para:', nombreCliente, 'en', desarrollo);
-      console.log('📸 Foto a usar:', photoUrl);
-      
-      if (!photoUrl) {
-        console.log('⚠️ No hay foto disponible para el video');
-        return null;
-      }
-      
-      // Descargar imagen como base64 para Veo 3
-      const imgResponse = await fetch(photoUrl);
-      if (!imgResponse.ok) {
-        console.log('⚠️ Error descargando thumbnail');
-        return null;
-      }
-      const imgBuffer = await imgResponse.arrayBuffer();
-      const imgBase64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
-      
-      // Prompt para Veo 3 con la imagen de referencia
-      const prompt = `Professional Mexican woman walks into frame, looks at camera and says in Spanish with clear voice: Bienvenido ${nombreCliente} a tu nuevo hogar aquí en Santa Rita. Then walks out of frame. Background is the provided property image. No music, only voice. No text overlay.`;
-
-      // Llamar a Veo 3 (Imagen a Video)
-      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': env.GEMINI_API_KEY
-        },
-        body: JSON.stringify({
-          instances: [{
-            prompt: prompt,
-            image: {
-              bytesBase64Encoded: imgBase64,
-              mimeType: "image/jpeg"
-            }
-          }],
-          parameters: {
-            aspectRatio: "9:16",
-            durationSeconds: 8,
-            personGeneration: "allow_adult"
-          }
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.log('⚠️ Veo 3 error:', errorText);
-        return null;
-      }
-
-      const result = await response.json();
-      console.log('🎬 Veo 3 operación iniciada:', result.name);
-      
-      const operationName = result.name;
-      if (!operationName) {
-        console.log('⚠️ No operation name');
-        return null;
-      }
-
-      // Guardar en pending_videos para que el cron lo procese
-      await this.supabase.client
-        .from('pending_videos')
-        .insert({
-          operation_id: operationName,
-          lead_phone: leadPhone.replace(/\D/g, ''),
-          lead_name: nombreCliente,
-          desarrollo: desarrollo
-        });
-      
-      console.log('📝 Video pendiente guardado en DB:', operationName);
-      return operationName;
-      
-    } catch (e) {
-      console.log('⚠️ Error generando video Veo 3:', e);
-      return null;
-    }
-  }
-
-
   private async crearCitaCompleta(
     from: string,
     cleanPhone: string,
@@ -5890,19 +5304,14 @@ ${msgContacto}`;
     fecha: string,
     hora: string,
     teamMembers: any[],
-    analysis: AIAnalysis,
-    properties: any[],
-    env: any
+    analysis: AIAnalysis
   ): Promise<void> {
     
-    // Validación defensiva
-    const teamMembersArray = Array.isArray(teamMembers) ? teamMembers : [];
-    
-    const vendedor = teamMembersArray.find(t => t.id === lead.assigned_to);
+    const vendedor = teamMembers.find(t => t.id === lead.assigned_to);
     console.log('👤 Vendedor encontrado:', vendedor?.name || 'NO', '| Email:', vendedor?.email || 'NO', '| Phone:', vendedor?.phone || 'NO');
     
     // Buscar asesor hipotecario en el equipo (ampliar búsqueda)
-    const asesorHipotecario = teamMembersArray.find(t => 
+    const asesorHipotecario = teamMembers.find(t => 
       t.role?.toLowerCase().includes('hipotec') || 
       t.role?.toLowerCase().includes('credito') ||
       t.role?.toLowerCase().includes('crédito') ||
@@ -5913,19 +5322,16 @@ ${msgContacto}`;
       t.name?.toLowerCase().includes('asesor')
     );
     console.log('💳 Asesor hipotecario encontrado:', asesorHipotecario?.name || 'NO', '| Email:', asesorHipotecario?.email || 'NO', '| Phone:', asesorHipotecario?.phone || 'NO');
-    console.log('📋 Team members disponibles:', teamMembersArray.map(t => ({ name: t.name, role: t.role, position: t.position })));
+    console.log('📋 Team members disponibles:', teamMembers.map(t => ({ name: t.name, role: t.role, position: t.position })));
     
-    const clientName = analysis.extracted_data?.nombre || lead.name || 'Cliente';
+    const clientName = analysis.extracted_data.nombre || lead.name || 'Cliente';
     const score = lead.lead_score || 0;
     const temp = score >= 70 ? 'HOT 🔥' : score >= 40 ? 'WARM 🌡️' : 'COLD ❄️';
-    const necesitaCredito = lead.needs_mortgage === true || analysis.extracted_data?.necesita_credito === true;
+    const necesitaCredito = lead.needs_mortgage === true || analysis.extracted_data.necesita_credito === true;
 
-    // Buscar propiedad para obtener dirección y GPS (properties ya viene como parámetro)
-    // VALIDACIÓN DEFENSIVA: asegurar que properties es un array
-    const propertiesArray = Array.isArray(properties) ? properties : [];
-    console.log(`🏠 Properties recibidas en crearCitaCompleta: ${propertiesArray.length} (tipo: ${typeof properties}, isArray: ${Array.isArray(properties)})`);
-    
-    const propDesarrollo = propertiesArray.find(p => 
+    // Buscar propiedad para obtener dirección y GPS
+    const properties = await this.getAllProperties();
+    const propDesarrollo = properties.find(p => 
       p.development?.toLowerCase().includes(desarrollo.toLowerCase())
     );
     console.log(`📍 Propiedad encontrada para ${desarrollo}:`, propDesarrollo ? `address=${propDesarrollo.address}, location=${propDesarrollo.location}` : 'NO ENCONTRADA');
@@ -5946,12 +5352,12 @@ ${msgContacto}`;
         console.log('⚠️ Ya existe cita reciente para este lead, no se creará duplicada');
         
         // Solo actualizar el nombre si no lo teníamos y ahora sí lo tenemos
-        if (analysis.extracted_data?.nombre && !citaExistente[0].lead_name) {
+        if (analysis.extracted_data.nombre && !citaExistente[0].lead_name) {
           await this.supabase.client
             .from('appointments')
-            .update({ lead_name: analysis.extracted_data?.nombre })
+            .update({ lead_name: analysis.extracted_data.nombre })
             .eq('id', citaExistente[0].id);
-          console.log('✅ Nombre actualizado en cita existente:', analysis.extracted_data?.nombre);
+          console.log('✅ Nombre actualizado en cita existente:', analysis.extracted_data.nombre);
         }
         return; // NO crear cita duplicada
       }
@@ -5984,15 +5390,6 @@ ${msgContacto}`;
         console.error('❌ Error creando cita en DB:', error);
       } else {
         console.log('📅 Cita creada en DB:', appointment?.id);
-        
-        // PROGRAMAR FOLLOW-UPS de cita agendada
-        try {
-          const followupService = new FollowupService(this.supabase);
-          await followupService.programarFollowups(lead.id, 'appointment_scheduled', 'scheduled', desarrollo);
-          console.log(`📬 Follow-ups de cita programados para ${clientName}`);
-        } catch (e) {
-          console.log('⚠️ Error programando follow-ups de cita:', e);
-        }
       }
 
       const fechaEvento = this.parseFecha(fecha, hora);
@@ -6043,7 +5440,7 @@ ${msgContacto}`;
             dateTime: endDateTime,
             timeZone: 'America/Mexico_City'
           },
-          attendees: []
+          attendees: vendedor?.email ? [{ email: vendedor.email }] : []
         };
         
         // Asegurar que no haya mezcla de date y dateTime
@@ -6084,7 +5481,7 @@ ${msgContacto}`;
               dateTime: endDateTime,
               timeZone: 'America/Mexico_City'
             },
-            attendees: []
+            attendees: [{ email: asesorHipotecario.email }]
           };
           
           // Asegurar que no haya mezcla de date y dateTime
@@ -6124,7 +5521,7 @@ ${msgContacto}`;
 ⚡ *¡PREPÁRATE PARA RECIBIRLO!* ⚡`;
 
         await this.twilio.sendWhatsAppMessage(
-          vendedor.phone,
+          `whatsapp:${vendedor.phone}`,
           msgVendedor
         );
         console.log('📤 Notificación enviada a vendedor');
@@ -6154,7 +5551,7 @@ ${msgContacto}`;
 ⚡ *¡CONTÁCTALO PARA INICIAR TRÁMITE!* ⚡`;
 
         await this.twilio.sendWhatsAppMessage(
-          asesorHipotecario.phone,
+          `whatsapp:${asesorHipotecario.phone}`,
           msgAsesor
         );
         console.log('📤 Notificación enviada a asesor hipotecario');
@@ -6188,61 +5585,13 @@ ${infoContactos}
 ¡Te esperamos! 🎉`;
 
       await this.twilio.sendWhatsAppMessage(from, confirmacion);
-      console.log('✅ Confirmación de cita enviada');
-      
-      // ═══════════════════════════════════════════════════════════
-      // VIDEO DE BIENVENIDA - Solo para PRIMERA cita
-      // ═══════════════════════════════════════════════════════════
-      try {
-        // Verificar si es primera cita (solo 1 cita = la que acabamos de crear)
-        const { data: todasCitas } = await this.supabase.client
-          .from('appointments')
-          .select('id')
-          .eq('lead_id', lead.id);
-        
-        const esPrimeraCita = !todasCitas || todasCitas.length <= 1;
-        
-        // Obtener foto del desarrollo desde el CRM
-        const propsConFoto = properties.filter(
-          (p: any) => p.development?.toLowerCase().includes(desarrollo.toLowerCase()) && p.photo_url
-        );
-        const propConFoto = propsConFoto.length > 0 ? propsConFoto[Math.floor(Math.random() * propsConFoto.length)] : null;
-        const fotoDesarrollo = propConFoto?.photo_url || '';
-        
-        if (esPrimeraCita && fotoDesarrollo) {
-          console.log('🎬 PRIMERA CITA - Generando video de bienvenida...');
-          
-          await new Promise(resolve => setTimeout(resolve, 1500));
-          
-          // Mensaje de bienvenida inmediato
-          const msgBienvenida = `🎉 *¡Bienvenido/a ${lead.name || "Cliente"} a tu nuevo hogar!*
-
-Estamos muy emocionados de que hayas elegido conocer *${desarrollo}*.
-
-🏠 Con más de *50 años* construyendo hogares, Grupo Santa Rita te garantiza:
-✅ Calidad premium en materiales
-✅ Ubicaciones con plusvalía
-✅ El mejor servicio post-venta
-
-_Preparando algo especial para ti..._ 🎬`;
-          
-          await this.twilio.sendWhatsAppMessage(from, msgBienvenida);
-          console.log('✅ Mensaje de bienvenida enviado');
-          
-          // Generar video con Veo 3 en background (el cron lo enviará)
-          this.generarVideoBienvenida(from, lead.name || "Cliente", desarrollo, fotoDesarrollo, env)
-            .catch(err => console.log('Error iniciando video:', err));
-        } else {
-          console.log('📹 No es primera cita o no hay foto:', esPrimeraCita, fotoDesarrollo ? 'SÍ' : 'NO');
-        }
-      } catch (videoErr) {
-        console.log('⚠️ Error en proceso de video bienvenida:', videoErr);
-      }
       
       // Enviar pregunta de crédito como mensaje SEPARADO (más visible)
       await new Promise(resolve => setTimeout(resolve, 2500)); // 2.5 segundos
       
-      const msgPreguntaCredito = `💳 ¿Te gustaría que te ayudemos con el crédito hipotecario? Responde *SÍ* para orientarte 😊`;
+      const msgPreguntaCredito = `💳 *IMPORTANTE* 💳
+
+¿Ya tienes crédito hipotecario aprobado o te gustaría que te orientáramos?`;
       
       await this.twilio.sendWhatsAppMessage(from, msgPreguntaCredito);
       console.log('✅ Pregunta de crédito enviada (mensaje separado)');
@@ -6345,10 +5694,9 @@ _Preparando algo especial para ti..._ 🎬`;
     if (data.necesita_credito !== null && data.necesita_credito !== undefined && lead.needs_mortgage === null) {
       updates.needs_mortgage = data.necesita_credito;
     }
-    // num_recamaras deshabilitado - columna no existe en DB
-    // if (data.num_recamaras && !lead.num_recamaras) {
-    //   updates.num_recamaras = data.num_recamaras;
-    // }
+    if (data.num_recamaras && !lead.num_recamaras) {
+      updates.num_recamaras = data.num_recamaras;
+    }
 
     // Calcular score
     let score = lead.lead_score || 0;

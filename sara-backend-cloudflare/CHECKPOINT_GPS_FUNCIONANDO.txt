@@ -1,0 +1,26 @@
+CHECKPOINT: 7-DIC-2025 - GPS FUNCIONANDO
+Version ID: 218bde64-0ece-4097-9e98-ccda5204b567
+
+✅ FUNCIONALIDADES:
+- Leads completos
+- Parsing financiero (ingreso/deudas/enganche)
+- Hipotecas automáticas
+- Citas en DB
+- Google Calendar (vendedor + asesor)
+- Notificaciones completas
+- GPS con links oficiales de Google Maps
+- Link de Maps en notificaciones a asesor y vendedor
+
+📍 UBICACIONES GPS:
+- Los Encinos, Monte Verde, Monte Real (links oficiales)
+- Andes, Miravalle, Villa Galiano
+- Distrito Falco, Villa Campelo, Alpes
+
+❌ PENDIENTE:
+- Link de Maps NO llega al cliente (solo a asesor/vendedor)
+- Celular del vendedor NO se incluye
+- Video/folleto automatizado NO implementado
+
+RESTAURAR:
+cp src/handlers/whatsapp.ts.checkpoint_20251207_GPS_FUNCIONANDO src/handlers/whatsapp.ts
+npm run deploy

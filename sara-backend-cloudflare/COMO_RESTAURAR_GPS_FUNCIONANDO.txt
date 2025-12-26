@@ -1,0 +1,78 @@
+═══════════════════════════════════════════════════════════════
+INSTRUCCIONES PARA RESTAURAR CHECKPOINT GPS FUNCIONANDO
+═══════════════════════════════════════════════════════════════
+
+📅 FECHA: 7-DIC-2025 16:35
+🆔 VERSION ID: 218bde64-0ece-4097-9e98-ccda5204b567
+📂 ARCHIVO: whatsapp.ts.checkpoint_20251207_GPS_FUNCIONANDO
+
+═══════════════════════════════════════════════════════════════
+MÉTODO 1: RESTAURAR DESDE ARCHIVO LOCAL
+═══════════════════════════════════════════════════════════════
+
+cd ~/Desktop/sara-backend-cloudflare
+cp src/handlers/whatsapp.ts.checkpoint_20251207_GPS_FUNCIONANDO src/handlers/whatsapp.ts
+npm run deploy
+
+═══════════════════════════════════════════════════════════════
+MÉTODO 2: ROLLBACK DESDE CLOUDFLARE
+═══════════════════════════════════════════════════════════════
+
+cd ~/Desktop/sara-backend-cloudflare
+npx wrangler rollback --version-id 218bde64-0ece-4097-9e98-ccda5204b567
+
+Cuando pregunte: "Are you sure you want to deploy this Worker Version to 100% of traffic?"
+Responder: yes
+
+═══════════════════════════════════════════════════════════════
+✅ LO QUE INCLUYE ESTE CHECKPOINT:
+═══════════════════════════════════════════════════════════════
+
+✅ Leads completos
+✅ Parsing financiero (ingreso/deudas/enganche)
+✅ Hipotecas automáticas
+✅ Citas en DB con timezone México
+✅ Google Calendar (eventos vendedor + asesor)
+✅ Notificaciones completas (5 mensajes)
+✅ GPS con links oficiales de Google Maps
+✅ Link de Maps en notificaciones a asesor y vendedor
+
+📍 Ubicaciones con links oficiales:
+   - Los Encinos (Ceiba, Eucalipto, Cedro)
+   - Monte Verde (Abeto, Fresno, Roble)
+   - Monte Real (Madroño, Avellano)
+   - Andes (Lavanda, Tulipán, Azalea)
+   - Miravalle (Almendro, Olivo)
+   - Villa Galiano (Girasol, Gardenia)
+   - Distrito Falco (Halcón, Águila)
+   - Villa Campelo (Sauce, Nogal)
+   - Alpes (Orquídea, Dalia)
+
+═══════════════════════════════════════════════════════════════
+❌ LO QUE NO INCLUYE (PENDIENTE):
+═══════════════════════════════════════════════════════════════
+
+❌ Link de Maps NO llega al cliente (solo a asesor/vendedor)
+❌ Celular del vendedor NO aparece en confirmación
+❌ Video/folleto automatizado
+
+═══════════════════════════════════════════════════════════════
+🧪 CÓMO PROBAR QUE FUNCIONA:
+═══════════════════════════════════════════════════════════════
+
+npx wrangler tail
+
+Enviar mensaje:
+"Hola, soy [NOMBRE], me interesa Lavanda Andes, 
+necesito crédito, gano 100 mil, sin deudas, 
+tengo 2 millones de enganche, quiero ir mañana a las 3pm"
+
+Debe resultar en:
+✅ Lead creado
+✅ Hipoteca creada
+✅ Cita guardada
+✅ 2 eventos Calendar (vendedor + asesor)
+✅ 5 notificaciones enviadas
+✅ Link de Maps en notificación a asesor/vendedor
+
+═══════════════════════════════════════════════════════════════
