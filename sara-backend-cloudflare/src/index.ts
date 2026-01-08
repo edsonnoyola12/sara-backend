@@ -2874,6 +2874,106 @@ Mensaje: ${mensaje}`;
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // TEST: Alerta 2pm a número específico
+    if (url.pathname.startsWith('/test-alerta-2pm/')) {
+      const phone = url.pathname.split('/').pop();
+      console.log(`TEST: Enviando alerta 2pm a ${phone}...`);
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      const phoneFormatted = phone?.startsWith('52') ? phone : '52' + phone;
+
+      const mexicoNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+      const hoyInicio = new Date(mexicoNow);
+      hoyInicio.setHours(0, 0, 0, 0);
+
+      const { data: leadsUrgentes } = await supabase.client
+        .from('leads')
+        .select('id, name, status, score')
+        .in('status', ['new', 'contacted', 'scheduled', 'negotiation'])
+        .or(`last_interaction.is.null,last_interaction.lt.${hoyInicio.toISOString()}`)
+        .order('score', { ascending: false })
+        .limit(10);
+
+      let msg = `⚡ *ALERTA 2PM - TEST*\n\n`;
+
+      if (!leadsUrgentes || leadsUrgentes.length === 0) {
+        msg += `✅ No hay leads urgentes pendientes.\n\nTodos los leads han sido contactados hoy.`;
+      } else {
+        msg += `Hay *${leadsUrgentes.length} leads* que necesitan atención:\n\n`;
+        for (const lead of leadsUrgentes.slice(0, 5)) {
+          const leadNombre = lead.name?.split(' ')[0] || 'Sin nombre';
+          const esNuevo = lead.status === 'new';
+          msg += `${esNuevo ? '🆕' : '🔥'} *${leadNombre}* - ${esNuevo ? 'Sin contactar' : lead.status}\n`;
+        }
+        if (leadsUrgentes.length > 5) {
+          msg += `\n...y ${leadsUrgentes.length - 5} más\n`;
+        }
+        msg += '\n💡 _Los leads contactados rápido tienen 9x más probabilidad de cerrar_';
+      }
+
+      await meta.sendWhatsAppMessage(phoneFormatted!, msg);
+      return corsResponse(JSON.stringify({ ok: true, message: `Alerta 2pm enviada a ${phoneFormatted}`, leads: leadsUrgentes?.length || 0 }));
+    }
+
+    // TEST: Alerta 5pm a número específico
+    if (url.pathname.startsWith('/test-alerta-5pm/')) {
+      const phone = url.pathname.split('/').pop();
+      console.log(`TEST: Enviando alerta 5pm a ${phone}...`);
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      const phoneFormatted = phone?.startsWith('52') ? phone : '52' + phone;
+
+      const mexicoNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+      const hoyInicio = new Date(mexicoNow);
+      hoyInicio.setHours(0, 0, 0, 0);
+
+      const { data: leadsPendientes } = await supabase.client
+        .from('leads')
+        .select('id, name, status, score')
+        .in('status', ['new', 'contacted', 'scheduled', 'negotiation'])
+        .or(`last_interaction.is.null,last_interaction.lt.${hoyInicio.toISOString()}`)
+        .order('score', { ascending: false })
+        .limit(10);
+
+      const manana = new Date(mexicoNow);
+      manana.setDate(manana.getDate() + 1);
+      manana.setHours(0, 0, 0, 0);
+      const mananaFin = new Date(manana);
+      mananaFin.setHours(23, 59, 59, 999);
+
+      const { data: citasManana } = await supabase.client
+        .from('appointments')
+        .select('id, date')
+        .eq('status', 'scheduled')
+        .gte('date', manana.toISOString())
+        .lt('date', mananaFin.toISOString());
+
+      const pendientes = leadsPendientes?.length || 0;
+      const citas = citasManana?.length || 0;
+
+      let msg = `🌅 *RESUMEN DEL DÍA - TEST*\n\n`;
+
+      if (pendientes > 0) {
+        const leadsMasUrgentes = leadsPendientes?.sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 3);
+        msg += `📋 *${pendientes} leads* pendientes de contactar:\n`;
+        for (const lead of leadsMasUrgentes || []) {
+          msg += `  • ${lead.name?.split(' ')[0] || 'Lead'} (${lead.status})\n`;
+        }
+        msg += '\n';
+      } else {
+        msg += `✅ Todos los leads fueron contactados hoy\n\n`;
+      }
+
+      if (citas > 0) {
+        msg += `📅 *${citas} citas* programadas para mañana\n\n`;
+      }
+
+      msg += pendientes > 3
+        ? '⚠️ _Aún tienes tiempo de hacer llamadas antes de cerrar el día_'
+        : '✨ _¡Buen trabajo hoy! Descansa bien_';
+
+      await meta.sendWhatsAppMessage(phoneFormatted!, msg);
+      return corsResponse(JSON.stringify({ ok: true, message: `Alerta 5pm enviada a ${phoneFormatted}`, pendientes, citas }));
+    }
+
     // STATUS: Ver estado de todos los CRONs
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/cron-status') {
@@ -3119,6 +3219,18 @@ Mensaje: ${mensaje}`;
     if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek === 3) {
       console.log('📣 Ejecutando remarketing leads fríos...');
       await remarketingLeadsFrios(supabase, meta);
+    }
+
+    // 2pm L-V: Alerta leads HOT sin contactar hoy
+    if (mexicoHour === 14 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('🔥 Verificando leads HOT sin contactar hoy...');
+      await alertaLeadsHotUrgentes(supabase, meta);
+    }
+
+    // 5pm L-V: Recordatorio final del día - pendientes críticos
+    if (mexicoHour === 17 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('⏰ Enviando recordatorio final del día...');
+      await recordatorioFinalDia(supabase, meta);
     }
 
     // MARTES y JUEVES 8am: Seguimiento hipotecas estancadas (alerta adicional a asesores)
@@ -4527,6 +4639,199 @@ async function alertaLeadsHotSinSeguimiento(supabase: SupabaseService, meta: Met
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ALERTA 2PM - LEADS HOT URGENTES (sin contactar hoy)
+// ═══════════════════════════════════════════════════════════════
+
+async function alertaLeadsHotUrgentes(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('🔥 [2pm] Verificando leads HOT sin contactar hoy...');
+
+    const { data: vendedores } = await supabase.client
+      .from('team_members')
+      .select('*')
+      .eq('role', 'vendedor')
+      .eq('is_active', true);
+
+    if (!vendedores || vendedores.length === 0) return;
+
+    const mexicoNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+    const hoyInicio = new Date(mexicoNow);
+    hoyInicio.setHours(0, 0, 0, 0);
+
+    for (const vendedor of vendedores) {
+      if (!vendedor.phone) continue;
+
+      const { data: leadsUrgentes } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, status, score, last_interaction')
+        .eq('assigned_to', vendedor.id)
+        .in('status', ['new', 'contacted', 'scheduled', 'negotiation'])
+        .gte('score', 70)
+        .or(`last_interaction.is.null,last_interaction.lt.${hoyInicio.toISOString()}`);
+
+      const hace4Horas = new Date(mexicoNow.getTime() - 4 * 60 * 60 * 1000);
+      const { data: leadsNuevosViejos } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, status, score')
+        .eq('assigned_to', vendedor.id)
+        .eq('status', 'new')
+        .lt('created_at', hace4Horas.toISOString());
+
+      const todosUrgentes = [
+        ...(leadsUrgentes || []),
+        ...(leadsNuevosViejos || []).filter(l => !leadsUrgentes?.find(u => u.id === l.id))
+      ];
+
+      if (todosUrgentes.length === 0) continue;
+
+      const nombre = vendedor.name?.split(' ')[0] || 'Hola';
+      let msg = `⚡ *${nombre}, ALERTA 2PM*\n\n`;
+      msg += `Tienes *${todosUrgentes.length} leads* que necesitan atención URGENTE:\n\n`;
+
+      for (const lead of todosUrgentes.slice(0, 5)) {
+        const leadNombre = lead.name?.split(' ')[0] || 'Sin nombre';
+        const esNuevo = lead.status === 'new';
+        msg += `${esNuevo ? '🆕' : '🔥'} *${leadNombre}* - ${esNuevo ? 'Sin contactar' : lead.status}\n`;
+      }
+
+      if (todosUrgentes.length > 5) {
+        msg += `\n...y ${todosUrgentes.length - 5} más\n`;
+      }
+
+      msg += '\n💡 _Los leads contactados rápido tienen 9x más probabilidad de cerrar_';
+
+      try {
+        await meta.sendWhatsAppMessage(vendedor.phone, msg);
+        console.log(`⚡ Alerta 2pm enviada a ${vendedor.name} (${todosUrgentes.length} leads)`);
+      } catch (e) {
+        console.log(`Error enviando alerta 2pm a ${vendedor.name}:`, e);
+      }
+    }
+  } catch (e) {
+    console.log('Error en alertaLeadsHotUrgentes:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RECORDATORIO 5PM - FIN DEL DÍA
+// ═══════════════════════════════════════════════════════════════
+
+async function recordatorioFinalDia(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('⏰ [5pm] Enviando recordatorio final del día...');
+
+    const { data: vendedores } = await supabase.client
+      .from('team_members')
+      .select('*')
+      .eq('role', 'vendedor')
+      .eq('is_active', true);
+
+    if (!vendedores || vendedores.length === 0) return;
+
+    const mexicoNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+    const hoyInicio = new Date(mexicoNow);
+    hoyInicio.setHours(0, 0, 0, 0);
+
+    let totalSinContactar = 0;
+    const vendedoresSinContactar: string[] = [];
+
+    for (const vendedor of vendedores) {
+      if (!vendedor.phone) continue;
+
+      const { data: leadsPendientes } = await supabase.client
+        .from('leads')
+        .select('id, name, status, score')
+        .eq('assigned_to', vendedor.id)
+        .in('status', ['new', 'contacted', 'scheduled', 'negotiation'])
+        .or(`last_interaction.is.null,last_interaction.lt.${hoyInicio.toISOString()}`);
+
+      const mañana = new Date(mexicoNow);
+      mañana.setDate(mañana.getDate() + 1);
+      mañana.setHours(0, 0, 0, 0);
+      const mañanaFin = new Date(mañana);
+      mañanaFin.setHours(23, 59, 59, 999);
+
+      const { data: citasMañana } = await supabase.client
+        .from('appointments')
+        .select('id, lead_id')
+        .eq('team_member_id', vendedor.id)
+        .eq('status', 'scheduled')
+        .gte('date', mañana.toISOString())
+        .lt('date', mañanaFin.toISOString());
+
+      const pendientes = leadsPendientes?.length || 0;
+      const citas = citasMañana?.length || 0;
+
+      if (pendientes === 0 && citas === 0) continue;
+
+      totalSinContactar += pendientes;
+      if (pendientes > 2) {
+        vendedoresSinContactar.push(`${vendedor.name}: ${pendientes}`);
+      }
+
+      const nombre = vendedor.name?.split(' ')[0] || 'Hola';
+      let msg = `🌅 *${nombre}, Resumen del día*\n\n`;
+
+      if (pendientes > 0) {
+        const leadsMasUrgentes = leadsPendientes?.sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 3);
+        msg += `📋 *${pendientes} leads* pendientes de contactar:\n`;
+        for (const lead of leadsMasUrgentes || []) {
+          msg += `  • ${lead.name?.split(' ')[0] || 'Lead'} (${lead.status})\n`;
+        }
+        msg += '\n';
+      }
+
+      if (citas > 0) {
+        msg += `📅 *${citas} citas* programadas para mañana\n\n`;
+      }
+
+      msg += pendientes > 3
+        ? '⚠️ _Aún tienes tiempo de hacer llamadas antes de cerrar el día_'
+        : '✨ _¡Buen trabajo hoy! Descansa bien_';
+
+      try {
+        await meta.sendWhatsAppMessage(vendedor.phone, msg);
+        console.log(`🌅 Recordatorio 5pm enviado a ${vendedor.name}`);
+      } catch (e) {
+        console.log(`Error enviando recordatorio 5pm a ${vendedor.name}:`, e);
+      }
+    }
+
+    if (totalSinContactar > 5) {
+      const { data: admins } = await supabase.client
+        .from('team_members')
+        .select('*')
+        .eq('role', 'admin')
+        .eq('is_active', true);
+
+      if (admins && admins.length > 0) {
+        let adminMsg = `⚠️ *ALERTA ADMIN - Fin del día*\n\n`;
+        adminMsg += `Hay *${totalSinContactar} leads* sin contactar hoy.\n\n`;
+        if (vendedoresSinContactar.length > 0) {
+          adminMsg += `Por vendedor:\n`;
+          for (const v of vendedoresSinContactar) {
+            adminMsg += `• ${v}\n`;
+          }
+        }
+        adminMsg += '\n_Considera revisar carga de trabajo del equipo_';
+
+        for (const admin of admins) {
+          if (!admin.phone) continue;
+          try {
+            await meta.sendWhatsAppMessage(admin.phone, adminMsg);
+            console.log(`⚠️ Alerta admin 5pm enviada a ${admin.name}`);
+          } catch (e) {
+            console.log(`Error enviando alerta admin 5pm:`, e);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.log('Error en recordatorioFinalDia:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // COACHING PROACTIVO - 11am L-V
 // ═══════════════════════════════════════════════════════════════
 
