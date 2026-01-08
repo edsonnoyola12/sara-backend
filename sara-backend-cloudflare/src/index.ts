@@ -3794,6 +3794,64 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // TEST: Reporte semanal asesor individual
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/test-reporte-semanal-asesor/')) {
+      const phone = url.pathname.split('/')[2];
+      if (!phone) return corsResponse(JSON.stringify({ error: 'Falta teléfono' }), 400);
+      const phoneFormatted = phone.startsWith('52') ? phone : `52${phone}`;
+      console.log(`TEST: Enviando reporte semanal asesor a ${phoneFormatted}...`);
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      const { data: asesorS } = await supabase.client.from('team_members').select('*').eq('phone', phoneFormatted).single();
+      const hoyS = new Date();
+      const inicioSemanaS = new Date(hoyS); inicioSemanaS.setDate(hoyS.getDate() - hoyS.getDay() - 6); inicioSemanaS.setHours(0, 0, 0, 0);
+      const finSemanaS = new Date(inicioSemanaS); finSemanaS.setDate(inicioSemanaS.getDate() + 6); finSemanaS.setHours(23, 59, 59, 999);
+      const inicioSemAntS = new Date(inicioSemanaS); inicioSemAntS.setDate(inicioSemAntS.getDate() - 7);
+      const finSemAntS = new Date(finSemanaS); finSemAntS.setDate(finSemAntS.getDate() - 7);
+
+      const { data: asesoresS } = await supabase.client.from('team_members').select('*').eq('role', 'asesor').eq('active', true);
+      const { data: hipotecasSemS } = await supabase.client.from('mortgage_applications').select('*').gte('created_at', inicioSemanaS.toISOString()).lte('created_at', finSemanaS.toISOString());
+      const { data: aprobadasSemS } = await supabase.client.from('mortgage_applications').select('*').eq('status', 'approved').gte('updated_at', inicioSemanaS.toISOString()).lte('updated_at', finSemanaS.toISOString());
+      const { data: rechazadasSemS } = await supabase.client.from('mortgage_applications').select('*').eq('status', 'rejected').gte('updated_at', inicioSemanaS.toISOString()).lte('updated_at', finSemanaS.toISOString());
+      const { data: hipotecasSemAntS } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').gte('created_at', inicioSemAntS.toISOString()).lte('created_at', finSemAntS.toISOString());
+      const { data: aprobadasSemAntS } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'approved').gte('updated_at', inicioSemAntS.toISOString()).lte('updated_at', finSemAntS.toISOString());
+
+      const asesorIdS = asesorS?.id || asesoresS?.[0]?.id || null;
+      const nombreAsesorS = asesorS?.name?.split(' ')[0] || 'Asesor';
+      const calcVarS = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
+
+      const nuevasSemS = hipotecasSemS?.filter(h => h.assigned_advisor_id === asesorIdS) || [];
+      const aprobadasAsesorS = aprobadasSemS?.filter(h => h.assigned_advisor_id === asesorIdS) || [];
+      const rechazadasAsesorS = rechazadasSemS?.filter(h => h.assigned_advisor_id === asesorIdS) || [];
+      const nuevasSemAntS = hipotecasSemAntS?.filter(h => h.assigned_advisor_id === asesorIdS) || [];
+      const aprobadasSemAntAsesorS = aprobadasSemAntS?.filter(h => h.assigned_advisor_id === asesorIdS) || [];
+
+      const totalProcesadasS = aprobadasAsesorS.length + rechazadasAsesorS.length;
+      const tasaAprobacionS = totalProcesadasS > 0 ? Math.round((aprobadasAsesorS.length / totalProcesadasS) * 100) : 0;
+
+      const asesoresConAprobacionesS = (asesoresS || []).map(a => {
+        const aprobadas = aprobadasSemS?.filter(h => h.assigned_advisor_id === a.id) || [];
+        return { ...a, aprobadas: aprobadas.length };
+      }).sort((a, b) => b.aprobadas - a.aprobadas);
+      const posicionS = asesoresConAprobacionesS.findIndex(a => a.id === asesorIdS) + 1 || asesoresConAprobacionesS.length;
+      const medallasS = ['🥇', '🥈', '🥉'];
+      const posicionStrS = posicionS <= 3 ? medallasS[posicionS - 1] : `#${posicionS}`;
+
+      const insightsS: string[] = [];
+      if (aprobadasAsesorS.length > aprobadasSemAntAsesorS.length && aprobadasSemAntAsesorS.length > 0) insightsS.push(`🚀 Más aprobaciones que semana pasada`);
+      if (posicionS === 1) insightsS.push(`🏆 ¡Fuiste el #1 del equipo!`);
+      else if (posicionS <= 3) insightsS.push(`🎯 Top 3 del equipo`);
+      if (tasaAprobacionS >= 70) insightsS.push(`✅ Excelente tasa de aprobación: ${tasaAprobacionS}%`);
+      const insightsTextS = insightsS.length > 0 ? insightsS.join('\n') : '💪 ¡Buena semana!';
+
+      const msgS = `📊 *TU REPORTE SEMANAL*\nHola *${nombreAsesorS}* 👋\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *HIPOTECAS*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes: *${nuevasSemS.length}* ${calcVarS(nuevasSemS.length, nuevasSemAntS.length)}\n• Aprobadas: *${aprobadasAsesorS.length}* ${calcVarS(aprobadasAsesorS.length, aprobadasSemAntAsesorS.length)}\n• Rechazadas: ${rechazadasAsesorS.length}\n• Tasa aprobación: *${tasaAprobacionS}%*\n\n━━━━━━━━━━━━━━━━━━━━━\n🏆 *RANKING*\n━━━━━━━━━━━━━━━━━━━━━\n• Posición: *${posicionStrS}* de ${asesoresConAprobacionesS.length}\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsTextS}\n\n_¡Éxito esta semana!_ 🚀`;
+
+      await meta.sendWhatsAppMessage(phoneFormatted, msgS);
+      return corsResponse(JSON.stringify({ ok: true, message: `Reporte semanal asesor enviado a ${phoneFormatted}` }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // TEST: Enviar reportes semanales a todos los asesores
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/test-reportes-semanales-asesores') {
@@ -3801,6 +3859,78 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       await enviarReporteSemanalAsesores(supabase, meta);
       return corsResponse(JSON.stringify({ ok: true, message: 'Reportes semanales enviados a todos los asesores' }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST: Reporte mensual asesor individual
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/test-reporte-mensual-asesor/')) {
+      const phone = url.pathname.split('/')[2];
+      if (!phone) return corsResponse(JSON.stringify({ error: 'Falta teléfono' }), 400);
+      const phoneFormatted = phone.startsWith('52') ? phone : `52${phone}`;
+      console.log(`TEST: Enviando reporte mensual asesor a ${phoneFormatted}...`);
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      const { data: asesorM } = await supabase.client.from('team_members').select('*').eq('phone', phoneFormatted).single();
+      const hoyM = new Date();
+      const mesActualM = hoyM.getMonth();
+      const anioActualM = hoyM.getFullYear();
+      const mesReporteM = mesActualM === 0 ? 11 : mesActualM - 1;
+      const anioReporteM = mesActualM === 0 ? anioActualM - 1 : anioActualM;
+      const inicioMesReporteM = new Date(anioReporteM, mesReporteM, 1);
+      const finMesReporteM = new Date(anioReporteM, mesReporteM + 1, 0, 23, 59, 59);
+      const mesAnteriorM = mesReporteM === 0 ? 11 : mesReporteM - 1;
+      const anioAnteriorM = mesReporteM === 0 ? anioReporteM - 1 : anioReporteM;
+      const inicioMesAnteriorM = new Date(anioAnteriorM, mesAnteriorM, 1);
+      const finMesAnteriorM = new Date(anioAnteriorM, mesAnteriorM + 1, 0, 23, 59, 59);
+      const mesesM = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+      const nombreMesM = mesesM[mesReporteM];
+
+      const { data: asesoresM } = await supabase.client.from('team_members').select('*').eq('role', 'asesor').eq('active', true);
+      const { data: hipotecasMesM } = await supabase.client.from('mortgage_applications').select('*').gte('created_at', inicioMesReporteM.toISOString()).lte('created_at', finMesReporteM.toISOString());
+      const { data: aprobadasMesM } = await supabase.client.from('mortgage_applications').select('*').eq('status', 'approved').gte('updated_at', inicioMesReporteM.toISOString()).lte('updated_at', finMesReporteM.toISOString());
+      const { data: rechazadasMesM } = await supabase.client.from('mortgage_applications').select('*').eq('status', 'rejected').gte('updated_at', inicioMesReporteM.toISOString()).lte('updated_at', finMesReporteM.toISOString());
+      const { data: hipotecasMesAntM } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').gte('created_at', inicioMesAnteriorM.toISOString()).lte('created_at', finMesAnteriorM.toISOString());
+      const { data: aprobadasMesAntM } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'approved').gte('updated_at', inicioMesAnteriorM.toISOString()).lte('updated_at', finMesAnteriorM.toISOString());
+
+      const asesorIdM = asesorM?.id || asesoresM?.[0]?.id || null;
+      const nombreAsesorM = asesorM?.name?.split(' ')[0] || 'Asesor';
+      const calcVarM = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
+
+      const nuevasMesM = hipotecasMesM?.filter(h => h.assigned_advisor_id === asesorIdM) || [];
+      const aprobadasAsesorM = aprobadasMesM?.filter(h => h.assigned_advisor_id === asesorIdM) || [];
+      const rechazadasAsesorM = rechazadasMesM?.filter(h => h.assigned_advisor_id === asesorIdM) || [];
+      const nuevasMesAntM = hipotecasMesAntM?.filter(h => h.assigned_advisor_id === asesorIdM) || [];
+      const aprobadasMesAntAsesorM = aprobadasMesAntM?.filter(h => h.assigned_advisor_id === asesorIdM) || [];
+
+      const totalProcesadasM = aprobadasAsesorM.length + rechazadasAsesorM.length;
+      const tasaAprobacionM = totalProcesadasM > 0 ? Math.round((aprobadasAsesorM.length / totalProcesadasM) * 100) : 0;
+      const tasaAprobacionAntM = aprobadasMesAntAsesorM.length > 0 ? Math.round((aprobadasMesAntAsesorM.length / (aprobadasMesAntAsesorM.length + rechazadasAsesorM.length)) * 100) : 0;
+
+      const asesoresConAprobacionesM = (asesoresM || []).map(a => {
+        const aprobadas = aprobadasMesM?.filter(h => h.assigned_advisor_id === a.id) || [];
+        return { ...a, aprobadas: aprobadas.length };
+      }).sort((a, b) => b.aprobadas - a.aprobadas);
+      const posicionM = asesoresConAprobacionesM.findIndex(a => a.id === asesorIdM) + 1 || asesoresConAprobacionesM.length;
+      const medallasM = ['🥇', '🥈', '🥉'];
+      const posicionStrM = posicionM <= 3 ? medallasM[posicionM - 1] : `#${posicionM}`;
+      const totalAprobacionesEquipoM = aprobadasMesM?.length || 0;
+      const porcentajeEquipoM = totalAprobacionesEquipoM > 0 ? Math.round((aprobadasAsesorM.length / totalAprobacionesEquipoM) * 100) : 0;
+
+      const insightsM: string[] = [];
+      if (aprobadasAsesorM.length > aprobadasMesAntAsesorM.length && aprobadasMesAntAsesorM.length > 0) {
+        const pct = Math.round(((aprobadasAsesorM.length - aprobadasMesAntAsesorM.length) / aprobadasMesAntAsesorM.length) * 100);
+        insightsM.push(`🚀 Aprobaciones crecieron ${pct}% vs mes anterior`);
+      }
+      if (posicionM === 1) insightsM.push(`🏆 ¡Fuiste el #1 del equipo!`);
+      else if (posicionM <= 3) insightsM.push(`🎯 Top 3 del equipo`);
+      if (tasaAprobacionM >= 70) insightsM.push(`✅ Excelente tasa de aprobación: ${tasaAprobacionM}%`);
+      const insightsTextM = insightsM.length > 0 ? insightsM.join('\n') : '💪 ¡Buen mes!';
+
+      const msgM = `📊 *TU REPORTE MENSUAL*\nHola *${nombreAsesorM}* 👋\n*${nombreMesM.toUpperCase()} ${anioReporteM}*\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *TUS RESULTADOS*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes: *${nuevasMesM.length}* ${calcVarM(nuevasMesM.length, nuevasMesAntM.length)}\n• Aprobadas: *${aprobadasAsesorM.length}* ${calcVarM(aprobadasAsesorM.length, aprobadasMesAntAsesorM.length)}\n• Rechazadas: ${rechazadasAsesorM.length}\n• Tasa aprobación: *${tasaAprobacionM}%* ${calcVarM(tasaAprobacionM, tasaAprobacionAntM)}\n\n━━━━━━━━━━━━━━━━━━━━━\n🏆 *RANKING EQUIPO*\n━━━━━━━━━━━━━━━━━━━━━\n• Posición: *${posicionStrM}* de ${asesoresConAprobacionesM.length}\n• Aportaste: *${porcentajeEquipoM}%* de aprobaciones\n• Total equipo: ${totalAprobacionesEquipoM} aprobadas\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN DEL MES*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsTextM}\n\n_¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
+
+      await meta.sendWhatsAppMessage(phoneFormatted, msgM);
+      return corsResponse(JSON.stringify({ ok: true, message: `Reporte mensual asesor enviado a ${phoneFormatted}` }));
     }
 
     // ═══════════════════════════════════════════════════════════════

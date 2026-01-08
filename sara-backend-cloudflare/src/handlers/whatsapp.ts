@@ -304,28 +304,39 @@ export class WhatsAppHandler {
     // ═══════════════════════════════════════════════════════════════════════════
     // REGLA 4.6: Si SARA preguntó HORA del asesor y cliente da hora → CONECTAR CON ASESOR
     // ═══════════════════════════════════════════════════════════════════════════
-    const preguntabaHoraAsesor = ultimoMsgSara.includes('qué hora te conviene') ||
-                                  ultimoMsgSara.includes('a qué hora') && (ultimoMsgSara.includes('asesor') || ultimoMsgSara.includes('contacte'));
+    const ultimoMsgSaraLower = ultimoMsgSara.toLowerCase();
+    const preguntabaHoraAsesor = ultimoMsgSaraLower.includes('qué hora te conviene') ||
+                                  ultimoMsgSaraLower.includes('a qué hora') && (ultimoMsgSaraLower.includes('asesor') || ultimoMsgSaraLower.includes('contacte'));
 
     // Detectar hora en el mensaje
     const horaMatch = mensaje.match(/(\d{1,2})\s*(am|pm|hrs|:00)?/i);
     const tieneHora = horaMatch !== null;
 
+    // Detectar día/fecha en el mensaje
+    const diaMatch = mensaje.match(/(mañana|pasado\s*mañana|hoy|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|el\s+\d{1,2})/i);
+
     if (preguntabaHoraAsesor && tieneHora) {
       const nombreCompleto = lead.name && lead.name !== 'Sin nombre' ? lead.name : '';
       const nombre = nombreCompleto ? nombreCompleto.split(' ')[0] : '';
       let horaTexto = horaMatch[0];
-      console.log('🎯 REGLA 4.6: Preguntaba hora asesor + Cliente dio hora:', horaTexto, '→ CONECTAR CON ASESOR');
+      let diaTexto = diaMatch ? diaMatch[0] : 'hoy';
+
+      // Capitalizar día si es día de la semana
+      if (diaMatch && !diaTexto.toLowerCase().startsWith('el ')) {
+        diaTexto = diaTexto.charAt(0).toUpperCase() + diaTexto.slice(1).toLowerCase();
+      }
+
+      console.log('🎯 REGLA 4.6: Preguntaba hora asesor + Cliente dio hora:', horaTexto, 'día:', diaTexto, '→ CONECTAR CON ASESOR');
 
       // Esta respuesta activará el flujo de send_contactos en el código principal
       return {
         accion: 'respuesta_directa',
-        respuesta: `¡Perfecto ${nombre}! Nuestro asesor de crédito te contactará hoy a las ${horaTexto}.
+        respuesta: `¡Perfecto ${nombre}! Nuestro asesor de crédito te contactará ${diaTexto.toLowerCase() === 'hoy' ? 'hoy' : 'el ' + diaTexto} a las ${horaTexto}.
 
 Te va a orientar sobre las mejores opciones de financiamiento para tu casa. ¡En breve te llega su información! 🏠💳`,
         siguientePregunta: null,
         flujoActivo: null,
-        datos: { hora_contacto: horaTexto, quiere_asesor: true }
+        datos: { hora_contacto: horaTexto, dia_contacto: diaTexto, quiere_asesor: true }
       };
     }
 
