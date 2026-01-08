@@ -2650,7 +2650,8 @@ Mensaje: ${mensaje}`;
         const imgBase64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
 
         const desarrollo = failedVideo.desarrollo?.split(',')[0]?.trim() || 'Los Encinos';
-        const prompt = `Cinematic medium shot of a friendly professional Mexican woman real estate agent standing in front of the luxury house shown in the image. She looks at the camera, smiles warmly and gestures welcome. Audio: A clear female voice speaking in Mexican Spanish saying Hola ${failedVideo.lead_name}, bienvenido a tu nuevo hogar aqui en ${desarrollo}. High quality, photorealistic, 4k resolution, natural lighting.`;
+        // Prompt optimizado para evitar filtros de seguridad de Google
+        const prompt = `A welcoming real estate video tour. Cinematic drone shot slowly approaching the beautiful house in the image. Smooth camera movement reveals the home's exterior details. Warm golden hour lighting. Professional real estate marketing video style. Text overlay appears: "Bienvenido ${failedVideo.lead_name} - ${desarrollo}". High quality, 4K resolution.`;
 
         const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning', {
           method: 'POST',
@@ -2684,6 +2685,41 @@ Mensaje: ${mensaje}`;
       } catch (e: any) {
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // DEBUG: Ver respuesta completa de Google para una operación
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/check-google-operation/')) {
+      const opId = url.pathname.replace('/check-google-operation/', '');
+      console.log(`🔍 Verificando operación Google: ${opId}`);
+
+      const statusResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/${opId}`,
+        { headers: { 'x-goog-api-key': env.GEMINI_API_KEY } }
+      );
+
+      const responseText = await statusResponse.text();
+      let parsed;
+      try {
+        parsed = JSON.parse(responseText);
+      } catch {
+        parsed = null;
+      }
+
+      return corsResponse(JSON.stringify({
+        status_code: statusResponse.status,
+        raw_response: responseText.substring(0, 2000),
+        parsed: parsed,
+        possible_uri_paths: parsed ? {
+          path1: parsed?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri,
+          path2: parsed?.response?.generatedSamples?.[0]?.video?.uri,
+          path3: parsed?.result?.videos?.[0]?.uri,
+          path4: parsed?.videos?.[0]?.uri,
+          path5: parsed?.response?.video?.uri,
+          path6: parsed?.metadata?.videos?.[0]?.uri
+        } : null
+      }, null, 2));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -7291,13 +7327,22 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
             .update({ sent: true, completed_at: new Date().toISOString(), video_url: `ERROR: ${status.error.message}` })
             .eq('id', video.id);
         } else {
-          console.log(`⚠️ Video completado pero sin URI`);
-          console.log(`📦 Estructura completa:`, JSON.stringify(status));
-          // Marcar como enviado para evitar reintentos infinitos
-          await supabase.client
-            .from('pending_videos')
-            .update({ sent: true, completed_at: new Date().toISOString(), video_url: 'ERROR: No URI found' })
-            .eq('id', video.id);
+          // Verificar si fue bloqueado por filtros de seguridad (RAI)
+          const raiReasons = status.response?.generateVideoResponse?.raiMediaFilteredReasons;
+          if (raiReasons && raiReasons.length > 0) {
+            console.log(`🚫 Video bloqueado por políticas de seguridad: ${raiReasons[0]}`);
+            await supabase.client
+              .from('pending_videos')
+              .update({ sent: true, completed_at: new Date().toISOString(), video_url: `ERROR_RAI: ${raiReasons[0]}` })
+              .eq('id', video.id);
+          } else {
+            console.log(`⚠️ Video completado pero sin URI`);
+            console.log(`📦 Estructura completa:`, JSON.stringify(status));
+            await supabase.client
+              .from('pending_videos')
+              .update({ sent: true, completed_at: new Date().toISOString(), video_url: 'ERROR: No URI found' })
+              .eq('id', video.id);
+          }
         }
       } else {
         console.log(`⏳ Video ${video.id} aún procesando...`);
