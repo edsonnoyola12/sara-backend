@@ -2825,6 +2825,97 @@ _Escribe *resumen* para más detalles_`;
       await enviarReporteMensualCEO(supabase, meta);
       return corsResponse(JSON.stringify({ ok: true, message: 'Reporte mensual enviado' }));
     }
+    // TEST: Reporte mensual mejorado a número específico
+    if (url.pathname.startsWith('/test-reporte-mensual/')) {
+      const phone = url.pathname.split('/').pop();
+      console.log(`TEST: Enviando reporte mensual mejorado a ${phone}...`);
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      const phoneFormatted = phone?.startsWith('52') ? phone : '52' + phone;
+
+      const hoy = new Date();
+      const mesActual = hoy.getMonth();
+      const anioActual = hoy.getFullYear();
+      const mesReporte = mesActual === 0 ? 11 : mesActual - 1;
+      const anioReporte = mesActual === 0 ? anioActual - 1 : anioActual;
+      const inicioMesReporte = new Date(anioReporte, mesReporte, 1);
+      const finMesReporte = new Date(anioReporte, mesReporte + 1, 0, 23, 59, 59);
+      const mesAnterior = mesReporte === 0 ? 11 : mesReporte - 1;
+      const anioAnterior = mesReporte === 0 ? anioReporte - 1 : anioReporte;
+      const inicioMesAnterior = new Date(anioAnterior, mesAnterior, 1);
+      const finMesAnterior = new Date(anioAnterior, mesAnterior + 1, 0, 23, 59, 59);
+      const inicioMesYoY = new Date(anioReporte - 1, mesReporte, 1);
+      const finMesYoY = new Date(anioReporte - 1, mesReporte + 1, 0, 23, 59, 59);
+      const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+      const nombreMes = meses[mesReporte];
+
+      const { data: leadsMes } = await supabase.client.from('leads').select('*, team_members!leads_assigned_to_fkey(name)').gte('created_at', inicioMesReporte.toISOString()).lte('created_at', finMesReporte.toISOString());
+      const { data: leadsMesAnterior } = await supabase.client.from('leads').select('id').gte('created_at', inicioMesAnterior.toISOString()).lte('created_at', finMesAnterior.toISOString());
+      const { data: leadsYoY } = await supabase.client.from('leads').select('id').gte('created_at', inicioMesYoY.toISOString()).lte('created_at', finMesYoY.toISOString());
+      const { data: cierresMes } = await supabase.client.from('leads').select('*, properties(price, name), team_members!leads_assigned_to_fkey(name)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMesReporte.toISOString()).lte('status_changed_at', finMesReporte.toISOString());
+      const { data: cierresMesAnterior } = await supabase.client.from('leads').select('id, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMesAnterior.toISOString()).lte('status_changed_at', finMesAnterior.toISOString());
+      const { data: cierresYoY } = await supabase.client.from('leads').select('id, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMesYoY.toISOString()).lte('status_changed_at', finMesYoY.toISOString());
+      const { data: pipelineMensual } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['negotiation', 'reserved', 'scheduled', 'visited']);
+      const { data: leadsPerdidos } = await supabase.client.from('leads').select('id, lost_reason').eq('status', 'lost').gte('status_changed_at', inicioMesReporte.toISOString()).lte('status_changed_at', finMesReporte.toISOString());
+      const { data: citasMes } = await supabase.client.from('appointments').select('*').gte('scheduled_date', inicioMesReporte.toISOString().split('T')[0]).lte('scheduled_date', finMesReporte.toISOString().split('T')[0]);
+      const { data: vendedoresMes } = await supabase.client.from('team_members').select('*').eq('role', 'vendedor').eq('active', true).order('sales_count', { ascending: false });
+      const { data: hipotecasMes } = await supabase.client.from('mortgage_applications').select('*').gte('created_at', inicioMesReporte.toISOString()).lte('created_at', finMesReporte.toISOString());
+
+      let revenueMes = 0, revenueMesAnt = 0, revenueYoY = 0, pipelineValue = 0;
+      cierresMes?.forEach(c => revenueMes += c.properties?.price || 2000000);
+      cierresMesAnterior?.forEach(c => revenueMesAnt += c.properties?.price || 2000000);
+      cierresYoY?.forEach(c => revenueYoY += c.properties?.price || 2000000);
+      pipelineMensual?.forEach(p => pipelineValue += p.properties?.price || 2000000);
+
+      const leadsActual = leadsMes?.length || 0;
+      const leadsPrev = leadsMesAnterior?.length || 0;
+      const leadsYoYCount = leadsYoY?.length || 0;
+      const cierresActual = cierresMes?.length || 0;
+      const cierresPrev = cierresMesAnterior?.length || 0;
+      const cierresYoYCount = cierresYoY?.length || 0;
+      const perdidosCount = leadsPerdidos?.length || 0;
+
+      const calcVarMes = (a: number, b: number) => b === 0 ? (a > 0 ? '↑' : '→') : a > b ? `↑${Math.round((a-b)/b*100)}%` : a < b ? `↓${Math.round((b-a)/b*100)}%` : '→';
+      const conversionMes = leadsActual > 0 ? Math.round((cierresActual / leadsActual) * 100) : 0;
+      const ticketPromedio = cierresActual > 0 ? revenueMes / cierresActual : 0;
+      const citasTotal = citasMes?.length || 0;
+      const citasCompletadas = citasMes?.filter(c => c.status === 'completed').length || 0;
+      const showRate = citasTotal > 0 ? Math.round((citasCompletadas / citasTotal) * 100) : 0;
+
+      const razonesLost: Record<string, number> = {};
+      leadsPerdidos?.forEach(l => { const r = l.lost_reason || 'Sin razón'; razonesLost[r] = (razonesLost[r] || 0) + 1; });
+      const topRazones = Object.entries(razonesLost).sort((a, b) => b[1] - a[1]).slice(0, 3);
+
+      const porFuenteMes: Record<string, number> = {};
+      leadsMes?.forEach(l => { const f = l.source || 'Directo'; porFuenteMes[f] = (porFuenteMes[f] || 0) + 1; });
+      const fuentesTop = Object.entries(porFuenteMes).sort((a, b) => b[1] - a[1]).slice(0, 3);
+
+      const hipAprobadas = hipotecasMes?.filter(h => h.status === 'approved').length || 0;
+      const hipRechazadas = hipotecasMes?.filter(h => h.status === 'rejected').length || 0;
+      const hipEnProceso = hipotecasMes?.filter(h => !['approved', 'rejected'].includes(h.status)).length || 0;
+
+      const rendVendedores: string[] = [];
+      vendedoresMes?.slice(0, 5).forEach((v, i) => {
+        const cierresV = cierresMes?.filter(c => c.assigned_to === v.id).length || 0;
+        const leadsV = leadsMes?.filter(l => l.assigned_to === v.id).length || 0;
+        const medallas = ['🥇', '🥈', '🥉', '4.', '5.'];
+        rendVendedores.push(`${medallas[i]} ${v.name?.split(' ')[0]}: ${cierresV}c | ${leadsV}L`);
+      });
+
+      const negociacion = pipelineMensual?.filter(p => p.status === 'negotiation').length || 0;
+      const reservados = pipelineMensual?.filter(p => p.status === 'reserved').length || 0;
+      const agendados = pipelineMensual?.filter(p => p.status === 'scheduled').length || 0;
+      const visitados = pipelineMensual?.filter(p => p.status === 'visited').length || 0;
+
+      const msg1 = `📊 *REPORTE MENSUAL CEO*\n*${nombreMes} ${anioReporte}*\n\n━━━━━━━━━━━━━━━━━━━━━\n💰 *RESULTADOS*\n━━━━━━━━━━━━━━━━━━━━━\n• Revenue: *$${(revenueMes/1000000).toFixed(1)}M*\n  MoM: ${calcVarMes(revenueMes, revenueMesAnt)} | YoY: ${calcVarMes(revenueMes, revenueYoY)}\n• Cierres: *${cierresActual}*\n  MoM: ${calcVarMes(cierresActual, cierresPrev)} | YoY: ${calcVarMes(cierresActual, cierresYoYCount)}\n• Ticket promedio: *$${(ticketPromedio/1000000).toFixed(2)}M*\n\n━━━━━━━━━━━━━━━━━━━━━\n📈 *PIPELINE & FORECAST*\n━━━━━━━━━━━━━━━━━━━━━\n• Valor pipeline: *$${(pipelineValue/1000000).toFixed(1)}M*\n• En negociación: ${negociacion}\n• Reservados: ${reservados}\n• Con cita: ${agendados}\n• Visitaron: ${visitados}\n\n━━━━━━━━━━━━━━━━━━━━━\n📥 *GENERACIÓN DE LEADS*\n━━━━━━━━━━━━━━━━━━━━━\n• Total leads: *${leadsActual}*\n  MoM: ${calcVarMes(leadsActual, leadsPrev)} | YoY: ${calcVarMes(leadsActual, leadsYoYCount)}\n• Conversión: *${conversionMes}%* ${conversionMes >= 5 ? '✅' : '⚠️'}\n• Perdidos: ${perdidosCount}\n\n*Top canales:*\n${fuentesTop.map((f, i) => (i+1) + '. ' + f[0] + ': ' + f[1]).join('\n')}`;
+
+      const msg2 = `👥 *EQUIPO DE VENTAS*\n━━━━━━━━━━━━━━━━━━━━━\n${rendVendedores.join('\n') || 'Sin datos'}\n\n━━━━━━━━━━━━━━━━━━━━━\n📅 *CITAS DEL MES*\n━━━━━━━━━━━━━━━━━━━━━\n• Total: ${citasTotal}\n• Completadas: ${citasCompletadas}\n• Show rate: *${showRate}%* ${showRate >= 70 ? '✅' : '⚠️'}\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *HIPOTECAS*\n━━━━━━━━━━━━━━━━━━━━━\n• En proceso: ${hipEnProceso}\n• Aprobadas: ${hipAprobadas}\n• Rechazadas: ${hipRechazadas}\n\n━━━━━━━━━━━━━━━━━━━━━\n❌ *LEADS PERDIDOS*\n━━━━━━━━━━━━━━━━━━━━━\n${topRazones.length > 0 ? topRazones.map(r => '• ' + r[0] + ': ' + r[1]).join('\n') : '• Sin datos'}\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *INSIGHTS*\n━━━━━━━━━━━━━━━━━━━━━\n${conversionMes >= 5 ? '✅ Conversión saludable' : '⚠️ Revisar seguimiento'}\n${showRate >= 70 ? '✅ Buen show rate' : '⚠️ Muchas citas sin asistir'}\n${cierresActual > cierresPrev ? '✅ Crecimiento MoM' : '⚠️ Revisar pipeline'}\n\n_Reporte ${nombreMes} ${anioReporte}_`;
+
+      await meta.sendWhatsAppMessage(phoneFormatted!, msg1);
+      await new Promise(r => setTimeout(r, 1000));
+      await meta.sendWhatsAppMessage(phoneFormatted!, msg2);
+      return corsResponse(JSON.stringify({ ok: true, message: `Reporte mensual mejorado enviado a ${phoneFormatted}` }));
+    }
+
 
     // ═══════════════════════════════════════════════════════════════
     // HEALTH CHECK - Estado del sistema
@@ -3755,19 +3846,23 @@ async function enviarReporteMensualCEO(supabase: SupabaseService, meta: MetaWhat
     const hoy = new Date();
     const mesActual = hoy.getMonth();
     const anioActual = hoy.getFullYear();
-    
+
     // Mes pasado (el que reportamos)
     const mesReporte = mesActual === 0 ? 11 : mesActual - 1;
     const anioReporte = mesActual === 0 ? anioActual - 1 : anioActual;
-    
+
     const inicioMesReporte = new Date(anioReporte, mesReporte, 1);
     const finMesReporte = new Date(anioReporte, mesReporte + 1, 0, 23, 59, 59);
-    
-    // Mes anterior al reporte (para comparar)
+
+    // Mes anterior al reporte (para comparar MoM)
     const mesAnterior = mesReporte === 0 ? 11 : mesReporte - 1;
     const anioAnterior = mesReporte === 0 ? anioReporte - 1 : anioReporte;
     const inicioMesAnterior = new Date(anioAnterior, mesAnterior, 1);
     const finMesAnterior = new Date(anioAnterior, mesAnterior + 1, 0, 23, 59, 59);
+
+    // Mismo mes año anterior (para comparar YoY)
+    const inicioMesYoY = new Date(anioReporte - 1, mesReporte, 1);
+    const finMesYoY = new Date(anioReporte - 1, mesReporte + 1, 0, 23, 59, 59);
 
     const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
                    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
@@ -3782,12 +3877,19 @@ async function enviarReporteMensualCEO(supabase: SupabaseService, meta: MetaWhat
       .gte('created_at', inicioMesReporte.toISOString())
       .lte('created_at', finMesReporte.toISOString());
 
-    // Leads mes anterior (comparar)
+    // Leads mes anterior (MoM)
     const { data: leadsMesAnterior } = await supabase.client
       .from('leads')
-      .select('*')
+      .select('id')
       .gte('created_at', inicioMesAnterior.toISOString())
       .lte('created_at', finMesAnterior.toISOString());
+
+    // Leads YoY (mismo mes año anterior)
+    const { data: leadsYoY } = await supabase.client
+      .from('leads')
+      .select('id')
+      .gte('created_at', inicioMesYoY.toISOString())
+      .lte('created_at', finMesYoY.toISOString());
 
     // Cierres del mes
     const { data: cierresMes } = await supabase.client
@@ -3797,13 +3899,35 @@ async function enviarReporteMensualCEO(supabase: SupabaseService, meta: MetaWhat
       .gte('status_changed_at', inicioMesReporte.toISOString())
       .lte('status_changed_at', finMesReporte.toISOString());
 
-    // Cierres mes anterior
+    // Cierres mes anterior (MoM)
     const { data: cierresMesAnterior } = await supabase.client
       .from('leads')
-      .select('*, properties(price)')
+      .select('id, properties(price)')
       .in('status', ['closed', 'delivered'])
       .gte('status_changed_at', inicioMesAnterior.toISOString())
       .lte('status_changed_at', finMesAnterior.toISOString());
+
+    // Cierres YoY
+    const { data: cierresYoY } = await supabase.client
+      .from('leads')
+      .select('id, properties(price)')
+      .in('status', ['closed', 'delivered'])
+      .gte('status_changed_at', inicioMesYoY.toISOString())
+      .lte('status_changed_at', finMesYoY.toISOString());
+
+    // Pipeline actual (forecast)
+    const { data: pipeline } = await supabase.client
+      .from('leads')
+      .select('*, properties(price)')
+      .in('status', ['negotiation', 'reserved', 'scheduled', 'visited']);
+
+    // Leads perdidos
+    const { data: leadsPerdidos } = await supabase.client
+      .from('leads')
+      .select('id, lost_reason')
+      .eq('status', 'lost')
+      .gte('status_changed_at', inicioMesReporte.toISOString())
+      .lte('status_changed_at', finMesReporte.toISOString());
 
     // Citas del mes
     const { data: citasMes } = await supabase.client
@@ -3840,18 +3964,29 @@ async function enviarReporteMensualCEO(supabase: SupabaseService, meta: MetaWhat
       revenueMesAnterior += c.properties?.price || 2000000;
     }
 
+    // YoY Revenue
+    let revenueYoY = 0;
+    for (const c of cierresYoY || []) {
+      revenueYoY += c.properties?.price || 2000000;
+    }
+
+    // Pipeline value
+    let pipelineValue = 0;
+    for (const p of pipeline || []) {
+      pipelineValue += p.properties?.price || 2000000;
+    }
+
     // Variaciones
     const leadsActual = leadsMes?.length || 0;
-    const leadsPrev = leadsMesAnterior?.length || 1;
-    const varLeads = Math.round(((leadsActual - leadsPrev) / leadsPrev) * 100);
-
+    const leadsPrev = leadsMesAnterior?.length || 0;
+    const leadsYoYCount = leadsYoY?.length || 0;
     const cierresActual = cierresMes?.length || 0;
-    const cierresPrev = cierresMesAnterior?.length || 1;
-    const varCierres = Math.round(((cierresActual - cierresPrev) / cierresPrev) * 100);
+    const cierresPrev = cierresMesAnterior?.length || 0;
+    const cierresYoYCount = cierresYoY?.length || 0;
+    const perdidosCount = leadsPerdidos?.length || 0;
 
-    const varRevenue = revenueMesAnterior > 0 
-      ? Math.round(((revenueMes - revenueMesAnterior) / revenueMesAnterior) * 100) 
-      : 0;
+    // Función para calcular variación con flechas
+    const calcVar = (a: number, b: number) => b === 0 ? (a > 0 ? '↑' : '→') : a > b ? `↑${Math.round((a-b)/b*100)}%` : a < b ? `↓${Math.round((b-a)/b*100)}%` : '→';
 
     // Conversión
     const conversionMes = leadsActual > 0 ? Math.round((cierresActual / leadsActual) * 100) : 0;
@@ -3871,76 +4006,102 @@ async function enviarReporteMensualCEO(supabase: SupabaseService, meta: MetaWhat
     }
     const fuentesOrdenadas = Object.entries(porFuente).sort((a, b) => b[1] - a[1]).slice(0, 3);
 
+    // Leads perdidos por razón
+    const razonesLost: Record<string, number> = {};
+    for (const l of leadsPerdidos || []) {
+      const razon = l.lost_reason || 'Sin razón';
+      razonesLost[razon] = (razonesLost[razon] || 0) + 1;
+    }
+    const topRazones = Object.entries(razonesLost).sort((a, b) => b[1] - a[1]).slice(0, 3);
+
     // Hipotecas stats
     const hipotecasAprobadas = hipotecas?.filter(h => h.status === 'approved').length || 0;
     const hipotecasRechazadas = hipotecas?.filter(h => h.status === 'rejected').length || 0;
     const hipotecasEnProceso = hipotecas?.filter(h => !['approved', 'rejected'].includes(h.status)).length || 0;
 
-    // Ranking vendedores (top 3)
-    const rankingVendedores = vendedores?.slice(0, 3) || [];
+    // Vendedores con rendimiento del mes
+    const rendVendedores: string[] = [];
+    vendedores?.slice(0, 5).forEach((v, i) => {
+      const cierresV = cierresMes?.filter(c => c.assigned_to === v.id).length || 0;
+      const leadsV = leadsMes?.filter(l => l.assigned_to === v.id).length || 0;
+      const medallas = ['🥇', '🥈', '🥉', '4.', '5.'];
+      rendVendedores.push(`${medallas[i]} ${v.name?.split(' ')[0]}: ${cierresV}c | ${leadsV}L`);
+    });
+
+    // Pipeline por etapa
+    const negociacion = pipeline?.filter(p => p.status === 'negotiation').length || 0;
+    const reservados = pipeline?.filter(p => p.status === 'reserved').length || 0;
+    const agendados = pipeline?.filter(p => p.status === 'scheduled').length || 0;
+    const visitados = pipeline?.filter(p => p.status === 'visited').length || 0;
 
     // Ticket promedio
     const ticketPromedio = cierresActual > 0 ? revenueMes / cierresActual : 0;
 
-    // Emojis para variación
-    const emojiVar = (v: number) => v > 0 ? '📈' : v < 0 ? '📉' : '➡️';
-    const signVar = (v: number) => v > 0 ? '+' : '';
-
     // ═══ CONSTRUIR MENSAJE ═══
 
-    const msg1 = `📊 *REPORTE MENSUAL*
+    const msg1 = `📊 *REPORTE MENSUAL CEO*
 *${nombreMes} ${anioReporte}*
 
 ━━━━━━━━━━━━━━━━━━━━━
-
 💰 *RESULTADOS*
-
-• Revenue: *$${(revenueMes/1000000).toFixed(1)}M* ${emojiVar(varRevenue)} ${signVar(varRevenue)}${varRevenue}%
-• Cierres: *${cierresActual}* ${emojiVar(varCierres)} ${signVar(varCierres)}${varCierres}%
-• Ticket promedio: $${(ticketPromedio/1000000).toFixed(2)}M
+━━━━━━━━━━━━━━━━━━━━━
+• Revenue: *$${(revenueMes/1000000).toFixed(1)}M*
+  MoM: ${calcVar(revenueMes, revenueMesAnterior)} | YoY: ${calcVar(revenueMes, revenueYoY)}
+• Cierres: *${cierresActual}*
+  MoM: ${calcVar(cierresActual, cierresPrev)} | YoY: ${calcVar(cierresActual, cierresYoYCount)}
+• Ticket promedio: *$${(ticketPromedio/1000000).toFixed(2)}M*
 
 ━━━━━━━━━━━━━━━━━━━━━
-
-📈 *PIPELINE*
-
-• Leads nuevos: ${leadsActual} ${emojiVar(varLeads)} ${signVar(varLeads)}${varLeads}%
-• Citas agendadas: ${citasMes?.length || 0}
-• Citas completadas: ${citasCompletadas}
-• Show rate: ${showRate}%
-• Conversión L→C: ${conversionMes}%
+📈 *PIPELINE & FORECAST*
+━━━━━━━━━━━━━━━━━━━━━
+• Valor pipeline: *$${(pipelineValue/1000000).toFixed(1)}M*
+• En negociación: ${negociacion}
+• Reservados: ${reservados}
+• Con cita: ${agendados}
+• Visitaron: ${visitados}
 
 ━━━━━━━━━━━━━━━━━━━━━
+📥 *GENERACIÓN DE LEADS*
+━━━━━━━━━━━━━━━━━━━━━
+• Total leads: *${leadsActual}*
+  MoM: ${calcVar(leadsActual, leadsPrev)} | YoY: ${calcVar(leadsActual, leadsYoYCount)}
+• Conversión: *${conversionMes}%* ${conversionMes >= 5 ? '✅' : '⚠️'}
+• Perdidos: ${perdidosCount}
 
-📣 *CANALES*
-${fuentesOrdenadas.map((f, i) => `${i+1}. ${f[0]}: ${f[1]} leads`).join('\n') || 'Sin datos'}`;
+*Top canales:*
+${fuentesOrdenadas.map((f, i) => (i+1) + '. ' + f[0] + ': ' + f[1]).join('\n') || 'Sin datos'}`;
 
-    const msg2 = `🏆 *RANKING VENDEDORES*
-${rankingVendedores.map((v, i) => {
-  const medallas = ['🥇', '🥈', '🥉'];
-  return `${medallas[i]} ${v.name}: ${v.sales_count || 0} cierres`;
-}).join('\n') || 'Sin datos'}
+    const msg2 = `👥 *EQUIPO DE VENTAS*
+━━━━━━━━━━━━━━━━━━━━━
+${rendVendedores.join('\n') || 'Sin datos'}
 
 ━━━━━━━━━━━━━━━━━━━━━
+📅 *CITAS DEL MES*
+━━━━━━━━━━━━━━━━━━━━━
+• Total: ${citasMes?.length || 0}
+• Completadas: ${citasCompletadas}
+• Show rate: *${showRate}%* ${showRate >= 70 ? '✅' : '⚠️'}
 
+━━━━━━━━━━━━━━━━━━━━━
 🏦 *HIPOTECAS*
-
+━━━━━━━━━━━━━━━━━━━━━
 • En proceso: ${hipotecasEnProceso}
 • Aprobadas: ${hipotecasAprobadas}
 • Rechazadas: ${hipotecasRechazadas}
-• Tasa aprobación: ${hipotecas && hipotecas.length > 0 ? Math.round((hipotecasAprobadas / hipotecas.length) * 100) : 0}%
 
 ━━━━━━━━━━━━━━━━━━━━━
+❌ *LEADS PERDIDOS*
+━━━━━━━━━━━━━━━━━━━━━
+${topRazones.length > 0 ? topRazones.map(r => '• ' + r[0] + ': ' + r[1]).join('\n') : '• Sin datos'}
 
+━━━━━━━━━━━━━━━━━━━━━
 💡 *INSIGHTS*
-
-${conversionMes >= 5 ? '✅ Conversión saludable' : '⚠️ Revisar seguimiento de leads'}
-${showRate >= 70 ? '✅ Buen show rate' : '⚠️ Muchas citas canceladas'}
-${varRevenue > 0 ? '✅ Crecimiento vs mes anterior' : '⚠️ Revenue menor al mes pasado'}
-
 ━━━━━━━━━━━━━━━━━━━━━
+${conversionMes >= 5 ? '✅ Conversión saludable' : '⚠️ Revisar seguimiento'}
+${showRate >= 70 ? '✅ Buen show rate' : '⚠️ Muchas citas sin asistir'}
+${cierresActual > cierresPrev ? '✅ Crecimiento MoM' : '⚠️ Revisar pipeline'}
 
-_Reporte generado automáticamente_
-_${new Date().toLocaleDateString('es-MX')}_`;
+_Reporte ${nombreMes} ${anioReporte}_`;
 
     // Enviar a cada admin (2 mensajes)
     const telefonosEnviados = new Set<string>();
