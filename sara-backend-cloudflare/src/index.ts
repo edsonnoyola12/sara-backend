@@ -3734,6 +3734,171 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
 
 
 
+    // ═══════════════════════════════════════════════════════════════
+    // TEST: Reporte diario asesor individual
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/test-reporte-diario-asesor/')) {
+      const phone = url.pathname.split('/')[2];
+      if (!phone) return corsResponse(JSON.stringify({ error: 'Falta teléfono' }), 400);
+      const phoneFormatted = phone.startsWith('52') ? phone : `52${phone}`;
+      console.log(`TEST: Enviando reporte diario asesor a ${phoneFormatted}...`);
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      const { data: asesorD } = await supabase.client.from('team_members').select('*').eq('phone', phoneFormatted).single();
+      const hoyD = new Date();
+      const inicioHoyD = new Date(hoyD); inicioHoyD.setHours(0, 0, 0, 0);
+      const finHoyD = new Date(hoyD); finHoyD.setHours(23, 59, 59, 999);
+      const inicioAyerD = new Date(inicioHoyD); inicioAyerD.setDate(inicioAyerD.getDate() - 1);
+      const finAyerD = new Date(finHoyD); finAyerD.setDate(finAyerD.getDate() - 1);
+
+      const { data: asesoresD } = await supabase.client.from('team_members').select('*').eq('role', 'asesor').eq('active', true);
+      const { data: hipotecasHoyD } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').gte('created_at', inicioHoyD.toISOString()).lte('created_at', finHoyD.toISOString());
+      const { data: aprobadasHoyD } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').eq('status', 'approved').gte('updated_at', inicioHoyD.toISOString()).lte('updated_at', finHoyD.toISOString());
+      const { data: hipotecasAyerD } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').gte('created_at', inicioAyerD.toISOString()).lte('created_at', finAyerD.toISOString());
+      const { data: pipelineActivoD } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').in('status', ['pending', 'in_progress', 'sent_to_bank']);
+
+      const asesorIdD = asesorD?.id || asesoresD?.[0]?.id || null;
+      const nombreAsesorD = asesorD?.name?.split(' ')[0] || 'Asesor';
+      const calcVarD = (a, b) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
+
+      const nuevasHoyD = hipotecasHoyD?.filter(h => h.assigned_advisor_id === asesorIdD) || [];
+      const aprobadasAsesorHoyD = aprobadasHoyD?.filter(h => h.assigned_advisor_id === asesorIdD) || [];
+      const nuevasAyerD = hipotecasAyerD?.filter(h => h.assigned_advisor_id === asesorIdD) || [];
+      const pipelineAsesorD = pipelineActivoD?.filter(h => h.assigned_advisor_id === asesorIdD) || [];
+      const pendientesD = pipelineAsesorD.filter(h => h.status === 'pending').length;
+      const enProcesoD = pipelineAsesorD.filter(h => h.status === 'in_progress').length;
+      const enBancoD = pipelineAsesorD.filter(h => h.status === 'sent_to_bank').length;
+
+      const insightsD = [];
+      if (aprobadasAsesorHoyD.length > 0) insightsD.push(`🎉 ¡${aprobadasAsesorHoyD.length} hipoteca${aprobadasAsesorHoyD.length > 1 ? 's' : ''} aprobada${aprobadasAsesorHoyD.length > 1 ? 's' : ''} hoy!`);
+      if (nuevasHoyD.length > nuevasAyerD.length && nuevasHoyD.length > 0) insightsD.push(`📈 Más solicitudes que ayer: ${nuevasAyerD.length}→${nuevasHoyD.length}`);
+      if (pendientesD > 3) insightsD.push(`📋 ${pendientesD} solicitudes pendientes de revisar`);
+      if (enBancoD > 0) insightsD.push(`🏦 ${enBancoD} en banco - dar seguimiento`);
+      const insightsTextD = insightsD.length > 0 ? insightsD.join('\n') : '💪 ¡Buen trabajo hoy!';
+      const fechaHoyD = `${hoyD.getDate()}/${hoyD.getMonth()+1}/${hoyD.getFullYear()}`;
+
+      const msgD = `📊 *TU RESUMEN DEL DÍA*\nHola *${nombreAsesorD}* 👋\n_${fechaHoyD}_\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *HOY*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes nuevas: *${nuevasHoyD.length}* ${calcVarD(nuevasHoyD.length, nuevasAyerD.length)}\n• Aprobadas: *${aprobadasAsesorHoyD.length}* ${aprobadasAsesorHoyD.length > 0 ? '🎉' : ''}\n\n━━━━━━━━━━━━━━━━━━━━━\n📋 *TU PIPELINE*\n━━━━━━━━━━━━━━━━━━━━━\n• Pendientes: ${pendientesD}\n• En proceso: ${enProcesoD}\n• En banco: ${enBancoD}\n• Total activo: *${pipelineAsesorD.length}*\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsTextD}\n\n_¡Descansa y mañana con todo!_ 🚀`;
+
+      await meta.sendWhatsAppMessage(phoneFormatted, msgD);
+      return corsResponse(JSON.stringify({ ok: true, message: `Reporte diario asesor enviado a ${phoneFormatted}` }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST: Enviar reportes diarios a todos los asesores
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-reportes-diarios-asesores') {
+      console.log('TEST: Enviando reportes diarios a todos los asesores...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await enviarReporteDiarioAsesores(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Reportes diarios enviados a todos los asesores' }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST: Enviar reportes semanales a todos los asesores
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-reportes-semanales-asesores') {
+      console.log('TEST: Enviando reportes semanales a todos los asesores...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await enviarReporteSemanalAsesores(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Reportes semanales enviados a todos los asesores' }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST: Enviar reportes mensuales a todos los asesores
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-reportes-mensuales-asesores') {
+      console.log('TEST: Enviando reportes mensuales a todos los asesores...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await enviarReporteMensualAsesores(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Reportes mensuales enviados a todos los asesores' }));
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST: Reporte marketing individual por teléfono
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/test-reporte-marketing/')) {
+      const phone = url.pathname.split('/')[2];
+      if (!phone) return corsResponse(JSON.stringify({ error: 'Falta teléfono' }), 400);
+      const phoneFormatted = phone.startsWith('52') ? phone : `52${phone}`;
+      console.log(`TEST: Enviando reporte marketing a ${phoneFormatted}...`);
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      const hoy = new Date();
+      const inicioHoy = new Date(hoy); inicioHoy.setHours(0, 0, 0, 0);
+      const finHoy = new Date(hoy); finHoy.setHours(23, 59, 59, 999);
+      const inicioAyer = new Date(inicioHoy); inicioAyer.setDate(inicioAyer.getDate() - 1);
+      const finAyer = new Date(finHoy); finAyer.setDate(finAyer.getDate() - 1);
+
+      const { data: leadsHoy } = await supabase.client.from('leads').select('*, properties(price)').gte('created_at', inicioHoy.toISOString()).lte('created_at', finHoy.toISOString());
+      const { data: leadsAyer } = await supabase.client.from('leads').select('id, source').gte('created_at', inicioAyer.toISOString()).lte('created_at', finAyer.toISOString());
+      const { data: citasHoy } = await supabase.client.from('appointments').select('*').eq('scheduled_date', inicioHoy.toISOString().split('T')[0]);
+      const { data: cierresHoy } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioHoy.toISOString()).lte('status_changed_at', finHoy.toISOString());
+
+      const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
+      const fechaHoy = `${hoy.getDate()}/${hoy.getMonth()+1}/${hoy.getFullYear()}`;
+
+      const fuenteHoy: Record<string, number> = {};
+      const fuenteAyer: Record<string, number> = {};
+      leadsHoy?.forEach(l => { const f = l.source || 'Directo'; fuenteHoy[f] = (fuenteHoy[f] || 0) + 1; });
+      leadsAyer?.forEach(l => { const f = l.source || 'Directo'; fuenteAyer[f] = (fuenteAyer[f] || 0) + 1; });
+      const topFuentes = Object.entries(fuenteHoy).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+      const citasAgendadas = citasHoy?.filter(c => c.status === 'scheduled').length || 0;
+      const citasCompletadas = citasHoy?.filter(c => c.status === 'completed').length || 0;
+      let revenueHoy = 0;
+      cierresHoy?.forEach(c => revenueHoy += c.properties?.price || 2000000);
+      const convLeadCita = (leadsHoy?.length || 0) > 0 ? Math.round((citasAgendadas / (leadsHoy?.length || 1)) * 100) : 0;
+
+      const fuentesStr = topFuentes.length > 0
+        ? topFuentes.map(([f, c]) => `  • ${f}: ${c} ${calcVar(c, fuenteAyer[f] || 0)}`).join('\n')
+        : '  Sin leads hoy';
+
+      const insights: string[] = [];
+      if ((leadsHoy?.length || 0) > (leadsAyer?.length || 0)) insights.push(`📈 +${(leadsHoy?.length || 0) - (leadsAyer?.length || 0)} leads vs ayer`);
+      if (cierresHoy && cierresHoy.length > 0) insights.push(`🎉 ${cierresHoy.length} cierre${cierresHoy.length > 1 ? 's' : ''} hoy!`);
+      if (convLeadCita >= 30) insights.push(`✅ Buena conversión lead→cita: ${convLeadCita}%`);
+      const mejorFuente = topFuentes[0];
+      if (mejorFuente && mejorFuente[1] >= 3) insights.push(`🔥 ${mejorFuente[0]} fue la mejor fuente`);
+      const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buen día de marketing!';
+
+      const msg = `📊 *REPORTE DIARIO MARKETING*\nHola 👋\n_${fechaHoy}_\n\n━━━━━━━━━━━━━━━━━━━━━\n📣 *LEADS HOY*\n━━━━━━━━━━━━━━━━━━━━━\n• Total: *${leadsHoy?.length || 0}* ${calcVar(leadsHoy?.length || 0, leadsAyer?.length || 0)}\n• Conv. lead→cita: *${convLeadCita}%*\n${cierresHoy && cierresHoy.length > 0 ? `• Revenue: *$${(revenueHoy/1000000).toFixed(1)}M*\n` : ''}\n━━━━━━━━━━━━━━━━━━━━━\n📍 *POR FUENTE*\n━━━━━━━━━━━━━━━━━━━━━\n${fuentesStr}\n\n━━━━━━━━━━━━━━━━━━━━━\n📅 *CITAS*\n━━━━━━━━━━━━━━━━━━━━━\n• Agendadas: ${citasAgendadas}\n• Completadas: ${citasCompletadas}\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *INSIGHTS*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Mañana seguimos!_ 🚀`;
+
+      await meta.sendWhatsAppMessage(phoneFormatted, msg);
+      return corsResponse(JSON.stringify({ ok: true, message: `Reporte marketing enviado a ${phoneFormatted}` }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST: Reporte diario marketing
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-reporte-diario-marketing') {
+      console.log('TEST: Enviando reporte diario marketing...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await enviarReporteDiarioMarketing(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Reporte diario marketing enviado' }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST: Reporte semanal marketing
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-reporte-semanal-marketing') {
+      console.log('TEST: Enviando reporte semanal marketing...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await enviarReporteSemanalMarketing(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Reporte semanal marketing enviado' }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST: Reporte mensual marketing
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-reporte-mensual-marketing') {
+      console.log('TEST: Enviando reporte mensual marketing...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await enviarReporteMensualMarketing(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Reporte mensual marketing enviado' }));
+    }
+
+
     // ═══════════════════════════════════════════════════════════════
     // HEALTH CHECK - Estado del sistema
     // ═══════════════════════════════════════════════════════════════
@@ -4130,6 +4295,18 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       await enviarReporteSemanalVendedores(supabase, meta);
     }
 
+    // 9am LUNES: Reporte semanal individual a asesores hipotecarios
+    if (mexicoHour === 9 && isFirstRunOfHour && dayOfWeek === 1) {
+      console.log('📊 Enviando reportes semanales a asesores...');
+      await enviarReporteSemanalAsesores(supabase, meta);
+    }
+
+    // 9am LUNES: Reporte semanal marketing
+    if (mexicoHour === 9 && isFirstRunOfHour && dayOfWeek === 1) {
+      console.log('📊 Enviando reporte semanal a marketing...');
+      await enviarReporteSemanalMarketing(supabase, meta);
+    }
+
     // 8am DÍA 1 DE CADA MES: Reporte mensual CEO/Admin
     if (mexicoHour === 8 && isFirstRunOfHour && now.getUTCDate() === 1) {
       console.log('📊 Enviando reporte mensual a CEO...');
@@ -4140,6 +4317,18 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     if (mexicoHour === 9 && isFirstRunOfHour && now.getUTCDate() === 1) {
       console.log('📊 Enviando reportes mensuales a vendedores...');
       await enviarReporteMensualVendedores(supabase, meta);
+    }
+
+    // 9am DÍA 1 DE CADA MES: Reporte mensual individual a asesores hipotecarios
+    if (mexicoHour === 9 && isFirstRunOfHour && now.getUTCDate() === 1) {
+      console.log('📊 Enviando reportes mensuales a asesores...');
+      await enviarReporteMensualAsesores(supabase, meta);
+    }
+
+    // 9am DÍA 1 DE CADA MES: Reporte mensual marketing
+    if (mexicoHour === 9 && isFirstRunOfHour && now.getUTCDate() === 1) {
+      console.log('📊 Enviando reporte mensual a marketing...');
+      await enviarReporteMensualMarketing(supabase, meta);
     }
 
     // 12:01am DÍA 1 DE CADA MES: Aplicar nuevos precios programados
@@ -4161,6 +4350,18 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     if (mexicoHour === 19 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
       console.log('📊 Enviando reportes diarios a vendedores...');
       await enviarReporteDiarioVendedores(supabase, meta);
+    }
+
+    // 7pm L-V: Reporte diario individual a asesores hipotecarios
+    if (mexicoHour === 19 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('📊 Enviando reportes diarios a asesores...');
+      await enviarReporteDiarioAsesores(supabase, meta);
+    }
+
+    // 7pm L-V: Reporte diario marketing
+    if (mexicoHour === 19 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('📊 Enviando reporte diario a marketing...');
+      await enviarReporteDiarioMarketing(supabase, meta);
     }
 
     // Viernes 6pm: Video semanal de logros con Veo 3 (solo primer ejecucion)
@@ -5770,6 +5971,482 @@ _¡Éxito en ${meses[mesActual]}!_ 🚀`;
     console.log('Error en reporte mensual vendedores:', e);
   }
 }
+
+
+// ═══════════════════════════════════════════════════════════════
+// REPORTE DIARIO INDIVIDUAL ASESORES HIPOTECARIOS - L-V 7pm
+// ═══════════════════════════════════════════════════════════════
+
+async function enviarReporteDiarioAsesores(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const { data: asesores } = await supabase.client
+      .from('team_members')
+      .select('*')
+      .eq('role', 'asesor')
+      .eq('active', true);
+
+    if (!asesores || asesores.length === 0) return;
+
+    const hoy = new Date();
+    const inicioHoy = new Date(hoy); inicioHoy.setHours(0, 0, 0, 0);
+    const finHoy = new Date(hoy); finHoy.setHours(23, 59, 59, 999);
+    const inicioAyer = new Date(inicioHoy); inicioAyer.setDate(inicioAyer.getDate() - 1);
+    const finAyer = new Date(finHoy); finAyer.setDate(finAyer.getDate() - 1);
+
+    const { data: hipotecasHoy } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').gte('created_at', inicioHoy.toISOString()).lte('created_at', finHoy.toISOString());
+    const { data: aprobadasHoy } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').eq('status', 'approved').gte('updated_at', inicioHoy.toISOString()).lte('updated_at', finHoy.toISOString());
+    const { data: hipotecasAyer } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').gte('created_at', inicioAyer.toISOString()).lte('created_at', finAyer.toISOString());
+    const { data: pipelineActivo } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').in('status', ['pending', 'in_progress', 'sent_to_bank']);
+
+    const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
+    const fechaHoy = `${hoy.getDate()}/${hoy.getMonth()+1}/${hoy.getFullYear()}`;
+
+    for (const asesor of asesores) {
+      if (!asesor.phone) continue;
+
+      const nuevasHoy = hipotecasHoy?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const aprobadasAsesorHoy = aprobadasHoy?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const nuevasAyer = hipotecasAyer?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const pipelineAsesor = pipelineActivo?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const pendientes = pipelineAsesor.filter(h => h.status === 'pending').length;
+      const enProceso = pipelineAsesor.filter(h => h.status === 'in_progress').length;
+      const enBanco = pipelineAsesor.filter(h => h.status === 'sent_to_bank').length;
+
+      const insights: string[] = [];
+      if (aprobadasAsesorHoy.length > 0) insights.push(`🎉 ¡${aprobadasAsesorHoy.length} hipoteca${aprobadasAsesorHoy.length > 1 ? 's' : ''} aprobada${aprobadasAsesorHoy.length > 1 ? 's' : ''} hoy!`);
+      if (nuevasHoy.length > nuevasAyer.length && nuevasHoy.length > 0) insights.push(`📈 Más solicitudes que ayer: ${nuevasAyer.length}→${nuevasHoy.length}`);
+      if (pendientes > 3) insights.push(`📋 ${pendientes} solicitudes pendientes de revisar`);
+      if (enBanco > 0) insights.push(`🏦 ${enBanco} en banco - dar seguimiento`);
+      const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buen trabajo hoy!';
+      const nombreCorto = asesor.name?.split(' ')[0] || 'Asesor';
+
+      const msg = `📊 *TU RESUMEN DEL DÍA*\nHola *${nombreCorto}* 👋\n_${fechaHoy}_\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *HOY*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes nuevas: *${nuevasHoy.length}* ${calcVar(nuevasHoy.length, nuevasAyer.length)}\n• Aprobadas: *${aprobadasAsesorHoy.length}* ${aprobadasAsesorHoy.length > 0 ? '🎉' : ''}\n\n━━━━━━━━━━━━━━━━━━━━━\n📋 *TU PIPELINE*\n━━━━━━━━━━━━━━━━━━━━━\n• Pendientes: ${pendientes}\n• En proceso: ${enProceso}\n• En banco: ${enBanco}\n• Total activo: *${pipelineAsesor.length}*\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Descansa y mañana con todo!_ 🚀`;
+
+      try {
+        await meta.sendWhatsAppMessage(asesor.phone, msg);
+        console.log(`📊 Reporte diario asesor enviado a ${asesor.name}`);
+      } catch (e) {
+        console.log(`Error enviando reporte diario a ${asesor.name}:`, e);
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    console.log(`✅ Reportes diarios enviados a ${asesores.length} asesores`);
+  } catch (e) {
+    console.log('Error en reporte diario asesores:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REPORTE SEMANAL INDIVIDUAL ASESORES HIPOTECARIOS - Lunes 9am
+// ═══════════════════════════════════════════════════════════════
+
+async function enviarReporteSemanalAsesores(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const { data: asesores } = await supabase.client.from('team_members').select('*').eq('role', 'asesor').eq('active', true);
+    if (!asesores || asesores.length === 0) return;
+
+    const hoy = new Date();
+    const inicioSemana = new Date(hoy); inicioSemana.setDate(hoy.getDate() - 7); inicioSemana.setHours(0, 0, 0, 0);
+    const finSemana = new Date(hoy); finSemana.setHours(23, 59, 59, 999);
+    const inicioSemAnt = new Date(inicioSemana); inicioSemAnt.setDate(inicioSemAnt.getDate() - 7);
+    const finSemAnt = new Date(inicioSemana); finSemAnt.setDate(finSemAnt.getDate() - 1); finSemAnt.setHours(23, 59, 59, 999);
+
+    const { data: hipotecasSemana } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').gte('created_at', inicioSemana.toISOString()).lte('created_at', finSemana.toISOString());
+    const { data: aprobadasSemana } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').eq('status', 'approved').gte('updated_at', inicioSemana.toISOString()).lte('updated_at', finSemana.toISOString());
+    const { data: rechazadasSemana } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'rejected').gte('updated_at', inicioSemana.toISOString()).lte('updated_at', finSemana.toISOString());
+    const { data: hipotecasSemAnt } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').gte('created_at', inicioSemAnt.toISOString()).lte('created_at', finSemAnt.toISOString());
+    const { data: aprobadasSemAnt } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'approved').gte('updated_at', inicioSemAnt.toISOString()).lte('updated_at', finSemAnt.toISOString());
+    const { data: pipelineActivo } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').in('status', ['pending', 'in_progress', 'sent_to_bank']);
+
+    const asesoresConAprobaciones = asesores.map(a => ({ ...a, aprobaciones: (aprobadasSemana?.filter(h => h.assigned_advisor_id === a.id) || []).length })).sort((a, b) => b.aprobaciones - a.aprobaciones);
+    const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
+
+    for (const asesor of asesores) {
+      if (!asesor.phone) continue;
+
+      const nuevasSem = hipotecasSemana?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const aprobadasAsesor = aprobadasSemana?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const rechazadasAsesor = rechazadasSemana?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const nuevasSemAnt = hipotecasSemAnt?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const aprobadasAnt = aprobadasSemAnt?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const pipelineAsesor = pipelineActivo?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const tasaAprobacion = (aprobadasAsesor.length + rechazadasAsesor.length) > 0 ? Math.round((aprobadasAsesor.length / (aprobadasAsesor.length + rechazadasAsesor.length)) * 100) : 0;
+      const posicion = asesoresConAprobaciones.findIndex(a => a.id === asesor.id) + 1;
+      const medallas = ['🥇', '🥈', '🥉'];
+      const posicionStr = posicion <= 3 ? medallas[posicion - 1] : `#${posicion}`;
+
+      const insights: string[] = [];
+      if (aprobadasAsesor.length > aprobadasAnt.length && aprobadasAnt.length > 0) insights.push(`🚀 Aprobaciones crecieron ${Math.round(((aprobadasAsesor.length - aprobadasAnt.length) / aprobadasAnt.length) * 100)}% vs semana anterior`);
+      if (posicion === 1) insights.push(`🏆 ¡Fuiste el #1 del equipo!`);
+      else if (posicion <= 3) insights.push(`🎯 Top 3 del equipo`);
+      if (tasaAprobacion >= 70) insights.push(`✅ Excelente tasa de aprobación: ${tasaAprobacion}%`);
+      const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buena semana!';
+      const nombreCorto = asesor.name?.split(' ')[0] || 'Asesor';
+
+      const msg = `📊 *TU REPORTE SEMANAL*\nHola *${nombreCorto}* 👋\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *ESTA SEMANA*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes nuevas: *${nuevasSem.length}* ${calcVar(nuevasSem.length, nuevasSemAnt.length)}\n• Aprobadas: *${aprobadasAsesor.length}* ${calcVar(aprobadasAsesor.length, aprobadasAnt.length)}\n• Rechazadas: ${rechazadasAsesor.length}\n• Tasa aprobación: *${tasaAprobacion}%*\n\n━━━━━━━━━━━━━━━━━━━━━\n📋 *PIPELINE ACTIVO*\n━━━━━━━━━━━━━━━━━━━━━\n• Pendientes: ${pipelineAsesor.filter(h => h.status === 'pending').length}\n• En proceso: ${pipelineAsesor.filter(h => h.status === 'in_progress').length}\n• En banco: ${pipelineAsesor.filter(h => h.status === 'sent_to_bank').length}\n• Total: *${pipelineAsesor.length}*\n\n━━━━━━━━━━━━━━━━━━━━━\n🏆 *RANKING EQUIPO*\n━━━━━━━━━━━━━━━━━━━━━\n• Posición: *${posicionStr}* de ${asesoresConAprobaciones.length}\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Éxito esta semana!_ 🚀`;
+
+      try {
+        await meta.sendWhatsAppMessage(asesor.phone, msg);
+        console.log(`📊 Reporte semanal asesor enviado a ${asesor.name}`);
+      } catch (e) {
+        console.log(`Error enviando reporte semanal a ${asesor.name}:`, e);
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    console.log(`✅ Reportes semanales enviados a ${asesores.length} asesores`);
+  } catch (e) {
+    console.log('Error en reporte semanal asesores:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REPORTE MENSUAL INDIVIDUAL ASESORES HIPOTECARIOS - Día 1 9am
+// ═══════════════════════════════════════════════════════════════
+
+async function enviarReporteMensualAsesores(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const { data: asesores } = await supabase.client.from('team_members').select('*').eq('role', 'asesor').eq('active', true);
+    if (!asesores || asesores.length === 0) return;
+
+    const hoy = new Date();
+    const mesActual = hoy.getMonth();
+    const anioActual = hoy.getFullYear();
+    const mesReporte = mesActual === 0 ? 11 : mesActual - 1;
+    const anioReporte = mesActual === 0 ? anioActual - 1 : anioActual;
+    const inicioMesReporte = new Date(anioReporte, mesReporte, 1);
+    const finMesReporte = new Date(anioReporte, mesReporte + 1, 0, 23, 59, 59);
+    const mesAnterior = mesReporte === 0 ? 11 : mesReporte - 1;
+    const anioAnterior = mesReporte === 0 ? anioReporte - 1 : anioReporte;
+    const inicioMesAnterior = new Date(anioAnterior, mesAnterior, 1);
+    const finMesAnterior = new Date(anioAnterior, mesAnterior + 1, 0, 23, 59, 59);
+    const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    const nombreMes = meses[mesReporte];
+
+    const { data: hipotecasMes } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').gte('created_at', inicioMesReporte.toISOString()).lte('created_at', finMesReporte.toISOString());
+    const { data: aprobadasMes } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').eq('status', 'approved').gte('updated_at', inicioMesReporte.toISOString()).lte('updated_at', finMesReporte.toISOString());
+    const { data: rechazadasMes } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'rejected').gte('updated_at', inicioMesReporte.toISOString()).lte('updated_at', finMesReporte.toISOString());
+    const { data: hipotecasMesAnt } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').gte('created_at', inicioMesAnterior.toISOString()).lte('created_at', finMesAnterior.toISOString());
+    const { data: aprobadasMesAnt } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'approved').gte('updated_at', inicioMesAnterior.toISOString()).lte('updated_at', finMesAnterior.toISOString());
+
+    const asesoresConAprobaciones = asesores.map(a => ({ ...a, aprobaciones: (aprobadasMes?.filter(h => h.assigned_advisor_id === a.id) || []).length })).sort((a, b) => b.aprobaciones - a.aprobaciones);
+    const totalAprobacionesEquipo = aprobadasMes?.length || 0;
+    const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
+
+    for (const asesor of asesores) {
+      if (!asesor.phone) continue;
+
+      const nuevasMes = hipotecasMes?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const aprobadasAsesor = aprobadasMes?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const rechazadasAsesor = rechazadasMes?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const nuevasMesAnt = hipotecasMesAnt?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const aprobadasAnt = aprobadasMesAnt?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+      const tasaAprobacion = (aprobadasAsesor.length + rechazadasAsesor.length) > 0 ? Math.round((aprobadasAsesor.length / (aprobadasAsesor.length + rechazadasAsesor.length)) * 100) : 0;
+      const posicion = asesoresConAprobaciones.findIndex(a => a.id === asesor.id) + 1;
+      const medallas = ['🥇', '🥈', '🥉'];
+      const posicionStr = posicion <= 3 ? medallas[posicion - 1] : `#${posicion}`;
+      const porcentajeEquipo = totalAprobacionesEquipo > 0 ? Math.round((aprobadasAsesor.length / totalAprobacionesEquipo) * 100) : 0;
+
+      const insights: string[] = [];
+      if (aprobadasAsesor.length > aprobadasAnt.length && aprobadasAnt.length > 0) insights.push(`🚀 Aprobaciones crecieron ${Math.round(((aprobadasAsesor.length - aprobadasAnt.length) / aprobadasAnt.length) * 100)}% vs mes anterior`);
+      else if (aprobadasAsesor.length < aprobadasAnt.length && aprobadasAnt.length > 0) insights.push(`📉 Aprobaciones bajaron vs mes anterior`);
+      if (posicion === 1) insights.push(`🏆 ¡Fuiste el #1 del equipo!`);
+      else if (posicion <= 3) insights.push(`🎯 Top 3 del equipo`);
+      if (tasaAprobacion >= 70) insights.push(`✅ Excelente tasa de aprobación: ${tasaAprobacion}%`);
+      const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buen mes!';
+      const nombreCorto = asesor.name?.split(' ')[0] || 'Asesor';
+
+      const msg = `📊 *TU REPORTE MENSUAL*\nHola *${nombreCorto}* 👋\n*${nombreMes.toUpperCase()} ${anioReporte}*\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *TUS RESULTADOS*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes: *${nuevasMes.length}* ${calcVar(nuevasMes.length, nuevasMesAnt.length)}\n• Aprobadas: *${aprobadasAsesor.length}* ${calcVar(aprobadasAsesor.length, aprobadasAnt.length)}\n• Rechazadas: ${rechazadasAsesor.length}\n• Tasa aprobación: *${tasaAprobacion}%*\n\n━━━━━━━━━━━━━━━━━━━━━\n🏆 *RANKING EQUIPO*\n━━━━━━━━━━━━━━━━━━━━━\n• Posición: *${posicionStr}* de ${asesoresConAprobaciones.length}\n• Aportaste: *${porcentajeEquipo}%* de aprobaciones\n• Total equipo: ${totalAprobacionesEquipo} aprobadas\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN DEL MES*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Éxito en ${meses[mesActual]}!_ 🚀`;
+
+      try {
+        await meta.sendWhatsAppMessage(asesor.phone, msg);
+        console.log(`📊 Reporte mensual asesor enviado a ${asesor.name}`);
+      } catch (e) {
+        console.log(`Error enviando reporte mensual a ${asesor.name}:`, e);
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    console.log(`✅ Reportes mensuales enviados a ${asesores.length} asesores`);
+  } catch (e) {
+    console.log('Error en reporte mensual asesores:', e);
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// REPORTE DIARIO MARKETING - L-V 7pm
+// ═══════════════════════════════════════════════════════════════
+
+async function enviarReporteDiarioMarketing(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const { data: marketing } = await supabase.client.from('team_members').select('*').eq('role', 'marketing').eq('active', true);
+    if (!marketing || marketing.length === 0) return;
+
+    const hoy = new Date();
+    const inicioHoy = new Date(hoy); inicioHoy.setHours(0, 0, 0, 0);
+    const finHoy = new Date(hoy); finHoy.setHours(23, 59, 59, 999);
+    const inicioAyer = new Date(inicioHoy); inicioAyer.setDate(inicioAyer.getDate() - 1);
+    const finAyer = new Date(finHoy); finAyer.setDate(finAyer.getDate() - 1);
+
+    const { data: leadsHoy } = await supabase.client.from('leads').select('*, properties(price)').gte('created_at', inicioHoy.toISOString()).lte('created_at', finHoy.toISOString());
+    const { data: leadsAyer } = await supabase.client.from('leads').select('id, source').gte('created_at', inicioAyer.toISOString()).lte('created_at', finAyer.toISOString());
+    const { data: citasHoy } = await supabase.client.from('appointments').select('*').eq('scheduled_date', inicioHoy.toISOString().split('T')[0]);
+    const { data: cierresHoy } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioHoy.toISOString()).lte('status_changed_at', finHoy.toISOString());
+
+    const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
+    const fechaHoy = `${hoy.getDate()}/${hoy.getMonth()+1}/${hoy.getFullYear()}`;
+
+    // Leads por fuente
+    const fuenteHoy: Record<string, number> = {};
+    const fuenteAyer: Record<string, number> = {};
+    leadsHoy?.forEach(l => { const f = l.source || 'Directo'; fuenteHoy[f] = (fuenteHoy[f] || 0) + 1; });
+    leadsAyer?.forEach(l => { const f = l.source || 'Directo'; fuenteAyer[f] = (fuenteAyer[f] || 0) + 1; });
+    const topFuentes = Object.entries(fuenteHoy).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+    // Citas agendadas hoy
+    const citasAgendadas = citasHoy?.filter(c => c.status === 'scheduled').length || 0;
+    const citasCompletadas = citasHoy?.filter(c => c.status === 'completed').length || 0;
+
+    // Revenue del día
+    let revenueHoy = 0;
+    cierresHoy?.forEach(c => revenueHoy += c.properties?.price || 2000000);
+
+    // Conversión leads->cita
+    const convLeadCita = (leadsHoy?.length || 0) > 0 ? Math.round((citasAgendadas / (leadsHoy?.length || 1)) * 100) : 0;
+
+    for (const mkt of marketing) {
+      if (!mkt.phone) continue;
+
+      const fuentesStr = topFuentes.length > 0 
+        ? topFuentes.map(([f, c]) => `  • ${f}: ${c} ${calcVar(c, fuenteAyer[f] || 0)}`).join('\n')
+        : '  Sin leads hoy';
+
+      const insights: string[] = [];
+      if ((leadsHoy?.length || 0) > (leadsAyer?.length || 0)) insights.push(`📈 +${(leadsHoy?.length || 0) - (leadsAyer?.length || 0)} leads vs ayer`);
+      if (cierresHoy && cierresHoy.length > 0) insights.push(`🎉 ${cierresHoy.length} cierre${cierresHoy.length > 1 ? 's' : ''} hoy!`);
+      if (convLeadCita >= 30) insights.push(`✅ Buena conversión lead→cita: ${convLeadCita}%`);
+      const mejorFuente = topFuentes[0];
+      if (mejorFuente && mejorFuente[1] >= 3) insights.push(`🔥 ${mejorFuente[0]} fue la mejor fuente`);
+      const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buen día de marketing!';
+      const nombreCorto = mkt.name?.split(' ')[0] || 'Marketing';
+
+      const msg = `📊 *REPORTE DIARIO MARKETING*\nHola *${nombreCorto}* 👋\n_${fechaHoy}_\n\n━━━━━━━━━━━━━━━━━━━━━\n📣 *LEADS HOY*\n━━━━━━━━━━━━━━━━━━━━━\n• Total: *${leadsHoy?.length || 0}* ${calcVar(leadsHoy?.length || 0, leadsAyer?.length || 0)}\n• Conv. lead→cita: *${convLeadCita}%*\n${cierresHoy && cierresHoy.length > 0 ? `• Revenue: *$${(revenueHoy/1000000).toFixed(1)}M*\n` : ''}\n━━━━━━━━━━━━━━━━━━━━━\n📍 *POR FUENTE*\n━━━━━━━━━━━━━━━━━━━━━\n${fuentesStr}\n\n━━━━━━━━━━━━━━━━━━━━━\n📅 *CITAS*\n━━━━━━━━━━━━━━━━━━━━━\n• Agendadas: ${citasAgendadas}\n• Completadas: ${citasCompletadas}\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *INSIGHTS*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Mañana seguimos!_ 🚀`;
+
+      try {
+        await meta.sendWhatsAppMessage(mkt.phone, msg);
+        console.log(`📊 Reporte diario marketing enviado a ${mkt.name}`);
+      } catch (e) {
+        console.log(`Error enviando reporte a ${mkt.name}:`, e);
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    console.log(`✅ Reportes diarios enviados a ${marketing.length} de marketing`);
+  } catch (e) {
+    console.log('Error en reporte diario marketing:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REPORTE SEMANAL MARKETING - Lunes 9am
+// ═══════════════════════════════════════════════════════════════
+
+async function enviarReporteSemanalMarketing(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const { data: marketing } = await supabase.client.from('team_members').select('*').eq('role', 'marketing').eq('active', true);
+    if (!marketing || marketing.length === 0) return;
+
+    const hoy = new Date();
+    const inicioSemana = new Date(hoy); inicioSemana.setDate(hoy.getDate() - 7); inicioSemana.setHours(0, 0, 0, 0);
+    const finSemana = new Date(hoy); finSemana.setHours(23, 59, 59, 999);
+    const inicioSemAnt = new Date(inicioSemana); inicioSemAnt.setDate(inicioSemAnt.getDate() - 7);
+    const finSemAnt = new Date(inicioSemana); finSemAnt.setDate(finSemAnt.getDate() - 1); finSemAnt.setHours(23, 59, 59, 999);
+
+    const { data: leadsSemana } = await supabase.client.from('leads').select('*, properties(price)').gte('created_at', inicioSemana.toISOString()).lte('created_at', finSemana.toISOString());
+    const { data: leadsSemAnt } = await supabase.client.from('leads').select('id, source').gte('created_at', inicioSemAnt.toISOString()).lte('created_at', finSemAnt.toISOString());
+    const { data: citasSemana } = await supabase.client.from('appointments').select('*').gte('scheduled_date', inicioSemana.toISOString().split('T')[0]).lte('scheduled_date', finSemana.toISOString().split('T')[0]);
+    const { data: cierresSemana } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioSemana.toISOString()).lte('status_changed_at', finSemana.toISOString());
+    const { data: cierresSemAnt } = await supabase.client.from('leads').select('id, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioSemAnt.toISOString()).lte('status_changed_at', finSemAnt.toISOString());
+
+    const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
+
+    // Leads por fuente
+    const fuenteSemana: Record<string, {leads: number, citas: number, cierres: number}> = {};
+    leadsSemana?.forEach(l => {
+      const f = l.source || 'Directo';
+      if (!fuenteSemana[f]) fuenteSemana[f] = {leads: 0, citas: 0, cierres: 0};
+      fuenteSemana[f].leads++;
+    });
+
+    // Citas por fuente (basado en lead_id)
+    const leadIds = new Set(leadsSemana?.map(l => l.id) || []);
+    citasSemana?.forEach(c => {
+      if (leadIds.has(c.lead_id)) {
+        const lead = leadsSemana?.find(l => l.id === c.lead_id);
+        const f = lead?.source || 'Directo';
+        if (fuenteSemana[f]) fuenteSemana[f].citas++;
+      }
+    });
+
+    // Cierres por fuente
+    cierresSemana?.forEach(c => {
+      const f = c.source || 'Directo';
+      if (fuenteSemana[f]) fuenteSemana[f].cierres++;
+    });
+
+    const topFuentes = Object.entries(fuenteSemana).sort((a, b) => b[1].leads - a[1].leads).slice(0, 5);
+
+    // Revenue
+    let revenueSemana = 0;
+    let revenueSemAnt = 0;
+    cierresSemana?.forEach(c => revenueSemana += c.properties?.price || 2000000);
+    cierresSemAnt?.forEach(c => revenueSemAnt += c.properties?.price || 2000000);
+
+    // Conversiones globales
+    const citasTotal = citasSemana?.length || 0;
+    const citasCompletadas = citasSemana?.filter(c => c.status === 'completed').length || 0;
+    const convLeadCita = (leadsSemana?.length || 0) > 0 ? Math.round((citasTotal / (leadsSemana?.length || 1)) * 100) : 0;
+    const convCitaCierre = citasCompletadas > 0 ? Math.round(((cierresSemana?.length || 0) / citasCompletadas) * 100) : 0;
+
+    for (const mkt of marketing) {
+      if (!mkt.phone) continue;
+
+      const fuentesStr = topFuentes.length > 0
+        ? topFuentes.map(([f, data]) => {
+            const conv = data.leads > 0 ? Math.round((data.cierres / data.leads) * 100) : 0;
+            return `  • ${f}: ${data.leads} leads → ${data.cierres} cierres (${conv}%)`;
+          }).join('\n')
+        : '  Sin datos';
+
+      const insights: string[] = [];
+      if ((leadsSemana?.length || 0) > (leadsSemAnt?.length || 0)) {
+        const pct = Math.round((((leadsSemana?.length || 0) - (leadsSemAnt?.length || 0)) / (leadsSemAnt?.length || 1)) * 100);
+        insights.push(`📈 Leads crecieron ${pct}% vs semana anterior`);
+      }
+      if (revenueSemana > revenueSemAnt && revenueSemAnt > 0) insights.push(`💰 Revenue creció vs semana anterior`);
+      const mejorFuente = topFuentes.find(([f, d]) => d.cierres > 0);
+      if (mejorFuente) insights.push(`🏆 Mejor fuente: ${mejorFuente[0]}`);
+      if (convLeadCita >= 25) insights.push(`✅ Buena conversión lead→cita: ${convLeadCita}%`);
+      const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buena semana!';
+      const nombreCorto = mkt.name?.split(' ')[0] || 'Marketing';
+
+      const msg = `📊 *REPORTE SEMANAL MARKETING*\nHola *${nombreCorto}* 👋\n\n━━━━━━━━━━━━━━━━━━━━━\n📣 *ESTA SEMANA*\n━━━━━━━━━━━━━━━━━━━━━\n• Leads: *${leadsSemana?.length || 0}* ${calcVar(leadsSemana?.length || 0, leadsSemAnt?.length || 0)}\n• Cierres: *${cierresSemana?.length || 0}* ${calcVar(cierresSemana?.length || 0, cierresSemAnt?.length || 0)}\n• Revenue: *$${(revenueSemana/1000000).toFixed(1)}M* ${calcVar(revenueSemana, revenueSemAnt)}\n\n━━━━━━━━━━━━━━━━━━━━━\n📈 *CONVERSIONES*\n━━━━━━━━━━━━━━━━━━━━━\n• Lead→Cita: *${convLeadCita}%*\n• Cita→Cierre: *${convCitaCierre}%*\n• Citas completadas: ${citasCompletadas}\n\n━━━━━━━━━━━━━━━━━━━━━\n📍 *PERFORMANCE POR FUENTE*\n━━━━━━━━━━━━━━━━━━━━━\n${fuentesStr}\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *INSIGHTS*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Éxito esta semana!_ 🚀`;
+
+      try {
+        await meta.sendWhatsAppMessage(mkt.phone, msg);
+        console.log(`📊 Reporte semanal marketing enviado a ${mkt.name}`);
+      } catch (e) {
+        console.log(`Error enviando reporte a ${mkt.name}:`, e);
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    console.log(`✅ Reportes semanales enviados a ${marketing.length} de marketing`);
+  } catch (e) {
+    console.log('Error en reporte semanal marketing:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REPORTE MENSUAL MARKETING - Día 1 9am
+// ═══════════════════════════════════════════════════════════════
+
+async function enviarReporteMensualMarketing(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const { data: marketing } = await supabase.client.from('team_members').select('*').eq('role', 'marketing').eq('active', true);
+    if (!marketing || marketing.length === 0) return;
+
+    const hoy = new Date();
+    const mesActual = hoy.getMonth();
+    const anioActual = hoy.getFullYear();
+    const mesReporte = mesActual === 0 ? 11 : mesActual - 1;
+    const anioReporte = mesActual === 0 ? anioActual - 1 : anioActual;
+    const inicioMesReporte = new Date(anioReporte, mesReporte, 1);
+    const finMesReporte = new Date(anioReporte, mesReporte + 1, 0, 23, 59, 59);
+    const mesAnterior = mesReporte === 0 ? 11 : mesReporte - 1;
+    const anioAnterior = mesReporte === 0 ? anioReporte - 1 : anioReporte;
+    const inicioMesAnterior = new Date(anioAnterior, mesAnterior, 1);
+    const finMesAnterior = new Date(anioAnterior, mesAnterior + 1, 0, 23, 59, 59);
+    const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    const nombreMes = meses[mesReporte];
+
+    const { data: leadsMes } = await supabase.client.from('leads').select('*, properties(price)').gte('created_at', inicioMesReporte.toISOString()).lte('created_at', finMesReporte.toISOString());
+    const { data: leadsMesAnt } = await supabase.client.from('leads').select('id, source').gte('created_at', inicioMesAnterior.toISOString()).lte('created_at', finMesAnterior.toISOString());
+    const { data: citasMes } = await supabase.client.from('appointments').select('*').gte('scheduled_date', inicioMesReporte.toISOString().split('T')[0]).lte('scheduled_date', finMesReporte.toISOString().split('T')[0]);
+    const { data: cierresMes } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMesReporte.toISOString()).lte('status_changed_at', finMesReporte.toISOString());
+    const { data: cierresMesAnt } = await supabase.client.from('leads').select('id, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMesAnterior.toISOString()).lte('status_changed_at', finMesAnterior.toISOString());
+
+    const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
+
+    // Leads por fuente con conversiones
+    const fuenteMes: Record<string, {leads: number, cierres: number, revenue: number}> = {};
+    leadsMes?.forEach(l => {
+      const f = l.source || 'Directo';
+      if (!fuenteMes[f]) fuenteMes[f] = {leads: 0, cierres: 0, revenue: 0};
+      fuenteMes[f].leads++;
+    });
+    cierresMes?.forEach(c => {
+      const f = c.source || 'Directo';
+      if (!fuenteMes[f]) fuenteMes[f] = {leads: 0, cierres: 0, revenue: 0};
+      fuenteMes[f].cierres++;
+      fuenteMes[f].revenue += c.properties?.price || 2000000;
+    });
+
+    const topFuentes = Object.entries(fuenteMes).sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 5);
+
+    // Totales
+    let revenueMes = 0;
+    let revenueMesAnt = 0;
+    cierresMes?.forEach(c => revenueMes += c.properties?.price || 2000000);
+    cierresMesAnt?.forEach(c => revenueMesAnt += c.properties?.price || 2000000);
+
+    const citasTotal = citasMes?.length || 0;
+    const citasCompletadas = citasMes?.filter(c => c.status === 'completed').length || 0;
+    const convLeadCita = (leadsMes?.length || 0) > 0 ? Math.round((citasTotal / (leadsMes?.length || 1)) * 100) : 0;
+    const convLeadCierre = (leadsMes?.length || 0) > 0 ? Math.round(((cierresMes?.length || 0) / (leadsMes?.length || 1)) * 100) : 0;
+    const ticketPromedio = (cierresMes?.length || 0) > 0 ? revenueMes / (cierresMes?.length || 1) : 0;
+
+    for (const mkt of marketing) {
+      if (!mkt.phone) continue;
+
+      const fuentesStr = topFuentes.length > 0
+        ? topFuentes.map(([f, data]) => {
+            const conv = data.leads > 0 ? Math.round((data.cierres / data.leads) * 100) : 0;
+            return `  • ${f}\n    ${data.leads} leads → ${data.cierres} cierres (${conv}%)\n    Revenue: $${(data.revenue/1000000).toFixed(1)}M`;
+          }).join('\n')
+        : '  Sin datos';
+
+      const insights: string[] = [];
+      if ((leadsMes?.length || 0) > (leadsMesAnt?.length || 0) && (leadsMesAnt?.length || 0) > 0) {
+        const pct = Math.round((((leadsMes?.length || 0) - (leadsMesAnt?.length || 0)) / (leadsMesAnt?.length || 1)) * 100);
+        insights.push(`📈 Leads crecieron ${pct}% vs mes anterior`);
+      } else if ((leadsMes?.length || 0) < (leadsMesAnt?.length || 0)) {
+        insights.push(`📉 Leads bajaron vs mes anterior`);
+      }
+      if (revenueMes > revenueMesAnt && revenueMesAnt > 0) {
+        const pct = Math.round(((revenueMes - revenueMesAnt) / revenueMesAnt) * 100);
+        insights.push(`💰 Revenue creció ${pct}%`);
+      }
+      const mejorFuente = topFuentes[0];
+      if (mejorFuente && mejorFuente[1].revenue > 0) insights.push(`🏆 Mejor ROI: ${mejorFuente[0]}`);
+      if (convLeadCierre >= 5) insights.push(`✅ Conversión lead→cierre: ${convLeadCierre}%`);
+      const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buen mes!';
+      const nombreCorto = mkt.name?.split(' ')[0] || 'Marketing';
+
+      const msg = `📊 *REPORTE MENSUAL MARKETING*\nHola *${nombreCorto}* 👋\n*${nombreMes.toUpperCase()} ${anioReporte}*\n\n━━━━━━━━━━━━━━━━━━━━━\n📣 *RESULTADOS DEL MES*\n━━━━━━━━━━━━━━━━━━━━━\n• Leads: *${leadsMes?.length || 0}* ${calcVar(leadsMes?.length || 0, leadsMesAnt?.length || 0)}\n• Cierres: *${cierresMes?.length || 0}* ${calcVar(cierresMes?.length || 0, cierresMesAnt?.length || 0)}\n• Revenue: *$${(revenueMes/1000000).toFixed(1)}M* ${calcVar(revenueMes, revenueMesAnt)}\n• Ticket promedio: *$${(ticketPromedio/1000000).toFixed(2)}M*\n\n━━━━━━━━━━━━━━━━━━━━━\n📈 *CONVERSIONES*\n━━━━━━━━━━━━━━━━━━━━━\n• Lead→Cita: *${convLeadCita}%*\n• Lead→Cierre: *${convLeadCierre}%*\n• Citas totales: ${citasTotal}\n• Citas completadas: ${citasCompletadas}\n\n━━━━━━━━━━━━━━━━━━━━━\n📍 *TOP FUENTES (por revenue)*\n━━━━━━━━━━━━━━━━━━━━━\n${fuentesStr}\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *INSIGHTS*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Éxito en ${meses[mesActual]}!_ 🚀`;
+
+      try {
+        await meta.sendWhatsAppMessage(mkt.phone, msg);
+        console.log(`📊 Reporte mensual marketing enviado a ${mkt.name}`);
+      } catch (e) {
+        console.log(`Error enviando reporte a ${mkt.name}:`, e);
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    console.log(`✅ Reportes mensuales enviados a ${marketing.length} de marketing`);
+  } catch (e) {
+    console.log('Error en reporte mensual marketing:', e);
+  }
+}
+
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ACTUALIZACIÓN AUTOMÁTICA DE PRECIOS (día 1 de cada mes a las 12:01 AM)
