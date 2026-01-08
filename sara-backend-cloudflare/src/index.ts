@@ -2740,6 +2740,82 @@ Mensaje: ${mensaje}`;
       return corsResponse(JSON.stringify({ ok: true, message: 'Reporte semanal enviado' }));
     }
 
+    // TEST: Reporte semanal a número específico
+    if (url.pathname.startsWith('/test-reporte-semanal/')) {
+      const phone = url.pathname.split('/').pop();
+      console.log(`TEST: Enviando reporte semanal a ${phone}...`);
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      const phoneFormatted = phone?.startsWith('52') ? phone : '52' + phone;
+
+      const hoy = new Date();
+      const inicioSemana = new Date(hoy);
+      inicioSemana.setDate(hoy.getDate() - 7);
+      const inicioSemanaAnterior = new Date(inicioSemana);
+      inicioSemanaAnterior.setDate(inicioSemanaAnterior.getDate() - 7);
+
+      const { data: leadsSemana } = await supabase.client.from('leads').select('*').gte('created_at', inicioSemana.toISOString());
+      const { data: cierresSemana } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioSemana.toISOString());
+      const { data: citasSemana } = await supabase.client.from('appointments').select('*').gte('scheduled_date', inicioSemana.toISOString().split('T')[0]);
+      const { data: leadsSemanaAnt } = await supabase.client.from('leads').select('id').gte('created_at', inicioSemanaAnterior.toISOString()).lt('created_at', inicioSemana.toISOString());
+      const { data: cierresSemanaAnt } = await supabase.client.from('leads').select('id').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioSemanaAnterior.toISOString()).lt('status_changed_at', inicioSemana.toISOString());
+      const { data: pipeline } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['negotiation', 'reserved', 'scheduled', 'visited']);
+      const { data: vendedores } = await supabase.client.from('team_members').select('id, name').eq('role', 'vendedor').eq('active', true);
+
+      let revenue = 0, pipelineValue = 0;
+      cierresSemana?.forEach(c => revenue += c.properties?.price || 2000000);
+      pipeline?.forEach(p => pipelineValue += p.properties?.price || 2000000);
+
+      const leadsActual = leadsSemana?.length || 0;
+      const leadsAnterior = leadsSemanaAnt?.length || 0;
+      const cierresActual = cierresSemana?.length || 0;
+      const cierresAnterior = cierresSemanaAnt?.length || 0;
+      const citasCompletadas = citasSemana?.filter(c => c.status === 'completed').length || 0;
+      const conversionRate = leadsActual > 0 ? Math.round(cierresActual / leadsActual * 100) : 0;
+
+      const calcVar = (a: number, b: number) => b === 0 ? (a > 0 ? '↑' : '→') : a > b ? `↑${Math.round((a-b)/b*100)}%` : a < b ? `↓${Math.round((b-a)/b*100)}%` : '→';
+
+      const rendimiento: string[] = [];
+      vendedores?.forEach(v => {
+        const l = leadsSemana?.filter(x => x.assigned_to === v.id).length || 0;
+        const c = cierresSemana?.filter(x => x.assigned_to === v.id).length || 0;
+        const ci = citasSemana?.filter(x => x.team_member_id === v.id && x.status === 'completed').length || 0;
+        if (l > 0 || c > 0) rendimiento.push(`${c > 0 ? '🏆' : '📋'} ${v.name?.split(' ')[0]}: ${c}c/${ci}cit/${l}L`);
+      });
+
+      const msg = `📈 *REPORTE SEMANAL CEO*
+_Semana ${inicioSemana.getDate()}/${inicioSemana.getMonth()+1} - ${hoy.getDate()}/${hoy.getMonth()+1}_
+
+━━━━━━━━━━━━━━━━━━━━━
+📊 *RESUMEN vs SEMANA ANTERIOR*
+━━━━━━━━━━━━━━━━━━━━━
+• Leads nuevos: *${leadsActual}* ${calcVar(leadsActual, leadsAnterior)}
+• Citas completadas: *${citasCompletadas}*
+• Cierres: *${cierresActual}* ${calcVar(cierresActual, cierresAnterior)}
+• Revenue: *$${(revenue/1000000).toFixed(1)}M*
+
+━━━━━━━━━━━━━━━━━━━━━
+💰 *PIPELINE & FORECAST*
+━━━━━━━━━━━━━━━━━━━━━
+• Valor en pipeline: *$${(pipelineValue/1000000).toFixed(1)}M*
+• Leads en negociación: *${pipeline?.filter(p => p.status === 'negotiation').length || 0}*
+• Leads reservados: *${pipeline?.filter(p => p.status === 'reserved').length || 0}*
+
+━━━━━━━━━━━━━━━━━━━━━
+⏱️ *MÉTRICAS*
+━━━━━━━━━━━━━━━━━━━━━
+• Conversión: *${conversionRate}%* ${conversionRate >= 5 ? '✅' : '⚠️'}
+
+━━━━━━━━━━━━━━━━━━━━━
+👥 *RENDIMIENTO EQUIPO*
+━━━━━━━━━━━━━━━━━━━━━
+${rendimiento.length > 0 ? rendimiento.slice(0,5).join('\n') : '• Sin datos'}
+
+_Escribe *resumen* para más detalles_`;
+
+      await meta.sendWhatsAppMessage(phoneFormatted!, msg);
+      return corsResponse(JSON.stringify({ ok: true, message: `Reporte semanal enviado a ${phoneFormatted}` }));
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // TEST: Reporte mensual CEO
     // ═══════════════════════════════════════════════════════════════
@@ -3396,21 +3472,27 @@ async function enviarReporteSemanalCEO(supabase: SupabaseService, meta: MetaWhat
 
   if (!admins || admins.length === 0) return;
 
-  // Calcular semana pasada
   const hoy = new Date();
+
+  // === SEMANA ACTUAL ===
   const inicioSemana = new Date(hoy);
   inicioSemana.setDate(hoy.getDate() - 7);
   const inicioSemanaStr = inicioSemana.toISOString();
 
-  // Datos de la semana
+  // === SEMANA ANTERIOR (para comparativa) ===
+  const inicioSemanaAnterior = new Date(inicioSemana);
+  inicioSemanaAnterior.setDate(inicioSemanaAnterior.getDate() - 7);
+  const inicioSemanaAnteriorStr = inicioSemanaAnterior.toISOString();
+
+  // Datos semana actual
   const { data: leadsSemana } = await supabase.client
     .from('leads')
-    .select('*')
+    .select('*, team_members!leads_assigned_to_fkey(name)')
     .gte('created_at', inicioSemanaStr);
 
   const { data: cierresSemana } = await supabase.client
     .from('leads')
-    .select('*, properties(price)')
+    .select('*, properties(price), team_members!leads_assigned_to_fkey(name)')
     .in('status', ['closed', 'delivered'])
     .gte('status_changed_at', inicioSemanaStr);
 
@@ -3420,24 +3502,113 @@ async function enviarReporteSemanalCEO(supabase: SupabaseService, meta: MetaWhat
     .gte('scheduled_date', inicioSemana.toISOString().split('T')[0])
     .lte('scheduled_date', hoy.toISOString().split('T')[0]);
 
-  // Calcular revenue estimado
+  // Datos semana anterior (para comparativa)
+  const { data: leadsSemanaAnt } = await supabase.client
+    .from('leads')
+    .select('id')
+    .gte('created_at', inicioSemanaAnteriorStr)
+    .lt('created_at', inicioSemanaStr);
+
+  const { data: cierresSemanaAnt } = await supabase.client
+    .from('leads')
+    .select('id, properties(price)')
+    .in('status', ['closed', 'delivered'])
+    .gte('status_changed_at', inicioSemanaAnteriorStr)
+    .lt('status_changed_at', inicioSemanaStr);
+
+  // === CÁLCULOS ===
+
+  // Revenue
   let revenue = 0;
+  let revenueAnt = 0;
   if (cierresSemana) {
     for (const cierre of cierresSemana) {
       revenue += cierre.properties?.price || 2000000;
     }
   }
+  if (cierresSemanaAnt) {
+    for (const cierre of cierresSemanaAnt) {
+      revenue += (cierre as any).properties?.price || 2000000;
+    }
+  }
 
-  // Top vendedor
+  // Pipeline Value (leads en negociación/reservado)
+  const { data: pipeline } = await supabase.client
+    .from('leads')
+    .select('*, properties(price)')
+    .in('status', ['negotiation', 'reserved', 'scheduled', 'visited']);
+
+  let pipelineValue = 0;
+  if (pipeline) {
+    for (const lead of pipeline) {
+      pipelineValue += lead.properties?.price || 2000000;
+    }
+  }
+
+  // Tiempo de respuesta promedio (minutos desde created_at hasta first_contact)
+  let tiempoRespuestaPromedio = 0;
+  let leadsConRespuesta = 0;
+  if (leadsSemana) {
+    for (const lead of leadsSemana) {
+      if (lead.first_contact_at && lead.created_at) {
+        const created = new Date(lead.created_at).getTime();
+        const contacted = new Date(lead.first_contact_at).getTime();
+        const diffMinutos = (contacted - created) / (1000 * 60);
+        if (diffMinutos > 0 && diffMinutos < 24 * 60) { // Ignorar outliers >24h
+          tiempoRespuestaPromedio += diffMinutos;
+          leadsConRespuesta++;
+        }
+      }
+    }
+    if (leadsConRespuesta > 0) {
+      tiempoRespuestaPromedio = Math.round(tiempoRespuestaPromedio / leadsConRespuesta);
+    }
+  }
+
+  // Ciclo de ventas promedio (días desde created_at hasta cierre)
+  let cicloVentasPromedio = 0;
+  let cierresConCiclo = 0;
+  if (cierresSemana) {
+    for (const cierre of cierresSemana) {
+      if (cierre.status_changed_at && cierre.created_at) {
+        const created = new Date(cierre.created_at).getTime();
+        const closed = new Date(cierre.status_changed_at).getTime();
+        const diffDias = (closed - created) / (1000 * 60 * 60 * 24);
+        if (diffDias > 0) {
+          cicloVentasPromedio += diffDias;
+          cierresConCiclo++;
+        }
+      }
+    }
+    if (cierresConCiclo > 0) {
+      cicloVentasPromedio = Math.round(cicloVentasPromedio / cierresConCiclo);
+    }
+  }
+
+  // Rendimiento por vendedor
   const { data: vendedores } = await supabase.client
     .from('team_members')
-    .select('*')
+    .select('id, name')
     .eq('role', 'vendedor')
-    .eq('active', true)
-    .order('sales_count', { ascending: false })
-    .limit(1);
+    .eq('active', true);
 
-  const topVendedor = vendedores?.[0];
+  const rendimientoVendedores: { nombre: string; leads: number; cierres: number; citas: number }[] = [];
+  if (vendedores) {
+    for (const v of vendedores) {
+      const leadsV = leadsSemana?.filter(l => l.assigned_to === v.id).length || 0;
+      const cierresV = cierresSemana?.filter(l => l.assigned_to === v.id).length || 0;
+      const citasV = citasSemana?.filter(c => c.team_member_id === v.id && c.status === 'completed').length || 0;
+      if (leadsV > 0 || cierresV > 0 || citasV > 0) {
+        rendimientoVendedores.push({
+          nombre: v.name?.split(' ')[0] || 'Vendedor',
+          leads: leadsV,
+          cierres: cierresV,
+          citas: citasV
+        });
+      }
+    }
+  }
+  rendimientoVendedores.sort((a, b) => b.cierres - a.cierres || b.citas - a.citas);
 
   // Leads por fuente
   const fuenteCount: Record<string, number> = {};
@@ -3451,33 +3622,104 @@ async function enviarReporteSemanalCEO(supabase: SupabaseService, meta: MetaWhat
 
   // Conversión
   const citasCompletadas = citasSemana?.filter(c => c.status === 'completed').length || 0;
-  const conversionRate = leadsSemana && leadsSemana.length > 0 
-    ? Math.round((cierresSemana?.length || 0) / leadsSemana.length * 100) 
+  const citasCompletadasAnt = 0; // Simplificado
+  const conversionRate = leadsSemana && leadsSemana.length > 0
+    ? Math.round((cierresSemana?.length || 0) / leadsSemana.length * 100)
     : 0;
 
-  // Construir mensaje
-  const msg = `📈 *REPORTE SEMANAL*
-Semana del ${inicioSemana.getDate()}/${inicioSemana.getMonth()+1} al ${hoy.getDate()}/${hoy.getMonth()+1}
+  // === COMPARATIVAS ===
+  const calcVariacion = (actual: number, anterior: number): string => {
+    if (anterior === 0) return actual > 0 ? '↑ nuevo' : '→';
+    const diff = ((actual - anterior) / anterior) * 100;
+    if (diff > 0) return `↑${Math.round(diff)}%`;
+    if (diff < 0) return `↓${Math.abs(Math.round(diff))}%`;
+    return '→';
+  };
 
-📊 *RESUMEN:*
-• Leads nuevos: ${leadsSemana?.length || 0}
-• Citas realizadas: ${citasCompletadas}
-• Cierres: ${cierresSemana?.length || 0}
-• Revenue: $${(revenue/1000000).toFixed(1)}M
+  const leadsActual = leadsSemana?.length || 0;
+  const leadsAnterior = leadsSemanaAnt?.length || 0;
+  const cierresActual = cierresSemana?.length || 0;
+  const cierresAnterior = cierresSemanaAnt?.length || 0;
 
-📈 *CONVERSIÓN:*
-• Lead → Cierre: ${conversionRate}%
+  // === CONSTRUIR MENSAJE ===
+  let msg = `📈 *REPORTE SEMANAL CEO*
+_Semana ${inicioSemana.getDate()}/${inicioSemana.getMonth()+1} - ${hoy.getDate()}/${hoy.getMonth()+1}_
 
-🏆 *TOP VENDEDOR:*
-${topVendedor ? `• ${topVendedor.name}: ${topVendedor.sales_count} cierres` : '• Sin datos'}
+━━━━━━━━━━━━━━━━━━━━━
+📊 *RESUMEN vs SEMANA ANTERIOR*
+━━━━━━━━━━━━━━━━━━━━━
+• Leads nuevos: *${leadsActual}* ${calcVariacion(leadsActual, leadsAnterior)}
+• Citas completadas: *${citasCompletadas}*
+• Cierres: *${cierresActual}* ${calcVariacion(cierresActual, cierresAnterior)}
+• Revenue: *$${(revenue/1000000).toFixed(1)}M*
 
-📣 *MEJOR FUENTE:*
+━━━━━━━━━━━━━━━━━━━━━
+💰 *PIPELINE & FORECAST*
+━━━━━━━━━━━━━━━━━━━━━
+• Valor en pipeline: *$${(pipelineValue/1000000).toFixed(1)}M*
+• Leads en negociación: *${pipeline?.filter(p => p.status === 'negotiation').length || 0}*
+• Leads reservados: *${pipeline?.filter(p => p.status === 'reserved').length || 0}*
+
+━━━━━━━━━━━━━━━━━━━━━
+⏱️ *MÉTRICAS DE VELOCIDAD*
+━━━━━━━━━━━━━━━━━━━━━
+• Tiempo respuesta: *${tiempoRespuestaPromedio > 60 ? Math.round(tiempoRespuestaPromedio/60) + 'h' : tiempoRespuestaPromedio + 'min'}* ${tiempoRespuestaPromedio > 120 ? '⚠️' : '✅'}
+• Ciclo de venta: *${cicloVentasPromedio} días*
+• Conversión: *${conversionRate}%* ${conversionRate >= 5 ? '✅' : '⚠️'}
+
+━━━━━━━━━━━━━━━━━━━━━
+👥 *RENDIMIENTO EQUIPO*
+━━━━━━━━━━━━━━━━━━━━━`;
+
+  if (rendimientoVendedores.length > 0) {
+    for (const v of rendimientoVendedores.slice(0, 5)) {
+      const emoji = v.cierres > 0 ? '🏆' : v.citas > 0 ? '📅' : '📋';
+      msg += `\n${emoji} ${v.nombre}: ${v.cierres}c/${v.citas}cit/${v.leads}L`;
+    }
+  } else {
+    msg += '\n• Sin datos de vendedores';
+  }
+
+  msg += `
+
+━━━━━━━━━━━━━━━━━━━━━
+📣 *MEJOR FUENTE*
+━━━━━━━━━━━━━━━━━━━━━
 ${topFuente ? `• ${topFuente[0]}: ${topFuente[1]} leads` : '• Sin datos'}
 
-💡 *INSIGHT:*
-${conversionRate >= 5 ? '✅ Conversión saludable. ¡Sigue así!' : '⚠️ Conversión baja. Revisar seguimiento.'}
+━━━━━━━━━━━━━━━━━━━━━
+💡 *INSIGHTS*
+━━━━━━━━━━━━━━━━━━━━━`;
 
-¡Excelente semana! 🚀`;
+  // Generar insights automáticos
+  const insights: string[] = [];
+
+  if (tiempoRespuestaPromedio > 120) {
+    insights.push('⚠️ Tiempo de respuesta alto. Meta: <30min');
+  } else if (tiempoRespuestaPromedio > 0 && tiempoRespuestaPromedio <= 30) {
+    insights.push('✅ Excelente tiempo de respuesta');
+  }
+
+  if (leadsActual > leadsAnterior * 1.2) {
+    insights.push('📈 +20% leads vs semana pasada');
+  } else if (leadsActual < leadsAnterior * 0.8) {
+    insights.push('📉 -20% leads vs semana pasada');
+  }
+
+  if (cierresActual > cierresAnterior) {
+    insights.push('🎯 Cierres mejorando vs semana pasada');
+  }
+
+  if (pipelineValue > revenue * 3) {
+    insights.push('💰 Pipeline saludable (3x revenue)');
+  }
+
+  if (insights.length === 0) {
+    insights.push('📊 Semana estable. Mantener ritmo.');
+  }
+
+  msg += '\n' + insights.join('\n');
+  msg += '\n\n_Escribe *resumen* para más detalles_';
 
   // Enviar a cada admin
   const telefonosEnviados = new Set<string>();
@@ -3486,7 +3728,7 @@ ${conversionRate >= 5 ? '✅ Conversión saludable. ¡Sigue así!' : '⚠️ Con
     const tel = admin.phone.replace(/\D/g, '');
     if (telefonosEnviados.has(tel)) continue;
     telefonosEnviados.add(tel);
-    
+
     try {
       await meta.sendWhatsAppMessage(admin.phone, msg);
       console.log(`📈 Reporte semanal enviado a ${admin.name}`);
