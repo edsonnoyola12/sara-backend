@@ -2614,6 +2614,229 @@ Mensaje: ${mensaje}`;
     }
 
     // ═══════════════════════════════════════════════════════════
+    // GENERAR VIDEO DE PRUEBA: Para cualquier teléfono
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/test-video-personalizado/')) {
+      const phone = url.pathname.split('/').pop();
+      const phoneFormatted = phone?.startsWith('52') ? phone : `52${phone}`;
+      const nombre = url.searchParams.get('nombre') || 'Amigo';
+      const desarrollo = url.searchParams.get('desarrollo') || 'Los Encinos';
+
+      console.log(`🎬 Generando video de prueba para ${phoneFormatted}...`);
+
+      try {
+        const apiKey = env.GEMINI_API_KEY;
+        const testFoto = 'https://img.youtube.com/vi/xzPXJ00yK0A/maxresdefault.jpg';
+
+        const imgResponse = await fetch(testFoto);
+        const imgBuffer = await imgResponse.arrayBuffer();
+        const imgBase64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
+
+        // PROMPT ORIGINAL que funcionaba - avatar + foto + voz
+        const prompt = `Cinematic medium shot of a friendly professional Mexican woman real estate agent standing in front of the luxury house shown in the image. She looks at the camera, smiles warmly and gestures welcome. Audio: A clear female voice speaking in Mexican Spanish saying "Hola ${nombre}, bienvenido a tu nuevo hogar aquí en ${desarrollo}". High quality, photorealistic, 4k resolution, natural lighting.`;
+
+        const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+          body: JSON.stringify({
+            instances: [{ prompt: prompt, image: { bytesBase64Encoded: imgBase64, mimeType: 'image/jpeg' } }],
+            parameters: { aspectRatio: '9:16', durationSeconds: 8 }
+          })
+        });
+
+        const result = await response.json() as any;
+        const operationName = result.name;
+
+        if (!operationName) {
+          return corsResponse(JSON.stringify({ error: 'No operation name', result }), 500);
+        }
+
+        await supabase.client.from('pending_videos').insert({
+          operation_id: operationName,
+          lead_phone: phoneFormatted,
+          lead_name: nombre,
+          desarrollo: desarrollo
+        });
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          message: `Video generándose para ${nombre} (${phoneFormatted})`,
+          operation_id: operationName,
+          nota: 'El video tardará ~2 minutos. Se enviará automáticamente.'
+        }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // TEST HEYGEN: Probar video con HeyGen API
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/test-heygen/')) {
+      const phone = url.pathname.split('/').pop();
+      const phoneFormatted = phone?.startsWith('52') ? phone : `52${phone}`;
+      const nombre = url.searchParams.get('nombre') || 'Amigo';
+      const desarrollo = url.searchParams.get('desarrollo') || 'Los Encinos';
+      const fotoUrl = url.searchParams.get('foto') || 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=800';
+
+      console.log(`🎬 [HeyGen] Generando video para ${phoneFormatted}...`);
+
+      try {
+        const heygenKey = env.HEYGEN_API_KEY;
+        if (!heygenKey) {
+          return corsResponse(JSON.stringify({ error: 'Falta HEYGEN_API_KEY' }), 500);
+        }
+
+        // Crear video con HeyGen
+        const response = await fetch('https://api.heygen.com/v2/video/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Api-Key': heygenKey
+          },
+          body: JSON.stringify({
+            video_inputs: [{
+              character: {
+                type: 'avatar',
+                avatar_id: 'Abigail_expressive_2024112501',
+                avatar_style: 'normal'
+              },
+              voice: {
+                type: 'text',
+                input_text: `Hola ${nombre}, bienvenido a tu nuevo hogar aquí en ${desarrollo}. Estoy aquí para ayudarte a encontrar la casa de tus sueños. ¡Contáctanos hoy!`,
+                voice_id: '6ce26db0cb6f4e7881b85452619f7f19'  // Camila Vega - Spanish female
+              },
+              background: {
+                type: 'image',
+                url: fotoUrl
+              }
+            }],
+            dimension: {
+              width: 720,
+              height: 1280
+            }
+          })
+        });
+
+        const result = await response.json() as any;
+        console.log('HeyGen response:', JSON.stringify(result));
+
+        if (result.error) {
+          return corsResponse(JSON.stringify({ error: result.error }), 500);
+        }
+
+        // Guardar en pending_videos con prefijo HEYGEN
+        await supabase.client.from('pending_videos').insert({
+          operation_id: `HEYGEN_${result.data?.video_id || 'unknown'}`,
+          lead_phone: phoneFormatted,
+          lead_name: nombre,
+          desarrollo: desarrollo
+        });
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          message: `Video HeyGen generándose para ${nombre}`,
+          video_id: result.data?.video_id,
+          status: result.data?.status,
+          nota: 'El video tardará ~1 minuto. Se enviará automáticamente.'
+        }));
+      } catch (e: any) {
+        console.error('Error HeyGen:', e);
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // HEYGEN: Listar avatares disponibles
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/heygen-avatars') {
+      try {
+        const response = await fetch('https://api.heygen.com/v2/avatars', {
+          headers: { 'X-Api-Key': env.HEYGEN_API_KEY }
+        });
+        const result = await response.json();
+        return corsResponse(JSON.stringify(result));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // HEYGEN: Listar voces disponibles
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/heygen-voices') {
+      try {
+        const response = await fetch('https://api.heygen.com/v2/voices', {
+          headers: { 'X-Api-Key': env.HEYGEN_API_KEY }
+        });
+        const result = await response.json();
+        return corsResponse(JSON.stringify(result));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // HEYGEN: Ver estado de video
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/heygen-status/')) {
+      const videoId = url.pathname.split('/').pop();
+      try {
+        const response = await fetch(`https://api.heygen.com/v1/video_status.get?video_id=${videoId}`, {
+          headers: { 'X-Api-Key': env.HEYGEN_API_KEY }
+        });
+        const result = await response.json();
+        return corsResponse(JSON.stringify(result));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // HEYGEN: Enviar video completado a WhatsApp
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/heygen-send/')) {
+      const videoId = url.pathname.split('/').pop();
+      const phone = url.searchParams.get('phone') || '525610016226';
+
+      try {
+        // Obtener estado del video
+        const statusRes = await fetch(`https://api.heygen.com/v1/video_status.get?video_id=${videoId}`, {
+          headers: { 'X-Api-Key': env.HEYGEN_API_KEY }
+        });
+        const status = await statusRes.json() as any;
+
+        if (status.data?.status !== 'completed') {
+          return corsResponse(JSON.stringify({ error: 'Video no completado', status: status.data?.status }), 400);
+        }
+
+        const videoUrl = status.data.video_url;
+        if (!videoUrl) {
+          return corsResponse(JSON.stringify({ error: 'No video URL' }), 400);
+        }
+
+        // Descargar video
+        console.log('📥 Descargando video de HeyGen...');
+        const videoRes = await fetch(videoUrl);
+        const videoBuffer = await videoRes.arrayBuffer();
+        console.log(`✅ Video descargado: ${videoBuffer.byteLength} bytes`);
+
+        // Subir a Meta y enviar
+        const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+        const mediaId = await meta.uploadVideoFromBuffer(videoBuffer);
+        console.log(`✅ Video subido a Meta: ${mediaId}`);
+
+        await meta.sendWhatsAppVideoById(phone, mediaId, '🎬 *¡Video personalizado para ti!*');
+        console.log(`✅ Video enviado a ${phone}`);
+
+        return corsResponse(JSON.stringify({ ok: true, message: `Video HeyGen enviado a ${phone}` }));
+      } catch (e: any) {
+        console.error('Error enviando video HeyGen:', e);
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // REGENERAR VIDEO: Para leads cuyo video falló
     // ═══════════════════════════════════════════════════════════
     if (url.pathname.startsWith('/regenerate-video/')) {
@@ -2766,6 +2989,87 @@ Mensaje: ${mensaje}`;
         }
       });
       return corsResponse(JSON.stringify({ ok: true, ...result }));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // FORZAR ENVÍO DE VIDEOS PENDIENTES
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/force-send-videos') {
+      console.log('🎬 Forzando envío de videos pendientes...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await verificarVideosPendientes(supabase, meta, env);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Videos pendientes procesados' }));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // VER VIDEOS PENDIENTES
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/pending-videos') {
+      const { data } = await supabase.client
+        .from('pending_videos')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10);
+      return corsResponse(JSON.stringify(data || []));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // REENVIAR VIDEO POR ID
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/resend-video/')) {
+      const videoId = url.pathname.split('/').pop();
+      console.log(`🔄 Reenviando video: ${videoId}`);
+
+      const { data: video } = await supabase.client
+        .from('pending_videos')
+        .select('*')
+        .eq('id', videoId)
+        .single();
+
+      if (!video) {
+        return corsResponse(JSON.stringify({ error: 'Video no encontrado' }), 404);
+      }
+
+      if (!video.video_url || video.video_url.startsWith('ERROR')) {
+        return corsResponse(JSON.stringify({ error: 'Video no tiene URL válido', video_url: video.video_url }), 400);
+      }
+
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      try {
+        // Descargar video
+        console.log('📥 Descargando video...');
+        const videoResponse = await fetch(video.video_url, {
+          headers: { 'x-goog-api-key': env.GEMINI_API_KEY }
+        });
+
+        if (!videoResponse.ok) {
+          return corsResponse(JSON.stringify({ error: `Error descargando: ${videoResponse.status}` }), 500);
+        }
+
+        const videoBuffer = await videoResponse.arrayBuffer();
+        console.log(`✅ Descargado: ${videoBuffer.byteLength} bytes`);
+
+        // Subir a Meta
+        console.log('📤 Subiendo a Meta...');
+        const mediaId = await meta.uploadVideoFromBuffer(videoBuffer);
+        console.log(`✅ Media ID: ${mediaId}`);
+
+        // Enviar por WhatsApp
+        console.log(`📱 Enviando a ${video.lead_phone}...`);
+        await meta.sendWhatsAppVideoById(video.lead_phone, mediaId,
+          `🎬 *¡${video.lead_name}, este video es para ti!*\n\nTu futuro hogar en *${video.desarrollo}* te espera.`);
+
+        // Marcar como enviado
+        await supabase.client
+          .from('pending_videos')
+          .update({ video_url: video.video_url + ' (ENVIADO)', completed_at: new Date().toISOString() })
+          .eq('id', video.id);
+
+        return corsResponse(JSON.stringify({ ok: true, message: `Video reenviado a ${video.lead_phone}` }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
     }
 
 

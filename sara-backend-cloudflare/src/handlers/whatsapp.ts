@@ -15195,10 +15195,8 @@ ${msgContacto}`;
       const imgBuffer = await imgResponse.arrayBuffer();
       const imgBase64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
       
-      // PROMPT: Con Primer Nombre solamente
-      const prompt = `Cinematic medium shot of a friendly professional Mexican woman real estate agent standing in front of the luxury house shown in the image. She looks at the camera, smiles warmly and gestures welcome. 
-      Audio: A clear female voice speaking in Mexican Spanish saying "Hola ${primerNombre}, bienvenido a tu nuevo hogar aquí en ${desarrollo}". 
-      High quality, photorealistic, 4k resolution, natural lighting.`;
+      // PROMPT ORIGINAL - avatar + foto + voz
+      const prompt = `Cinematic medium shot of a friendly professional Mexican woman real estate agent standing in front of the luxury house shown in the image. She looks at the camera, smiles warmly and gestures welcome. Audio: A clear female voice speaking in Mexican Spanish saying "Hola ${primerNombre}, bienvenido a tu nuevo hogar aquí en ${desarrollo}". High quality, photorealistic, 4k resolution, natural lighting.`;
 
       console.log('🎬 Prompt:', prompt);
 
