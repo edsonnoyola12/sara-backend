@@ -108,8 +108,9 @@ export class CalendarService {
   // ═══════════════════════════════════════════════════════════════
   async createEvent(eventData: CalendarEventInput): Promise<any> {
     const token = await this.getAccessToken();
-    
+
     console.log('📆 createEvent:', eventData.summary);
+    console.log('📆 Calendar ID:', this.calendarId);
 
     const finalEvent = {
       reminders: {

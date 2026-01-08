@@ -57,28 +57,37 @@ export async function handleTeamRoutes(request: Request, env: any, supabase: Sup
   
   if (url.pathname.startsWith('/api/team-members/') && request.method === 'PUT') {
     const id = url.pathname.split('/')[3];
-    const body = await request.json();
-    
+    const body = await request.json() as any;
+
+    // Construir objeto de actualización solo con campos presentes
+    const updateData: any = {};
+    if (body.name !== undefined) updateData.name = body.name;
+    if (body.email !== undefined) updateData.email = body.email;
+    if (body.phone !== undefined) updateData.phone = body.phone;
+    if (body.role !== undefined) updateData.role = body.role;
+    if (body.active !== undefined) updateData.active = body.active;
+    // Campos de disponibilidad
+    if (body.vacation_start !== undefined) updateData.vacation_start = body.vacation_start || null;
+    if (body.vacation_end !== undefined) updateData.vacation_end = body.vacation_end || null;
+    if (body.is_on_duty !== undefined) updateData.is_on_duty = body.is_on_duty;
+    if (body.work_start !== undefined) updateData.work_start = body.work_start || null;
+    if (body.work_end !== undefined) updateData.work_end = body.work_end || null;
+    if (body.working_days !== undefined) updateData.working_days = body.working_days;
+
     const { data, error } = await supabase.client
       .from('team_members')
-      .update({
-        name: body.name,
-        email: body.email,
-        phone: body.phone,
-        role: body.role,
-        active: body.active
-      })
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
-    
+
     if (error) {
       return new Response(JSON.stringify({ error: error.message }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-    
+
     return new Response(JSON.stringify(data), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
