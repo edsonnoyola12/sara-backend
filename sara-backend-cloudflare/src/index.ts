@@ -2853,6 +2853,26 @@ Mensaje: ${mensaje}`;
       return corsResponse(JSON.stringify({ ok: true, message: 'Briefings enviados', count: enviados }));
     }
 
+    // TEST: Enviar briefing a número específico
+    if (url.pathname.startsWith('/test-briefing/')) {
+      const phone = url.pathname.split('/').pop();
+      console.log(`TEST: Enviando briefing a ${phone}...`);
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      // Crear vendedor virtual para el test
+      const vendedorTest = {
+        id: 'test',
+        name: 'Usuario',
+        phone: phone?.startsWith('52') ? phone : '52' + phone,
+        role: 'vendedor',
+        recibe_briefing: true,
+        last_briefing_sent: null
+      };
+
+      await enviarBriefingMatutino(supabase, meta, vendedorTest);
+      return corsResponse(JSON.stringify({ ok: true, message: `Briefing enviado a ${vendedorTest.phone}` }));
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // STATUS: Ver estado de todos los CRONs
     // ═══════════════════════════════════════════════════════════════
