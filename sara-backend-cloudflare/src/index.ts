@@ -2592,6 +2592,36 @@ Mensaje: ${mensaje}`;
       }
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // ADMIN: Eliminar lead por ID o teléfono
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/admin/delete-lead/')) {
+      const identifier = url.pathname.split('/').pop();
+      console.log(`🗑️ Eliminando lead: ${identifier}`);
+
+      // Buscar por ID (UUID) o por teléfono
+      const isUUID = identifier?.includes('-') && identifier.length > 30;
+
+      let query = supabase.client.from('leads').delete();
+      if (isUUID) {
+        query = query.eq('id', identifier);
+      } else {
+        query = query.ilike('phone', `%${identifier}%`);
+      }
+
+      const { error, count } = await query.select('id');
+
+      if (error) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        message: `Lead eliminado`,
+        identifier
+      }));
+    }
+
     if (url.pathname === '/test-followups') {
       console.log('🧪 TEST: Forzando verificación de follow-ups...');
       const followupService = new FollowupService(supabase);
@@ -2845,22 +2875,20 @@ Mensaje: ${mensaje}`;
       const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
       
       const crons = [
-        { name: 'Briefing matutino', hora: '8:00', dias: 'L-V' },
+        { name: '📋 BRIEFING CONSOLIDADO', hora: '8:00', dias: 'L-V', desc: 'Citas + Leads pendientes + Hipotecas + Cumples + Promos' },
         { name: 'Reporte diario CEO', hora: '8:00', dias: 'L-V' },
         { name: 'Reporte semanal CEO', hora: '8:00', dias: 'Lunes' },
         { name: 'Reporte mensual CEO', hora: '8:00', dias: 'Dia 1' },
+        { name: 'Alertas proactivas CEO', hora: '8:00', dias: 'L-V' },
         { name: 'Felicitaciones cumple', hora: '9:00', dias: 'Diario' },
-        { name: 'Alertas estancamiento', hora: '10:00', dias: 'L-V' },
-        { name: 'Coaching proactivo', hora: '11:00', dias: 'L-V' },
-        { name: 'Alertas proactivas CEO', hora: '14:00', dias: 'L-V' },
-        { name: 'Alerta HOT', hora: '17:00', dias: 'L-V' },
         { name: 'Video semanal', hora: '18:00', dias: 'Viernes' },
         { name: 'Recap diario', hora: '19:00', dias: 'L-V' },
         { name: 'Recap semanal', hora: '12:00', dias: 'Sabado' },
         { name: 'Recordatorios citas', hora: 'c/2min', dias: 'Siempre' },
-        { name: 'Follow-ups', hora: 'c/2min', dias: 'Siempre' },
-        { name: 'Remarketing frios', hora: '10:00', dias: 'Miercoles' },
-        { name: 'Seguimiento hipotecas', hora: '10:00', dias: 'Mar/Jue' },
+        { name: 'Follow-ups automáticos', hora: 'c/2min', dias: 'Siempre' },
+        { name: 'Videos pendientes', hora: 'c/2min', dias: 'Siempre' },
+        { name: 'Remarketing fríos', hora: '8:00', dias: 'Miércoles' },
+        { name: 'Seguimiento hipotecas', hora: '8:00', dias: 'Mar/Jue' },
       ];
 
       return corsResponse(JSON.stringify({
@@ -3049,48 +3077,34 @@ Mensaje: ${mensaje}`;
       }
     });
 
-    // 10am L-V: Alertas de estancamiento
-    if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('⚠️ Verificando leads estancados...');
-      await verificarLeadsEstancados(supabase, meta);
-      console.log('👆 Enviando recordatorios a asesores...');
-      await recordatorioAsesores(supabase, meta);
-    }
+    // ═══════════════════════════════════════════════════════════
+    // NOTA: Las siguientes tareas ahora están CONSOLIDADAS en el
+    // briefing matutino de las 8am:
+    // - Alertas de leads estancados
+    // - Recordatorios a asesores hipotecarios
+    // - Cumpleaños del día
+    // - Promociones activas
+    //
+    // Esto evita "notification fatigue" y consolida toda la info
+    // relevante en UN solo mensaje matutino.
+    // ═══════════════════════════════════════════════════════════
 
-    // 2pm L-V: Alertas proactivas CEO (situaciones críticas)
-    if (mexicoHour === 14 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+    // 8am L-V: Alertas proactivas CEO (situaciones críticas) - JUNTO CON BRIEFING
+    if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
       console.log('🚨 Verificando alertas proactivas CEO...');
       await enviarAlertasProactivasCEO(supabase, meta);
     }
 
-    // 5pm L-V: Alerta leads HOT sin seguimiento hoy
-    if (mexicoHour === 17 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('🔥 Verificando leads HOT sin seguimiento...');
-      await alertaLeadsHotSinSeguimiento(supabase, meta);
-    }
-
-    // 11am L-V: Coaching proactivo a vendedores
-    if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5 && vendedores) {
-      console.log('🎯 Enviando coaching proactivo...');
-      await enviarCoachingProactivo(supabase, meta, vendedores);
-    }
-
-    // 10am MIÉRCOLES: Remarketing leads fríos
-    if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek === 3) {
+    // MIÉRCOLES 8am: Remarketing leads fríos
+    if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek === 3) {
       console.log('📣 Ejecutando remarketing leads fríos...');
       await remarketingLeadsFrios(supabase, meta);
     }
 
-    // 10am MARTES y JUEVES: Seguimiento hipotecas estancadas
-    if (mexicoHour === 10 && isFirstRunOfHour && (dayOfWeek === 2 || dayOfWeek === 4)) {
+    // MARTES y JUEVES 8am: Seguimiento hipotecas estancadas (alerta adicional a asesores)
+    if (mexicoHour === 8 && isFirstRunOfHour && (dayOfWeek === 2 || dayOfWeek === 4)) {
       console.log('🏦 Verificando hipotecas estancadas...');
       await seguimientoHipotecas(supabase, meta);
-    }
-
-    // 9am L-S: Recordatorios de promociones activas
-    if (mexicoHour === 9 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 6) {
-      console.log('🎯 Procesando recordatorios de promociones...');
-      await enviarRecordatoriosPromociones(supabase, meta);
     }
   },
 };
@@ -3697,49 +3711,164 @@ async function enviarFelicitaciones(supabase: SupabaseService, meta: MetaWhatsAp
 }
 
 async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhatsAppService, vendedor: any): Promise<void> {
-  const hoy = new Date().toISOString().split('T')[0];
+  const hoy = new Date();
+  const hoyStr = hoy.toISOString().split('T')[0];
+  const dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+  const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const fechaFormato = `${dias[hoy.getDay()]} ${hoy.getDate()} de ${meses[hoy.getMonth()]}`;
 
-  // PROTECCIÓN ANTI-DUPLICADOS: Verificar si ya se envió hoy
-  if (vendedor.last_briefing_sent === hoy) {
+  // PROTECCIÓN ANTI-DUPLICADOS
+  if (vendedor.last_briefing_sent === hoyStr) {
     console.log(`⏭️ Briefing ya enviado hoy a ${vendedor.name}, saltando...`);
     return;
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // 1. CITAS DEL DÍA
+  // ═══════════════════════════════════════════════════════════
   const { data: citasHoy } = await supabase.client
     .from('appointments')
     .select('*, leads(name, phone)')
     .eq('team_member_id', vendedor.id)
-    .eq('scheduled_date', hoy)
-    .eq('status', 'scheduled');
+    .eq('scheduled_date', hoyStr)
+    .eq('status', 'scheduled')
+    .order('scheduled_time', { ascending: true });
 
-  const { data: leadsAsignados } = await supabase.client
+  // ═══════════════════════════════════════════════════════════
+  // 2. LEADS QUE REQUIEREN ACCIÓN
+  // ═══════════════════════════════════════════════════════════
+  // 2a. Leads nuevos sin contactar
+  const { data: leadsSinContactar } = await supabase.client
     .from('leads')
-    .select('*')
+    .select('name, phone, created_at')
     .eq('assigned_to', vendedor.id)
-    .in('status', ['new', 'contacted']);
+    .eq('status', 'new');
 
-  let mensaje = `☀️ *Buenos días ${vendedor.name}!*\n\n`;
-  mensaje += `📅 *Tu agenda de hoy:*\n`;
+  // 2b. Leads estancados (3+ días sin actividad)
+  const hace3dias = new Date();
+  hace3dias.setDate(hace3dias.getDate() - 3);
+  const { data: leadsEstancados } = await supabase.client
+    .from('leads')
+    .select('name, phone, status, updated_at')
+    .eq('assigned_to', vendedor.id)
+    .in('status', ['contacted', 'appointment_scheduled'])
+    .lt('updated_at', hace3dias.toISOString());
 
-  if (citasHoy && citasHoy.length > 0) {
-    mensaje += citasHoy.map((c: any) =>
-      `• ${c.scheduled_time} - ${c.leads?.name || 'Cliente'} en ${c.property_interest || 'Por definir'}`
-    ).join('\n');
-  } else {
-    mensaje += `Sin citas programadas`;
+  // ═══════════════════════════════════════════════════════════
+  // 3. HIPOTECAS ESTANCADAS (si es asesor)
+  // ═══════════════════════════════════════════════════════════
+  let hipotecasEstancadas: any[] = [];
+  if (vendedor.role === 'asesor') {
+    const hace7dias = new Date();
+    hace7dias.setDate(hace7dias.getDate() - 7);
+    const { data: hips } = await supabase.client
+      .from('mortgage_applications')
+      .select('lead_name, bank, status, updated_at')
+      .eq('assigned_advisor_id', vendedor.id)
+      .in('status', ['pending', 'in_review', 'documents', 'sent_to_bank'])
+      .lt('updated_at', hace7dias.toISOString());
+    hipotecasEstancadas = hips || [];
   }
 
-  mensaje += `\n\n*Leads pendientes:* ${leadsAsignados?.length || 0}`;
-  mensaje += `\n\nExito hoy!`;
+  // ═══════════════════════════════════════════════════════════
+  // 4. CUMPLEAÑOS DEL DÍA
+  // ═══════════════════════════════════════════════════════════
+  const mesActual = String(hoy.getMonth() + 1).padStart(2, '0');
+  const diaActual = String(hoy.getDate()).padStart(2, '0');
+  const { data: cumpleaneros } = await supabase.client
+    .from('leads')
+    .select('name, phone')
+    .eq('assigned_to', vendedor.id)
+    .ilike('birthday', `%-${mesActual}-${diaActual}`);
+
+  // ═══════════════════════════════════════════════════════════
+  // 5. PROMOCIONES ACTIVAS
+  // ═══════════════════════════════════════════════════════════
+  const { data: promos } = await supabase.client
+    .from('promotions')
+    .select('name, development, discount_percent, end_date')
+    .lte('start_date', hoyStr)
+    .gte('end_date', hoyStr)
+    .eq('status', 'active')
+    .limit(3);
+
+  // ═══════════════════════════════════════════════════════════
+  // CONSTRUIR MENSAJE CONSOLIDADO
+  // ═══════════════════════════════════════════════════════════
+  let mensaje = `📋 *BRIEFING DIARIO*\n`;
+  mensaje += `${fechaFormato}\n\n`;
+
+  // Citas
+  mensaje += `🗓️ *CITAS HOY*`;
+  if (citasHoy && citasHoy.length > 0) {
+    mensaje += ` (${citasHoy.length}):\n`;
+    citasHoy.forEach((c: any) => {
+      mensaje += `  • ${(c.scheduled_time || '').substring(0,5)} - ${c.leads?.name || 'Cliente'}\n`;
+    });
+  } else {
+    mensaje += `: Sin citas\n`;
+  }
+
+  // Acciones requeridas
+  const totalAcciones = (leadsSinContactar?.length || 0) + (leadsEstancados?.length || 0) + hipotecasEstancadas.length;
+  if (totalAcciones > 0) {
+    mensaje += `\n⚠️ *REQUIEREN ACCIÓN* (${totalAcciones}):\n`;
+
+    if (leadsSinContactar && leadsSinContactar.length > 0) {
+      leadsSinContactar.slice(0, 3).forEach((l: any) => {
+        mensaje += `  • ${l.name || 'Sin nombre'} - sin contactar\n`;
+      });
+      if (leadsSinContactar.length > 3) {
+        mensaje += `  _...y ${leadsSinContactar.length - 3} más_\n`;
+      }
+    }
+
+    if (leadsEstancados && leadsEstancados.length > 0) {
+      leadsEstancados.slice(0, 3).forEach((l: any) => {
+        const diasSinMover = Math.floor((Date.now() - new Date(l.updated_at).getTime()) / (1000*60*60*24));
+        mensaje += `  • ${l.name || 'Sin nombre'} - ${diasSinMover}d sin actividad\n`;
+      });
+      if (leadsEstancados.length > 3) {
+        mensaje += `  _...y ${leadsEstancados.length - 3} más_\n`;
+      }
+    }
+
+    if (hipotecasEstancadas.length > 0) {
+      hipotecasEstancadas.slice(0, 2).forEach((h: any) => {
+        mensaje += `  • 🏦 ${h.lead_name} - hipoteca estancada\n`;
+      });
+    }
+  } else {
+    mensaje += `\n✅ *Sin acciones pendientes urgentes*\n`;
+  }
+
+  // Cumpleaños
+  if (cumpleaneros && cumpleaneros.length > 0) {
+    mensaje += `\n🎂 *CUMPLEAÑOS*:\n`;
+    cumpleaneros.forEach((c: any) => {
+      mensaje += `  • ${c.name}\n`;
+    });
+  }
+
+  // Promociones
+  if (promos && promos.length > 0) {
+    mensaje += `\n💰 *PROMOS ACTIVAS*:\n`;
+    promos.forEach((p: any) => {
+      const diasRestantes = Math.ceil((new Date(p.end_date).getTime() - hoy.getTime()) / (1000*60*60*24));
+      mensaje += `  • ${p.name} (${diasRestantes}d restantes)\n`;
+    });
+  }
+
+  mensaje += `\n_Éxito hoy!_ 💪`;
 
   await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
 
-  // Marcar como enviado para evitar duplicados
+  // Marcar como enviado
   await supabase.client
     .from('team_members')
-    .update({ last_briefing_sent: hoy })
+    .update({ last_briefing_sent: hoyStr })
     .eq('id', vendedor.id);
-  console.log(`✅ Briefing enviado a ${vendedor.name}`);
+  console.log(`✅ Briefing consolidado enviado a ${vendedor.name}`);
 }
 
 async function enviarRecapDiario(supabase: SupabaseService, meta: MetaWhatsAppService, vendedor: any): Promise<void> {
