@@ -2520,6 +2520,100 @@ Mensaje: ${mensaje}`;
     }
 
     // ═══════════════════════════════════════════════════════════
+    // REENVIAR VIDEO: Para videos que tienen URL pero no se enviaron
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/retry-video/')) {
+      const videoId = url.pathname.split('/').pop();
+      console.log(`🔄 Reintentando envío de video: ${videoId}`);
+
+      const { data: video } = await supabase.client
+        .from('pending_videos')
+        .select('*')
+        .eq('id', videoId)
+        .single();
+
+      if (!video) {
+        return corsResponse(JSON.stringify({ error: 'Video no encontrado' }), 404);
+      }
+
+      if (!video.video_url || video.video_url.startsWith('ERROR')) {
+        return corsResponse(JSON.stringify({ error: 'Video no tiene URL válida', video_url: video.video_url }), 400);
+      }
+
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      try {
+        // Descargar video de Google
+        console.log(`📥 Descargando video de Google...`);
+        const videoResponse = await fetch(video.video_url, {
+          headers: { 'x-goog-api-key': env.GEMINI_API_KEY }
+        });
+
+        if (!videoResponse.ok) {
+          return corsResponse(JSON.stringify({
+            error: 'Error descargando video',
+            status: videoResponse.status,
+            details: await videoResponse.text()
+          }), 500);
+        }
+
+        const videoBuffer = await videoResponse.arrayBuffer();
+        console.log(`✅ Video descargado: ${videoBuffer.byteLength} bytes`);
+
+        // Subir a Meta
+        const mediaId = await meta.uploadVideoFromBuffer(videoBuffer);
+        console.log(`✅ Video subido a Meta: ${mediaId}`);
+
+        // Enviar por WhatsApp
+        await meta.sendWhatsAppVideoById(video.lead_phone, mediaId,
+          `🎬 *¡${video.lead_name}, este video es para ti!*\n\nTu futuro hogar en *${video.desarrollo}* te espera.`);
+
+        // Actualizar registro como realmente enviado
+        await supabase.client
+          .from('pending_videos')
+          .update({ sent: true, completed_at: new Date().toISOString(), video_url: video.video_url + ' (ENVIADO)' })
+          .eq('id', video.id);
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          message: `Video enviado exitosamente a ${video.lead_name} (${video.lead_phone})`,
+          media_id: mediaId
+        }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // RESET VIDEO: Marcar video como no enviado para reintento
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/reset-video/')) {
+      const videoId = url.pathname.split('/').pop();
+      console.log(`🔄 Reseteando video: ${videoId}`);
+
+      const { data: video } = await supabase.client
+        .from('pending_videos')
+        .select('*')
+        .eq('id', videoId)
+        .single();
+
+      if (!video) {
+        return corsResponse(JSON.stringify({ error: 'Video no encontrado' }), 404);
+      }
+
+      // Resetear para que el cron lo procese de nuevo
+      await supabase.client
+        .from('pending_videos')
+        .update({ sent: false, completed_at: null })
+        .eq('id', videoId);
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        message: `Video ${videoId} reseteado. Se procesará en el próximo cron.`
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // REGENERAR VIDEO: Para leads cuyo video falló
     // ═══════════════════════════════════════════════════════════
     if (url.pathname.startsWith('/regenerate-video/')) {
@@ -7056,6 +7150,37 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
   for (const video of pendientes) {
     console.log(`🔍 Verificando video: ${video.id} - ${video.lead_name}`);
     try {
+      // Si ya tiene URL válida (de un intento anterior), intentar enviar directamente
+      if (video.video_url && !video.video_url.startsWith('ERROR')) {
+        console.log(`📦 Video ${video.id} ya tiene URL, intentando enviar...`);
+        try {
+          const videoResponse = await fetch(video.video_url, {
+            headers: { 'x-goog-api-key': env.GEMINI_API_KEY }
+          });
+
+          if (videoResponse.ok) {
+            const videoBuffer = await videoResponse.arrayBuffer();
+            console.log(`✅ Video descargado: ${videoBuffer.byteLength} bytes`);
+
+            const mediaId = await meta.uploadVideoFromBuffer(videoBuffer);
+            console.log(`✅ Video subido a Meta: ${mediaId}`);
+
+            await meta.sendWhatsAppVideoById(video.lead_phone, mediaId,
+              `🎬 *¡${video.lead_name}, este video es para ti!*\n\nTu futuro hogar en *${video.desarrollo}* te espera.`);
+
+            await supabase.client
+              .from('pending_videos')
+              .update({ sent: true, completed_at: new Date().toISOString() })
+              .eq('id', video.id);
+
+            console.log(`✅ Video ${video.id} enviado exitosamente (retry)`);
+            continue;
+          }
+        } catch (retryError: any) {
+          console.log(`⚠️ Error en retry de video ${video.id}: ${retryError.message}`);
+        }
+      }
+
       // Verificar estado de la operación en Google
       console.log(`📡 Consultando Google: ${video.operation_id}`);
       const statusResponse = await fetch(
@@ -7079,46 +7204,48 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
 
       if (status.done) {
         // Intentar múltiples rutas para encontrar el URI del video
-        const videoUri = 
+        const videoUri =
           status.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri ||
           status.response?.generatedSamples?.[0]?.video?.uri ||
           status.result?.videos?.[0]?.uri ||
           status.videos?.[0]?.uri;
         
         console.log(`🔍 URI encontrado: ${videoUri ? 'Sí' : 'NO'}`);
-        
+
         if (videoUri) {
           console.log(`📥 Video URI: ${videoUri.substring(0, 80)}...`);
-          
-          // ⚠️ MARCAR COMO ENVIADO ANTES para evitar spam si el cron corre múltiples veces
+
+          // Guardar URL primero (para retry si falla el envío)
           await supabase.client
             .from('pending_videos')
-            .update({ sent: true, completed_at: new Date().toISOString(), video_url: videoUri })
+            .update({ video_url: videoUri })
             .eq('id', video.id);
-          
+
           try {
             // 1. Descargar video de Google (requiere API key)
             console.log(`📥 Descargando video de Google...`);
             const videoResponse = await fetch(videoUri, {
               headers: { 'x-goog-api-key': env.GEMINI_API_KEY }
             });
-            
+
             if (!videoResponse.ok) {
               console.log(`❌ Error descargando video: ${videoResponse.status}`);
-              return;
+              // NO marcar como enviado, se reintentará
+              continue;
             }
-            
+
             const videoBuffer = await videoResponse.arrayBuffer();
             console.log(`✅ Video descargado: ${videoBuffer.byteLength} bytes`);
-            
+
             // 2. Subir a Meta
             const mediaId = await meta.uploadVideoFromBuffer(videoBuffer);
             console.log(`✅ Video subido a Meta: ${mediaId}`);
-            
+
             // 3. Enviar por WhatsApp
+            let enviadoExitoso = false;
             if (video.lead_phone === 'TEAM_WEEKLY') {
               console.log('📤 Enviando video semanal a todo el equipo...');
-              
+
               const { data: equipo } = await supabase.client
                 .from('team_members')
                 .select('phone, name')
@@ -7128,21 +7255,33 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
               for (const miembro of equipo || []) {
                 if (!miembro.phone) continue;
                 try {
-                  await meta.sendWhatsAppVideoById(miembro.phone, mediaId, 
+                  await meta.sendWhatsAppVideoById(miembro.phone, mediaId,
                     `🎬 *¡Video de la semana!*\n\n🏠 ${video.desarrollo}\n\n¡Excelente trabajo equipo! 👪🔥`);
                   console.log(`✅ Video semanal enviado a ${miembro.name}`);
+                  enviadoExitoso = true;
                 } catch (e: any) {
                   console.log(`⚠️ Error enviando video a ${miembro.name}: ${e.message}`);
                 }
               }
             } else {
               // Video individual (bienvenida)
-              await meta.sendWhatsAppVideoById(video.lead_phone, mediaId, 
+              await meta.sendWhatsAppVideoById(video.lead_phone, mediaId,
                 `🎬 *¡${video.lead_name}, este video es para ti!*\n\nTu futuro hogar en *${video.desarrollo}* te espera.`);
               console.log(`✅ Video enviado a ${video.lead_name}`);
+              enviadoExitoso = true;
+            }
+
+            // ✅ SOLO marcar como enviado DESPUÉS de envío exitoso
+            if (enviadoExitoso) {
+              await supabase.client
+                .from('pending_videos')
+                .update({ sent: true, completed_at: new Date().toISOString() })
+                .eq('id', video.id);
+              console.log(`✅ Video ${video.id} marcado como enviado`);
             }
           } catch (downloadError: any) {
             console.log(`❌ Error en flujo de video: ${downloadError.message}`);
+            // NO marcar como enviado, se reintentará en próximo cron
           }
 
         } else if (status.error) {
