@@ -5,6 +5,7 @@ import { FollowupService } from '../services/followupService';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { scoringService, LeadStatus } from '../services/leadScoring';
 import { resourceService } from '../services/resourceService';
+import { CalendarService } from '../services/calendar';
 
 const VIDEO_SERVER_URL = 'https://sara-videos.onrender.com';
 
@@ -53,6 +54,13 @@ interface AIAnalysis {
     enganche_disponible?: number;  // 234000 aunque escriba "234m1l"
     modalidad_contacto?: string;   // "telefonica"|"videollamada"|"presencial"
     quiere_asesor?: boolean;       // true si dice "sí", "va", "sale", etc
+    // CAMPOS DE SEGMENTACIÓN
+    how_found_us?: string;         // Facebook, Google, Espectacular, Referido, etc
+    family_size?: number;          // Número de personas en familia
+    current_housing?: string;      // renta, propia, con_familia
+    urgency?: string;              // inmediata, 3_meses, 6_meses, 1_año
+    occupation?: string;           // Profesión/trabajo
+    age_range?: string;            // 25-35, 35-45, etc
   };
   response: string;
   send_gps?: boolean;
@@ -80,6 +88,9 @@ export class WhatsAppHandler {
     }
   }
 
+
+  // Almacenar env para acceder a variables de entorno en todos los métodos
+  private env: any = null;
 
   constructor(
     private supabase: SupabaseService,
@@ -151,15 +162,57 @@ export class WhatsAppHandler {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // REGLA 0.5: Si SARA YA MENCIONÓ CITA EXISTENTE y cliente dice SÍ → Solo confirmar
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Detectar si SARA estaba hablando de una cita YA existente (no pidiendo agendar nueva)
+    const saraMencionabaCitaExistente = ultimoMsgSara.includes('tu visita de hoy') ||
+                                         ultimoMsgSara.includes('tu cita de hoy') ||
+                                         ultimoMsgSara.includes('tu visita de mañana') ||
+                                         ultimoMsgSara.includes('tu cita de mañana') ||
+                                         ultimoMsgSara.includes('visita de las') ||
+                                         ultimoMsgSara.includes('cita de las') ||
+                                         ultimoMsgSara.includes('a las 5 pm') ||
+                                         ultimoMsgSara.includes('a las 5pm') ||
+                                         ultimoMsgSara.match(/tu (visita|cita).*a las \d/) ||
+                                         ultimoMsgSara.match(/te esperamos.*\d+:\d+/);
+
+    if (saraMencionabaCitaExistente && esAfirmativo) {
+      const nombre = lead.name && lead.name !== 'Sin nombre' ? lead.name : null;
+      const nombreCorto = nombre ? nombre.split(' ')[0] : '';
+      console.log('🎯 REGLA 0.5: SARA mencionaba cita existente + SÍ → Confirmar sin pedir nueva');
+
+      // Buscar datos de la cita activa
+      if (citaActiva) {
+        const fechaCita = citaActiva.scheduled_date || 'hoy';
+        const horaCita = citaActiva.scheduled_time?.substring(0, 5) || '';
+        const lugarCita = citaActiva.property_name || 'nuestros desarrollos';
+        return {
+          accion: 'respuesta_directa',
+          respuesta: `¡Excelente ${nombreCorto}! 😊 Entonces te esperamos ${fechaCita}${horaCita ? ` a las ${horaCita}` : ''} en *${lugarCita}*. ¡Será un gusto recibirte!`,
+          siguientePregunta: null,
+          flujoActivo: 'cita_confirmada'
+        };
+      } else {
+        // No tenemos cita en contexto pero SARA mencionó una - responder genéricamente
+        return {
+          accion: 'respuesta_directa',
+          respuesta: `¡Perfecto ${nombreCorto}! 😊 Te esperamos con mucho gusto. Si necesitas cambiar algo de tu visita, solo avísame.`,
+          siguientePregunta: null,
+          flujoActivo: 'cita_confirmada'
+        };
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // REGLA 1: Si SARA preguntó por VISITA y cliente dice SÍ → Pedir nombre
     // ═══════════════════════════════════════════════════════════════════════════
     const preguntabaVisita = ultimoMsgSara.includes('visitarlos') ||
-                             ultimoMsgSara.includes('visita') ||
+                             ultimoMsgSara.includes('visitar') ||
                              ultimoMsgSara.includes('agendar') ||
                              ultimoMsgSara.includes('conocerlas') ||
                              ultimoMsgSara.includes('conocerlos') ||
-                             (ultimoMsgSara.includes('cita') && ultimoMsgSara.includes('?'));
-    
+                             (ultimoMsgSara.includes('cita') && ultimoMsgSara.includes('?') && !saraMencionabaCitaExistente);
+
     if (preguntabaVisita && esAfirmativo) {
       const nombre = lead.name && lead.name !== 'Sin nombre' ? lead.name : null;
       const nombreCorto = nombre ? nombre.split(' ')[0] : '';
@@ -167,7 +220,7 @@ export class WhatsAppHandler {
       // Si ya tiene cita activa, confirmarla en lugar de pedir nueva fecha
       if (citaActiva) {
         const fechaCita = citaActiva.scheduled_date || 'por definir';
-        const horaCita = citaActiva.scheduled_time || 'por definir';
+        const horaCita = citaActiva.scheduled_time?.substring(0, 5) || 'por definir';
         const lugarCita = citaActiva.property_name || citaActiva.development || 'nuestros desarrollos';
         console.log('🎯 REGLA 1c: Preguntaba visita + SÍ + YA TIENE CITA → Confirmar cita existente');
         return {
@@ -732,6 +785,9 @@ Te va a orientar sobre las mejores opciones de financiamiento para tu casa. ¡En
 
   async handleIncomingMessage(from: string, body: string, env?: any, rawRequest?: any): Promise<void> {
     try {
+      // Almacenar env para acceder en todos los métodos de la clase
+      if (env) this.env = env;
+
       const trimmedBody = (body || '').trim();
       
       // Filtrar status callbacks de Twilio
@@ -795,6 +851,20 @@ Te va a orientar sobre las mejores opciones de financiamiento para tu casa. ¡En
         }
       } catch (e) {
         console.log('⚠️ Error cancelando follow-ups:', e);
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // VERIFICAR SI ES RESPUESTA A ENCUESTA
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      try {
+        const respuestaEncuesta = await this.procesarRespuestaEncuesta(cleanPhone, trimmedBody);
+        if (respuestaEncuesta) {
+          console.log(`📋 Respuesta de encuesta procesada para ${cleanPhone}`);
+          await this.meta.sendWhatsAppMessage(cleanPhone, respuestaEncuesta);
+          return; // No procesar más, ya respondimos a la encuesta
+        }
+      } catch (e) {
+        console.log('⚠️ Error procesando respuesta de encuesta:', e);
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1117,10 +1187,24 @@ Te va a orientar sobre las mejores opciones de financiamiento para tu casa. ¡En
       const analysis = await this.analyzeWithAI(body, lead, properties);
       console.log('📌 §  AI Analysis:', JSON.stringify(analysis, null, 2));
 
-      // Si la IA detectó nombre y el lead no lo tenía, actualizar en memoria Y en DB
-      if (analysis.extracted_data?.nombre && !lead.name) {
-        lead.name = analysis.extracted_data.nombre;
-        console.log('✅ Nombre actualizado en memoria:', lead.name);
+      // Si la IA detectó nombre, actualizar en memoria Y en DB
+      // CORRECCIÓN: También actualizar si el usuario CORRIGE su nombre explícitamente
+      const nombreExtraido = analysis.extracted_data?.nombre;
+      const msgLowerNombre = body.toLowerCase();
+      const usuarioCorrigeNombre = msgLowerNombre.includes('me llamo') ||
+                                    msgLowerNombre.includes('mi nombre es') ||
+                                    msgLowerNombre.includes('soy ') ||
+                                    msgLowerNombre.match(/^(soy|me llamo)\s+/i);
+      const nombreActualEsPlaceholder = !lead.name ||
+                                         lead.name === 'Sin nombre' ||
+                                         lead.name === 'Cliente' ||
+                                         lead.name.toLowerCase() === 'amigo';
+
+      // Actualizar nombre si: (1) no tiene nombre válido, O (2) usuario corrige explícitamente
+      if (nombreExtraido && (nombreActualEsPlaceholder || usuarioCorrigeNombre)) {
+        const nombreAnterior = lead.name;
+        lead.name = nombreExtraido;
+        console.log('✅ Nombre actualizado en memoria:', lead.name, nombreAnterior ? `(antes: ${nombreAnterior})` : '');
 
         // GUARDAR EN DB TAMBIÉN
         await this.supabase.client
@@ -3758,9 +3842,20 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
     }
 
     // HIPOTECA: ¿Cómo va el crédito?
-    if ((mensaje.includes('cómo va') || mensaje.includes('como va') || mensaje.includes('estatus') || mensaje.includes('status')) && 
+    if ((mensaje.includes('cómo va') || mensaje.includes('como va') || mensaje.includes('estatus') || mensaje.includes('status')) &&
         (mensaje.includes('crédit') || mensaje.includes('credit') || mensaje.includes('hipoteca') || mensaje.includes('banco'))) {
       await this.vendedorConsultarCredito(from, body, vendedor);
+      return;
+    }
+
+    // =====================================================
+    // ASIGNAR LEAD A ASESOR HIPOTECARIO
+    // Formatos: "asesor para Juan", "pasarlo al asesor Juan", "credito para Juan"
+    // =====================================================
+    const asesorMatch = body.match(/^(?:asesor\s+(?:para|a)|pasarlo?\s+(?:a|al)\s+asesor|cr[eé]dito\s+(?:para|a))\s+([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+)$/i);
+    if (asesorMatch) {
+      const nombreLead = asesorMatch[1].trim();
+      await this.vendedorAsignarAsesor(from, nombreLead, vendedor, teamMembers);
       return;
     }
 
@@ -6592,6 +6687,96 @@ ${statusAnterior} → ${statusNuevo}
     await this.twilio.sendWhatsAppMessage(from, resp);
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // VENDEDOR: Asignar lead a asesor hipotecario
+  // Comando: "asesor para Juan", "pasarlo al asesor María", "crédito para Pedro"
+  // ═══════════════════════════════════════════════════════════════
+  private async vendedorAsignarAsesor(from: string, nombreLead: string, vendedor: any, teamMembers: any[]): Promise<void> {
+    try {
+      console.log(`🏦 Vendedor ${vendedor.name} asignando "${nombreLead}" a asesor hipotecario...`);
+
+      // 1. Buscar el lead del vendedor
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('*')
+        .eq('assigned_to', vendedor.id)
+        .ilike('name', `%${nombreLead}%`)
+        .limit(5);
+
+      if (!leads || leads.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `❌ No encontré un lead llamado *"${nombreLead}"* asignado a ti.\n\n💡 Escribe *"mis leads"* para ver tu lista.`
+        );
+        return;
+      }
+
+      // Si hay varios, pedir que especifique
+      if (leads.length > 1) {
+        let msg = `🔍 Encontré ${leads.length} leads con ese nombre:\n\n`;
+        leads.forEach((l: any, i: number) => {
+          msg += `${i + 1}. *${l.name}* - ${l.phone}\n`;
+        });
+        msg += `\n💡 Especifica el nombre completo.`;
+        await this.twilio.sendWhatsAppMessage(from, msg);
+        return;
+      }
+
+      const lead = leads[0];
+
+      // 2. Buscar asesores hipotecarios activos
+      const asesores = teamMembers.filter(t =>
+        t.role === 'asesor' && t.active && t.phone
+      );
+
+      if (asesores.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `⚠️ No hay asesores hipotecarios activos en el sistema.`
+        );
+        return;
+      }
+
+      // 3. Asignar al primer asesor disponible (o round-robin si hay varios)
+      // Por ahora usamos el primero, pero se puede mejorar
+      const asesor = asesores[0];
+
+      // 4. Actualizar el lead con el asesor asignado
+      await this.supabase.client
+        .from('leads')
+        .update({
+          asesor_banco_id: asesor.id,
+          needs_mortgage: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', lead.id);
+
+      // 5. Notificar al asesor hipotecario
+      const msgAsesor = `🏦 *LEAD ASIGNADO PARA CRÉDITO*
+━━━━━━━━━━━━━━━━━━━━━━
+
+👤 *Cliente:* ${lead.name}
+📱 *Tel:* ${lead.phone}
+🏠 *Desarrollo:* ${lead.property_interest || 'No especificado'}
+
+👔 *Vendedor:* ${vendedor.name}
+📱 *Tel vendedor:* ${vendedor.phone}
+
+━━━━━━━━━━━━━━━━━━━━━━
+💳 *¡Contactar para iniciar trámite!*`;
+
+      await this.twilio.sendWhatsAppMessage(asesor.phone, msgAsesor);
+
+      // 6. Confirmar al vendedor
+      await this.twilio.sendWhatsAppMessage(from,
+        `✅ *${lead.name}* asignado a asesor hipotecario\n\n🏦 *Asesor:* ${asesor.name}\n📱 *Tel:* ${asesor.phone}\n\n¡El asesor lo contactará pronto!`
+      );
+
+      console.log(`✅ Lead ${lead.name} asignado a asesor ${asesor.name}`);
+    } catch (e) {
+      console.log('❌ Error asignando asesor:', e);
+      await this.twilio.sendWhatsAppMessage(from, `❌ Error al asignar. Intenta de nuevo.`);
+    }
+  }
+
   private async vendedorBriefing(from: string, vendedor: any, nombre: string): Promise<void> {
     // Combinar citas + leads + meta en un solo briefing
     const ahora = new Date();
@@ -7427,6 +7612,21 @@ Escribe el nombre completo para continuar.`;
     }
 
     // Crear evento en Google Calendar
+    console.log('📅📅📅 VENDEDOR: Inicio bloque Calendar - citaCreada:', citaCreada?.id || 'NULL');
+
+    // ═══ Crear instancia de CalendarService con credenciales del env ═══
+    console.log('🔑 ENV credentials check (vendedor):', {
+      hasEmail: !!this.env?.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      hasKey: !!this.env?.GOOGLE_PRIVATE_KEY,
+      hasCalendarId: !!this.env?.GOOGLE_CALENDAR_ID
+    });
+    const calendarLocal = new CalendarService(
+      this.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      this.env.GOOGLE_PRIVATE_KEY,
+      this.env.GOOGLE_CALENDAR_ID
+    );
+    console.log('📅 CalendarService creado OK (vendedor)');
+
     try {
       const endFecha = new Date(fecha.getTime() + 60 * 60 * 1000); // +1 hora
       
@@ -7439,20 +7639,16 @@ Escribe el nombre completo para continuar.`;
         return `${year}-${month}-${day}T${hours}:${minutes}:00`;
       };
 
-      // Agregar vendedor como invitado para notificaciones de Calendar
-      const attendeesList: {email: string, displayName?: string}[] = [];
-      if (vendedor?.email) {
-        attendeesList.push({ email: vendedor.email, displayName: vendedor.name || 'Vendedor' });
-        console.log('📧 Agregando vendedor como invitado:', vendedor.email);
-      }
+      // NOTA: NO agregar attendees - causa error 403 "forbiddenForServiceAccounts"
+      // Las cuentas de servicio no pueden invitar sin Domain-Wide Delegation
+      console.log('📅 Creando evento SIN attendees (Service Account limitation)');
 
       const eventData = {
         summary: `🏠 Visita ${desarrollo} - ${lead.name}`,
-        description: `👤 Cliente: ${lead.name}\n📱 Teléfono: ${lead.phone}\n🏠 Desarrollo: ${desarrollo}\n📝 Agendada via WhatsApp`,
+        description: `👤 Cliente: ${lead.name}\n📱 Teléfono: ${lead.phone}\n🏠 Desarrollo: ${desarrollo}\n📝 Agendada via WhatsApp\n👤 Vendedor: ${vendedor?.name || 'Por asignar'}`,
         location: desarrollo,
         start: { dateTime: formatDate(fecha), timeZone: 'America/Mexico_City' },
         end: { dateTime: formatDate(endFecha), timeZone: 'America/Mexico_City' },
-        attendees: attendeesList,
         reminders: {
           useDefault: false,
           overrides: [
@@ -7463,8 +7659,8 @@ Escribe el nombre completo para continuar.`;
         }
       };
 
-      const eventResult = await this.calendar.createEvent(eventData);
-      console.log('📅 Evento Google Calendar creado:', eventResult?.id || 'OK');
+      const eventResult = await calendarLocal.createEvent(eventData);
+      console.log('📅 Evento Google Calendar creado:', eventResult?.id);
       
       // Guardar ID del evento en la cita
       if (citaCreada?.id && eventResult?.id) {
@@ -7473,9 +7669,15 @@ Escribe el nombre completo para continuar.`;
           .update({ google_event_vendedor_id: eventResult.id })
           .eq('id', citaCreada.id);
       }
-    } catch (calError) {
+    } catch (calError: any) {
       console.error('❌ Error Google Calendar:', calError);
-      // No bloqueamos el flujo si falla el calendario
+      // Registrar error en la cita para diagnóstico
+      if (citaCreada?.id) {
+        await this.supabase.client
+          .from('appointments')
+          .update({ notes: `Calendar Error: ${calError?.message || String(calError)}` })
+          .eq('id', citaCreada.id);
+      }
     }
 
     // Actualizar status del lead
@@ -11034,7 +11236,13 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
     "ingreso_mensual": null,
     "enganche_disponible": null,
     "modalidad_contacto": null,
-    "quiere_asesor": null
+    "quiere_asesor": null,
+    "how_found_us": null,
+    "family_size": null,
+    "current_housing": null,
+    "urgency": null,
+    "occupation": null,
+    "age_range": null
   },
   "response": "Tu respuesta conversacional para WhatsApp",
   "send_video_desarrollo": false,
@@ -11070,6 +11278,49 @@ La fecha de hoy es: ${new Date().toLocaleDateString('es-MX', { weekday: 'long', 
 - "2", "zoom", "video" ➜ modalidad_contacto: "videollamada"
 - "3", "oficina", "presencial" ➜ modalidad_contacto: "presencial"
 
+⚠️ EXTRACCIÓN DE DATOS DE SEGMENTACIÓN (MUY IMPORTANTE):
+Extrae estos datos cuando el cliente los mencione NATURALMENTE en la conversación:
+
+📢 how_found_us (cómo se enteró):
+- "vi su anuncio en Facebook/Instagram" ➜ how_found_us: "Facebook"
+- "los encontré en Google" ➜ how_found_us: "Google"
+- "vi un espectacular/anuncio en la calle" ➜ how_found_us: "Espectacular"
+- "me recomendó un amigo/familiar" ➜ how_found_us: "Referido"
+- "los vi en la feria/expo" ➜ how_found_us: "Feria"
+- "escuché en la radio" ➜ how_found_us: "Radio"
+- "pasé por el desarrollo" ➜ how_found_us: "Visita_directa"
+
+👨‍👩‍👧‍👦 family_size (tamaño de familia):
+- "somos 2", "mi esposa y yo" ➜ family_size: 2
+- "somos 3", "tengo un hijo" ➜ family_size: 3
+- "somos 4", "tengo 2 hijos" ➜ family_size: 4
+- "familia grande", "5 personas" ➜ family_size: 5
+
+🏠 current_housing (vivienda actual):
+- "estoy rentando", "pago renta" ➜ current_housing: "renta"
+- "vivo con mis papás/familia" ➜ current_housing: "con_familia"
+- "ya tengo casa propia" ➜ current_housing: "propia"
+
+⏰ urgency (urgencia de compra):
+- "lo antes posible", "urgente", "ya" ➜ urgency: "inmediata"
+- "en 1-2 meses" ➜ urgency: "1_mes"
+- "en 3 meses" ➜ urgency: "3_meses"
+- "en 6 meses", "para fin de año" ➜ urgency: "6_meses"
+- "el próximo año" ➜ urgency: "1_año"
+- "solo estoy viendo", "a futuro" ➜ urgency: "solo_viendo"
+
+💼 occupation (profesión):
+- "soy maestro/doctor/ingeniero/etc" ➜ occupation: "Maestro"/"Doctor"/"Ingeniero"
+- "trabajo en X empresa" ➜ extrae la profesión si la menciona
+
+🎂 age_range (si lo menciona o se puede inferir):
+- "tengo 28 años" ➜ age_range: "25-35"
+- "tengo 40 años" ➜ age_range: "35-45"
+- "ya estoy jubilado" ➜ age_range: "55+"
+
+⚠️ IMPORTANTE: NO preguntes estos datos directamente. Extráelos solo cuando el cliente los mencione naturalmente.
+Excepción: Puedes preguntar "¿Cómo supiste de nosotros?" de forma casual después de dar información.
+
 RECUERDA: 
 - Tu respuesta debe ser SOLO JSON válido
 - Empieza con { y termina con }
@@ -11101,20 +11352,169 @@ RECUERDA:
       const parsed = JSON.parse(jsonStr);
       
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // CINTURÓN DE SEGURIDAD: Forzar extracción de nombre si la IA no lo puso
+      // CINTURÓN DE SEGURIDAD: Forzar extracción si la IA no lo puso
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       if (!parsed.extracted_data) {
         parsed.extracted_data = {};
       }
 
-      if (!parsed.extracted_data.nombre) {
-        const nameMatch = message.match(/(?:soy|me llamo|mi nombre es)\s+([a-záéíóúñ0-9\s]+)/i);
-        if (nameMatch) {
-          parsed.extracted_data.nombre = nameMatch[1].trim();
-          console.log('👤 Nombre detectado por regex:', parsed.extracted_data.nombre);
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // FALLBACK REGEX: Segmentación si la IA no lo extrajo
+      // IMPORTANTE: Extraer OCUPACIÓN primero para no confundir con nombre
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const msgLowerSeg = message.toLowerCase();
+
+      // Lista de profesiones (para no confundir con nombres)
+      const profesiones = ['maestro', 'maestra', 'doctor', 'doctora', 'ingeniero', 'ingeniera',
+                           'abogado', 'abogada', 'contador', 'contadora', 'enfermero', 'enfermera',
+                           'arquitecto', 'arquitecta', 'policia', 'policía', 'militar', 'médico',
+                           'medico', 'dentista', 'veterinario', 'veterinaria', 'psicólogo', 'psicologa',
+                           'chef', 'cocinero', 'electricista', 'plomero', 'carpintero', 'albañil',
+                           'chofer', 'taxista', 'comerciante', 'vendedor', 'vendedora', 'empresario',
+                           'empresaria', 'empleado', 'empleada', 'obrero', 'obrera', 'secretario',
+                           'secretaria', 'administrador', 'administradora', 'programador', 'programadora',
+                           'diseñador', 'diseñadora', 'profesor', 'profesora', 'estudiante'];
+
+      // Extraer OCUPACIÓN primero (antes de nombre para evitar "soy ingeniero" como nombre)
+      if (!parsed.extracted_data.occupation) {
+        const occupationMatch = message.match(/soy\s+(maestr[oa]|doctor[a]?|ingenier[oa]|abogad[oa]|contador[a]?|enfermero|enfermera|arquitect[oa]|policia|policía|militar|médico|medico|dentista|veterinari[oa]|psicolog[oa]|chef|cocinero|electricista|plomero|carpintero|albañil|chofer|taxista|comerciante|vendedor[a]?|empresari[oa]|emplead[oa]|obrer[oa]|secretari[oa]|administrador[a]?|programador[a]?|diseñador[a]?|profesor[a]?|estudiante)/i);
+        if (occupationMatch) {
+          const occ = occupationMatch[1].charAt(0).toUpperCase() + occupationMatch[1].slice(1).toLowerCase();
+          parsed.extracted_data.occupation = occ;
+          console.log('💼 occupation detectado por regex:', occ);
         }
       }
-      
+
+      // Ahora extraer NOMBRE (excluyendo profesiones)
+      if (!parsed.extracted_data.nombre) {
+        // Solo usar "me llamo" o "mi nombre es" (más confiable que "soy")
+        let nameMatch = message.match(/(?:me llamo|mi nombre es)\s+([A-Za-záéíóúñÁÉÍÓÚÑ]+(?:\s+[A-Za-záéíóúñÁÉÍÓÚÑ]+)?)/i);
+
+        // Si no encontró con "me llamo", intentar con "soy" pero verificar que no sea profesión
+        if (!nameMatch) {
+          const soyMatch = message.match(/soy\s+([A-Za-záéíóúñÁÉÍÓÚÑ]+(?:\s+[A-Za-záéíóúñÁÉÍÓÚÑ]+)?)/i);
+          if (soyMatch) {
+            const posibleNombre = soyMatch[1].trim().toLowerCase();
+            const primeraPalabra = posibleNombre.split(/\s+/)[0];
+            // Solo usar si NO es una profesión
+            if (!profesiones.includes(primeraPalabra)) {
+              nameMatch = soyMatch;
+            }
+          }
+        }
+
+        if (nameMatch) {
+          // Limpiar: solo tomar máximo 3 palabras que parezcan nombre
+          const nombreLimpio = nameMatch[1].trim().split(/\s+/).slice(0, 3).join(' ');
+          // Verificar que no sea algo como "de familia" o palabras comunes
+          const palabrasInvalidas = ['de', 'la', 'el', 'los', 'las', 'un', 'una', 'familia', 'buscando', 'quiero', 'necesito'];
+          const primeraPalabra = nombreLimpio.toLowerCase().split(/\s+/)[0];
+          if (!palabrasInvalidas.includes(primeraPalabra) && nombreLimpio.length > 1) {
+            parsed.extracted_data.nombre = nombreLimpio;
+            console.log('👤 Nombre detectado por regex:', parsed.extracted_data.nombre);
+          }
+        }
+      }
+
+      // how_found_us
+      if (!parsed.extracted_data.how_found_us) {
+        if (msgLowerSeg.includes('facebook') || msgLowerSeg.includes('fb') || msgLowerSeg.includes('face')) {
+          parsed.extracted_data.how_found_us = 'Facebook';
+          console.log('📊 how_found_us detectado por regex: Facebook');
+        } else if (msgLowerSeg.includes('instagram') || msgLowerSeg.includes('ig') || msgLowerSeg.includes('insta')) {
+          parsed.extracted_data.how_found_us = 'Instagram';
+          console.log('📊 how_found_us detectado por regex: Instagram');
+        } else if (msgLowerSeg.includes('google')) {
+          parsed.extracted_data.how_found_us = 'Google';
+          console.log('📊 how_found_us detectado por regex: Google');
+        } else if (msgLowerSeg.includes('espectacular') || msgLowerSeg.includes('anuncio en la calle') || msgLowerSeg.includes('letrero')) {
+          parsed.extracted_data.how_found_us = 'Espectacular';
+          console.log('📊 how_found_us detectado por regex: Espectacular');
+        } else if (msgLowerSeg.includes('recomend') || msgLowerSeg.includes('amigo me') || msgLowerSeg.includes('familiar me')) {
+          parsed.extracted_data.how_found_us = 'Referido';
+          console.log('📊 how_found_us detectado por regex: Referido');
+        } else if (msgLowerSeg.includes('feria') || msgLowerSeg.includes('expo')) {
+          parsed.extracted_data.how_found_us = 'Feria';
+          console.log('📊 how_found_us detectado por regex: Feria');
+        } else if (msgLowerSeg.includes('radio')) {
+          parsed.extracted_data.how_found_us = 'Radio';
+          console.log('📊 how_found_us detectado por regex: Radio');
+        } else if (msgLowerSeg.includes('pasé por') || msgLowerSeg.includes('pase por') || msgLowerSeg.includes('vi el desarrollo')) {
+          parsed.extracted_data.how_found_us = 'Visita_directa';
+          console.log('📊 how_found_us detectado por regex: Visita_directa');
+        }
+      }
+
+      // family_size
+      if (!parsed.extracted_data.family_size) {
+        const familyMatch = msgLowerSeg.match(/somos?\s*(\d+)|(\d+)\s*(?:de familia|personas|integrantes)|familia de\s*(\d+)/i);
+        if (familyMatch) {
+          const size = parseInt(familyMatch[1] || familyMatch[2] || familyMatch[3]);
+          if (size >= 1 && size <= 10) {
+            parsed.extracted_data.family_size = size;
+            console.log('👨‍👩‍👧‍👦 family_size detectado por regex:', size);
+          }
+        } else if (msgLowerSeg.includes('mi esposa y yo') || msgLowerSeg.includes('somos pareja') || msgLowerSeg.includes('mi esposo y yo')) {
+          parsed.extracted_data.family_size = 2;
+          console.log('👨‍👩‍👧‍👦 family_size detectado por regex: 2');
+        } else if (msgLowerSeg.includes('tengo un hijo') || msgLowerSeg.includes('tengo una hija') || msgLowerSeg.includes('con 1 hijo')) {
+          parsed.extracted_data.family_size = 3;
+          console.log('👨‍👩‍👧‍👦 family_size detectado por regex: 3');
+        } else if (msgLowerSeg.includes('tengo 2 hijos') || msgLowerSeg.includes('dos hijos') || msgLowerSeg.includes('tengo dos hijos')) {
+          parsed.extracted_data.family_size = 4;
+          console.log('👨‍👩‍👧‍👦 family_size detectado por regex: 4');
+        }
+      }
+
+      // current_housing
+      if (!parsed.extracted_data.current_housing) {
+        if (msgLowerSeg.includes('rentando') || msgLowerSeg.includes('rentamos') || msgLowerSeg.includes('rento') || msgLowerSeg.includes('pago renta') || msgLowerSeg.includes('en renta') || msgLowerSeg.includes('estamos rentando')) {
+          parsed.extracted_data.current_housing = 'renta';
+          console.log('🏠 current_housing detectado por regex: renta');
+        } else if (msgLowerSeg.includes('con mis pap') || msgLowerSeg.includes('con mi familia') || msgLowerSeg.includes('con mis suegros') || msgLowerSeg.includes('vivo con')) {
+          parsed.extracted_data.current_housing = 'con_familia';
+          console.log('🏠 current_housing detectado por regex: con_familia');
+        } else if (msgLowerSeg.includes('casa propia') || msgLowerSeg.includes('ya tengo casa') || msgLowerSeg.includes('mi casa actual')) {
+          parsed.extracted_data.current_housing = 'propia';
+          console.log('🏠 current_housing detectado por regex: propia');
+        }
+      }
+
+      // urgency
+      if (!parsed.extracted_data.urgency) {
+        if (msgLowerSeg.includes('lo antes posible') || msgLowerSeg.includes('urgente') || msgLowerSeg.includes('ya la necesito') || msgLowerSeg.includes('de inmediato')) {
+          parsed.extracted_data.urgency = 'inmediata';
+          console.log('⏰ urgency detectado por regex: inmediata');
+        } else if (msgLowerSeg.match(/(?:para |en |dentro de )?(1|un|uno)\s*mes/i)) {
+          parsed.extracted_data.urgency = '1_mes';
+          console.log('⏰ urgency detectado por regex: 1_mes');
+        } else if (msgLowerSeg.match(/(?:para |en |dentro de )?(2|dos|3|tres)\s*mes/i)) {
+          parsed.extracted_data.urgency = '3_meses';
+          console.log('⏰ urgency detectado por regex: 3_meses');
+        } else if (msgLowerSeg.match(/(?:para |en |dentro de )?(6|seis)\s*mes/i) || msgLowerSeg.includes('fin de año') || msgLowerSeg.includes('medio año')) {
+          parsed.extracted_data.urgency = '6_meses';
+          console.log('⏰ urgency detectado por regex: 6_meses');
+        } else if (msgLowerSeg.includes('próximo año') || msgLowerSeg.includes('el año que viene') || msgLowerSeg.includes('para el otro año')) {
+          parsed.extracted_data.urgency = '1_año';
+          console.log('⏰ urgency detectado por regex: 1_año');
+        } else if (msgLowerSeg.includes('solo viendo') || msgLowerSeg.includes('solo estoy viendo') || msgLowerSeg.includes('a futuro') || msgLowerSeg.includes('no tengo prisa')) {
+          parsed.extracted_data.urgency = 'solo_viendo';
+          console.log('⏰ urgency detectado por regex: solo_viendo');
+        }
+      }
+
+      // num_recamaras (también como fallback)
+      if (!parsed.extracted_data.num_recamaras) {
+        const recamarasMatch = message.match(/(\d+)\s*(?:recamara|recámara|cuarto|habitacion|habitación)/i);
+        if (recamarasMatch) {
+          const num = parseInt(recamarasMatch[1]);
+          if (num >= 1 && num <= 6) {
+            parsed.extracted_data.num_recamaras = num;
+            console.log('🛏️ num_recamaras detectado por regex:', num);
+          }
+        }
+      }
+
       // CORRECCIÓN: Si tiene fecha Y hora, forzar confirmar_cita
       if (parsed.extracted_data?.fecha && parsed.extracted_data?.hora) {
         parsed.intent = 'confirmar_cita';
@@ -11140,12 +11540,48 @@ RECUERDA:
       }
       
     } catch (e) {
-      console.error('❌’ Error OpenAI:', e);
-      
+      console.error('❌ Error OpenAI:', e);
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // EXTRAER SEGMENTACIÓN INCLUSO EN FALLBACK
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const fallbackData: any = {};
+      const msgLowerFallback = message.toLowerCase();
+
+      // how_found_us
+      if (msgLowerFallback.includes('facebook') || msgLowerFallback.includes('fb')) fallbackData.how_found_us = 'Facebook';
+      else if (msgLowerFallback.includes('instagram') || msgLowerFallback.includes('insta')) fallbackData.how_found_us = 'Instagram';
+      else if (msgLowerFallback.includes('google')) fallbackData.how_found_us = 'Google';
+
+      // family_size
+      const familyMatchFb = msgLowerFallback.match(/somos?\s*(\d+)|(\d+)\s*de familia/i);
+      if (familyMatchFb) fallbackData.family_size = parseInt(familyMatchFb[1] || familyMatchFb[2]);
+
+      // current_housing
+      if (msgLowerFallback.includes('rentando') || msgLowerFallback.includes('rentamos') || msgLowerFallback.includes('rento')) fallbackData.current_housing = 'renta';
+
+      // occupation
+      const occMatchFb = message.match(/soy\s+(maestr[oa]|doctor[a]?|ingenier[oa]|abogad[oa]|contador[a]?|enfermero|enfermera|arquitect[oa]|médico|medico)/i);
+      if (occMatchFb) fallbackData.occupation = occMatchFb[1].charAt(0).toUpperCase() + occMatchFb[1].slice(1).toLowerCase();
+
+      // urgency
+      if (msgLowerFallback.match(/(?:para |en )?(6|seis)\s*mes/i)) fallbackData.urgency = '6_meses';
+      else if (msgLowerFallback.match(/(?:para |en )?(3|tres)\s*mes/i)) fallbackData.urgency = '3_meses';
+
+      // num_recamaras
+      const recMatchFb = message.match(/(\d+)\s*(?:recamara|recámara)/i);
+      if (recMatchFb) fallbackData.num_recamaras = parseInt(recMatchFb[1]);
+
+      // nombre (solo si dice "me llamo" explícitamente)
+      const nameMatchFb = message.match(/(?:me llamo|mi nombre es)\s+([A-Za-záéíóúñÁÉÍÓÚÑ]+(?:\s+[A-Za-záéíóúñÁÉÍÓÚÑ]+)?)/i);
+      if (nameMatchFb) fallbackData.nombre = nameMatchFb[1].trim();
+
+      console.log('📊 Datos extraídos en fallback:', fallbackData);
+
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // FALLBACK INTELIGENTE: Si OpenAI respondió texto plano, ¡usarlo!
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      
+
       // Limpiar la respuesta de OpenAI (quitar markdown, etc)
       let respuestaLimpia = openaiRawResponse
         .replace(/```json/gi, '')
@@ -11180,7 +11616,7 @@ RECUERDA:
         
         return {
           intent: fallbackIntent,
-          extracted_data: {},
+          extracted_data: fallbackData,  // Usar datos extraídos
           response: respuestaLimpia,
           send_gps: false,
           send_video_desarrollo: false,
@@ -11188,7 +11624,7 @@ RECUERDA:
           contactar_vendedor: fallbackContactarVendedor
         };
       }
-      
+
       // Si no hay respuesta útil de OpenAI, usar fallback contextual
       const msgLower = message.toLowerCase();
       const leadTieneNombre = lead.name;
@@ -11274,7 +11710,7 @@ Tú dime, ¿por dónde empezamos?`;
       
       return {
         intent: fallbackIntent,
-        extracted_data: {},
+        extracted_data: fallbackData,  // Usar datos extraídos
         response: fallbackResponse,
         send_gps: false,
         send_video_desarrollo: false,
@@ -12423,32 +12859,40 @@ Tú dime, ¿por dónde empezamos?`;
               }
 
               // ═══ PUSH A CITA - IMPORTANTE PARA CERRAR VENTA ═══
-              await new Promise(r => setTimeout(r, 400));
-              const desarrollosMencionados = desarrollosLista.join(' y ');
-              const msgPush = tieneNombre
-                ? `${primerNombre}, ¿te gustaría visitar *${desarrollosMencionados}* en persona? 🏠 Te agendo una cita sin compromiso 😊`
-                : `¿Te gustaría visitarlos en persona? 🏠 Te agendo una cita sin compromiso 😊`;
+              // ⚠️ FIX 08-ENE-2026: NO enviar push si el usuario YA quiere cita (intent: confirmar_cita)
+              // Evita preguntar "¿te gustaría visitar?" cuando ya dijeron "quiero ir hoy a las 5"
+              const yaQuiereCita = analysis.intent === 'confirmar_cita';
 
-              await this.twilio.sendWhatsAppMessage(from, msgPush);
-              console.log('✅ Push a cita enviado después de recursos');
+              if (!yaQuiereCita) {
+                await new Promise(r => setTimeout(r, 400));
+                const desarrollosMencionados = desarrollosLista.join(' y ');
+                const msgPush = tieneNombre
+                  ? `${primerNombre}, ¿te gustaría visitar *${desarrollosMencionados}* en persona? 🏠 Te agendo una cita sin compromiso 😊`
+                  : `¿Te gustaría visitarlos en persona? 🏠 Te agendo una cita sin compromiso 😊`;
 
-              // Guardar en historial para que Claude sepa que preguntamos por visita
-              try {
-                const { data: leadHist } = await this.supabase.client
-                  .from('leads')
-                  .select('conversation_history')
-                  .eq('id', lead.id)
-                  .single();
+                await this.twilio.sendWhatsAppMessage(from, msgPush);
+                console.log('✅ Push a cita enviado después de recursos');
 
-                const histAct = leadHist?.conversation_history || [];
-                histAct.push({ role: 'assistant', content: msgPush, timestamp: new Date().toISOString() });
+                // Guardar en historial para que Claude sepa que preguntamos por visita
+                try {
+                  const { data: leadHist } = await this.supabase.client
+                    .from('leads')
+                    .select('conversation_history')
+                    .eq('id', lead.id)
+                    .single();
 
-                await this.supabase.client
-                  .from('leads')
-                  .update({ conversation_history: histAct.slice(-30) })
-                  .eq('id', lead.id);
-              } catch (e) {
-                console.log('⚠️ Error guardando push en historial');
+                  const histAct = leadHist?.conversation_history || [];
+                  histAct.push({ role: 'assistant', content: msgPush, timestamp: new Date().toISOString() });
+
+                  await this.supabase.client
+                    .from('leads')
+                    .update({ conversation_history: histAct.slice(-30) })
+                    .eq('id', lead.id);
+                } catch (e) {
+                  console.log('⚠️ Error guardando push en historial');
+                }
+              } else {
+                console.log('ℹ️ Push a cita OMITIDO - usuario ya expresó intent: confirmar_cita');
               }
             } else {
               console.log('ℹ️ Lead ya tiene cita - recursos enviados, push crédito se verificará abajo');
@@ -14327,7 +14771,51 @@ Un asesor te contactará muy pronto. ¿Hay algo más en lo que pueda ayudarte?`;
         .trim();
       console.log('📌 ℹ️ Limpiado mensaje de crédito de respuesta de cita');
     }
-    
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // VALIDAR HORARIO ANTES DE CONFIRMAR CITA (evitar doble mensaje)
+    // ═══════════════════════════════════════════════════════════════════════════
+    let saltarCreacionCita = false;
+    if (esConfirmarCita) {
+      const horaExtraida = analysis.extracted_data?.hora || '';
+      // Parsear hora (puede ser "21:00", "9pm", "9 pm", etc.)
+      let horaNumero = 0;
+      const horaMatch = horaExtraida.match(/(\d+)/);
+      if (horaMatch) {
+        horaNumero = parseInt(horaMatch[1]);
+        // Si es formato 12h con pm, convertir a 24h
+        if (horaExtraida.toLowerCase().includes('pm') && horaNumero < 12) {
+          horaNumero += 12;
+        } else if (horaExtraida.toLowerCase().includes('am') && horaNumero === 12) {
+          horaNumero = 0;
+        }
+      }
+
+      // Horario de atención: 9am - 6pm (L-V), 9am - 2pm (Sábado)
+      const fechaExtraida = analysis.extracted_data?.fecha || '';
+      const fechaCita = this.parseFecha(fechaExtraida, horaExtraida);
+      const esSabado = fechaCita.getDay() === 6;
+      const horaInicioAtencion = 9;
+      const horaFinAtencion = esSabado ? 14 : 18;
+
+      if (horaNumero > 0 && (horaNumero < horaInicioAtencion || horaNumero >= horaFinAtencion)) {
+        console.log(`⚠️ HORA FUERA DE HORARIO: ${horaNumero}:00 (permitido: ${horaInicioAtencion}:00 - ${horaFinAtencion}:00)`);
+        const nombreCliente = lead.name?.split(' ')[0] || '';
+        const horaFinTexto = esSabado ? '2:00 PM' : '6:00 PM';
+        const diaTexto = esSabado ? ' los sábados' : '';
+
+        // REEMPLAZAR la respuesta de la IA con el mensaje de horario inválido
+        respuestaPrincipal = `⚠️ ${nombreCliente ? nombreCliente + ', las ' : 'Las '}*${horaNumero}:00* está fuera de nuestro horario de atención${diaTexto}.
+
+📅 *Horario disponible${diaTexto}:* 9:00 AM a ${horaFinTexto}
+
+¿A qué hora dentro de este horario te gustaría visitarnos? 😊`;
+
+        saltarCreacionCita = true; // No crear la cita
+        console.log('🚫 Cita NO se creará - horario inválido');
+      }
+    }
+
     await this.twilio.sendWhatsAppMessage(from, respuestaPrincipal);
     console.log('✅ Respuesta enviada');
     
@@ -14561,13 +15049,14 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       console.log('⚠️ Error verificando cita previa');
     }
     
-    if (analysis.intent === 'confirmar_cita' && 
-        analysis.extracted_data?.fecha && 
-        analysis.extracted_data?.hora) {
-      
+    if (analysis.intent === 'confirmar_cita' &&
+        analysis.extracted_data?.fecha &&
+        analysis.extracted_data?.hora &&
+        !saltarCreacionCita) {  // NO crear si el horario es inválido
+
       // Determinar el desarrollo final
       const desarrolloFinal = desarrollosParaCita || desarrollo;
-      
+
       // Si ya tiene cita, NO crear otra
       if (yaExisteCita) {
         console.log('🚫 YA TIENE CITA - No se creará duplicada');
@@ -15464,11 +15953,24 @@ ${msgContacto}`;
         }
       }
 
+      console.log('📅📅📅 INICIO BLOQUE CALENDAR - appointment:', appointment?.id || 'NULL');
+
       const fechaEvento = this.parseFecha(fecha, hora);
-      console.log('📅  Fecha evento parseada:', fechaEvento.toISOString());
-      console.log('📅  Calendar object exists:', !!this.calendar);
-      console.log('📅  Calendar.createEvent exists:', typeof this.calendar?.createEvent);
-      
+      console.log('📅 Fecha evento parseada:', fechaEvento.toISOString());
+
+      // ═══ Crear instancia de CalendarService con credenciales del env ═══
+      console.log('🔑 ENV credentials check:', {
+        hasEmail: !!env?.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        hasKey: !!env?.GOOGLE_PRIVATE_KEY,
+        hasCalendarId: !!env?.GOOGLE_CALENDAR_ID
+      });
+      const calendarLocal = new CalendarService(
+        env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        env.GOOGLE_PRIVATE_KEY,
+        env.GOOGLE_CALENDAR_ID
+      );
+      console.log('📅 CalendarService creado OK');
+
       // Formatear fechas para Google Calendar API (RFC3339 con offset)
       const endEvento = new Date(fechaEvento.getTime() + 60 * 60 * 1000);
       
@@ -15495,11 +15997,9 @@ ${msgContacto}`;
         
         // Normalizar evento para evitar error "Start and end times must either both be date or both be dateTime"
         // Agregar vendedor como invitado para que reciba notificaciones de Google Calendar
-        const attendeesList: {email: string, displayName?: string}[] = [];
-        if (vendedor?.email) {
-          attendeesList.push({ email: vendedor.email, displayName: vendedor.name || 'Vendedor' });
-          console.log('📧 Agregando vendedor como invitado:', vendedor.email);
-        }
+        // NOTA: NO agregar attendees - causa error 403 "forbiddenForServiceAccounts"
+        // Las cuentas de servicio no pueden invitar sin Domain-Wide Delegation
+        console.log('📅 Creando evento VENDEDOR SIN attendees (Service Account limitation)');
 
         const eventData: any = {
           summary: `🏠 Visita ${desarrollo} - ${clientName}`,
@@ -15509,7 +16009,8 @@ ${msgContacto}`;
 📍 Dirección: ${direccion}
 🗺️ GPS: ${gpsLink}
 📊 Score: ${score}/100 ${temp}
-💳 Necesita crédito: ${necesitaCredito ? 'SÍ' : 'No especificado'}`,
+💳 Necesita crédito: ${necesitaCredito ? 'SÍ' : 'No especificado'}
+👤 Vendedor: ${vendedor?.name || 'Por asignar'}`,
           location: direccion,
           start: {
             dateTime: startDateTime,
@@ -15519,7 +16020,6 @@ ${msgContacto}`;
             dateTime: endDateTime,
             timeZone: 'America/Mexico_City'
           },
-          attendees: attendeesList,
           reminders: {
             useDefault: false,
             overrides: [
@@ -15536,8 +16036,8 @@ ${msgContacto}`;
         
         console.log('📅  Event data (normalizado):', JSON.stringify(eventData, null, 2));
         
-        const eventResult = await this.calendar.createEvent(eventData);
-        console.log('📅 Evento Google Calendar VENDEDOR creado:', eventResult);
+        const eventResult = await calendarLocal.createEvent(eventData);
+        console.log('📅 Evento Google Calendar VENDEDOR creado:', eventResult?.id);
         
         // ✅ GUARDAR google_event_vendedor_id para que webhook funcione
         if (appointment?.id && eventResult?.id) {
@@ -15547,9 +16047,16 @@ ${msgContacto}`;
             .eq('id', appointment.id);
           console.log('✅ google_event_vendedor_id guardado:', eventResult.id);
         }
-      } catch (calError) {
+      } catch (calError: any) {
         console.error('❌ Error Calendar Vendedor:', calError);
         console.error('❌ Error details:', JSON.stringify(calError, null, 2));
+        // Registrar error en la cita para diagnóstico
+        if (appointment?.id) {
+          await this.supabase.client
+            .from('appointments')
+            .update({ notes: `Calendar Error: ${calError?.message || String(calError)}` })
+            .eq('id', appointment.id);
+        }
       }
 
       // 3. Google Calendar - CITA ASESOR HIPOTECARIO (si necesita crédito)
@@ -15583,7 +16090,7 @@ ${msgContacto}`;
               dateTime: endDateTime,
               timeZone: 'America/Mexico_City'
             },
-            attendees: asesorAttendees,
+            // attendees REMOVIDO - causa error 403 forbiddenForServiceAccounts
             reminders: {
               useDefault: false,
               overrides: [
@@ -15598,8 +16105,8 @@ ${msgContacto}`;
           if (eventAsesorData.start?.dateTime) delete eventAsesorData.start.date;
           if (eventAsesorData.end?.dateTime) delete eventAsesorData.end.date;
           
-          const eventAsesor = await this.calendar.createEvent(eventAsesorData);
-          console.log('📅 Evento Google Calendar ASESOR HIPOTECARIO creado:', eventAsesor);
+          const eventAsesor = await calendarLocal.createEvent(eventAsesorData);
+          console.log('📅 Evento Google Calendar ASESOR HIPOTECARIO creado:', eventAsesor?.id);
         } catch (calError) {
           console.error('❌ Error Calendar Asesor:', calError);
         }
@@ -15824,7 +16331,7 @@ ${infoContactos}
       console.log('✅ CITA COMPLETA CREADA');
 
     } catch (error) {
-      console.error('❌’ Error en crearCitaCompleta:', error);
+      console.error('❌ Error en crearCitaCompleta:', error);
     }
   }
 
@@ -16185,10 +16692,37 @@ ${ingresoFinal > 0 ? `📊 Capacidad estimada: $${Math.round(ingresoFinal * 60).
     if (data.necesita_credito !== null && data.necesita_credito !== undefined && lead.needs_mortgage === null) {
       updates.needs_mortgage = data.necesita_credito;
     }
-    // num_recamaras deshabilitado - columna no existe en DB
-    // if (data.num_recamaras && !lead.num_recamaras) {
-    //   updates.num_recamaras = data.num_recamaras;
-    // }
+    if (data.num_recamaras && !lead.num_bedrooms_wanted) {
+      updates.num_bedrooms_wanted = data.num_recamaras;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // CAMPOS DE SEGMENTACIÓN
+    // ═══════════════════════════════════════════════════════════
+    if (data.how_found_us && !lead.how_found_us) {
+      updates.how_found_us = data.how_found_us;
+      console.log('📊 Fuente detectada:', data.how_found_us);
+    }
+    if (data.family_size && !lead.family_size) {
+      updates.family_size = data.family_size;
+      console.log('👨‍👩‍👧‍👦 Tamaño familia:', data.family_size);
+    }
+    if (data.current_housing && !lead.current_housing) {
+      updates.current_housing = data.current_housing;
+      console.log('🏠 Vivienda actual:', data.current_housing);
+    }
+    if (data.urgency && !lead.urgency) {
+      updates.urgency = data.urgency;
+      console.log('⏰ Urgencia:', data.urgency);
+    }
+    if (data.occupation && !lead.occupation) {
+      updates.occupation = data.occupation;
+      console.log('💼 Ocupación:', data.occupation);
+    }
+    if (data.age_range && !lead.age_range) {
+      updates.age_range = data.age_range;
+      console.log('🎂 Rango edad:', data.age_range);
+    }
 
     // Calcular score
     let score = lead.lead_score || 0;
@@ -16567,5 +17101,182 @@ ${ingresoFinal > 0 ? `📊 Capacidad estimada: $${Math.round(ingresoFinal * 60).
     }
 
     await this.twilio.sendWhatsAppMessage(from, msg);
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // PROCESAR RESPUESTA DE ENCUESTA (con comentarios)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async procesarRespuestaEncuesta(phone: string, mensaje: string): Promise<string | null> {
+    try {
+      // Buscar encuesta pendiente o esperando comentario
+      const { data: encuesta } = await this.supabase.client
+        .from('surveys')
+        .select('*')
+        .eq('lead_phone', phone)
+        .in('status', ['sent', 'awaiting_feedback'])
+        .order('sent_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (!encuesta) return null;
+
+      const textoLimpio = mensaje.trim();
+      const nombreCorto = encuesta.lead_name?.split(' ')[0] || 'Cliente';
+
+      // ═══════════════════════════════════════════════════════════
+      // PASO 2: Recibir comentario después de la calificación
+      // ═══════════════════════════════════════════════════════════
+      if (encuesta.status === 'awaiting_feedback') {
+        // Guardar el comentario
+        await this.supabase.client
+          .from('surveys')
+          .update({
+            status: 'answered',
+            answered_at: new Date().toISOString(),
+            feedback: textoLimpio
+          })
+          .eq('id', encuesta.id);
+
+        // Notificar al vendedor y admin
+        await this.notificarResultadoEncuesta(encuesta, textoLimpio);
+
+        return `¡Gracias por tu comentario *${nombreCorto}*! 🙏\n\nTu opinión nos ayuda a mejorar cada día. ¡Estamos para servirte!`;
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // PASO 1: Recibir calificación inicial
+      // ═══════════════════════════════════════════════════════════
+
+      // Encuesta post-cita (espera 1-4)
+      if (encuesta.survey_type === 'post_cita') {
+        const respuesta = parseInt(textoLimpio);
+        if (respuesta >= 1 && respuesta <= 4) {
+          const ratings: { [key: number]: { rating: number; texto: string } } = {
+            1: { rating: 5, texto: 'Excelente' },
+            2: { rating: 4, texto: 'Buena' },
+            3: { rating: 3, texto: 'Regular' },
+            4: { rating: 2, texto: 'Mala' }
+          };
+
+          // Guardar calificación y esperar comentario
+          await this.supabase.client
+            .from('surveys')
+            .update({
+              status: 'awaiting_feedback',
+              rating: ratings[respuesta].rating
+            })
+            .eq('id', encuesta.id);
+
+          // Pedir comentario según la calificación
+          if (respuesta <= 2) {
+            return `¡Gracias *${nombreCorto}*! 🌟\n\n¿Hay algo que quieras destacar o algún comentario adicional?\n\n_Escribe tu comentario o "no" para terminar_`;
+          } else {
+            return `Gracias por tu respuesta *${nombreCorto}*.\n\n¿Qué podemos mejorar? Tu opinión es muy valiosa.\n\n_Escribe tu comentario_`;
+          }
+        }
+      }
+
+      // Encuesta NPS (espera 0-10)
+      if (encuesta.survey_type === 'nps') {
+        const nps = parseInt(textoLimpio);
+        if (nps >= 0 && nps <= 10) {
+          // Guardar NPS y esperar comentario
+          await this.supabase.client
+            .from('surveys')
+            .update({
+              status: 'awaiting_feedback',
+              nps_score: nps,
+              would_recommend: nps >= 7
+            })
+            .eq('id', encuesta.id);
+
+          if (nps >= 9) {
+            return `¡Wow, gracias *${nombreCorto}*! 🌟\n\n¿Qué fue lo que más te gustó de trabajar con nosotros?\n\n_Escribe tu comentario o "no" para terminar_`;
+          } else if (nps >= 7) {
+            return `¡Gracias *${nombreCorto}*! 😊\n\n¿Hay algo que quieras compartir sobre tu experiencia?\n\n_Escribe tu comentario o "no" para terminar_`;
+          } else {
+            return `Gracias por tu honestidad *${nombreCorto}*.\n\n¿Qué pudimos haber hecho mejor? Nos encantaría escucharte.\n\n_Escribe tu comentario_`;
+          }
+        }
+      }
+
+      return null;
+    } catch (e) {
+      console.log('Error procesando respuesta encuesta:', e);
+      return null;
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // NOTIFICAR RESULTADO DE ENCUESTA A VENDEDOR Y ADMIN
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async notificarResultadoEncuesta(encuesta: any, comentario: string): Promise<void> {
+    try {
+      const ratingTextos: { [key: number]: string } = {
+        5: '⭐⭐⭐⭐⭐ Excelente',
+        4: '⭐⭐⭐⭐ Buena',
+        3: '⭐⭐⭐ Regular',
+        2: '⭐⭐ Mala',
+        1: '⭐ Muy mala'
+      };
+
+      const tipoEncuesta = encuesta.survey_type === 'post_cita' ? 'POST-CITA' : 'NPS';
+      const calificacion = encuesta.rating ? ratingTextos[encuesta.rating] || `${encuesta.rating}/5` : `NPS: ${encuesta.nps_score}/10`;
+
+      // Determinar emoji según calificación
+      let emoji = '📋';
+      if (encuesta.rating) {
+        emoji = encuesta.rating >= 4 ? '✅' : encuesta.rating === 3 ? '⚠️' : '🚨';
+      } else if (encuesta.nps_score !== null) {
+        emoji = encuesta.nps_score >= 9 ? '✅' : encuesta.nps_score >= 7 ? '⚠️' : '🚨';
+      }
+
+      const mensaje = `${emoji} *ENCUESTA ${tipoEncuesta}*
+
+👤 *Cliente:* ${encuesta.lead_name || 'Sin nombre'}
+📱 *Tel:* ${encuesta.lead_phone}
+👔 *Vendedor:* ${encuesta.vendedor_name || 'N/A'}
+
+📊 *Calificación:* ${calificacion}
+
+💬 *Comentario:*
+"${comentario === 'no' || comentario.toLowerCase() === 'no' ? 'Sin comentarios adicionales' : comentario}"
+
+_${new Date().toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}_`;
+
+      // Notificar al vendedor si tiene teléfono
+      if (encuesta.vendedor_id) {
+        const { data: vendedor } = await this.supabase.client
+          .from('team_members')
+          .select('phone')
+          .eq('id', encuesta.vendedor_id)
+          .single();
+
+        if (vendedor?.phone) {
+          await this.meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+          console.log(`📋 Encuesta notificada a vendedor ${encuesta.vendedor_name}`);
+        }
+      }
+
+      // Notificar a admins si calificación es baja
+      const esCalificacionBaja = (encuesta.rating && encuesta.rating <= 3) || (encuesta.nps_score !== null && encuesta.nps_score < 7);
+
+      if (esCalificacionBaja) {
+        const { data: admins } = await this.supabase.client
+          .from('team_members')
+          .select('phone, name')
+          .eq('role', 'admin')
+          .eq('active', true);
+
+        for (const admin of admins || []) {
+          if (admin.phone) {
+            await this.meta.sendWhatsAppMessage(admin.phone, `🚨 *ALERTA ENCUESTA BAJA*\n\n${mensaje}`);
+            console.log(`🚨 Alerta de encuesta enviada a admin ${admin.name}`);
+          }
+        }
+      }
+    } catch (e) {
+      console.log('Error notificando resultado de encuesta:', e);
+    }
   }
 }
