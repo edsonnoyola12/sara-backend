@@ -874,6 +874,7 @@ Te va a orientar sobre las mejores opciones de financiamiento para tu casa. ¡En
 
       if (lead.template_sent) {
         console.log('🔓 Cliente respondió a template:', lead.name, '- Mensaje:', body);
+        const templateType = lead.template_sent;
 
         // Limpiar template_sent para que no vuelva a detectar
         await this.supabase.client.from('leads').update({
@@ -887,8 +888,47 @@ Te va a orientar sobre las mejores opciones de financiamiento para tu casa. ¡En
           client_responded_at: new Date().toISOString()
         }).eq('lead_phone', cleanPhone).eq('confirmation_sent', true).is('client_responded', null);
 
-        // NO hacer return - dejar que SARA procese el mensaje normalmente
-        // Así si dice "Si" entiende que confirma, si dice "cancelar" ayuda a cancelar, etc.
+        // ✅ FIX 08-ENE-2026: Si es respuesta a template de confirmación de cita
+        if (templateType === 'appointment_confirmation') {
+          const bodyLower = body.toLowerCase().trim();
+          const esAfirmativo = /^(s[ií]|ok|okey|claro|perfecto|listo|de acuerdo|confirmo|confirmado|va|vale|genial|excelente|por supuesto|correcto)$/i.test(bodyLower) ||
+                              bodyLower.includes('confirmo') || bodyLower.includes('ahí estaré') || bodyLower.includes('ahi estare');
+          const esNegativo = /^(no|cancel|cambiar|reprogramar|otro día|otra hora)/i.test(bodyLower);
+
+          if (esAfirmativo) {
+            console.log('✅ Lead CONFIRMA cita con:', body);
+            // Buscar la cita para dar detalles
+            const { data: citaConfirmada } = await this.supabase.client
+              .from('appointments')
+              .select('*')
+              .eq('lead_phone', cleanPhone)
+              .eq('confirmation_sent', true)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .single();
+
+            let msgConfirmacion = `¡Excelente ${lead.name?.split(' ')[0] || ''}! 🎉 Tu cita está confirmada.`;
+            if (citaConfirmada) {
+              const fechaCita = citaConfirmada.scheduled_date ? new Date(citaConfirmada.scheduled_date).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'short' }) : '';
+              const horaCita = citaConfirmada.scheduled_time || '';
+              msgConfirmacion += `\n\n📅 ${fechaCita} a las ${horaCita}`;
+              if (citaConfirmada.development) {
+                msgConfirmacion += `\n📍 ${citaConfirmada.development}`;
+              }
+            }
+            msgConfirmacion += `\n\n¡Te esperamos! Si tienes cualquier duda, aquí estoy para ayudarte. 😊`;
+
+            await this.twilio.sendWhatsAppMessage(from, msgConfirmacion);
+            return; // No continuar a SARA
+          } else if (esNegativo) {
+            console.log('❌ Lead quiere cancelar/cambiar cita:', body);
+            await this.twilio.sendWhatsAppMessage(from, `Entendido, sin problema. ¿Te gustaría reprogramar para otro día u hora? Estoy aquí para ayudarte. 😊`);
+            return; // No continuar a SARA
+          }
+          // Si no es claro, continuar a SARA para que interprete
+          console.log('🤔 Respuesta no clara a confirmación, pasando a SARA...');
+        }
+
         console.log('📌 Continuando al procesamiento normal de SARA...');
       }
 
@@ -3733,6 +3773,63 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
 
     console.log('🔍 VENDEDOR HANDLER - mensaje:', mensaje);
 
+    // ✅ DETECTAR MENSAJE PENDIENTE PARA LEAD (ANTES de todo lo demás)
+    console.log('🔍 PASO 1: Buscando notas pendientes para vendedor ID:', vendedor.id);
+    try {
+      const { data: vendedorActualizado, error: errorNotes } = await this.supabase.client
+        .from('team_members')
+        .select('notes')
+        .eq('id', vendedor.id)
+        .single();
+
+      console.log('🔍 PASO 2: Query ejecutada - error:', errorNotes, '| data:', vendedorActualizado?.notes);
+
+    if (vendedorActualizado?.notes) {
+      try {
+        const notes = typeof vendedorActualizado.notes === 'string' ? JSON.parse(vendedorActualizado.notes) : vendedorActualizado.notes;
+
+        // Detectar selección de lead con número (1, 2, 3...)
+        if (notes?.pending_lead_selection) {
+          const seleccion = parseInt(mensaje);
+          if (!isNaN(seleccion) && seleccion >= 1 && seleccion <= notes.pending_lead_selection.leads.length) {
+            const leadSeleccionado = notes.pending_lead_selection.leads[seleccion - 1];
+            console.log('✅ Lead seleccionado:', leadSeleccionado.name);
+
+            // Guardar pending_message_to_lead con el lead seleccionado
+            const notesData = JSON.stringify({
+              pending_message_to_lead: {
+                lead_id: leadSeleccionado.id,
+                lead_name: leadSeleccionado.name,
+                lead_phone: leadSeleccionado.phone,
+                asked_at: new Date().toISOString()
+              }
+            });
+
+            await this.supabase.client
+              .from('team_members')
+              .update({ notes: notesData })
+              .eq('id', vendedor.id);
+
+            await this.twilio.sendWhatsAppMessage(from,
+              `📝 *¿Qué mensaje quieres enviar a ${leadSeleccionado.name}?*\n\n💡 Escribe el mensaje y lo envío.`
+            );
+            return;
+          }
+        }
+
+        if (notes?.pending_message_to_lead) {
+          console.log('📤 Enviando mensaje pendiente a lead:', notes.pending_message_to_lead.lead_name);
+          await this.enviarMensajePendienteLead(from, body, vendedor, notes.pending_message_to_lead);
+          return;
+        }
+      } catch (e) {
+        console.log('⚠️ Error parseando notes:', e);
+      }
+    }
+    } catch (outerError) {
+      console.log('⚠️ Error buscando notes de vendedor:', outerError);
+    }
+
     // INTERCEPCION TEMPRANA: reagendar
     if (mensaje.includes('reagendar') || mensaje.includes('re agendar') || mensaje.includes('mover cita') || mensaje.includes('cambiar cita')) {
       console.log('✅ REAGENDAR DETECTADO TEMPRANO!');
@@ -3841,7 +3938,35 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
       return;
     }
 
-    // HIPOTECA: ¿Cómo va el crédito?
+    // HIPOTECA: Ver lista de créditos de mis leads
+    // Comandos: "mis creditos", "creditos", "hipotecas", "mis hipotecas"
+    if (mensaje === 'creditos' || mensaje === 'créditos' || mensaje === 'mis creditos' || mensaje === 'mis créditos' ||
+        mensaje === 'hipotecas' || mensaje === 'mis hipotecas' || mensaje === 'ver creditos' || mensaje === 'ver créditos') {
+      await this.vendedorConsultarCredito(from, '', vendedor); // Sin nombre = muestra todos
+      return;
+    }
+
+    // =====================================================
+    // COMANDO 1: "status credito [nombre]" - Status estático de BD
+    // =====================================================
+    const statusCreditoMatch = body.match(/^status\s+(?:credito|crédito)\s+([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+)$/i);
+    if (statusCreditoMatch) {
+      const nombreLead = statusCreditoMatch[1].trim();
+      await this.vendedorConsultarCredito(from, nombreLead, vendedor);
+      return;
+    }
+
+    // =====================================================
+    // COMANDO 2: "preguntar asesor [nombre]" - Pregunta al asesor en vivo
+    // =====================================================
+    const preguntarAsesorMatch = body.match(/^preguntar\s+(?:al\s+)?asesor\s+(?:como\s+va\s+|cómo\s+va\s+)?([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+)$/i);
+    if (preguntarAsesorMatch) {
+      const nombreLead = preguntarAsesorMatch[1].trim();
+      await this.vendedorPreguntarAsesor(from, nombreLead, vendedor, teamMembers);
+      return;
+    }
+
+    // HIPOTECA: ¿Cómo va el crédito de X? (mantener compatibilidad)
     if ((mensaje.includes('cómo va') || mensaje.includes('como va') || mensaje.includes('estatus') || mensaje.includes('status')) &&
         (mensaje.includes('crédit') || mensaje.includes('credit') || mensaje.includes('hipoteca') || mensaje.includes('banco'))) {
       await this.vendedorConsultarCredito(from, body, vendedor);
@@ -3850,19 +3975,30 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
 
     // =====================================================
     // ASIGNAR LEAD A ASESOR HIPOTECARIO
-    // Formatos: "asesor para Juan", "pasarlo al asesor Juan", "credito para Juan"
+    // Formatos: "asesor para Juan", "asesor para Juan 5512345678", "credito para Juan"
     // =====================================================
-    const asesorMatch = body.match(/^(?:asesor\s+(?:para|a)|pasarlo?\s+(?:a|al)\s+asesor|cr[eé]dito\s+(?:para|a))\s+([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+)$/i);
+    const asesorMatch = body.match(/^(?:asesor\s+(?:para|a)|pasarlo?\s+(?:a|al)\s+asesor|cr[eé]dito\s+(?:para|a))\s+([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+?)(?:\s+(\d{10,13}))?$/i);
     if (asesorMatch) {
       const nombreLead = asesorMatch[1].trim();
-      await this.vendedorAsignarAsesor(from, nombreLead, vendedor, teamMembers);
+      const telefonoLead = asesorMatch[2] || null;
+      await this.vendedorAsignarAsesor(from, nombreLead, vendedor, teamMembers, telefonoLead);
+      return;
+    }
+
+    // =====================================================
+    // MENSAJE [nombre] - Enviar WhatsApp al lead
+    // =====================================================
+    const mensajeLeadMatch = body.match(/^(?:mensaje|whatsapp|wa|escribir)\s+(?:a\s+)?([a-zA-ZáéíóúñÁÉÍÓÚÑ\s\d]+)$/i);
+    if (mensajeLeadMatch) {
+      const nombreLead = mensajeLeadMatch[1].trim();
+      await this.enviarMensajeLead(from, nombreLead, vendedor);
       return;
     }
 
     // =====================================================
     // ACTIVIDADES: Llamé, Visité, Cotización, WhatsApp, Email
     // =====================================================
-    
+
     // ACTIVIDAD: Llamé a Juan / Llame a Juan
     const llameMatch = body.match(/^(?:llam[eé]|hable|hablé)\s+(?:a\s+)?([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+)$/i);
     if (llameMatch) {
@@ -5040,6 +5176,101 @@ ${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
     const mensaje = body.toLowerCase().trim();
     const nombreAsesor = asesor.name?.split(' ')[0] || 'crack';
 
+    // ✅ DETECTAR MENSAJE PENDIENTE PARA LEAD (Asesor)
+    const { data: asesorActualizado } = await this.supabase.client
+      .from('team_members')
+      .select('notes')
+      .eq('id', asesor.id)
+      .single();
+
+    if (asesorActualizado?.notes) {
+      try {
+        const notes = typeof asesorActualizado.notes === 'string' ? JSON.parse(asesorActualizado.notes) : asesorActualizado.notes;
+
+        // Detectar selección de lead con número (1, 2, 3...)
+        if (notes?.pending_lead_selection) {
+          const seleccion = parseInt(mensaje);
+          if (!isNaN(seleccion) && seleccion >= 1 && seleccion <= notes.pending_lead_selection.leads.length) {
+            const leadSeleccionado = notes.pending_lead_selection.leads[seleccion - 1];
+            console.log('✅ Asesor seleccionó lead:', leadSeleccionado.name);
+
+            const notesData = JSON.stringify({
+              pending_message_to_lead: {
+                lead_id: leadSeleccionado.id,
+                lead_name: leadSeleccionado.name,
+                lead_phone: leadSeleccionado.phone,
+                asked_at: new Date().toISOString()
+              }
+            });
+
+            await this.supabase.client
+              .from('team_members')
+              .update({ notes: notesData })
+              .eq('id', asesor.id);
+
+            await this.twilio.sendWhatsAppMessage(from,
+              `📝 *¿Qué mensaje quieres enviar a ${leadSeleccionado.name}?*\n\n💡 Escribe el mensaje y lo envío.`
+            );
+            return;
+          }
+        }
+
+        if (notes?.pending_message_to_lead) {
+          console.log('📤 Asesor enviando mensaje pendiente a lead:', notes.pending_message_to_lead.lead_name);
+          await this.enviarMensajePendienteLead(from, body, asesor, notes.pending_message_to_lead);
+          return;
+        }
+      } catch (e) {
+        // notes no es JSON válido, continuar
+      }
+    }
+
+    // ✅ FIX 08-ENE-2026: Detectar si hay pregunta pendiente de vendedor
+    // Si el asesor responde cualquier cosa, reenviar al vendedor
+    const { data: solicitudConPregunta } = await this.supabase.client
+      .from('mortgage_applications')
+      .select('*')
+      .eq('assigned_advisor_id', asesor.id)
+      .not('status_notes', 'is', null)
+      .limit(10);
+
+    if (solicitudConPregunta && solicitudConPregunta.length > 0) {
+      for (const sol of solicitudConPregunta) {
+        try {
+          const notes = typeof sol.status_notes === 'string' ? JSON.parse(sol.status_notes) : sol.status_notes;
+          if (notes?.pending_question && notes?.from_vendedor_phone) {
+            console.log(`💬 Asesor ${asesor.name} respondió a pregunta de vendedor sobre ${sol.lead_name}`);
+
+            // Enviar respuesta al vendedor
+            const msgVendedor = `💬 *Respuesta de ${asesor.name}* sobre *${sol.lead_name}*:
+
+"${body}"
+
+📋 Status: ${sol.status === 'pending' ? 'Pendiente' : sol.status === 'in_review' ? 'En revisión' : sol.status === 'sent_to_bank' ? 'En banco' : sol.status}`;
+
+            await this.twilio.sendWhatsAppMessage(notes.from_vendedor_phone, msgVendedor);
+
+            // Limpiar la pregunta pendiente
+            await this.supabase.client
+              .from('mortgage_applications')
+              .update({
+                status_notes: null,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', sol.id);
+
+            // Confirmar al asesor
+            await this.twilio.sendWhatsAppMessage(from,
+              `✅ Respuesta enviada a ${notes.from_vendedor_name || 'el vendedor'}.`
+            );
+            return;
+          }
+        } catch (e) {
+          // status_notes no es JSON válido, ignorar
+        }
+      }
+    }
+
     // 1. Briefing
     if (mensaje.includes('briefing') || mensaje.includes('buenos dias') || mensaje.includes('buenos días') || mensaje.includes('buen dia') || mensaje.includes('buen día') || mensaje === 'hola') {
       await this.asesorBriefing(from, asesor, nombreAsesor);
@@ -5153,6 +5384,26 @@ ${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
     // 7. Nota
     if (mensaje.includes('nota ') || mensaje.includes('apunte ')) {
       await this.asesorAgregarNota(from, body, asesor, nombreAsesor);
+      return;
+    }
+
+    // =====================================================
+    // LLAMAR [nombre] - Mostrar teléfono clickeable (Asesor)
+    // =====================================================
+    const llamarAsesorMatch = body.match(/^llamar\s+(?:a\s+)?([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+)$/i);
+    if (llamarAsesorMatch) {
+      const nombreLead = llamarAsesorMatch[1].trim();
+      await this.mostrarTelefonoLead(from, nombreLead, asesor);
+      return;
+    }
+
+    // =====================================================
+    // MENSAJE [nombre] - Enviar WhatsApp al lead (Asesor)
+    // =====================================================
+    const mensajeAsesorMatch = body.match(/^(?:mensaje|whatsapp|wa|escribir)\s+(?:a\s+)?([a-zA-ZáéíóúñÁÉÍÓÚÑ\s\d]+)$/i);
+    if (mensajeAsesorMatch) {
+      const nombreLead = mensajeAsesorMatch[1].trim();
+      await this.enviarMensajeLead(from, nombreLead, asesor);
       return;
     }
 
@@ -6603,26 +6854,41 @@ ${statusAnterior} → ${statusNuevo}
       nombreLead = matchNombre[1].replace(/(?:el\s+)?(?:crédit|credit|hipoteca|banco).*$/i, '').trim();
     }
 
-    // Si no hay nombre, mostrar todos los créditos activos
+    // Si no hay nombre, mostrar los créditos de MIS leads
     if (!nombreLead || nombreLead.length < 2) {
-      const { data: solicitudes } = await this.supabase.client
-        .from('mortgage_applications')
-        .select('*')
-        .in('status', ['pending', 'in_review', 'sent_to_bank'])
-        .order('updated_at', { ascending: false })
-        .limit(10);
+      // ✅ FIX 08-ENE-2026: Filtrar por leads asignados al vendedor
+      // Primero obtener IDs de leads del vendedor
+      const { data: misLeads } = await this.supabase.client
+        .from('leads')
+        .select('id')
+        .eq('assigned_to', vendedor.id);
 
-      if (!solicitudes || solicitudes.length === 0) {
-        await this.twilio.sendWhatsAppMessage(from, `📋 No hay créditos en proceso actualmente.`);
+      const misLeadIds = misLeads?.map((l: any) => l.id) || [];
+
+      let solicitudes: any[] = [];
+      if (misLeadIds.length > 0) {
+        const { data } = await this.supabase.client
+          .from('mortgage_applications')
+          .select('*')
+          .in('lead_id', misLeadIds)
+          .in('status', ['pending', 'in_review', 'sent_to_bank', 'approved'])
+          .order('updated_at', { ascending: false })
+          .limit(15);
+        solicitudes = data || [];
+      }
+
+      if (solicitudes.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from, `📋 No tienes leads con crédito en proceso.\n\n💡 Para asignar un lead al asesor: *"asesor para [nombre]"*`);
         return;
       }
 
-      let resp = `📋 *Créditos en proceso:*\n\n`;
+      let resp = `📋 *Créditos de tus leads:*\n\n`;
       solicitudes.forEach((s: any) => {
-        const emoji = s.status === 'pending' ? '⏳' : s.status === 'in_review' ? '📋' : '🏦';
-        resp += `${emoji} *${s.lead_name}* - ${s.bank}\n   ${s.status === 'pending' ? 'Pendiente' : s.status === 'in_review' ? 'En revisión' : 'En banco'}\n`;
+        const emoji = s.status === 'pending' ? '⏳' : s.status === 'in_review' ? '📋' : s.status === 'sent_to_bank' ? '🏦' : '✅';
+        const estadoCorto = s.status === 'pending' ? 'Pendiente' : s.status === 'in_review' ? 'Revisión' : s.status === 'sent_to_bank' ? 'En banco' : 'Aprobado';
+        resp += `${emoji} *${s.lead_name}* - ${s.bank || 'Sin banco'}\n   ${estadoCorto}${s.status_notes ? ' - ' + s.status_notes.substring(0, 30) : ''}\n`;
       });
-      resp += `\n💡 Escribe *"¿Cómo va crédito de Juan?"* para detalle`;
+      resp += `\n💡 *"¿Cómo va crédito de Juan?"* para detalle`;
 
       await this.twilio.sendWhatsAppMessage(from, resp);
       return;
@@ -6689,11 +6955,11 @@ ${statusAnterior} → ${statusNuevo}
 
   // ═══════════════════════════════════════════════════════════════
   // VENDEDOR: Asignar lead a asesor hipotecario
-  // Comando: "asesor para Juan", "pasarlo al asesor María", "crédito para Pedro"
+  // Comando: "asesor para Juan", "asesor para Juan 5512345678", "crédito para Pedro"
   // ═══════════════════════════════════════════════════════════════
-  private async vendedorAsignarAsesor(from: string, nombreLead: string, vendedor: any, teamMembers: any[]): Promise<void> {
+  private async vendedorAsignarAsesor(from: string, nombreLead: string, vendedor: any, teamMembers: any[], telefonoLead?: string | null): Promise<void> {
     try {
-      console.log(`🏦 Vendedor ${vendedor.name} asignando "${nombreLead}" a asesor hipotecario...`);
+      console.log(`🏦 Vendedor ${vendedor.name} asignando "${nombreLead}" ${telefonoLead ? 'tel:' + telefonoLead : ''} a asesor hipotecario...`);
 
       // 1. Buscar el lead del vendedor
       const { data: leads } = await this.supabase.client
@@ -6701,7 +6967,7 @@ ${statusAnterior} → ${statusNuevo}
         .select('*')
         .eq('assigned_to', vendedor.id)
         .ilike('name', `%${nombreLead}%`)
-        .limit(5);
+        .limit(10);
 
       if (!leads || leads.length === 0) {
         await this.twilio.sendWhatsAppMessage(from,
@@ -6710,18 +6976,33 @@ ${statusAnterior} → ${statusNuevo}
         return;
       }
 
-      // Si hay varios, pedir que especifique
-      if (leads.length > 1) {
-        let msg = `🔍 Encontré ${leads.length} leads con ese nombre:\n\n`;
-        leads.forEach((l: any, i: number) => {
+      let leadsFiltered = leads;
+
+      // ✅ FIX 08-ENE-2026: Si hay teléfono, filtrar por teléfono
+      if (telefonoLead && leads.length > 1) {
+        const telefonoLimpio = telefonoLead.replace(/\D/g, '').slice(-10);
+        const leadPorTel = leads.find((l: any) => {
+          const telLead = l.phone?.replace(/\D/g, '').slice(-10);
+          return telLead === telefonoLimpio;
+        });
+        if (leadPorTel) {
+          leadsFiltered = [leadPorTel];
+          console.log('📱 Lead filtrado por teléfono:', leadPorTel.name);
+        }
+      }
+
+      // Si hay varios y no se pudo filtrar, pedir que especifique
+      if (leadsFiltered.length > 1) {
+        let msg = `🔍 Encontré ${leadsFiltered.length} leads con ese nombre:\n\n`;
+        leadsFiltered.forEach((l: any, i: number) => {
           msg += `${i + 1}. *${l.name}* - ${l.phone}\n`;
         });
-        msg += `\n💡 Especifica el nombre completo.`;
+        msg += `\n💡 Agrega el teléfono:\n*"Asesor para ${nombreLead} ${leadsFiltered[0].phone?.replace(/\D/g, '').slice(-10)}"*`;
         await this.twilio.sendWhatsAppMessage(from, msg);
         return;
       }
 
-      const lead = leads[0];
+      const lead = leadsFiltered[0];
 
       // 2. Buscar asesores hipotecarios activos
       const asesores = teamMembers.filter(t =>
@@ -6749,6 +7030,41 @@ ${statusAnterior} → ${statusNuevo}
         })
         .eq('id', lead.id);
 
+      // 4.5 ✅ FIX 08-ENE-2026: Crear mortgage_application para que aparezca en CRM
+      // Verificar si ya existe una solicitud activa para este lead
+      const { data: solicitudExistente } = await this.supabase.client
+        .from('mortgage_applications')
+        .select('id')
+        .eq('lead_id', lead.id)
+        .in('status', ['pending', 'in_review', 'sent_to_bank'])
+        .limit(1)
+        .single();
+
+      if (!solicitudExistente) {
+        // Crear nueva solicitud hipotecaria
+        const { error: errorMortgage } = await this.supabase.client
+          .from('mortgage_applications')
+          .insert({
+            lead_id: lead.id,
+            lead_name: lead.name,
+            lead_phone: lead.phone,
+            status: 'pending',
+            assigned_advisor_id: asesor.id,
+            property_name: lead.property_interest || 'Por definir',
+            bank: 'Por definir',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+
+        if (errorMortgage) {
+          console.log('⚠️ Error creando mortgage_application:', errorMortgage);
+        } else {
+          console.log('✅ mortgage_application CREADA para:', lead.name);
+        }
+      } else {
+        console.log('ℹ️ Ya existe mortgage_application activa para:', lead.name);
+      }
+
       // 5. Notificar al asesor hipotecario
       const msgAsesor = `🏦 *LEAD ASIGNADO PARA CRÉDITO*
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -6774,6 +7090,300 @@ ${statusAnterior} → ${statusNuevo}
     } catch (e) {
       console.log('❌ Error asignando asesor:', e);
       await this.twilio.sendWhatsAppMessage(from, `❌ Error al asignar. Intenta de nuevo.`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // VENDEDOR: Preguntar al asesor cómo va un lead (comunicación en vivo)
+  // Comando: "preguntar asesor vanessa"
+  // ═══════════════════════════════════════════════════════════════
+  private async vendedorPreguntarAsesor(from: string, nombreLead: string, vendedor: any, teamMembers: any[]): Promise<void> {
+    try {
+      console.log(`💬 Vendedor ${vendedor.name} preguntando al asesor por "${nombreLead}"...`);
+
+      // 1. Buscar el lead
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('*')
+        .eq('assigned_to', vendedor.id)
+        .ilike('name', `%${nombreLead}%`)
+        .limit(5);
+
+      if (!leads || leads.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `❌ No encontré un lead llamado *"${nombreLead}"*.\n\n💡 Escribe *"mis leads"* para ver tu lista.`
+        );
+        return;
+      }
+
+      // Si hay varios, tomar el primero que tenga asesor
+      const lead = leads.find((l: any) => l.asesor_banco_id) || leads[0];
+
+      // 2. Buscar la solicitud de hipoteca
+      const { data: solicitud } = await this.supabase.client
+        .from('mortgage_applications')
+        .select('*')
+        .eq('lead_id', lead.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (!solicitud || !solicitud.assigned_advisor_id) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `⚠️ *${lead.name}* no tiene asesor hipotecario asignado.\n\n💡 Usa: *"asesor para ${lead.name}"*`
+        );
+        return;
+      }
+
+      // 3. Buscar datos del asesor
+      const asesor = teamMembers.find((t: any) => t.id === solicitud.assigned_advisor_id);
+      if (!asesor || !asesor.phone) {
+        await this.twilio.sendWhatsAppMessage(from, `⚠️ No encontré el asesor asignado.`);
+        return;
+      }
+
+      // 4. Guardar pending en la solicitud para detectar respuesta
+      await this.supabase.client
+        .from('mortgage_applications')
+        .update({
+          status_notes: JSON.stringify({
+            pending_question: true,
+            from_vendedor_id: vendedor.id,
+            from_vendedor_phone: from,
+            from_vendedor_name: vendedor.name,
+            asked_at: new Date().toISOString()
+          }),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', solicitud.id);
+
+      // 5. Enviar mensaje al asesor
+      const msgAsesor = `💬 *PREGUNTA DE VENDEDOR*
+━━━━━━━━━━━━━━━━━━━━━━
+
+👔 *${vendedor.name}* pregunta:
+¿Cómo va el crédito de *${lead.name}*?
+
+📋 *Status actual:* ${solicitud.status === 'pending' ? 'Pendiente' : solicitud.status === 'in_review' ? 'En revisión' : solicitud.status === 'sent_to_bank' ? 'En banco' : solicitud.status}
+🏦 *Banco:* ${solicitud.bank || 'Sin asignar'}
+
+━━━━━━━━━━━━━━━━━━━━━━
+💡 *Responde aquí* y se lo envío a ${vendedor.name?.split(' ')[0]}`;
+
+      await this.twilio.sendWhatsAppMessage(asesor.phone, msgAsesor);
+
+      // 6. Confirmar al vendedor
+      await this.twilio.sendWhatsAppMessage(from,
+        `✅ Le pregunté a *${asesor.name}* por *${lead.name}*.\n\n📩 Te envío su respuesta cuando conteste.`
+      );
+
+      console.log(`✅ Pregunta enviada a asesor ${asesor.name} sobre ${lead.name}`);
+    } catch (e) {
+      console.log('❌ Error preguntando a asesor:', e);
+      await this.twilio.sendWhatsAppMessage(from, `❌ Error. Intenta de nuevo.`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // LLAMAR [nombre] - Mostrar teléfono clickeable para marcar
+  // ═══════════════════════════════════════════════════════════════
+  private async mostrarTelefonoLead(from: string, nombreLead: string, usuario: any): Promise<void> {
+    try {
+      // Buscar lead por nombre (del usuario o global si es asesor)
+      let query = this.supabase.client
+        .from('leads')
+        .select('*')
+        .ilike('name', `%${nombreLead}%`)
+        .limit(5);
+
+      // Si es vendedor, filtrar por sus leads
+      if (usuario.role === 'vendedor' || usuario.role === 'seller') {
+        query = query.eq('assigned_to', usuario.id);
+      }
+
+      const { data: leads } = await query;
+
+      if (!leads || leads.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from, `❌ No encontré un lead llamado *"${nombreLead}"*.`);
+        return;
+      }
+
+      const lead = leads[0];
+      const telefono = lead.phone?.replace(/\D/g, '') || '';
+      const telFormateado = telefono.length === 10 ? `52${telefono}` : telefono;
+
+      const msg = `📞 *${lead.name}*
+
+☎️ Teléfono: ${lead.phone}
+📱 Marcar: tel:+${telFormateado}
+
+💡 Toca el número para llamar`;
+
+      await this.twilio.sendWhatsAppMessage(from, msg);
+      console.log(`📞 Teléfono mostrado: ${lead.name} -> ${usuario.name}`);
+    } catch (e) {
+      console.log('❌ Error mostrando teléfono:', e);
+      await this.twilio.sendWhatsAppMessage(from, `❌ Error. Intenta de nuevo.`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // MENSAJE [nombre] - Enviar WhatsApp al lead (pregunta qué mensaje)
+  // ═══════════════════════════════════════════════════════════════
+  private async enviarMensajeLead(from: string, nombreLead: string, usuario: any): Promise<void> {
+    try {
+      // Detectar si incluye últimos 4 dígitos del teléfono: "vanessa 8993"
+      const matchDigitos = nombreLead.match(/^(.+?)\s+(\d{4})$/);
+      let nombreBuscar = nombreLead;
+      let digitosFiltro = '';
+
+      if (matchDigitos) {
+        nombreBuscar = matchDigitos[1].trim();
+        digitosFiltro = matchDigitos[2];
+        console.log(`🔍 Buscando lead: "${nombreBuscar}" con teléfono terminado en ${digitosFiltro}`);
+      }
+
+      // Buscar lead por nombre
+      let query = this.supabase.client
+        .from('leads')
+        .select('*')
+        .ilike('name', `%${nombreBuscar}%`)
+        .limit(10);
+
+      // Si es vendedor, filtrar por sus leads
+      if (usuario.role === 'vendedor' || usuario.role === 'seller') {
+        query = query.eq('assigned_to', usuario.id);
+      }
+
+      let { data: leads } = await query;
+
+      if (!leads || leads.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from, `❌ No encontré un lead llamado *"${nombreBuscar}"*.`);
+        return;
+      }
+
+      // Si se especificaron últimos 4 dígitos, filtrar por ellos
+      if (digitosFiltro) {
+        leads = leads.filter((l: any) => {
+          const tel = l.phone?.replace(/\D/g, '') || '';
+          return tel.endsWith(digitosFiltro);
+        });
+
+        if (leads.length === 0) {
+          await this.twilio.sendWhatsAppMessage(from, `❌ No encontré un lead *"${nombreBuscar}"* con teléfono terminado en *${digitosFiltro}*.`);
+          return;
+        }
+      }
+
+      // Si hay múltiples leads con el mismo nombre, guardar opciones y preguntar
+      if (leads.length > 1) {
+        // Guardar las opciones en notes para que el usuario elija con número
+        const leadsOptions = leads.map((l: any) => ({
+          id: l.id,
+          name: l.name,
+          phone: l.phone?.replace(/\D/g, '').slice(-10) || ''
+        }));
+
+        const notesData = JSON.stringify({
+          pending_lead_selection: {
+            leads: leadsOptions,
+            action: 'mensaje',
+            asked_at: new Date().toISOString()
+          }
+        });
+
+        await this.supabase.client
+          .from('team_members')
+          .update({ notes: notesData })
+          .eq('id', usuario.id);
+
+        let msg = `📋 Encontré *${leads.length} leads* con ese nombre:\n\n`;
+        leads.forEach((l: any, i: number) => {
+          const tel = l.phone?.replace(/\D/g, '').slice(-10) || 'sin tel';
+          msg += `${i + 1}️⃣ *${l.name}* - ${tel}\n`;
+        });
+        msg += `\n💡 Responde con el número (1, 2, etc.)`;
+        await this.twilio.sendWhatsAppMessage(from, msg);
+        return;
+      }
+
+      const lead = leads[0];
+      const telefono = lead.phone?.replace(/\D/g, '').slice(-10) || '';
+
+      if (!telefono) {
+        await this.twilio.sendWhatsAppMessage(from, `⚠️ *${lead.name}* no tiene teléfono registrado.`);
+        return;
+      }
+
+      // Guardar pending para esperar el mensaje
+      const notesData = JSON.stringify({
+        pending_message_to_lead: {
+          lead_id: lead.id,
+          lead_name: lead.name,
+          lead_phone: telefono,
+          asked_at: new Date().toISOString()
+        }
+      });
+
+      console.log('💾 GUARDANDO PENDING - usuario_id:', usuario.id, '| notes:', notesData);
+
+      const { error: errorSave } = await this.supabase.client
+        .from('team_members')
+        .update({ notes: notesData })
+        .eq('id', usuario.id);
+
+      if (errorSave) {
+        console.log('❌ ERROR guardando notes:', errorSave);
+      } else {
+        console.log('✅ Notes guardado correctamente');
+      }
+
+      // Preguntar qué mensaje enviar
+      await this.twilio.sendWhatsAppMessage(from,
+        `📝 *¿Qué mensaje quieres enviar a ${lead.name}?*\n\n💡 Escribe el mensaje y lo envío.`
+      );
+
+      console.log(`💬 Esperando mensaje para ${lead.name} de ${usuario.name}`);
+    } catch (e) {
+      console.log('❌ Error preparando mensaje:', e);
+      await this.twilio.sendWhatsAppMessage(from, `❌ Error. Intenta de nuevo.`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Enviar mensaje pendiente al lead (cuando el usuario escribe el contenido)
+  // ═══════════════════════════════════════════════════════════════
+  private async enviarMensajePendienteLead(from: string, mensaje: string, usuario: any, pendingData: any): Promise<void> {
+    try {
+      const { lead_id, lead_name, lead_phone } = pendingData;
+
+      // Enviar mensaje al lead
+      await this.meta.sendWhatsAppMessage(lead_phone, mensaje);
+
+      // Limpiar pending
+      await this.supabase.client
+        .from('team_members')
+        .update({ notes: null })
+        .eq('id', usuario.id);
+
+      // Confirmar al usuario
+      await this.twilio.sendWhatsAppMessage(from,
+        `✅ Mensaje enviado a *${lead_name}*\n\n📤 "${mensaje.substring(0, 50)}${mensaje.length > 50 ? '...' : ''}"`
+      );
+
+      // Registrar actividad
+      await this.supabase.client.from('activities').insert({
+        lead_id: lead_id,
+        type: 'whatsapp',
+        description: `WhatsApp: "${mensaje.substring(0, 100)}"`,
+        created_at: new Date().toISOString(),
+        created_by: usuario.id
+      });
+
+      console.log(`💬 Mensaje enviado a ${lead_name} por ${usuario.name}: ${mensaje.substring(0, 30)}...`);
+    } catch (e) {
+      console.log('❌ Error enviando mensaje pendiente:', e);
+      await this.twilio.sendWhatsAppMessage(from, `❌ Error enviando mensaje. Intenta de nuevo.`);
     }
   }
 
@@ -7339,7 +7949,22 @@ Escribe el nombre completo para continuar.`;
     const matchDia = body.match(/(mañana|hoy|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)/i);
     // Patrón para fechas específicas: "7 de enero", "15 de febrero", etc.
     const matchFechaEspecifica = body.match(/(\d{1,2})\s*(?:de\s*)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/i);
-    const matchDesarrollo = body.match(/(?:en|desarrollo)\s+([a-záéíóúñ\s]+)$/i);
+    // Desarrollo: buscar "en [desarrollo]" O detectar nombres de desarrollos conocidos al final
+    let matchDesarrollo = body.match(/(?:en|para|desarrollo)\s+([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+)$/i);
+
+    // Si no hay match, buscar desarrollos conocidos al final del mensaje
+    if (!matchDesarrollo) {
+      const desarrollosConocidos = ['distrito falco', 'los encinos', 'miravalle', 'santa rita', 'valle dorado', 'rinconada', 'la cantera', 'montebello', 'prados', 'jardines'];
+      const bodyLower = body.toLowerCase();
+      for (const dev of desarrollosConocidos) {
+        if (bodyLower.endsWith(dev) || bodyLower.includes(` ${dev}`)) {
+          // Extraer el desarrollo del mensaje original (con mayúsculas originales)
+          const idx = bodyLower.lastIndexOf(dev);
+          matchDesarrollo = { 1: body.substring(idx, idx + dev.length) } as any;
+          break;
+        }
+      }
+    }
 
     if (!matchNombre) {
       await this.twilio.sendWhatsAppMessage(from,
@@ -7442,12 +8067,25 @@ Escribe el nombre completo para continuar.`;
       }
     }
 
+    // Si hay múltiples leads Y tenemos teléfono, filtrar por teléfono
+    if (leads.length > 1 && telefono) {
+      const leadFiltrado = leads.find((l: any) =>
+        l.phone?.includes(telefono) ||
+        l.phone?.endsWith(telefono) ||
+        l.phone?.replace(/\D/g, '').endsWith(telefono)
+      );
+      if (leadFiltrado) {
+        console.log('📱 Múltiples leads filtrados por teléfono:', leadFiltrado.name);
+        leads = [leadFiltrado];
+      }
+    }
+
     if (leads.length > 1) {
       let msg = `🤝 Encontré ${leads.length} leads:\n\n`;
       leads.forEach((l: any, i: number) => {
         msg += `${i + 1}. ${l.name} (...${l.phone?.slice(-4) || '????'})\n`;
       });
-      msg += `\nEscribe nombre completo.`;
+      msg += `\n💡 Incluye el teléfono para elegir:\n*"Cita vanessa 5512345678 mañana 10am"*`;
       await this.twilio.sendWhatsAppMessage(from, msg);
       return;
     }
@@ -8505,15 +9143,16 @@ SÉ MUY CONCRETO. NO repitas los datos, ANALÍÍZALOS. Máximo 200 palabras.`;
         // ═══ TEMPLATE (lead nunca ha escrito o hace más de 24h) ═══
         console.log('📤 Enviando TEMPLATE (lead inactivo o nuevo)');
 
-        // Template: ¡Hola {{1}}! Tu cita para visita a {{2}} el {{3}} a las {{4}} está confirmada.
+        // Template Meta: ¡Hola {{1}}! Gracias por agendar con {{2}}. Tu cita para el {{3}} a las {{4}} está confirmada. Te esperamos en: {{5}}.
         const templateComponents = [
           {
             type: 'body',
             parameters: [
-              { type: 'text', text: lead.name?.split(' ')[0] || 'cliente' }, // {{1}} Nombre
-              { type: 'text', text: conf.desarrollo || 'nuestras oficinas' }, // {{2}} Desarrollo
-              { type: 'text', text: conf.fecha },                             // {{3}} Fecha
-              { type: 'text', text: conf.hora }                               // {{4}} Hora
+              { type: 'text', text: lead.name?.split(' ')[0] || 'cliente' },           // {{1}} Nombre
+              { type: 'text', text: 'Grupo Santa Rita' },                              // {{2}} Empresa
+              { type: 'text', text: conf.fecha },                                      // {{3}} Fecha → "Tu cita para el sábado 10 ene"
+              { type: 'text', text: conf.hora },                                       // {{4}} Hora → "a las 11:00"
+              { type: 'text', text: conf.desarrollo || 'nuestras oficinas' }           // {{5}} Lugar → "Te esperamos en: Distrito Falco"
             ]
           }
         ];
