@@ -3822,6 +3822,31 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
           await this.enviarMensajePendienteLead(from, body, vendedor, notes.pending_message_to_lead);
           return;
         }
+
+        // Detectar selección de lead para hipoteca (1, 2, 3...)
+        if (notes?.pending_hipoteca_selection) {
+          const seleccion = parseInt(mensaje);
+          if (!isNaN(seleccion) && seleccion >= 1 && seleccion <= notes.pending_hipoteca_selection.leads.length) {
+            const leadSeleccionado = notes.pending_hipoteca_selection.leads[seleccion - 1];
+            console.log('✅ Lead seleccionado para hipoteca:', leadSeleccionado.name);
+
+            // Limpiar notes
+            await this.supabase.client
+              .from('team_members')
+              .update({ notes: null })
+              .eq('id', vendedor.id);
+
+            // Cargar teamMembers para el round robin
+            const { data: teamMembersData } = await this.supabase.client
+              .from('team_members')
+              .select('*')
+              .eq('active', true);
+
+            // Asignar hipoteca al lead seleccionado
+            await this.asignarHipotecaALead(from, leadSeleccionado, vendedor, teamMembersData || []);
+            return;
+          }
+        }
       } catch (e) {
         console.log('⚠️ Error parseando notes:', e);
       }
@@ -3848,6 +3873,13 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
     if ((mensaje.startsWith('crear ') || mensaje.startsWith('registrar ') || mensaje.startsWith('nuevo ')) && mensaje.match(/\d{10,13}/)) {
       console.log('✅ CREAR LEAD DETECTADO TEMPRANO!');
       await this.vendedorCrearLead(from, body, vendedor, nombreVendedor);
+      return;
+    }
+
+    // INTERCEPCION TEMPRANA: asignar hipoteca a lead existente - "hipoteca Juan"
+    if (mensaje.startsWith('hipoteca ')) {
+      console.log('✅ ASIGNAR HIPOTECA A LEAD DETECTADO!');
+      await this.vendedorAsignarHipoteca(from, body, vendedor, nombreVendedor, teamMembers);
       return;
     }
 
@@ -5388,6 +5420,14 @@ ${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
     }
 
     // =====================================================
+    // CREAR LEAD HIPOTECA - "nuevo Juan 5512345678 para Edson"
+    // =====================================================
+    if ((mensaje.startsWith('nuevo ') || mensaje.startsWith('crear ') || mensaje.startsWith('registrar ')) && mensaje.match(/\d{10,13}/)) {
+      await this.asesorCrearLeadHipoteca(from, body, asesor, nombreAsesor, teamMembers);
+      return;
+    }
+
+    // =====================================================
     // LLAMAR [nombre] - Mostrar teléfono clickeable (Asesor)
     // =====================================================
     const llamarAsesorMatch = body.match(/^llamar\s+(?:a\s+)?([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+)$/i);
@@ -5734,7 +5774,179 @@ ${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
       .update({ mortgage_status: 'rechazado', updated_at: new Date().toISOString() })
       .eq('id', leads[0].id);
 
-    await this.twilio.sendWhatsAppMessage(from, `❌’ *${leads[0].name}* marcado como RECHAZADO`);
+    await this.twilio.sendWhatsAppMessage(from, `❌' *${leads[0].name}* marcado como RECHAZADO`);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ASESOR CREAR LEAD HIPOTECA
+  // Formato: "nuevo Juan Garcia 5512345678 para Edson" o "nuevo Juan Garcia 5512345678"
+  // ═══════════════════════════════════════════════════════════════
+  private async asesorCrearLeadHipoteca(from: string, body: string, asesor: any, nombre: string, teamMembers: any[]): Promise<void> {
+    console.log('📝 asesorCrearLeadHipoteca llamado con:', body);
+
+    // Regex: "nuevo/crear/registrar [nombre] [telefono] para [vendedor]"
+    const match = body.match(/(?:nuevo|crear|registrar)\s+([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+?)\s+(\d{10,13})(?:\s+(?:para|a|con)\s+([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+))?$/i);
+
+    if (!match) {
+      await this.twilio.sendWhatsAppMessage(from,
+        `👤 *Crear lead hipotecario:*\n\n` +
+        `📝 *"nuevo Juan García 5512345678 para Edson"*\n\n` +
+        `O sin vendedor asignado:\n` +
+        `📝 *"nuevo Juan García 5512345678"*`
+      );
+      return;
+    }
+
+    const nombreLead = match[1].trim();
+    const telefonoRaw = match[2];
+    const telefono = telefonoRaw.slice(-10);
+    const nombreVendedor = match[3]?.trim();
+
+    // Verificar si ya existe
+    const { data: existente } = await this.supabase.client
+      .from('leads')
+      .select('id, name, phone')
+      .or(`phone.like.%${telefono},phone.eq.${telefono},phone.eq.521${telefono},phone.eq.52${telefono}`)
+      .limit(1);
+
+    if (existente && existente.length > 0) {
+      await this.twilio.sendWhatsAppMessage(from,
+        `⚠️ Ya existe un lead con ese teléfono:\n*${existente[0].name}*`
+      );
+      return;
+    }
+
+    // Buscar vendedor si se especificó, o asignar por round robin
+    let vendedorAsignado: any = null;
+    let asignadoPorRoundRobin = false;
+
+    if (nombreVendedor) {
+      // Vendedor especificado por el asesor
+      const vendedores = teamMembers.filter((m: any) =>
+        (m.role === 'vendedor' || m.role === 'seller') &&
+        m.name.toLowerCase().includes(nombreVendedor.toLowerCase())
+      );
+
+      if (vendedores.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `❌ No encontré vendedor *"${nombreVendedor}"*.\n\n` +
+          `Vendedores disponibles:\n` +
+          teamMembers.filter((m: any) => m.role === 'vendedor' || m.role === 'seller')
+            .map((v: any) => `• ${v.name}`).join('\n')
+        );
+        return;
+      }
+      vendedorAsignado = vendedores[0];
+    } else {
+      // Round robin - asignar al vendedor con menos leads activos
+      console.log('🔄 Round robin - buscando vendedor con menos leads...');
+      const vendedores = teamMembers.filter((m: any) =>
+        (m.role === 'vendedor' || m.role === 'seller') && m.active !== false
+      );
+
+      if (vendedores.length > 0) {
+        // Contar leads activos por vendedor
+        const leadCounts: { [key: string]: number } = {};
+        for (const v of vendedores) {
+          const { count } = await this.supabase.client
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('assigned_to', v.id)
+            .in('status', ['new', 'contacted', 'qualified', 'appointment_scheduled']);
+          leadCounts[v.id] = count || 0;
+          console.log(`   - ${v.name}: ${leadCounts[v.id]} leads activos`);
+        }
+
+        // Seleccionar el que tenga menos
+        vendedorAsignado = vendedores.reduce((min, v) =>
+          leadCounts[v.id] < leadCounts[min.id] ? v : min
+        );
+        asignadoPorRoundRobin = true;
+        console.log(`✅ Round robin seleccionó a: ${vendedorAsignado.name}`);
+      }
+    }
+
+    // Normalizar teléfono
+    const telefonoNormalizado = '521' + telefono;
+
+    // Crear lead
+    const { data: nuevoLead, error } = await this.supabase.client
+      .from('leads')
+      .insert({
+        name: nombreLead,
+        phone: telefonoNormalizado,
+        assigned_to: vendedorAsignado?.id || null,
+        status: 'new',
+        lead_category: 'WARM',
+        source: 'asesor_hipotecario',
+        needs_mortgage: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.log('❌ Error creando lead:', error);
+      await this.twilio.sendWhatsAppMessage(from, `❌ Error al crear lead: ${error.message}`);
+      return;
+    }
+
+    // Crear mortgage_application
+    const { error: errorMortgage } = await this.supabase.client
+      .from('mortgage_applications')
+      .insert({
+        lead_id: nuevoLead.id,
+        lead_name: nombreLead,
+        lead_phone: telefonoNormalizado,
+        status: 'pending',
+        assigned_advisor_id: asesor.id,
+        property_name: 'Por definir',
+        bank: 'Por definir',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+
+    if (errorMortgage) {
+      console.log('⚠️ Error creando mortgage_application:', errorMortgage);
+    }
+
+    // Notificar al vendedor si fue asignado
+    if (vendedorAsignado?.phone) {
+      const vPhone = vendedorAsignado.phone.replace(/[^0-9]/g, '');
+      const vFormatted = vPhone.startsWith('52') ? vPhone : '52' + vPhone.slice(-10);
+
+      const msgVendedor = asignadoPorRoundRobin
+        ? `🏦 *NUEVO LEAD HIPOTECARIO*\n\n` +
+          `👤 *${nombreLead}*\n` +
+          `📱 ${telefono}\n` +
+          `👨‍💼 Asesor: ${asesor.name}\n\n` +
+          `💡 El asesor ${asesor.name} está trabajando el crédito de este lead. Te fue asignado automáticamente.`
+        : `🏦 *NUEVO LEAD HIPOTECARIO*\n\n` +
+          `👤 *${nombreLead}*\n` +
+          `📱 ${telefono}\n` +
+          `👨‍💼 Asesor: ${asesor.name}\n\n` +
+          `💡 El asesor ${asesor.name} te asignó este lead para crédito hipotecario.`;
+
+      await this.twilio.sendWhatsAppMessage(this.formatPhoneMX(vFormatted), msgVendedor);
+      console.log('📤 Vendedor notificado de nuevo lead hipotecario:', vendedorAsignado.name, asignadoPorRoundRobin ? '(round robin)' : '');
+    }
+
+    // Confirmar al asesor
+    let msgCreado = `✅ *Lead hipotecario creado:*\n\n👤 ${nombreLead}\n📱 ${telefono}`;
+    if (vendedorAsignado) {
+      if (asignadoPorRoundRobin) {
+        msgCreado += `\n🔄 Asignado automáticamente a: *${vendedorAsignado.name}* (notificado)`;
+      } else {
+        msgCreado += `\n👔 Vendedor: ${vendedorAsignado.name} (notificado)`;
+      }
+    } else {
+      msgCreado += `\n⚠️ Sin vendedor asignado (no hay vendedores activos)`;
+    }
+    msgCreado += `\n🏦 Solicitud de crédito creada`;
+
+    await this.twilio.sendWhatsAppMessage(from, msgCreado);
+    console.log('✅ Lead hipotecario creado por asesor:', nombreLead, asignadoPorRoundRobin ? `(round robin → ${vendedorAsignado?.name})` : '');
   }
 
   private async asesorAgregarNota(from: string, body: string, asesor: any, nombre: string): Promise<void> {
@@ -7905,6 +8117,168 @@ Escribe el nombre completo para continuar.`;
     if (interes) msgCreado += `\n🏠 Interés: ${interes}`;
     msgCreado += `\n📌 WARM\n\nYa puedes agendar cita con este lead.`;
     await this.twilio.sendWhatsAppMessage(from, msgCreado);
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // VENDEDOR ASIGNAR HIPOTECA A LEAD EXISTENTE
+  // Formato: "hipoteca Juan" - busca lead existente y le asigna asesor
+  // ═══════════════════════════════════════════════════════════════
+  private async vendedorAsignarHipoteca(from: string, body: string, vendedor: any, nombre: string, teamMembers: any[]): Promise<void> {
+    console.log('🏦 vendedorAsignarHipoteca llamado con:', body);
+
+    // Extraer nombre del lead: "hipoteca Juan García"
+    const match = body.match(/hipoteca\s+(.+)/i);
+    if (!match) {
+      await this.twilio.sendWhatsAppMessage(from,
+        `🏦 *Asignar hipoteca a lead:*\n\n` +
+        `📝 *"hipoteca Juan García"*\n\n` +
+        `Se asigna asesor automáticamente.`
+      );
+      return;
+    }
+
+    const nombreBusqueda = match[1].trim();
+
+    // Buscar lead existente del vendedor
+    const { data: leads } = await this.supabase.client
+      .from('leads')
+      .select('id, name, phone, needs_mortgage')
+      .eq('assigned_to', vendedor.id)
+      .ilike('name', `%${nombreBusqueda}%`)
+      .limit(5);
+
+    if (!leads || leads.length === 0) {
+      await this.twilio.sendWhatsAppMessage(from,
+        `❌ No encontré ningún lead tuyo con el nombre *"${nombreBusqueda}"*`
+      );
+      return;
+    }
+
+    // Si hay múltiples leads, mostrar opciones
+    if (leads.length > 1) {
+      const notesData = JSON.stringify({
+        pending_hipoteca_selection: {
+          leads: leads.map((l: any) => ({ id: l.id, name: l.name, phone: l.phone })),
+          asked_at: new Date().toISOString()
+        }
+      });
+
+      await this.supabase.client
+        .from('team_members')
+        .update({ notes: notesData })
+        .eq('id', vendedor.id);
+
+      let msg = `📋 Encontré *${leads.length} leads* con ese nombre:\n\n`;
+      leads.forEach((l: any, i: number) => {
+        const tel = l.phone?.replace(/\D/g, '').slice(-10) || 'sin tel';
+        msg += `${i + 1}️⃣ *${l.name}* - ${tel}\n`;
+      });
+      msg += `\n💡 Responde con el número (1, 2, etc.)`;
+      await this.twilio.sendWhatsAppMessage(from, msg);
+      return;
+    }
+
+    // Un solo lead encontrado - asignar hipoteca
+    const leadEncontrado = leads[0];
+    await this.asignarHipotecaALead(from, leadEncontrado, vendedor, teamMembers);
+  }
+
+  // Función auxiliar para asignar hipoteca a un lead
+  private async asignarHipotecaALead(from: string, lead: any, vendedor: any, teamMembers: any[]): Promise<void> {
+    // Verificar si ya tiene hipoteca
+    if (lead.needs_mortgage) {
+      const { data: existingApp } = await this.supabase.client
+        .from('mortgage_applications')
+        .select('*, team_members!mortgage_applications_assigned_advisor_id_fkey(name)')
+        .eq('lead_id', lead.id)
+        .single();
+
+      if (existingApp) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `⚠️ *${lead.name}* ya tiene hipoteca asignada.\n` +
+          `🏦 Asesor: ${existingApp.team_members?.name || 'Sin asesor'}\n` +
+          `📊 Estado: ${existingApp.status}`
+        );
+        return;
+      }
+    }
+
+    // Buscar asesor por round robin
+    console.log('🔄 Round robin - buscando asesor con menos aplicaciones...');
+    const asesores = teamMembers.filter((m: any) =>
+      m.role === 'asesor' && m.active !== false
+    );
+
+    let asesorAsignado: any = null;
+    if (asesores.length > 0) {
+      const appCounts: { [key: string]: number } = {};
+      for (const a of asesores) {
+        const { count } = await this.supabase.client
+          .from('mortgage_applications')
+          .select('*', { count: 'exact', head: true })
+          .eq('assigned_advisor_id', a.id)
+          .in('status', ['pending', 'in_progress', 'documents_pending']);
+        appCounts[a.id] = count || 0;
+        console.log(`   - ${a.name}: ${appCounts[a.id]} aplicaciones activas`);
+      }
+
+      asesorAsignado = asesores.reduce((min, a) =>
+        appCounts[a.id] < appCounts[min.id] ? a : min
+      );
+      console.log(`✅ Round robin seleccionó asesor: ${asesorAsignado.name}`);
+    } else {
+      console.log('⚠️ No hay asesores hipotecarios activos');
+    }
+
+    // Marcar lead como needs_mortgage
+    await this.supabase.client
+      .from('leads')
+      .update({ needs_mortgage: true, updated_at: new Date().toISOString() })
+      .eq('id', lead.id);
+
+    // Crear mortgage_application
+    if (asesorAsignado) {
+      await this.supabase.client
+        .from('mortgage_applications')
+        .insert({
+          lead_id: lead.id,
+          lead_name: lead.name,
+          lead_phone: lead.phone,
+          status: 'pending',
+          assigned_advisor_id: asesorAsignado.id,
+          property_name: 'Por definir',
+          bank: 'Por definir',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+
+      // Notificar al asesor
+      if (asesorAsignado.phone) {
+        const aPhone = asesorAsignado.phone.replace(/[^0-9]/g, '');
+        const aFormatted = aPhone.startsWith('52') ? aPhone : '52' + aPhone.slice(-10);
+
+        await this.twilio.sendWhatsAppMessage(this.formatPhoneMX(aFormatted),
+          `🏦 *NUEVO LEAD HIPOTECARIO*\n\n` +
+          `👤 *${lead.name}*\n` +
+          `📱 ${lead.phone?.slice(-10) || 'Sin tel'}\n` +
+          `👔 Vendedor: ${vendedor.name}\n\n` +
+          `💡 El vendedor ${vendedor.name} te asignó este lead para crédito hipotecario.`
+        );
+        console.log('📤 Asesor notificado:', asesorAsignado.name);
+      }
+    }
+
+    // Confirmar al vendedor
+    let msg = `✅ *Hipoteca asignada a ${lead.name}*\n\n`;
+    if (asesorAsignado) {
+      msg += `🏦 Asesor: *${asesorAsignado.name}* (notificado)\n`;
+    } else {
+      msg += `⚠️ Sin asesor asignado (no hay asesores activos)\n`;
+    }
+    msg += `\n📌 El asesor se encargará del crédito.`;
+
+    await this.twilio.sendWhatsAppMessage(from, msg);
+    console.log('✅ Hipoteca asignada a lead:', lead.name, asesorAsignado ? `→ asesor ${asesorAsignado.name}` : '');
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
