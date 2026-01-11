@@ -8,78 +8,42 @@ import { scoringService, LeadStatus } from '../services/leadScoring';
 import { resourceService } from '../services/resourceService';
 import { CalendarService } from '../services/calendar';
 
-const VIDEO_SERVER_URL = 'https://sara-videos.onrender.com';
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// MÓDULOS REFACTORIZADOS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+import {
+  VIDEO_SERVER_URL,
+  HORARIOS,
+  DESARROLLOS_CONOCIDOS,
+  MODELOS_CONOCIDOS,
+  ContextoDecision,
+  DatosConversacion,
+  AIAnalysis,
+  parsearDesarrollosYModelos,
+  inferirDesarrollosDesdeModelos,
+  formatPhoneMX as formatPhoneMXUtil,
+  PATRONES
+} from './constants';
+
+import {
+  getMexicoNow,
+  getNextDayOfWeek,
+  parseFechaEspanol,
+  detectarIntencionCita,
+  parseFecha as parseFechaUtil,
+  parseFechaISO,
+  parseHoraISO,
+  formatearFechaParaUsuario,
+  formatearHoraParaUsuario,
+  ParsedFecha,
+  IntencionCita
+} from './dateParser';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// CONFIGURACIÓN DE HORARIOS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-const HORARIOS = {
-  HORA_FIN_SABADO: 14,        // 2:00 PM - Hora de cierre sábados
-  HORA_INICIO_DEFAULT: 9,     // 9:00 AM - Hora inicio por defecto
-  HORA_FIN_DEFAULT: 18,       // 6:00 PM - Hora fin por defecto L-V
-};
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// INTERFACES
+// INTERFACES LOCALES (las que no se exportaron a módulos)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-// 🧠 CONTEXTO INTELIGENTE
-interface ContextoDecision {
-  accion: 'continuar_flujo' | 'respuesta_directa' | 'usar_openai';
-  respuesta?: string;
-  siguientePregunta?: string;
-  flujoActivo?: 'cita' | 'credito' | null;
-  datos?: {
-    nombre?: string;
-    fecha?: string;
-    hora?: string;
-    banco?: string;
-    ingreso?: number;
-    enganche?: number;
-  };
-}
-
-interface DatosConversacion {
-  mensaje: string;
-  historial: Array<{ role: string; content: string; timestamp?: string }>;
-  lead: any;
-  datosExtraidos: any;
-  citaActiva?: any; // Cita programada existente
-}
-
-interface AIAnalysis {
-  intent: string;
-  extracted_data: {
-    nombre?: string;
-    fecha?: string;
-    hora?: string;
-    desarrollo?: string;
-    desarrollos?: string[];  // Múltiples desarrollos
-    modelos?: string[];      // Modelos/casas específicas
-    num_recamaras?: number;
-    necesita_credito?: boolean;
-    // CAMPOS DE CRÉDITO - OpenAI extrae aunque tenga typos
-    banco_preferido?: string;      // "Scotiabank" aunque escriba "soctia"
-    ingreso_mensual?: number;      // 67000 aunque escriba "67 mil"
-    enganche_disponible?: number;  // 234000 aunque escriba "234m1l"
-    modalidad_contacto?: string;   // "telefonica"|"videollamada"|"presencial"
-    quiere_asesor?: boolean;       // true si dice "sí", "va", "sale", etc
-    // CAMPOS DE SEGMENTACIÓN
-    how_found_us?: string;         // Facebook, Google, Espectacular, Referido, etc
-    family_size?: number;          // Número de personas en familia
-    current_housing?: string;      // renta, propia, con_familia
-    urgency?: string;              // inmediata, 3_meses, 6_meses, 1_año
-    occupation?: string;           // Profesión/trabajo
-    age_range?: string;            // 25-35, 35-45, etc
-    // VENDEDOR PREFERIDO
-    vendedor_preferido?: string;   // Nombre del vendedor si el cliente lo menciona
-  };
-  response: string;
-  send_gps?: boolean;
-  send_video_desarrollo?: boolean;
-  send_contactos?: boolean;
-  contactar_vendedor?: boolean;
-}
+// Nota: ContextoDecision, DatosConversacion y AIAnalysis ahora vienen de constants.ts
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // CLASE PRINCIPAL
@@ -948,53 +912,8 @@ Te va a orientar sobre las mejores opciones de financiamiento para tu casa. ¡En
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // LISTAS DE DESARROLLOS Y MODELOS CONOCIDOS
+  // PROPIEDADES POR DESARROLLO
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  
-  private readonly DESARROLLOS_CONOCIDOS = [
-    'Monte Verde', 'Monte Real', 'Los Encinos', 'Miravalle', 'Andes', 'Distrito Falco'
-  ];
-  
-  private readonly MODELOS_CONOCIDOS = [
-    // Los Encinos
-    'Ascendente', 'Descendente', 'Encino Blanco', 'Encino Verde', 'Encino Dorado',
-    // Andes
-    'Gardenia', 'Dalia', 'Lavanda', 'Azalea', 'Magnolia',
-    // Distrito Falco
-    'Calandria', 'Colibrí', 'Colibri', 'Chipre', 'Mirlo',
-    // Monte Verde
-    'Pino', 'Roble', 'Cedro',
-    // Monte Real
-    'Real I', 'Real II', 'Real III',
-    // Miravalle
-    'Bilbao', 'Vizcaya', 'Navarra'
-  ];
-
-  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // PARSEAR MÚLTIPLES DESARROLLOS Y MODELOS
-  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  private parsearDesarrollosYModelos(texto: string): { desarrollos: string[], modelos: string[] } {
-    const textoLower = texto.toLowerCase();
-    const desarrollos: string[] = [];
-    const modelos: string[] = [];
-    
-    // Buscar desarrollos mencionados
-    for (const dev of this.DESARROLLOS_CONOCIDOS) {
-      if (textoLower.includes(dev.toLowerCase())) {
-        desarrollos.push(dev);
-      }
-    }
-    
-    // Buscar modelos/casas específicas mencionadas
-    for (const modelo of this.MODELOS_CONOCIDOS) {
-      if (textoLower.includes(modelo.toLowerCase())) {
-        modelos.push(modelo);
-      }
-    }
-    
-    return { desarrollos, modelos };
-  }
 
   // Obtener propiedades para múltiples desarrollos
   private getPropsParaDesarrollos(desarrollos: string[], properties: any[]): any[] {
@@ -18698,7 +18617,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
     
     // Si OpenAI no detectó desarrollo, buscarlo manualmente en el mensaje
     if (!desarrollo || desarrollo === 'Por definir') {
-      const { desarrollos: desarrollosDelMensaje } = this.parsearDesarrollosYModelos(originalMessage);
+      const { desarrollos: desarrollosDelMensaje } = parsearDesarrollosYModelos(originalMessage);
       if (desarrollosDelMensaje.length > 0) {
         desarrollo = desarrollosDelMensaje[0];
         console.log('👍 Desarrollo detectado manualmente del mensaje:', desarrollo);
@@ -18715,7 +18634,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       const mensajesCliente = historial.filter((m: any) => m.role === 'user');
 
       for (let i = mensajesCliente.length - 1; i >= 0; i--) {
-        const { desarrollos: devsEnMsg } = this.parsearDesarrollosYModelos(mensajesCliente[i].content || '');
+        const { desarrollos: devsEnMsg } = parsearDesarrollosYModelos(mensajesCliente[i].content || '');
         if (devsEnMsg.length > 0) {
           // Tomar el ÚLTIMO desarrollo mencionado por el cliente
           desarrolloCliente = devsEnMsg[devsEnMsg.length - 1];
@@ -18731,7 +18650,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
         // (fallback para casos donde cliente solo dijo "sí" o "el primero")
         let desarrollosEncontrados: string[] = [];
         for (const msg of historial) {
-          const { desarrollos: devsEnMsg } = this.parsearDesarrollosYModelos(msg.content || '');
+          const { desarrollos: devsEnMsg } = parsearDesarrollosYModelos(msg.content || '');
           if (devsEnMsg.length > 0) {
             desarrollosEncontrados = [...new Set([...desarrollosEncontrados, ...devsEnMsg])];
           }
@@ -18846,7 +18765,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
     const clientName = clientNameFull !== 'Cliente' ? clientNameFull.split(' ')[0] : 'Cliente';
 
     // Parsear desarrollos y modelos del mensaje original
-    const { desarrollos: desarrollosDetectados, modelos: modelosDetectados } = this.parsearDesarrollosYModelos(originalMessage);
+    const { desarrollos: desarrollosDetectados, modelos: modelosDetectados } = parsearDesarrollosYModelos(originalMessage);
     
     // También considerar lo que extrajo OpenAI
     const desarrollosOpenAI = analysis.extracted_data?.desarrollos || [];
