@@ -39,6 +39,31 @@ import {
   IntencionCita
 } from './dateParser';
 
+import {
+  validarHorarioLaboral,
+  parseHoraCRM,
+  parseDiasCRM,
+  formatDateForCalendar,
+  crearEventoCalendar,
+  parseCancelarCitaCommand,
+  parseReagendarCommand,
+  parseAgendarCitaCommand,
+  mensajeNuevaCitaVendedor,
+  mensajeNuevaCitaAsesor,
+  mensajeConfirmacionCitaCliente,
+  mensajeCitaCancelada,
+  mensajeReagendadoCliente,
+  mensajeHorarioFueraRango,
+  formatearFechaLegible,
+  formatearHoraLegible,
+  calcularTemperatura,
+  citaRecienteThreshold,
+  Appointment,
+  AppointmentValidation,
+  ParsedCommand,
+  CalendarEventData
+} from './appointmentService';
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // INTERFACES LOCALES (las que no se exportaron a módulos)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
