@@ -2354,11 +2354,26 @@ function App() {
                 <h4 className="font-semibold mb-2">Historial de conversación:</h4>
                 <div className="bg-slate-700 p-4 rounded-xl max-h-96 overflow-y-auto">
                   {selectedLead.conversation_history && selectedLead.conversation_history.length > 0 ? (
-                    selectedLead.conversation_history.map((msg: any, i: number) => (
-                      <div key={i} className={`mb-3 ${msg.role === 'user' ? 'text-blue-400' : 'text-green-400'}`}>
-                        <span className="font-semibold">{msg.role === 'user' ? 'Cliente' : 'SARA'}:</span> {msg.content}
-                      </div>
-                    ))
+                    selectedLead.conversation_history.map((msg: any, i: number) => {
+                      // Determinar color y etiqueta según el rol
+                      let colorClass = 'text-green-400';
+                      let label = 'SARA';
+
+                      if (msg.role === 'user') {
+                        colorClass = 'text-blue-400';
+                        label = 'Cliente';
+                      } else if (msg.role === 'vendedor') {
+                        colorClass = 'text-orange-400';
+                        label = msg.vendedor_name ? `Vendedor (${msg.vendedor_name})` : 'Vendedor';
+                      }
+
+                      return (
+                        <div key={i} className={`mb-3 ${colorClass}`}>
+                          <span className="font-semibold">{label}:</span> {msg.content}
+                          {msg.via_bridge && <span className="text-xs text-slate-500 ml-2">(chat directo)</span>}
+                        </div>
+                      );
+                    })
                   ) : (
                     <p className="text-slate-500">Sin historial de conversación</p>
                   )}

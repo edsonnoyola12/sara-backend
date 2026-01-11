@@ -206,6 +206,20 @@ export default {
       return corsResponse(JSON.stringify({ ok: true, message: "Leads fríos ejecutado - revisa logs" }));
     }
 
+    // TEST: Actualizar status de lead (para pruebas)
+    if (url.pathname === "/test-update-lead" && request.method === "POST") {
+      const body = await request.json() as any;
+      const { lead_id, status } = body;
+      if (!lead_id || !status) {
+        return corsResponse(JSON.stringify({ error: "Falta lead_id o status" }), 400);
+      }
+      const { error } = await supabase.client.from('leads').update({ status, status_changed_at: new Date().toISOString() }).eq('id', lead_id);
+      if (error) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+      return corsResponse(JSON.stringify({ ok: true, message: `Lead ${lead_id} actualizado a ${status}` }));
+    }
+
     // ═══════════════════════════════════════════════════════════
     // DIAGNÓSTICO CRM - Ver datos para verificar comandos
     // ═══════════════════════════════════════════════════════════
