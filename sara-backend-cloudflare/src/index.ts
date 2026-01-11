@@ -1892,6 +1892,102 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
       }
     }
 
+
+    // ═══════════════════════════════════════════════════════════
+    // CHAT IA PARA DASHBOARD - Preguntas sobre métricas generales
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/api/dashboard/ask' && request.method === 'POST') {
+      try {
+        const body = await request.json() as any;
+        const { pregunta, contexto } = body;
+
+        if (!pregunta) {
+          return corsResponse(JSON.stringify({ error: 'Falta pregunta' }), 400);
+        }
+
+        // Preparar resumen de datos del dashboard para Claude
+        let resumenDatos = 'DATOS DEL DASHBOARD DE VENTAS:\n\n';
+
+        resumenDatos += '📊 MÉTRICAS GENERALES:\n';
+        resumenDatos += '- Total leads: ' + (contexto?.totalLeads || 0) + '\n';
+        resumenDatos += '- Pipeline value: $' + ((contexto?.pipelineValue || 0) / 1000000).toFixed(1) + 'M\n';
+        resumenDatos += '- Cierres este mes: ' + (contexto?.cierresMes || 0) + '\n';
+        resumenDatos += '- Cambio vs mes anterior: ' + (contexto?.cambioVsMesAnterior || 0) + '%\n';
+        resumenDatos += '- Leads HOT (negociación/reservado): ' + (contexto?.leadsHot || 0) + '\n';
+        resumenDatos += '- Tiempo promedio respuesta: ' + (contexto?.tiempoRespuesta || 0) + ' min\n\n';
+
+        resumenDatos += '🔥 DISTRIBUCIÓN FUNNEL:\n';
+        resumenDatos += '- Nuevos: ' + (contexto?.funnel?.new || 0) + '\n';
+        resumenDatos += '- Contactados: ' + (contexto?.funnel?.contacted || 0) + '\n';
+        resumenDatos += '- Cita agendada: ' + (contexto?.funnel?.scheduled || 0) + '\n';
+        resumenDatos += '- Visitaron: ' + (contexto?.funnel?.visited || 0) + '\n';
+        resumenDatos += '- Negociación: ' + (contexto?.funnel?.negotiation || 0) + '\n';
+        resumenDatos += '- Reservado: ' + (contexto?.funnel?.reserved || 0) + '\n';
+        resumenDatos += '- Cerrado: ' + (contexto?.funnel?.closed || 0) + '\n\n';
+
+        resumenDatos += '📈 CONVERSIONES:\n';
+        resumenDatos += '- Lead a venta: ' + (contexto?.conversiones?.leadToSale || 0) + '%\n';
+        resumenDatos += '- Lead a cita: ' + (contexto?.conversiones?.leadToCita || 0) + '%\n';
+        resumenDatos += '- Visita a cierre: ' + (contexto?.conversiones?.visitaToClose || 0) + '%\n';
+        resumenDatos += '- Leads por venta (ratio): ' + (contexto?.conversiones?.ratioLeadsPorVenta || 0) + ':1\n\n';
+
+        resumenDatos += '🏆 TOP VENDEDORES:\n';
+        if (contexto?.topVendedores) {
+          for (const v of contexto.topVendedores) {
+            resumenDatos += '- ' + v.name + ': ' + v.ventas + ' ventas, ' + v.leads + ' leads, ' + v.conversion + '% conv\n';
+          }
+        } else {
+          resumenDatos += 'Sin datos\n';
+        }
+
+        resumenDatos += '\n🏘️ TOP DESARROLLOS:\n';
+        if (contexto?.topDesarrollos) {
+          for (const d of contexto.topDesarrollos) {
+            resumenDatos += '- ' + d.name + ': ' + d.ventas + ' ventas, $' + (d.revenue / 1000000).toFixed(1) + 'M revenue\n';
+          }
+        } else {
+          resumenDatos += 'Sin datos\n';
+        }
+
+        resumenDatos += '\n📣 LEADS POR FUENTE:\n';
+        if (contexto?.fuentesLeads) {
+          for (const f of contexto.fuentesLeads) {
+            resumenDatos += '- ' + f.source + ': ' + f.count + ' leads, ' + f.closed + ' cerrados\n';
+          }
+        } else {
+          resumenDatos += 'Sin datos\n';
+        }
+
+        // Llamar a Claude para responder
+        const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': env.ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: 'claude-3-5-haiku-20241022',
+            max_tokens: 600,
+            messages: [
+              {
+                role: 'user',
+                content: 'Eres un asistente de análisis de datos para Santa Rita Residencial. Responde preguntas sobre el dashboard y métricas de ventas de forma clara, concisa y accionable.\n\n' + resumenDatos + '\n\nPREGUNTA DEL USUARIO: ' + pregunta + '\n\nResponde de forma directa y útil. Da recomendaciones específicas cuando sea apropiado. Usa emojis para hacer la respuesta más visual. Máximo 3-4 párrafos.'
+              }
+            ]
+          })
+        });
+
+        const claudeData = await claudeResponse.json() as any;
+        const respuesta = claudeData?.content?.[0]?.text || 'No pude procesar la pregunta.';
+
+        return corsResponse(JSON.stringify({ respuesta }));
+
+      } catch (err) {
+        console.error('Error en chat IA dashboard:', err);
+        return corsResponse(JSON.stringify({ error: 'Error procesando pregunta', respuesta: 'Hubo un error al procesar tu pregunta. Por favor intenta de nuevo.' }), 500);
+      }
+    }
     // ═══════════════════════════════════════════════════════════
     // Endpoint de prueba - Enviar TEMPLATE
     // Endpoint para ver templates aprobados de Meta
