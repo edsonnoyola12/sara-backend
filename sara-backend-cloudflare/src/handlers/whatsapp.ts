@@ -9582,7 +9582,9 @@ ${statusAnterior} → ${statusNuevo}
               ? JSON.parse(usuarioActual.notes)
               : usuarioActual.notes;
           }
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+          console.log('⚠️ Error parsing notes (pending_lead_selection):', e instanceof Error ? e.message : e);
+        }
 
         const notesData = JSON.stringify({
           ...notasExistentes,
@@ -9630,7 +9632,9 @@ ${statusAnterior} → ${statusNuevo}
             ? JSON.parse(usuarioActual.notes)
             : usuarioActual.notes;
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        console.log('⚠️ Error parsing notes (pending_message_to_lead):', e instanceof Error ? e.message : e);
+      }
 
       // Guardar pending para esperar el mensaje (preservando citas_preguntadas)
       const notesData = JSON.stringify({
@@ -9693,7 +9697,9 @@ ${statusAnterior} → ${statusNuevo}
             ? JSON.parse(usuarioActual.notes)
             : usuarioActual.notes;
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        console.log('⚠️ Error parsing notes (active_bridge setup):', e instanceof Error ? e.message : e);
+      }
 
       // Remover pending_message_to_lead y activar bridge de 10 minutos
       const { pending_message_to_lead, ...notasSinPending } = notasExistentes;
@@ -15595,7 +15601,9 @@ Tú dime, ¿por dónde empezamos?`;
             notasVendedor = typeof vendedorData?.notes === 'string'
               ? JSON.parse(vendedorData.notes)
               : (vendedorData?.notes || {});
-          } catch (e) { /* ignore */ }
+          } catch (e) {
+            console.log('⚠️ Error parsing vendedor notes (pending_bridge_appointment):', e instanceof Error ? e.message : e);
+          }
 
           // Guardar pendiente para confirmación
           notasVendedor.pending_bridge_appointment = {
@@ -15665,7 +15673,9 @@ Tú dime, ¿por dónde empezamos?`;
             notasVendedor = typeof vendedorData.notes === 'string'
               ? JSON.parse(vendedorData.notes)
               : vendedorData.notes;
-          } catch (e) { /* ignore */ }
+          } catch (e) {
+            console.log('⚠️ Error parsing vendedor notes (active_bridge expiry):', e instanceof Error ? e.message : e);
+          }
 
           if (notasVendedor.active_bridge) {
             notasVendedor.active_bridge.expires_at = nuevoExpiry;
