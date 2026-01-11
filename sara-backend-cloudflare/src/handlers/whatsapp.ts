@@ -11,6 +11,15 @@ import { CalendarService } from '../services/calendar';
 const VIDEO_SERVER_URL = 'https://sara-videos.onrender.com';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CONFIGURACIÓN DE HORARIOS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const HORARIOS = {
+  HORA_FIN_SABADO: 14,        // 2:00 PM - Hora de cierre sábados
+  HORA_INICIO_DEFAULT: 9,     // 9:00 AM - Hora inicio por defecto
+  HORA_FIN_DEFAULT: 18,       // 6:00 PM - Hora fin por defecto L-V
+};
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // INTERFACES
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -10844,14 +10853,13 @@ Escribe el nombre completo para continuar.`;
       return [1,2,3,4,5,6];
     };
 
-    const horaInicioVendedor = parseHoraCRM(vendedor.work_start, 9);
-    const horaFinVendedorBase = parseHoraCRM(vendedor.work_end, 18); // 6pm por defecto (L-V)
-    const horaFinSabado = 14; // 2pm sábados (hardcoded por ahora)
+    const horaInicioVendedor = parseHoraCRM(vendedor.work_start, HORARIOS.HORA_INICIO_DEFAULT);
+    const horaFinVendedorBase = parseHoraCRM(vendedor.work_end, HORARIOS.HORA_FIN_DEFAULT);
     const diasLaborales = parseDiasCRM(vendedor.working_days);
     const diaCita = fecha.getDay(); // 0=domingo, 1=lunes, etc.
 
     // Sábado (6) tiene horario diferente
-    const horaFinVendedor = diaCita === 6 ? horaFinSabado : horaFinVendedorBase;
+    const horaFinVendedor = diaCita === 6 ? HORARIOS.HORA_FIN_SABADO : horaFinVendedorBase;
 
     // Verificar si la hora está dentro del horario del vendedor
     if (horaFinal < horaInicioVendedor || horaFinal >= horaFinVendedor) {
@@ -11250,12 +11258,11 @@ Escribe el nombre completo para continuar.`;
     const parseHora = (v: any, def: number) => !v ? def : typeof v === 'number' ? v : parseInt(String(v).split(':')[0]) || def;
     const parseDias = (v: any) => !v ? [1,2,3,4,5,6] : Array.isArray(v) ? v.map(Number) : String(v).split(',').map(d => parseInt(d)).filter(n => !isNaN(n));
 
-    const horaInicioVendedor = parseHora(vendedor.work_start, 9);
-    const horaFinVendedorBase = parseHora(vendedor.work_end, 18); // 6pm L-V
-    const horaFinSabado = 14; // 2pm sábados
+    const horaInicioVendedor = parseHora(vendedor.work_start, HORARIOS.HORA_INICIO_DEFAULT);
+    const horaFinVendedorBase = parseHora(vendedor.work_end, HORARIOS.HORA_FIN_DEFAULT);
     const diasLaborales = parseDias(vendedor.working_days);
     const diaCita = nuevaFecha.getDay();
-    const horaFinVendedor = diaCita === 6 ? horaFinSabado : horaFinVendedorBase;
+    const horaFinVendedor = diaCita === 6 ? HORARIOS.HORA_FIN_SABADO : horaFinVendedorBase;
 
     if (horaParaValidar < horaInicioVendedor || horaParaValidar >= horaFinVendedor) {
       await this.twilio.sendWhatsAppMessage(from,
@@ -13347,11 +13354,10 @@ Soy SARA, tu asistente. Aquí todos mis comandos:
       const parseH = (x: any, d: number) => !x ? d : typeof x === 'number' ? x : parseInt(String(x).split(':')[0]) || d;
       const parseD = (x: any) => !x ? [1,2,3,4,5,6] : Array.isArray(x) ? x.map(Number) : String(x).split(',').map(n => parseInt(n)).filter(n => !isNaN(n));
 
-      const horaInicio = parseH(v.work_start, 9);
-      const horaFinBase = parseH(v.work_end, 18); // 6pm L-V
-      const horaFinSab = 14; // 2pm sábados
+      const horaInicio = parseH(v.work_start, HORARIOS.HORA_INICIO_DEFAULT);
+      const horaFinBase = parseH(v.work_end, HORARIOS.HORA_FIN_DEFAULT);
       const diasLaborales = parseD(v.working_days);
-      const horaFin = diaActual === 6 ? horaFinSab : horaFinBase; // Sábado = 6
+      const horaFin = diaActual === 6 ? HORARIOS.HORA_FIN_SABADO : horaFinBase;
 
       const enHorario = horaActual >= horaInicio && horaActual < horaFin;
       const enDiaLaboral = diasLaborales.includes(diaActual);
@@ -18539,8 +18545,8 @@ Un asesor te contactará muy pronto. ¿Hay algo más en lo que pueda ayudarte?`;
       const fechaExtraida = analysis.extracted_data?.fecha || '';
       const fechaCita = this.parseFecha(fechaExtraida, horaExtraida);
       const esSabado = fechaCita.getDay() === 6;
-      const horaInicioAtencion = 9;
-      const horaFinAtencion = esSabado ? 14 : 18;
+      const horaInicioAtencion = HORARIOS.HORA_INICIO_DEFAULT;
+      const horaFinAtencion = esSabado ? HORARIOS.HORA_FIN_SABADO : HORARIOS.HORA_FIN_DEFAULT;
 
       if (horaNumero > 0 && (horaNumero < horaInicioAtencion || horaNumero >= horaFinAtencion)) {
         console.log(`⚠️ HORA FUERA DE HORARIO: ${horaNumero}:00 (permitido: ${horaInicioAtencion}:00 - ${horaFinAtencion}:00)`);
@@ -19589,15 +19595,14 @@ ${msgContacto}`;
     // Parsear horarios del CRM (work_start/work_end pueden ser "09:00" o número)
     const parseHoraV = (v: any, d: number) => !v ? d : typeof v === 'number' ? v : parseInt(String(v).split(':')[0]) || d;
 
-    const horaInicioVendedor = parseHoraV(vendedor?.work_start, 9);
-    const horaFinVendedorBase = parseHoraV(vendedor?.work_end, 18); // 6pm L-V
-    const horaFinSabado = 14; // 2pm sábados
+    const horaInicioVendedor = parseHoraV(vendedor?.work_start, HORARIOS.HORA_INICIO_DEFAULT);
+    const horaFinVendedorBase = parseHoraV(vendedor?.work_end, HORARIOS.HORA_FIN_DEFAULT);
     const horaNumero = parseInt(hora.split(':')[0]) || parseInt(hora) || 0;
 
     // Determinar si la fecha es sábado
     const fechaCita = this.parseFecha(fecha, hora);
     const esSabado = fechaCita.getDay() === 6;
-    const horaFinVendedor = esSabado ? horaFinSabado : horaFinVendedorBase;
+    const horaFinVendedor = esSabado ? HORARIOS.HORA_FIN_SABADO : horaFinVendedorBase;
 
     console.log(`📅 Validando hora: ${horaNumero}:00 vs horario vendedor: ${horaInicioVendedor}:00 - ${horaFinVendedor}:00 (${esSabado ? 'SÁBADO' : 'L-V'})`);
 
