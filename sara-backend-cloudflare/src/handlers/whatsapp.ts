@@ -2,6 +2,7 @@ import { SupabaseService } from '../services/supabase';
 import { ClaudeService } from '../services/claude';
 import { TwilioService } from '../services/twilio';
 import { FollowupService } from '../services/followupService';
+import { FollowupApprovalService } from '../services/followupApprovalService';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { scoringService, LeadStatus } from '../services/leadScoring';
 import { resourceService } from '../services/resourceService';
@@ -61,6 +62,8 @@ interface AIAnalysis {
     urgency?: string;              // inmediata, 3_meses, 6_meses, 1_año
     occupation?: string;           // Profesión/trabajo
     age_range?: string;            // 25-35, 35-45, etc
+    // VENDEDOR PREFERIDO
+    vendedor_preferido?: string;   // Nombre del vendedor si el cliente lo menciona
   };
   response: string;
   send_gps?: boolean;
@@ -88,6 +91,160 @@ export class WhatsAppHandler {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 📅 PARSEO DE FECHAS EN ESPAÑOL
+  // ═══════════════════════════════════════════════════════════════════════════
+  private parseFechaEspanol(texto: string): { fecha: string; hora: string; tipo: string } | null {
+    const now = new Date();
+    // Ajustar a zona horaria de México (UTC-6)
+    const mexicoOffset = -6 * 60;
+    const localOffset = now.getTimezoneOffset();
+    const mexicoNow = new Date(now.getTime() + (localOffset - mexicoOffset) * 60 * 1000);
+
+    const textoLower = texto.toLowerCase();
+    let fechaTarget: Date | null = null;
+    let hora = '10:00'; // Default
+    let tipo = 'llamada'; // Default
+
+    // Detectar tipo de evento
+    if (textoLower.includes('cita') || textoLower.includes('visita') || textoLower.includes('ver casa')) {
+      tipo = 'cita';
+    } else if (textoLower.includes('recordatorio') || textoLower.includes('recordar')) {
+      tipo = 'recordatorio';
+    } else if (textoLower.includes('llamada') || textoLower.includes('llamar') || textoLower.includes('marcar') || textoLower.includes('telefonear')) {
+      tipo = 'llamada';
+    }
+
+    // Parsear hora (10am, 10:00, 10 am, 2pm, 14:00, etc)
+    const horaMatch = textoLower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm|hrs?)?/i);
+    if (horaMatch) {
+      let horas = parseInt(horaMatch[1]);
+      const minutos = horaMatch[2] || '00';
+      const ampm = horaMatch[3]?.toLowerCase();
+
+      if (ampm === 'pm' && horas < 12) horas += 12;
+      if (ampm === 'am' && horas === 12) horas = 0;
+
+      hora = `${horas.toString().padStart(2, '0')}:${minutos}`;
+    }
+
+    // Días de la semana
+    const diasSemana: { [key: string]: number } = {
+      'domingo': 0, 'lunes': 1, 'martes': 2, 'miercoles': 3, 'miércoles': 3,
+      'jueves': 4, 'viernes': 5, 'sabado': 6, 'sábado': 6
+    };
+
+    // Parsear fecha relativa
+    if (textoLower.includes('hoy')) {
+      fechaTarget = new Date(mexicoNow);
+    } else if (textoLower.includes('mañana') || textoLower.includes('manana')) {
+      fechaTarget = new Date(mexicoNow);
+      fechaTarget.setDate(fechaTarget.getDate() + 1);
+    } else if (textoLower.includes('pasado mañana') || textoLower.includes('pasado manana')) {
+      fechaTarget = new Date(mexicoNow);
+      fechaTarget.setDate(fechaTarget.getDate() + 2);
+    } else {
+      // Buscar día de la semana
+      for (const [dia, num] of Object.entries(diasSemana)) {
+        if (textoLower.includes(dia)) {
+          fechaTarget = new Date(mexicoNow);
+          const diaActual = fechaTarget.getDay();
+          let diasHasta = num - diaActual;
+          if (diasHasta <= 0) diasHasta += 7; // Próxima semana si ya pasó
+          fechaTarget.setDate(fechaTarget.getDate() + diasHasta);
+          break;
+        }
+      }
+    }
+
+    // Parsear fecha específica (15 enero, 15/01, enero 15)
+    if (!fechaTarget) {
+      const meses: { [key: string]: number } = {
+        'enero': 0, 'febrero': 1, 'marzo': 2, 'abril': 3, 'mayo': 4, 'junio': 5,
+        'julio': 6, 'agosto': 7, 'septiembre': 8, 'octubre': 9, 'noviembre': 10, 'diciembre': 11
+      };
+
+      // Formato: 15 de enero, enero 15, 15 enero
+      for (const [mes, num] of Object.entries(meses)) {
+        const regexMes = new RegExp(`(\\d{1,2})\\s*(?:de\\s*)?${mes}|${mes}\\s*(\\d{1,2})`, 'i');
+        const match = textoLower.match(regexMes);
+        if (match) {
+          const dia = parseInt(match[1] || match[2]);
+          fechaTarget = new Date(mexicoNow.getFullYear(), num, dia);
+          if (fechaTarget < mexicoNow) {
+            fechaTarget.setFullYear(fechaTarget.getFullYear() + 1);
+          }
+          break;
+        }
+      }
+
+      // Formato: 15/01, 15-01
+      const fechaNumMatch = textoLower.match(/(\d{1,2})[\/\-](\d{1,2})/);
+      if (fechaNumMatch && !fechaTarget) {
+        const dia = parseInt(fechaNumMatch[1]);
+        const mes = parseInt(fechaNumMatch[2]) - 1;
+        fechaTarget = new Date(mexicoNow.getFullYear(), mes, dia);
+        if (fechaTarget < mexicoNow) {
+          fechaTarget.setFullYear(fechaTarget.getFullYear() + 1);
+        }
+      }
+    }
+
+    if (!fechaTarget) return null;
+
+    // Formatear fecha como YYYY-MM-DD
+    const fecha = `${fechaTarget.getFullYear()}-${(fechaTarget.getMonth() + 1).toString().padStart(2, '0')}-${fechaTarget.getDate().toString().padStart(2, '0')}`;
+
+    return { fecha, hora, tipo };
+  }
+
+  // Detectar intención de agendar algo en un mensaje del chat
+  private detectarIntencionCita(mensaje: string): { detectado: boolean; fecha?: string; hora?: string; tipo?: string; textoOriginal?: string } {
+    const msgLower = mensaje.toLowerCase();
+
+    // Patrones que indican acuerdo de fecha/hora
+    const patronesAcuerdo = [
+      /(?:nos\s+)?(?:vemos|marcamos|hablamos|llamamos|quedamos)\s+(?:el\s+)?(.+)/i,
+      /(?:te\s+)?(?:marco|llamo|veo)\s+(?:el\s+)?(.+)/i,
+      /(?:nos\s+)?(?:vemos|reunimos)\s+(?:el\s+)?(.+)/i,
+      /(?:quedamos\s+)?(?:para\s+)?(?:el\s+)?(.+)\s+(?:a\s+las?\s+)?(\d)/i,
+      /(?:el\s+)?(lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo|mañana|manana)\s+(?:a\s+las?\s+)?(\d+)/i,
+      /(?:cita|visita|llamada)\s+(?:para\s+)?(?:el\s+)?(.+)/i
+    ];
+
+    for (const patron of patronesAcuerdo) {
+      if (patron.test(msgLower)) {
+        const parsed = this.parseFechaEspanol(mensaje);
+        if (parsed) {
+          return {
+            detectado: true,
+            fecha: parsed.fecha,
+            hora: parsed.hora,
+            tipo: parsed.tipo,
+            textoOriginal: mensaje
+          };
+        }
+      }
+    }
+
+    // También detectar si simplemente menciona día + hora
+    const tienesDiaHora = /(?:lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo|mañana|manana|hoy)\s+(?:a\s+las?\s+)?(\d+)/i.test(msgLower);
+    if (tienesDiaHora) {
+      const parsed = this.parseFechaEspanol(mensaje);
+      if (parsed) {
+        return {
+          detectado: true,
+          fecha: parsed.fecha,
+          hora: parsed.hora,
+          tipo: parsed.tipo,
+          textoOriginal: mensaje
+        };
+      }
+    }
+
+    return { detectado: false };
+  }
+
 
   // Almacenar env para acceder a variables de entorno en todos los métodos
   private env: any = null;
@@ -112,7 +269,74 @@ export class WhatsAppHandler {
     const { mensaje, historial, lead, datosExtraidos, citaActiva } = datos;
     const msgLower = mensaje.toLowerCase().trim();
     const msgLimpio = msgLower.replace(/[.,!¡¿?]/g, '').trim();
-    
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // REGLA -2 (PRIORIDAD ABSOLUTA): Bridge activo vendedor ↔ lead
+    // Si hay bridge activo, reenviar al vendedor en lugar de procesar con SARA
+    // ═══════════════════════════════════════════════════════════════════════════
+    const notasLead = typeof lead?.notes === 'object' ? lead.notes : {};
+
+    if (notasLead.active_bridge_to_vendedor) {
+      const bridge = notasLead.active_bridge_to_vendedor;
+      const ahora = new Date();
+      const expira = new Date(bridge.expires_at);
+
+      if (ahora < expira) {
+        console.log(`🔗 BRIDGE ACTIVO: Lead ${lead.name} tiene chat directo con ${bridge.vendedor_name}`);
+        return {
+          accion: 'bridge_to_vendedor',
+          respuesta: null, // No responder al lead, solo reenviar
+          bridge_data: bridge,
+          mensaje_original: mensaje
+        };
+      } else {
+        // Bridge expiró, limpiar
+        console.log(`⏰ Bridge expirado para lead ${lead.name}`);
+        // Se limpiará en el handler principal
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // REGLA -1 (PRIORIDAD MÁXIMA): Verificar encuesta post-visita en notas del lead
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (notasLead.pending_client_survey) {
+      const survey = notasLead.pending_client_survey;
+      const nombreCorto = lead.name?.split(' ')[0] || 'Cliente';
+      console.log(`🎯 REGLA -1: Lead ${lead.name} tiene encuesta post-visita pendiente, procesando respuesta: ${msgLimpio}`);
+
+      // Detectar respuesta (1, 2, 3 o texto libre)
+      if (msgLimpio === '1' || msgLimpio.includes('encant') || msgLimpio.includes('avanzar')) {
+        return {
+          accion: 'encuesta_post_visita',
+          respuesta: `¡Excelente ${nombreCorto}! 🎉 Me alegra mucho que te haya encantado.\n\nTu asesor *${survey.vendedor_name || 'tu asesor'}* se pondrá en contacto contigo para los siguientes pasos. ¡Estás muy cerca de tu nuevo hogar! 🏠`,
+          tipo_encuesta: 'muy_interesado',
+          survey_data: survey
+        };
+      } else if (msgLimpio === '2' || msgLimpio.includes('más opciones') || msgLimpio.includes('mas opciones') || msgLimpio.includes('ver más')) {
+        return {
+          accion: 'encuesta_post_visita',
+          respuesta: `Entendido ${nombreCorto} 👍\n\n¿Qué te gustaría diferente?\n• ¿Más espacio?\n• ¿Precio más accesible?\n• ¿Otra ubicación?\n\nCuéntame y te busco opciones que se ajusten mejor. 😊`,
+          tipo_encuesta: 'quiere_opciones',
+          survey_data: survey
+        };
+      } else if (msgLimpio === '3' || msgLimpio.includes('duda') || msgLimpio.includes('pregunta')) {
+        return {
+          accion: 'encuesta_post_visita',
+          respuesta: `Claro ${nombreCorto}, con gusto te ayudo 🤝\n\n¿Cuáles son tus dudas? Puedo ayudarte con:\n• Precios y formas de pago\n• Financiamiento\n• Ubicación y amenidades\n• Tiempos de entrega\n\nPregúntame lo que necesites. 😊`,
+          tipo_encuesta: 'tiene_dudas',
+          survey_data: survey
+        };
+      } else {
+        // Texto libre - también válido como respuesta
+        return {
+          accion: 'encuesta_post_visita',
+          respuesta: `¡Gracias por tu respuesta ${nombreCorto}! 🙏\n\nTu asesor *${survey.vendedor_name || 'tu asesor'}* revisará tu comentario y te contactará pronto.\n\nEstoy aquí si necesitas algo más. 😊`,
+          tipo_encuesta: 'texto_libre',
+          survey_data: survey
+        };
+      }
+    }
+
     // ═══ DETECTORES ═══
     const esAfirmativo = /^(sí|si|claro|dale|ok|por favor|quiero|va|órale|orale|porfa|yes|yeah|simón|simon|arre|sale|porfi|porfavor|sip|sep|oki|okey|esta bien|perfecto|de acuerdo|adelante)$/i.test(msgLimpio) ||
                          msgLimpio.startsWith('si ') ||
@@ -240,6 +464,19 @@ export class WhatsAppHandler {
           flujoActivo: 'cita'
         };
       } else {
+        // ✅ FIX 09-ENE-2026: Si el usuario YA incluyó fecha/hora en su mensaje, dejar que OpenAI lo procese
+        const yaIncluyeFechaHora = datosExtraidos.fecha || datosExtraidos.hora ||
+          mensaje.match(/mañana|hoy|lunes|martes|miércoles|jueves|viernes|sábado|domingo|\d{1,2}\s*(am|pm|hrs|:)/i);
+
+        if (yaIncluyeFechaHora) {
+          console.log('🎯 REGLA 1b-FIX: Usuario ya incluyó fecha/hora → Dejar que OpenAI procese');
+          return {
+            accion: 'continuar_flujo',
+            flujoActivo: 'cita',
+            datos: { fecha: datosExtraidos.fecha, hora: datosExtraidos.hora }
+          };
+        }
+
         console.log('🎯 REGLA 1b: Preguntaba visita + SÍ + Ya tiene nombre → Pedir fecha');
         return {
           accion: 'respuesta_directa',
@@ -324,10 +561,18 @@ export class WhatsAppHandler {
     // ═══════════════════════════════════════════════════════════════════════════
     // REGLA 4.5: Si SARA preguntó MODALIDAD y cliente responde → Confirmar y pedir hora
     // ═══════════════════════════════════════════════════════════════════════════
-    const preguntabaModalidad = ultimoMsgSara.includes('cómo prefieres que te contacte') ||
+    // IMPORTANTE: NO confundir con encuesta post-visita que también tiene 1️⃣2️⃣3️⃣
+    const esEncuestaPostVisita = ultimoMsgSara.includes('¿Qué te pareció?') ||
+                                 ultimoMsgSara.includes('Me encantó, quiero avanzar') ||
+                                 ultimoMsgSara.includes('quiero ver más opciones') ||
+                                 ultimoMsgSara.includes('Gracias por visitarnos');
+
+    const preguntabaModalidad = !esEncuestaPostVisita && (
+                                ultimoMsgSara.includes('cómo prefieres que te contacte') ||
                                 ultimoMsgSara.includes('llamada telefónica') ||
                                 ultimoMsgSara.includes('videollamada') ||
-                                (ultimoMsgSara.includes('1️⃣') && ultimoMsgSara.includes('2️⃣'));
+                                (ultimoMsgSara.includes('1️⃣') && ultimoMsgSara.includes('2️⃣') &&
+                                 (ultimoMsgSara.includes('llamada') || ultimoMsgSara.includes('presencial'))));
 
     // Detectar modalidad elegida
     let modalidadElegida = '';
@@ -841,6 +1086,15 @@ Te va a orientar sobre las mejores opciones de financiamiento para tu casa. ¡En
       ]);
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // ACTUALIZAR ÚLTIMA ACTIVIDAD DEL LEAD
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      if (lead?.id) {
+        await this.supabase.client.from('leads')
+          .update({ last_activity_at: new Date().toISOString() })
+          .eq('id', lead.id);
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // CANCELAR FOLLOW-UPS PENDIENTES (el lead respondió)
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       try {
@@ -933,6 +1187,16 @@ Te va a orientar sobre las mejores opciones de financiamiento para tu casa. ¡En
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // DETECTAR REFERIDOS DE CLIENTES QUE YA COMPRARON
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      if (lead.status === 'sold') {
+        const referidoResult = await this.detectarYCrearReferido(lead, body, cleanPhone, from);
+        if (referidoResult) {
+          return; // Ya se procesó el referido
+        }
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // DETECTAR SI ES VENDEDOR/ASESOR
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       const vendedor = teamMembers.find((tm: any) => {
@@ -943,9 +1207,69 @@ Te va a orientar sobre las mejores opciones de financiamiento para tu casa. ¡En
       });
 
       if (vendedor) {
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // PRIMERO: DETECTAR RESPUESTAS A APROBACIÓN DE FOLLOW-UPS
+        // Respuestas simples: ok, si, no, o mensaje directo
+        // O con número: 1 ok, 2 no, etc.
+        // O: status [nombre] [actualización]
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        const approvalService = new FollowupApprovalService(this.supabase);
+
+        // Verificar si podría ser respuesta a aprobación
+        // Ser más agresivo: cualquier mensaje corto o mensaje que parezca un follow-up
+        const esRespuestaSimple = /^(ok|si|sí|no|va|dale|nel|nop|listo|sale|enviar|aprobar|cancelar|rechazar|\d+\s|editar\s)/i.test(trimmedBody);
+        const esCodigo = trimmedBody.match(/^[A-Z0-9]{6}\s/i);
+        const esMensajeLargo = trimmedBody.length > 10 && !trimmedBody.includes('?') && !trimmedBody.toLowerCase().startsWith('cita ');
+        const puedeSerAprobacion = esRespuestaSimple || esCodigo || esMensajeLargo;
+
+        if (puedeSerAprobacion) {
+          console.log('📋 Posible respuesta a aprobación detectada');
+          const approvalResult = await approvalService.procesarRespuestaVendedor(
+            cleanPhone,
+            trimmedBody,
+            async (phone, message) => {
+              try {
+                // Enviar al cliente
+                const phoneFormatted = phone.startsWith('52') ? phone : '52' + phone;
+                await this.meta.sendWhatsAppMessage(phoneFormatted, message);
+                return true;
+              } catch (e) {
+                console.log('❌ Error enviando a cliente:', e);
+                return false;
+              }
+            },
+            async (phone, message) => {
+              try {
+                // Enviar al vendedor
+                await this.meta.sendWhatsAppMessage(phone, message);
+                return true;
+              } catch (e) {
+                console.log('❌ Error enviando a vendedor:', e);
+                return false;
+              }
+            }
+          );
+
+          if (approvalResult.handled) {
+            console.log(`✅ Respuesta de aprobación procesada: ${approvalResult.action}`);
+            return;
+          }
+        }
+
+        // Verificar si es respuesta de status: "status [nombre] [actualización]"
+        if (trimmedBody.toLowerCase().startsWith('status ')) {
+          const statusResult = await approvalService.procesarRespuestaStatus(cleanPhone, trimmedBody);
+          if (statusResult.handled) {
+            await this.meta.sendWhatsAppMessage(cleanPhone,
+              `✅ *Status actualizado para ${statusResult.leadName}*\n\n` +
+              `Gracias por la actualización. El CRM ya tiene la info.`);
+            return;
+          }
+        }
+
         // Detectar rol específico
         const rol = vendedor.role?.toLowerCase() || 'vendedor';
-        
+
         // CEO / Admin / Director / Gerente
         if (rol.includes('ceo') || rol.includes('admin') || rol.includes('director') || rol.includes('gerente') || rol.includes('dueño') || rol.includes('owner')) {
           console.log('📌 MODO CEO/ADMIN detectado:', vendedor.name);
@@ -1160,6 +1484,77 @@ Te va a orientar sobre las mejores opciones de financiamiento para tu casa. ¡En
             `No tienes ninguna cita agendada actualmente. 📅\n\n` +
             `¿Te gustaría agendar una visita a nuestros desarrollos?`
           );
+          return;
+        }
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // CAPTURA DE CUMPLEAÑOS POST-CITA
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const notasLead = typeof lead.notes === 'object' ? lead.notes : {};
+      if (notasLead?.pending_birthday_response && !lead.birthday) {
+        // Detectar si el mensaje parece una fecha de cumpleaños
+        const fechaMatch = body.match(/(\d{1,2})\s*(de\s*)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|\d{1,2})/i);
+        const fechaSlash = body.match(/^(\d{1,2})[\/\-](\d{1,2})$/);
+
+        if (fechaMatch || fechaSlash) {
+          let birthday = null;
+          const meses: Record<string, string> = {
+            enero:'01', febrero:'02', marzo:'03', abril:'04', mayo:'05', junio:'06',
+            julio:'07', agosto:'08', septiembre:'09', octubre:'10', noviembre:'11', diciembre:'12'
+          };
+
+          if (fechaMatch) {
+            const dia = fechaMatch[1].padStart(2, '0');
+            const mesTexto = fechaMatch[3].toLowerCase();
+            const mes = meses[mesTexto] || mesTexto.padStart(2, '0');
+            birthday = '2000-' + mes + '-' + dia;
+          } else if (fechaSlash) {
+            const dia = fechaSlash[1].padStart(2, '0');
+            const mes = fechaSlash[2].padStart(2, '0');
+            birthday = '2000-' + mes + '-' + dia;
+          }
+
+          if (birthday) {
+            // Guardar cumpleaños y limpiar flag
+            const { pending_birthday_response, ...notasSinPending } = notasLead;
+            await this.supabase.client.from('leads').update({
+              birthday,
+              notes: notasSinPending
+            }).eq('id', lead.id);
+
+            const nombreLead = lead.name?.split(' ')[0] || '';
+            await this.meta.sendWhatsAppMessage(from,
+              `🎂 ¡Anotado${nombreLead ? ' ' + nombreLead : ''}! Te tendremos una sorpresa ese día 🎁`
+            );
+            console.log('✅ Cumpleaños guardado:', birthday);
+            return; // No procesar más
+          }
+        }
+        // Si no detectamos fecha, dejar que Claude la procese normalmente
+        // (puede que el cliente haya respondido otra cosa)
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // RESPUESTA A MENSAJE DE ANIVERSARIO
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      if (lead.status === 'delivered') {
+        const añoActual = new Date().getFullYear();
+        const tieneAniversario = notasLead?.[`Aniversario ${añoActual}`];
+
+        // Detectar respuestas típicas de agradecimiento
+        const esAgradecimiento = /^(gracias|muchas gracias|mil gracias|thank|thx|grax|que (bonito|lindo|padre)|muy amable|se los agradezco|bendiciones|saludos|igualmente|😊|🙏|❤️|👍|🏠|🎉)+[!.]*$/i.test(body.trim());
+
+        if (tieneAniversario && esAgradecimiento) {
+          const nombreCliente = lead.name?.split(' ')[0] || '';
+          const respuestas = [
+            `¡Con mucho gusto${nombreCliente ? ' ' + nombreCliente : ''}! 🏠💙 Que sigas disfrutando tu hogar. ¡Aquí estamos para lo que necesites!`,
+            `¡Para eso estamos${nombreCliente ? ' ' + nombreCliente : ''}! 🙌 Nos da gusto saber de ti. ¡Disfruta tu casa!`,
+            `¡Un abrazo${nombreCliente ? ' ' + nombreCliente : ''}! 🤗 Gracias por seguir siendo parte de la familia Santa Rita 🏠`
+          ];
+          const respuesta = respuestas[Math.floor(Math.random() * respuestas.length)];
+          await this.meta.sendWhatsAppMessage(from, respuesta);
+          console.log('🏠 Respuesta a aniversario:', body);
           return;
         }
       }
@@ -2367,7 +2762,7 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
       // Contar leads por segmento
       const { data: leads } = await this.supabase.client
         .from('leads')
-        .select('id, status, lead_score, score, phone, lead_category');
+        .select('id, status, lead_score, score, phone, lead_category, property_interest');
 
       if (!leads) {
         await this.twilio.sendWhatsAppMessage(from, 'Error al obtener segmentos.');
@@ -2384,6 +2779,17 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
       const visitados = conTel.filter(l => l.status === 'visited');
       const negociacion = conTel.filter(l => ['negotiation', 'reserved'].includes(l.status));
 
+      // Contar por desarrollo
+      const porDesarrollo: { [key: string]: number } = {};
+      conTel.forEach(l => {
+        if (l.property_interest) {
+          porDesarrollo[l.property_interest] = (porDesarrollo[l.property_interest] || 0) + 1;
+        }
+      });
+      const desarrollosOrdenados = Object.entries(porDesarrollo)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8);
+
       await this.twilio.sendWhatsAppMessage(from,
         `*SEGMENTOS DISPONIBLES*\n${nombre}\n\n` +
         `📊 *Por temperatura:*\n` +
@@ -2396,12 +2802,13 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
         `• *negociacion* - ${negociacion.length} leads\n` +
         `• *compradores* - ${compradores.length} leads 🏠\n` +
         `• *caidos* - ${caidos.length} leads\n\n` +
-        `📊 *Total:*\n` +
-        `• *todos* - ${conTel.length} leads\n\n` +
-        `💡 *Para enviar:*\n` +
-        `Escribe: *enviar a hot: Tu mensaje aquí*\n\n` +
-        `💡 *Para ver preview:*\n` +
-        `Escribe: *preview hot*`
+        `🏘️ *Por desarrollo:*\n` +
+        desarrollosOrdenados.map(([d, c]) => `• *${d}* - ${c} leads`).join('\n') +
+        `\n\n📊 *Total:* ${conTel.length} leads\n\n` +
+        `💡 *Formatos de envío:*\n` +
+        `• enviar a hot: mensaje\n` +
+        `• enviar a Distrito Falco: mensaje\n` +
+        `• enviar a hot de Distrito Falco: mensaje`
       );
     } catch (e) {
       console.error('Error en verSegmentos:', e);
@@ -2429,23 +2836,155 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
 
   private async enviarASegmento(from: string, body: string, usuario: any): Promise<void> {
     try {
-      // Parsear: "enviar a hot: mensaje aquí"
-      const match = body.match(/envi(?:ar|a) a (\w+)[:\s]+(.+)/i);
-      if (!match) {
+      // Parsear formatos (orden de prioridad):
+      // "enviar a hot de Distrito Falco vendedor Karla: mensaje" - todos los filtros
+      // "enviar a hot vendedor Karla: mensaje" - segmento + vendedor
+      // "enviar a vendedor Karla: mensaje" - solo vendedor
+      // "enviar a hot de Distrito Falco: mensaje" - segmento + desarrollo
+      // "enviar a Distrito Falco: mensaje" - solo desarrollo
+      // "enviar a hot: mensaje" - solo segmento
+
+      let segmento: string | null = null;
+      let desarrollo: string | null = null;
+      let vendedorNombre: string | null = null;
+      let fechaDesde: Date | null = null;
+      let fechaHasta: Date | null = null;
+      let fechaDescripcion: string | null = null;
+      let mensajeTemplate: string = '';
+
+      // Extraer filtro de fecha si existe
+      const hoy = new Date();
+      const fechaPatterns = [
+        { regex: /desde\s+(\d{4}-\d{2}-\d{2})/i, handler: (m: RegExpMatchArray) => {
+          fechaDesde = new Date(m[1]);
+          fechaDescripcion = `desde ${m[1]}`;
+        }},
+        { regex: /hasta\s+(\d{4}-\d{2}-\d{2})/i, handler: (m: RegExpMatchArray) => {
+          fechaHasta = new Date(m[1]);
+          fechaHasta.setHours(23, 59, 59);
+          fechaDescripcion = fechaDescripcion ? `${fechaDescripcion} hasta ${m[1]}` : `hasta ${m[1]}`;
+        }},
+        { regex: /esta semana/i, handler: () => {
+          const inicioSemana = new Date(hoy);
+          inicioSemana.setDate(hoy.getDate() - hoy.getDay());
+          inicioSemana.setHours(0, 0, 0, 0);
+          fechaDesde = inicioSemana;
+          fechaDescripcion = 'esta semana';
+        }},
+        { regex: /este mes/i, handler: () => {
+          fechaDesde = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+          fechaDescripcion = 'este mes';
+        }},
+        { regex: /(?:último|ultimo) mes/i, handler: () => {
+          fechaDesde = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+          fechaHasta = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 23, 59, 59);
+          fechaDescripcion = 'último mes';
+        }},
+        { regex: /(?:últimos|ultimos)\s+(\d+)\s+días?/i, handler: (m: RegExpMatchArray) => {
+          fechaDesde = new Date(hoy);
+          fechaDesde.setDate(hoy.getDate() - parseInt(m[1]));
+          fechaDescripcion = `últimos ${m[1]} días`;
+        }},
+        { regex: /hoy/i, handler: () => {
+          fechaDesde = new Date(hoy);
+          fechaDesde.setHours(0, 0, 0, 0);
+          fechaHasta = new Date(hoy);
+          fechaHasta.setHours(23, 59, 59);
+          fechaDescripcion = 'hoy';
+        }}
+      ];
+
+      for (const pattern of fechaPatterns) {
+        const match = body.match(pattern.regex);
+        if (match) {
+          pattern.handler(match);
+        }
+      }
+
+      // Intentar extraer vendedor primero (puede estar en cualquier formato)
+      const vendedorMatch = body.match(/vendedor\s+([^:]+?)(?:\s*:|$)/i);
+      if (vendedorMatch) {
+        vendedorNombre = vendedorMatch[1].trim();
+      }
+
+      // Limpiar el body quitando vendedor y fechas para parsear el resto
+      const bodyLimpio = body
+        .replace(/\s*vendedor\s+[^:]+/i, '')
+        .replace(/\s*desde\s+\d{4}-\d{2}-\d{2}/i, '')
+        .replace(/\s*hasta\s+\d{4}-\d{2}-\d{2}/i, '')
+        .replace(/\s*esta semana/i, '')
+        .replace(/\s*este mes/i, '')
+        .replace(/\s*(?:último|ultimo) mes/i, '')
+        .replace(/\s*(?:últimos|ultimos)\s+\d+\s+días?/i, '')
+        .replace(/\s*hoy/i, '');
+
+      // Ahora parsear segmento y desarrollo del body limpio
+      const matchConDesarrollo = bodyLimpio.match(/envi(?:ar|a) a (\w+) de ([^:]+)[:\s]+(.+)/i);
+      const matchSimple = bodyLimpio.match(/envi(?:ar|a) a ([^:]+)[:\s]+(.+)/i);
+
+      const segmentosConocidos = ['hot', 'warm', 'cold', 'compradores', 'buyers', 'caidos', 'fallen', 'nuevos', 'new', 'visitados', 'negociacion', 'todos', 'all'];
+
+      if (matchConDesarrollo) {
+        const posibleSegmento = matchConDesarrollo[1].toLowerCase().trim();
+        if (segmentosConocidos.includes(posibleSegmento)) {
+          segmento = posibleSegmento;
+          desarrollo = matchConDesarrollo[2].trim();
+        }
+        mensajeTemplate = matchConDesarrollo[3].trim();
+      } else if (matchSimple) {
+        const primerParte = matchSimple[1].trim().toLowerCase();
+        mensajeTemplate = matchSimple[2].trim();
+
+        if (segmentosConocidos.includes(primerParte)) {
+          segmento = primerParte;
+        } else if (!vendedorNombre) {
+          // Solo asumir desarrollo si no hay vendedor
+          desarrollo = matchSimple[1].trim();
+        }
+      }
+
+      // Si solo hay vendedor, extraer mensaje de forma diferente
+      if (vendedorNombre && !mensajeTemplate) {
+        const msgMatch = body.match(/:\s*(.+)$/);
+        if (msgMatch) {
+          mensajeTemplate = msgMatch[1].trim();
+        }
+      }
+
+      if (!mensajeTemplate) {
         await this.twilio.sendWhatsAppMessage(from,
-          'Formato: *enviar a [segmento]: [mensaje]*\n\n' +
-          'Ejemplo: enviar a hot: Hola {nombre}, tenemos novedades!'
+          '*ENVÍO A SEGMENTOS* 📤\n\n' +
+          '*Formatos disponibles:*\n\n' +
+          '1️⃣ *Por segmento:*\n' +
+          '   enviar a hot: Tu mensaje\n\n' +
+          '2️⃣ *Por desarrollo:*\n' +
+          '   enviar a Distrito Falco: Tu mensaje\n\n' +
+          '3️⃣ *Por vendedor:*\n' +
+          '   enviar a vendedor Karla: Tu mensaje\n\n' +
+          '4️⃣ *Por fecha:*\n' +
+          '   enviar a nuevos esta semana: mensaje\n' +
+          '   enviar a hot este mes: mensaje\n' +
+          '   enviar a todos últimos 7 días: mensaje\n' +
+          '   enviar a nuevos desde 2025-01-01: mensaje\n\n' +
+          '5️⃣ *Combinados:*\n' +
+          '   enviar a hot de Distrito Falco: mensaje\n' +
+          '   enviar a hot vendedor Karla: mensaje\n' +
+          '   enviar a nuevos esta semana vendedor Karla: mensaje\n\n' +
+          '*Segmentos:* hot, warm, cold, nuevos, visitados, negociacion, compradores, caidos, todos\n\n' +
+          '*Fechas:* hoy, esta semana, este mes, último mes, últimos N días, desde YYYY-MM-DD\n\n' +
+          '*Variables:* {nombre}, {desarrollo}'
         );
         return;
       }
 
-      const segmento = match[1].toLowerCase();
-      const mensajeTemplate = match[2].trim();
-
-      // Obtener leads del segmento
+      // Obtener leads y team members
       const { data: leads } = await this.supabase.client
         .from('leads')
-        .select('id, name, phone, status, lead_score, score, property_interest');
+        .select('id, name, phone, status, lead_score, score, property_interest, assigned_to, created_at');
+
+      const { data: teamMembers } = await this.supabase.client
+        .from('team_members')
+        .select('id, name');
 
       if (!leads) {
         await this.twilio.sendWhatsAppMessage(from, 'Error al obtener leads.');
@@ -2454,49 +2993,124 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
 
       let leadsSegmento = leads.filter(l => l.phone);
 
-      // Filtrar por segmento
-      switch (segmento) {
-        case 'hot':
-          leadsSegmento = leadsSegmento.filter(l => (l.lead_score || l.score || 0) >= 70);
-          break;
-        case 'warm':
-          leadsSegmento = leadsSegmento.filter(l => (l.lead_score || l.score || 0) >= 40 && (l.lead_score || l.score || 0) < 70);
-          break;
-        case 'cold':
-          leadsSegmento = leadsSegmento.filter(l => (l.lead_score || l.score || 0) < 40);
-          break;
-        case 'compradores':
-        case 'buyers':
-          leadsSegmento = leadsSegmento.filter(l => ['closed_won', 'delivered'].includes(l.status));
-          break;
-        case 'caidos':
-        case 'fallen':
-          leadsSegmento = leadsSegmento.filter(l => l.status === 'fallen');
-          break;
-        case 'nuevos':
-        case 'new':
-          leadsSegmento = leadsSegmento.filter(l => l.status === 'new');
-          break;
-        case 'visitados':
-          leadsSegmento = leadsSegmento.filter(l => l.status === 'visited');
-          break;
-        case 'negociacion':
-          leadsSegmento = leadsSegmento.filter(l => ['negotiation', 'reserved'].includes(l.status));
-          break;
-        case 'todos':
-        case 'all':
-          // Ya están todos
-          break;
-        default:
+      // Filtrar por vendedor si se especificó
+      if (vendedorNombre && teamMembers) {
+        const vendedorLower = vendedorNombre.toLowerCase();
+        const vendedor = teamMembers.find((tm: any) =>
+          tm.name?.toLowerCase().includes(vendedorLower) ||
+          vendedorLower.includes(tm.name?.split(' ')[0]?.toLowerCase() || '')
+        );
+
+        if (!vendedor) {
           await this.twilio.sendWhatsAppMessage(from,
-            `Segmento "${segmento}" no reconocido.\n\n` +
-            `Opciones: hot, warm, cold, compradores, caidos, nuevos, visitados, negociacion, todos`
+            `❌ Vendedor "${vendedorNombre}" no encontrado.\n\n` +
+            `*Vendedores disponibles:*\n` +
+            teamMembers.slice(0, 15).map((tm: any) => `• ${tm.name}`).join('\n')
           );
           return;
+        }
+
+        leadsSegmento = leadsSegmento.filter(l => l.assigned_to === vendedor.id);
+        vendedorNombre = vendedor.name; // Usar nombre completo
+
+        if (leadsSegmento.length === 0) {
+          await this.twilio.sendWhatsAppMessage(from,
+            `❌ ${vendedor.name} no tiene leads asignados con teléfono.`
+          );
+          return;
+        }
       }
 
+      // Filtrar por desarrollo si se especificó
+      if (desarrollo) {
+        const desarrolloLower = desarrollo.toLowerCase();
+        leadsSegmento = leadsSegmento.filter(l => {
+          const propInterest = (l.property_interest || '').toLowerCase();
+          return propInterest.includes(desarrolloLower) || desarrolloLower.includes(propInterest);
+        });
+
+        if (leadsSegmento.length === 0) {
+          const desarrollosUnicos = [...new Set(leads.map(l => l.property_interest).filter(Boolean))];
+          await this.twilio.sendWhatsAppMessage(from,
+            `❌ No hay leads interesados en "${desarrollo}".\n\n` +
+            `*Desarrollos disponibles:*\n` +
+            desarrollosUnicos.slice(0, 10).map(d => `• ${d}`).join('\n')
+          );
+          return;
+        }
+      }
+
+      // Filtrar por fecha si se especificó
+      if (fechaDesde || fechaHasta) {
+        leadsSegmento = leadsSegmento.filter(l => {
+          if (!l.created_at) return false;
+          const fechaCreacion = new Date(l.created_at);
+          if (fechaDesde && fechaCreacion < fechaDesde) return false;
+          if (fechaHasta && fechaCreacion > fechaHasta) return false;
+          return true;
+        });
+
+        if (leadsSegmento.length === 0) {
+          await this.twilio.sendWhatsAppMessage(from,
+            `❌ No hay leads creados ${fechaDescripcion || 'en el rango especificado'}.`
+          );
+          return;
+        }
+      }
+
+      // Filtrar por segmento si se especificó
+      if (segmento) {
+        switch (segmento) {
+          case 'hot':
+            leadsSegmento = leadsSegmento.filter(l => (l.lead_score || l.score || 0) >= 70);
+            break;
+          case 'warm':
+            leadsSegmento = leadsSegmento.filter(l => (l.lead_score || l.score || 0) >= 40 && (l.lead_score || l.score || 0) < 70);
+            break;
+          case 'cold':
+            leadsSegmento = leadsSegmento.filter(l => (l.lead_score || l.score || 0) < 40);
+            break;
+          case 'compradores':
+          case 'buyers':
+            leadsSegmento = leadsSegmento.filter(l => ['closed_won', 'delivered'].includes(l.status));
+            break;
+          case 'caidos':
+          case 'fallen':
+            leadsSegmento = leadsSegmento.filter(l => l.status === 'fallen');
+            break;
+          case 'nuevos':
+          case 'new':
+            leadsSegmento = leadsSegmento.filter(l => l.status === 'new');
+            break;
+          case 'visitados':
+            leadsSegmento = leadsSegmento.filter(l => l.status === 'visited');
+            break;
+          case 'negociacion':
+            leadsSegmento = leadsSegmento.filter(l => ['negotiation', 'reserved'].includes(l.status));
+            break;
+          case 'todos':
+          case 'all':
+            // Ya están todos
+            break;
+          default:
+            await this.twilio.sendWhatsAppMessage(from,
+              `Segmento "${segmento}" no reconocido.\n\n` +
+              `Opciones: hot, warm, cold, compradores, caidos, nuevos, visitados, negociacion, todos`
+            );
+            return;
+        }
+      }
+
+      // Construir descripción del filtro
+      const filtroDesc = [
+        segmento ? `segmento: ${segmento}` : null,
+        desarrollo ? `desarrollo: ${desarrollo}` : null,
+        vendedorNombre ? `vendedor: ${vendedorNombre}` : null,
+        fechaDescripcion ? `fecha: ${fechaDescripcion}` : null
+      ].filter(Boolean).join(' + ') || 'todos';
+
       if (leadsSegmento.length === 0) {
-        await this.twilio.sendWhatsAppMessage(from, `No hay leads en el segmento "${segmento}".`);
+        await this.twilio.sendWhatsAppMessage(from, `No hay leads con filtro: ${filtroDesc}`);
         return;
       }
 
@@ -2504,9 +3118,9 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
       const { data: campana, error: campError } = await this.supabase.client
         .from('campaigns')
         .insert({
-          name: `Broadcast ${segmento} - ${new Date().toLocaleDateString('es-MX')}`,
+          name: `Broadcast ${filtroDesc} - ${new Date().toLocaleDateString('es-MX')}`,
           message: mensajeTemplate,
-          segment_filters: { segment: segmento },
+          segment_filters: { segment: segmento, desarrollo: desarrollo, vendedor: vendedorNombre, fecha: fechaDescripcion },
           status: 'sending',
           total_recipients: leadsSegmento.length,
           created_by: usuario.id
@@ -2524,7 +3138,7 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
 
       await this.twilio.sendWhatsAppMessage(from,
         `📤 *Iniciando envío...*\n\n` +
-        `Segmento: ${segmento}\n` +
+        `Filtro: ${filtroDesc}\n` +
         `Destinatarios: ${leadsSegmento.length}\n\n` +
         `⏳ Esto puede tomar unos minutos...`
       );
@@ -2769,13 +3383,20 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
     }
   }
 
-  // INVITAR A EVENTO - Envía invitaciones a un segmento con opción de registro
+  // INVITAR A EVENTO - Envía invitaciones con filtros avanzados
   private async invitarEvento(from: string, body: string, usuario: any): Promise<void> {
     try {
-      // Formato: "invitar evento [nombre] a [segmento]" o "invitar evento [nombre]: [segmento]"
-      const match = body.match(/invitar (?:a )?evento[:\s]+(.+?)(?:\s+a\s+|\s*:\s*|\s+segmento\s+)(\w+)/i);
+      // Formatos soportados:
+      // "invitar evento Open House a hot" - básico
+      // "invitar evento Open House a hot de Distrito Falco" - con desarrollo
+      // "invitar evento Open House a hot vendedor Karla" - con vendedor
+      // "invitar evento Open House a hot esta semana" - con fecha
+      // Combinaciones de todos
 
-      if (!match) {
+      // Extraer nombre del evento primero
+      const eventoMatch = body.match(/invitar (?:a )?evento[:\s]+([^a]+?)(?:\s+a\s+|$)/i);
+
+      if (!eventoMatch) {
         // Mostrar eventos disponibles
         const { data: eventos } = await this.supabase.client
           .from('events')
@@ -2784,22 +3405,28 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
           .order('event_date', { ascending: true })
           .limit(5);
 
-        let lista = '*EVENTOS DISPONIBLES*\n\n';
+        let lista = '*INVITAR A EVENTO* 📨\n\n';
         if (eventos && eventos.length > 0) {
+          lista += '*Eventos disponibles:*\n';
           eventos.forEach((e, i) => {
             lista += `${i + 1}. ${e.name} - ${new Date(e.event_date).toLocaleDateString('es-MX')}\n`;
           });
-          lista += '\n*Formato:*\ninvitar evento [nombre] a [segmento]\n\n';
-          lista += '*Ejemplo:*\ninvitar evento Open House a hot';
+          lista += '\n*Formatos:*\n';
+          lista += '• invitar evento Open House a hot\n';
+          lista += '• invitar evento Open House a hot de Distrito Falco\n';
+          lista += '• invitar evento Open House a vendedor Karla\n';
+          lista += '• invitar evento Open House a nuevos esta semana\n';
+          lista += '• invitar evento Open House a todos últimos 30 días\n\n';
+          lista += '*Segmentos:* hot, warm, cold, nuevos, visitados, todos\n';
+          lista += '*Fechas:* hoy, esta semana, este mes, últimos N días';
         } else {
-          lista += 'No hay eventos proximos.\n\nCrea uno con: *evento [nombre] [fecha]*';
+          lista += 'No hay eventos próximos.\n\nCrea uno con: *evento [nombre] [fecha]*';
         }
         await this.twilio.sendWhatsAppMessage(from, lista);
         return;
       }
 
-      const nombreEvento = match[1].trim();
-      const segmento = match[2].toLowerCase();
+      const nombreEvento = eventoMatch[1].trim();
 
       // Buscar el evento
       const { data: evento } = await this.supabase.client
@@ -2810,14 +3437,91 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
         .single();
 
       if (!evento) {
-        await this.twilio.sendWhatsAppMessage(from, `No encontre el evento "${nombreEvento}".`);
+        await this.twilio.sendWhatsAppMessage(from, `No encontré el evento "${nombreEvento}".`);
         return;
       }
 
-      // Obtener leads del segmento
+      // Extraer el resto del comando después del nombre del evento
+      const restoMatch = body.match(/invitar (?:a )?evento[:\s]+.+?\s+a\s+(.+)/i);
+      const resto = restoMatch ? restoMatch[1] : '';
+
+      // Variables para filtros
+      let segmento: string | null = null;
+      let desarrollo: string | null = null;
+      let vendedorNombre: string | null = null;
+      let fechaDesde: Date | null = null;
+      let fechaHasta: Date | null = null;
+      let fechaDescripcion: string | null = null;
+
+      const hoy = new Date();
+
+      // Extraer fecha
+      const fechaPatterns = [
+        { regex: /desde\s+(\d{4}-\d{2}-\d{2})/i, handler: (m: RegExpMatchArray) => {
+          fechaDesde = new Date(m[1]);
+          fechaDescripcion = `desde ${m[1]}`;
+        }},
+        { regex: /esta semana/i, handler: () => {
+          const inicioSemana = new Date(hoy);
+          inicioSemana.setDate(hoy.getDate() - hoy.getDay());
+          inicioSemana.setHours(0, 0, 0, 0);
+          fechaDesde = inicioSemana;
+          fechaDescripcion = 'esta semana';
+        }},
+        { regex: /este mes/i, handler: () => {
+          fechaDesde = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+          fechaDescripcion = 'este mes';
+        }},
+        { regex: /(?:últimos|ultimos)\s+(\d+)\s+días?/i, handler: (m: RegExpMatchArray) => {
+          fechaDesde = new Date(hoy);
+          fechaDesde.setDate(hoy.getDate() - parseInt(m[1]));
+          fechaDescripcion = `últimos ${m[1]} días`;
+        }},
+        { regex: /hoy/i, handler: () => {
+          fechaDesde = new Date(hoy);
+          fechaDesde.setHours(0, 0, 0, 0);
+          fechaHasta = new Date(hoy);
+          fechaHasta.setHours(23, 59, 59);
+          fechaDescripcion = 'hoy';
+        }}
+      ];
+
+      for (const pattern of fechaPatterns) {
+        const match = resto.match(pattern.regex);
+        if (match) {
+          pattern.handler(match);
+        }
+      }
+
+      // Extraer vendedor
+      const vendedorMatch = resto.match(/vendedor\s+([^\s]+)/i);
+      if (vendedorMatch) {
+        vendedorNombre = vendedorMatch[1].trim();
+      }
+
+      // Extraer desarrollo
+      const desarrolloMatch = resto.match(/de\s+([^v][^\s]+(?:\s+[^v][^\s]+)?)/i);
+      if (desarrolloMatch && !desarrolloMatch[1].match(/vendedor/i)) {
+        desarrollo = desarrolloMatch[1].trim();
+      }
+
+      // Extraer segmento
+      const segmentosConocidos = ['hot', 'warm', 'cold', 'nuevos', 'new', 'visitados', 'negociacion', 'compradores', 'caidos', 'todos', 'all'];
+      for (const seg of segmentosConocidos) {
+        if (resto.toLowerCase().includes(seg)) {
+          segmento = seg;
+          break;
+        }
+      }
+
+      // Obtener leads y team members
       const { data: leads } = await this.supabase.client
         .from('leads')
-        .select('id, name, phone, status, lead_score, score, notes');
+        .select('id, name, phone, status, lead_score, score, property_interest, assigned_to, created_at, notes');
+
+      const { data: teamMembers } = await this.supabase.client
+        .from('team_members')
+        .select('id, name');
 
       if (!leads) {
         await this.twilio.sendWhatsAppMessage(from, 'Error al obtener leads.');
@@ -2826,34 +3530,98 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
 
       let leadsSegmento = leads.filter(l => l.phone);
 
-      // Filtrar por segmento
-      switch (segmento) {
-        case 'hot':
-          leadsSegmento = leadsSegmento.filter(l => (l.lead_score || l.score || 0) >= 70);
-          break;
-        case 'warm':
-          leadsSegmento = leadsSegmento.filter(l => (l.lead_score || l.score || 0) >= 40 && (l.lead_score || l.score || 0) < 70);
-          break;
-        case 'cold':
-          leadsSegmento = leadsSegmento.filter(l => (l.lead_score || l.score || 0) < 40);
-          break;
-        case 'todos':
-        case 'all':
-          break;
-        default:
-          await this.twilio.sendWhatsAppMessage(from, `Segmento "${segmento}" no valido.\nOpciones: hot, warm, cold, todos`);
+      // Filtrar por vendedor
+      if (vendedorNombre && teamMembers) {
+        const vendedorLower = vendedorNombre.toLowerCase();
+        const vendedor = teamMembers.find((tm: any) =>
+          tm.name?.toLowerCase().includes(vendedorLower) ||
+          vendedorLower.includes(tm.name?.split(' ')[0]?.toLowerCase() || '')
+        );
+
+        if (!vendedor) {
+          await this.twilio.sendWhatsAppMessage(from,
+            `❌ Vendedor "${vendedorNombre}" no encontrado.\n\n` +
+            `*Vendedores:*\n` +
+            teamMembers.slice(0, 10).map((tm: any) => `• ${tm.name}`).join('\n')
+          );
           return;
+        }
+
+        leadsSegmento = leadsSegmento.filter(l => l.assigned_to === vendedor.id);
+        vendedorNombre = vendedor.name;
       }
 
+      // Filtrar por desarrollo
+      if (desarrollo) {
+        const desarrolloLower = desarrollo.toLowerCase();
+        leadsSegmento = leadsSegmento.filter(l => {
+          const propInterest = (l.property_interest || '').toLowerCase();
+          return propInterest.includes(desarrolloLower) || desarrolloLower.includes(propInterest);
+        });
+      }
+
+      // Filtrar por fecha
+      if (fechaDesde || fechaHasta) {
+        leadsSegmento = leadsSegmento.filter(l => {
+          if (!l.created_at) return false;
+          const fechaCreacion = new Date(l.created_at);
+          if (fechaDesde && fechaCreacion < fechaDesde) return false;
+          if (fechaHasta && fechaCreacion > fechaHasta) return false;
+          return true;
+        });
+      }
+
+      // Filtrar por segmento
+      if (segmento) {
+        switch (segmento) {
+          case 'hot':
+            leadsSegmento = leadsSegmento.filter(l => (l.lead_score || l.score || 0) >= 70);
+            break;
+          case 'warm':
+            leadsSegmento = leadsSegmento.filter(l => (l.lead_score || l.score || 0) >= 40 && (l.lead_score || l.score || 0) < 70);
+            break;
+          case 'cold':
+            leadsSegmento = leadsSegmento.filter(l => (l.lead_score || l.score || 0) < 40);
+            break;
+          case 'nuevos':
+          case 'new':
+            leadsSegmento = leadsSegmento.filter(l => l.status === 'new');
+            break;
+          case 'visitados':
+            leadsSegmento = leadsSegmento.filter(l => l.status === 'visited');
+            break;
+          case 'negociacion':
+            leadsSegmento = leadsSegmento.filter(l => ['negotiation', 'reserved'].includes(l.status));
+            break;
+          case 'compradores':
+            leadsSegmento = leadsSegmento.filter(l => ['closed_won', 'delivered'].includes(l.status));
+            break;
+          case 'caidos':
+            leadsSegmento = leadsSegmento.filter(l => l.status === 'fallen');
+            break;
+          case 'todos':
+          case 'all':
+            break;
+        }
+      }
+
+      // Construir descripción del filtro
+      const filtroDesc = [
+        segmento ? segmento : null,
+        desarrollo ? `de ${desarrollo}` : null,
+        vendedorNombre ? `vendedor ${vendedorNombre}` : null,
+        fechaDescripcion || null
+      ].filter(Boolean).join(' + ') || 'todos';
+
       if (leadsSegmento.length === 0) {
-        await this.twilio.sendWhatsAppMessage(from, `No hay leads en el segmento "${segmento}".`);
+        await this.twilio.sendWhatsAppMessage(from, `No hay leads con filtro: ${filtroDesc}`);
         return;
       }
 
       await this.twilio.sendWhatsAppMessage(from,
         `📤 *Enviando invitaciones...*\n\n` +
         `Evento: ${evento.name}\n` +
-        `Segmento: ${segmento}\n` +
+        `Filtro: ${filtroDesc}\n` +
         `Destinatarios: ${leadsSegmento.length}\n\n` +
         `⏳ Esto puede tomar unos minutos...`
       );
@@ -2871,7 +3639,7 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
             `📌 *${evento.name}*\n` +
             `📅 ${fechaEvento}${evento.event_time ? ' a las ' + evento.event_time : ''}\n` +
             `${evento.location ? '📍 ' + evento.location : ''}\n\n` +
-            `*¿Te gustaria asistir?*\n` +
+            `*¿Te gustaría asistir?*\n` +
             `Responde *SI* para reservar tu lugar.`;
 
           const phone = lead.phone.startsWith('52') ? lead.phone : '52' + lead.phone;
@@ -2899,9 +3667,11 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
       await this.twilio.sendWhatsAppMessage(from,
         `✅ *Invitaciones enviadas*\n\n` +
         `📊 Resultados:\n` +
+        `• Evento: ${evento.name}\n` +
+        `• Filtro: ${filtroDesc}\n` +
         `• Enviados: ${enviados}\n` +
         `• Errores: ${errores}\n\n` +
-        `Los leads pueden responder *SI* para registrarse automaticamente.\n\n` +
+        `Los leads pueden responder *SI* para registrarse.\n\n` +
         `Ver registrados: *registrados ${evento.name}*`
       );
 
@@ -3784,9 +4554,406 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
 
       console.log('🔍 PASO 2: Query ejecutada - error:', errorNotes, '| data:', vendedorActualizado?.notes);
 
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // CAPTURA DE CUMPLEAÑOS PARA EQUIPO (vendedores, asesores, etc)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    const notasVendedor = typeof vendedorActualizado?.notes === 'object' ? vendedorActualizado.notes :
+                          typeof vendedorActualizado?.notes === 'string' ? JSON.parse(vendedorActualizado.notes || '{}') : {};
+
+    if (notasVendedor?.pending_birthday_response && !vendedor.birthday) {
+      // Detectar si el mensaje parece una fecha de cumpleaños
+      const fechaMatch = body.match(/(\d{1,2})\s*(de\s*)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|\d{1,2})/i);
+      const fechaSlash = body.match(/^(\d{1,2})[\/\-](\d{1,2})$/);
+
+      if (fechaMatch || fechaSlash) {
+        let birthday = null;
+        const meses: Record<string, string> = {
+          enero:'01', febrero:'02', marzo:'03', abril:'04', mayo:'05', junio:'06',
+          julio:'07', agosto:'08', septiembre:'09', octubre:'10', noviembre:'11', diciembre:'12'
+        };
+
+        if (fechaMatch) {
+          const dia = fechaMatch[1].padStart(2, '0');
+          const mesTexto = fechaMatch[3].toLowerCase();
+          const mes = meses[mesTexto] || mesTexto.padStart(2, '0');
+          birthday = '2000-' + mes + '-' + dia;
+        } else if (fechaSlash) {
+          const dia = fechaSlash[1].padStart(2, '0');
+          const mes = fechaSlash[2].padStart(2, '0');
+          birthday = '2000-' + mes + '-' + dia;
+        }
+
+        if (birthday) {
+          // Guardar cumpleaños y limpiar flag
+          const { pending_birthday_response, ...notasSinPending } = notasVendedor;
+          await this.supabase.client.from('team_members').update({
+            birthday,
+            notes: Object.keys(notasSinPending).length > 0 ? notasSinPending : null
+          }).eq('id', vendedor.id);
+
+          await this.twilio.sendWhatsAppMessage(from,
+            `🎂 ¡Anotado ${nombreVendedor}! El equipo te tendrá una sorpresa ese día 🎁`
+          );
+          console.log('✅ Cumpleaños de vendedor guardado:', birthday);
+          return;
+        }
+      }
+      // Si no detectamos fecha, continuar con el flujo normal
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // RESPUESTAS DE AGRADECIMIENTO (gracias, ok, etc)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    const esAgradecimiento = /^(gracias|muchas gracias|mil gracias|grax|ok|okok|vale|va|listo|perfecto|excelente|genial|súper|super|de acuerdo|entendido|claro|sale|órale|orale|👍|👌|🙏|😊|✅)+[!.]*$/i.test(mensaje);
+
+    if (esAgradecimiento) {
+      const respuestas = [
+        `¡Para servirte ${nombreVendedor}! 💪`,
+        `¡Con gusto ${nombreVendedor}! Aquí andamos 🙌`,
+        `¡Siempre a la orden ${nombreVendedor}! 👊`,
+        `¡Échale ganas ${nombreVendedor}! 🚀`
+      ];
+      const respuesta = respuestas[Math.floor(Math.random() * respuestas.length)];
+      await this.twilio.sendWhatsAppMessage(from, respuesta);
+      console.log('👍 Respuesta a agradecimiento de vendedor:', mensaje);
+      return;
+    }
+
     if (vendedorActualizado?.notes) {
       try {
         const notes = typeof vendedorActualizado.notes === 'string' ? JSON.parse(vendedorActualizado.notes) : vendedorActualizado.notes;
+
+        // ═══════════════════════════════════════════════════════════
+        // BRIDGE ACTIVO: Chat directo vendedor ↔ lead
+        // Si hay bridge activo, reenviar mensaje al lead directamente
+        // ═══════════════════════════════════════════════════════════
+        if (notes?.active_bridge) {
+          const bridge = notes.active_bridge;
+          const ahora = new Date();
+          const expira = new Date(bridge.expires_at);
+
+          // Verificar si el bridge sigue activo
+          if (ahora < expira) {
+            console.log(`🔗 BRIDGE ACTIVO: Procesando mensaje de ${vendedor.name}`);
+
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            // DETECCIÓN DE COMANDOS # (no se envían al lead)
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            const esComandoHash = mensaje.trim().startsWith('#');
+
+            if (esComandoHash) {
+              const comandoLower = mensaje.toLowerCase().trim();
+
+              // #cerrar - Terminar bridge
+              if (comandoLower.startsWith('#cerrar') || comandoLower.startsWith('#terminar') || comandoLower.startsWith('#fin')) {
+                console.log(`🔚 Vendedor cerró bridge manualmente`);
+                const { active_bridge, pending_bridge_appointment, ...notasSinBridge } = notes;
+                await this.supabase.client
+                  .from('team_members')
+                  .update({ notes: Object.keys(notasSinBridge).length > 0 ? JSON.stringify(notasSinBridge) : null })
+                  .eq('id', vendedor.id);
+
+                // Limpiar del lead
+                const { data: leadActual } = await this.supabase.client
+                  .from('leads')
+                  .select('notes')
+                  .eq('id', bridge.lead_id)
+                  .single();
+
+                if (leadActual?.notes?.active_bridge_to_vendedor) {
+                  const { active_bridge_to_vendedor, ...notasLeadSinBridge } = leadActual.notes;
+                  await this.supabase.client
+                    .from('leads')
+                    .update({ notes: notasLeadSinBridge })
+                    .eq('id', bridge.lead_id);
+                }
+
+                await this.meta.sendWhatsAppMessage(from,
+                  `✅ *Chat con ${bridge.lead_name} cerrado*\n\nSARA retoma el seguimiento.\n\n💡 Para otro mensaje: *"mensaje ${bridge.lead_name}"*`
+                );
+                return;
+              }
+
+              // #llamada, #cita, #recordatorio - Agendar evento
+              const matchComando = comandoLower.match(/^#(llamada|cita|visita|recordatorio)\s+(.+)/i);
+              if (matchComando) {
+                const tipoEvento = matchComando[1];
+                const fechaTexto = matchComando[2];
+                const parsed = this.parseFechaEspanol(fechaTexto);
+
+                if (parsed) {
+                  // Formatear fecha para mostrar
+                  const fechaObj = new Date(parsed.fecha + 'T' + parsed.hora + ':00');
+                  const fechaFormateada = fechaObj.toLocaleDateString('es-MX', {
+                    weekday: 'long', day: 'numeric', month: 'long'
+                  });
+                  const horaFormateada = fechaObj.toLocaleTimeString('es-MX', {
+                    hour: '2-digit', minute: '2-digit'
+                  });
+
+                  // Crear appointment en BD
+                  const tipoAppointment = tipoEvento === 'llamada' ? 'phone_call' :
+                                          tipoEvento === 'recordatorio' ? 'reminder' : 'property_viewing';
+
+                  const { data: appointment, error: appointmentError } = await this.supabase.client
+                    .from('appointments')
+                    .insert({
+                      lead_id: bridge.lead_id,
+                      salesperson_id: vendedor.id,
+                      scheduled_date: parsed.fecha,
+                      scheduled_time: parsed.hora,
+                      status: 'scheduled',
+                      notes: `Agendado durante chat bridge - ${tipoEvento}`
+                    })
+                    .select()
+                    .single();
+
+                  if (appointmentError) {
+                    console.error('❌ Error creando appointment:', appointmentError);
+                    await this.meta.sendWhatsAppMessage(from,
+                      `❌ Error al agendar. Intenta de nuevo.`
+                    );
+                  } else {
+                    // Registrar actividad
+                    await this.supabase.client.from('lead_activities').insert({
+                      lead_id: bridge.lead_id,
+                      team_member_id: vendedor.id,
+                      activity_type: tipoEvento === 'llamada' ? 'call_scheduled' :
+                                     tipoEvento === 'recordatorio' ? 'reminder' : 'appointment_scheduled',
+                      notes: `${tipoEvento.charAt(0).toUpperCase() + tipoEvento.slice(1)} agendada: ${fechaFormateada} ${horaFormateada}`,
+                      created_at: new Date().toISOString()
+                    });
+
+                    const iconos: Record<string, string> = {
+                      'llamada': '📞',
+                      'cita': '📅',
+                      'visita': '📅',
+                      'recordatorio': '⏰'
+                    };
+
+                    await this.meta.sendWhatsAppMessage(from,
+                      `${iconos[tipoEvento] || '✅'} *${tipoEvento.charAt(0).toUpperCase() + tipoEvento.slice(1)} agendada*\n\n` +
+                      `👤 ${bridge.lead_name}\n` +
+                      `📆 ${fechaFormateada}\n` +
+                      `🕐 ${horaFormateada}\n\n` +
+                      `💡 Te recordaré antes.`
+                    );
+                    console.log(`✅ ${tipoEvento} agendada:`, parsed.fecha, parsed.hora);
+                  }
+                } else {
+                  await this.meta.sendWhatsAppMessage(from,
+                    `❓ No entendí la fecha.\n\nEjemplos válidos:\n• #llamada mañana 10am\n• #cita viernes 3pm\n• #recordatorio lunes 9am`
+                  );
+                }
+                return;
+              }
+
+              // #si - Confirmar agendado sugerido
+              if ((comandoLower === '#si' || comandoLower === '#sí') && notes.pending_bridge_appointment) {
+                const pending = notes.pending_bridge_appointment;
+
+                const { data: appointment } = await this.supabase.client
+                  .from('appointments')
+                  .insert({
+                    lead_id: bridge.lead_id,
+                    salesperson_id: vendedor.id,
+                    scheduled_date: pending.fecha,
+                    scheduled_time: pending.hora,
+                    status: 'scheduled',
+                    notes: `Agendado desde detección automática - ${pending.tipo}`
+                  })
+                  .select()
+                  .single();
+
+                // Registrar actividad
+                await this.supabase.client.from('lead_activities').insert({
+                  lead_id: bridge.lead_id,
+                  team_member_id: vendedor.id,
+                  activity_type: pending.tipo === 'llamada' ? 'call_scheduled' : 'appointment_scheduled',
+                  notes: `${pending.tipo} agendada: ${pending.fecha} ${pending.hora}`,
+                  created_at: new Date().toISOString()
+                });
+
+                // Limpiar pending
+                const { pending_bridge_appointment, ...notasSinPending } = notes;
+                await this.supabase.client
+                  .from('team_members')
+                  .update({ notes: JSON.stringify(notasSinPending) })
+                  .eq('id', vendedor.id);
+
+                const fechaObj = new Date(pending.fecha + 'T' + pending.hora + ':00');
+                await this.meta.sendWhatsAppMessage(from,
+                  `✅ *${pending.tipo.charAt(0).toUpperCase() + pending.tipo.slice(1)} agendada*\n\n` +
+                  `📆 ${fechaObj.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })}\n` +
+                  `🕐 ${fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}`
+                );
+                return;
+              }
+
+              // #no - Cancelar sugerencia de agendado
+              if (comandoLower === '#no' && notes.pending_bridge_appointment) {
+                const { pending_bridge_appointment, ...notasSinPending } = notes;
+                await this.supabase.client
+                  .from('team_members')
+                  .update({ notes: JSON.stringify(notasSinPending) })
+                  .eq('id', vendedor.id);
+
+                await this.meta.sendWhatsAppMessage(from, `👍 Entendido, no se agendó.`);
+                return;
+              }
+
+              // Comando # no reconocido
+              await this.meta.sendWhatsAppMessage(from,
+                `❓ Comando no reconocido.\n\n*Comandos disponibles:*\n` +
+                `• #llamada [fecha hora]\n• #cita [fecha hora]\n• #recordatorio [fecha hora]\n• #cerrar\n\n` +
+                `Ejemplo: *#llamada viernes 10am*`
+              );
+              return;
+            }
+
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            // DETECCIÓN AUTOMÁTICA DE INTENCIONES DE CITA
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            const intencion = this.detectarIntencionCita(mensaje);
+            if (intencion.detectado && intencion.fecha && intencion.hora) {
+              console.log(`📅 Detectada intención de cita en mensaje de vendedor:`, intencion);
+
+              // Guardar pendiente para confirmación
+              const notasConPending = JSON.stringify({
+                ...notes,
+                pending_bridge_appointment: {
+                  fecha: intencion.fecha,
+                  hora: intencion.hora,
+                  tipo: intencion.tipo,
+                  detected_at: new Date().toISOString()
+                }
+              });
+              await this.supabase.client
+                .from('team_members')
+                .update({ notes: notasConPending })
+                .eq('id', vendedor.id);
+
+              const fechaObj = new Date(intencion.fecha + 'T' + intencion.hora + ':00');
+              const fechaFormateada = fechaObj.toLocaleDateString('es-MX', {
+                weekday: 'long', day: 'numeric', month: 'long'
+              });
+              const horaFormateada = fechaObj.toLocaleTimeString('es-MX', {
+                hour: '2-digit', minute: '2-digit'
+              });
+
+              // Preguntar al vendedor si quiere agendar (en paralelo al mensaje al lead)
+              setTimeout(async () => {
+                await this.meta.sendWhatsAppMessage(from,
+                  `📅 *¿Agendo ${intencion.tipo}?*\n\n` +
+                  `👤 ${bridge.lead_name}\n` +
+                  `📆 ${fechaFormateada}\n` +
+                  `🕐 ${horaFormateada}\n\n` +
+                  `Responde *#si* o *#no*`
+                );
+              }, 1000);
+            }
+
+            // Enviar mensaje al lead (si no fue comando #)
+            console.log(`🔗 BRIDGE: Reenviando mensaje de ${vendedor.name} a ${bridge.lead_name}`);
+            await this.meta.sendWhatsAppMessage(bridge.lead_phone, mensaje);
+
+            // ═══════════════════════════════════════════════════════════
+            // GUARDAR EN CONVERSATION_HISTORY DEL LEAD
+            // ═══════════════════════════════════════════════════════════
+            const { data: leadParaHistorial } = await this.supabase.client
+              .from('leads')
+              .select('conversation_history, notes')
+              .eq('id', bridge.lead_id)
+              .single();
+
+            const historialActual = leadParaHistorial?.conversation_history || [];
+            historialActual.push({
+              role: 'vendedor',
+              content: mensaje,
+              timestamp: new Date().toISOString(),
+              vendedor_name: vendedor.name,
+              via_bridge: true
+            });
+
+            // Actualizar last_activity y extender el bridge 5 minutos más
+            const nuevoExpiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+            const notasActualizadas = JSON.stringify({
+              ...notes,
+              active_bridge: {
+                ...bridge,
+                last_activity: new Date().toISOString(),
+                expires_at: nuevoExpiry
+              }
+            });
+
+            await this.supabase.client
+              .from('team_members')
+              .update({ notes: notasActualizadas })
+              .eq('id', vendedor.id);
+
+            // Actualizar lead con historial y notas
+            const notasLeadExistentes = leadParaHistorial?.notes || {};
+            const notasLeadObj = typeof notasLeadExistentes === 'object' ? notasLeadExistentes : {};
+            await this.supabase.client
+              .from('leads')
+              .update({
+                conversation_history: historialActual.slice(-50),
+                notes: {
+                  ...notasLeadObj,
+                  active_bridge_to_vendedor: {
+                    ...(notasLeadObj as any).active_bridge_to_vendedor,
+                    expires_at: nuevoExpiry
+                  }
+                },
+                last_interaction: new Date().toISOString()
+              })
+              .eq('id', bridge.lead_id);
+
+            // Confirmar al vendedor
+            await this.meta.sendWhatsAppMessage(from,
+              `📤 *→ ${bridge.lead_name}*`
+            );
+
+            // Registrar en actividades
+            await this.supabase.client.from('lead_activities').insert({
+              lead_id: bridge.lead_id,
+              team_member_id: vendedor.id,
+              activity_type: 'whatsapp',
+              notes: `Chat directo (${vendedor.name}): "${mensaje.substring(0, 100)}"`,
+              created_at: new Date().toISOString()
+            });
+
+            return;
+          } else {
+            // Bridge expiró, limpiar y notificar
+            console.log(`⏰ Bridge expirado para ${bridge.lead_name}`);
+            const { active_bridge, ...notasSinBridge } = notes;
+            await this.supabase.client
+              .from('team_members')
+              .update({ notes: Object.keys(notasSinBridge).length > 0 ? JSON.stringify(notasSinBridge) : null })
+              .eq('id', vendedor.id);
+
+            // Limpiar del lead también
+            const { data: leadActual } = await this.supabase.client
+              .from('leads')
+              .select('notes')
+              .eq('id', bridge.lead_id)
+              .single();
+
+            if (leadActual?.notes?.active_bridge_to_vendedor) {
+              const { active_bridge_to_vendedor, ...notasLeadSinBridge } = leadActual.notes;
+              await this.supabase.client
+                .from('leads')
+                .update({ notes: notasLeadSinBridge })
+                .eq('id', bridge.lead_id);
+            }
+
+            await this.meta.sendWhatsAppMessage(from,
+              `🔚 *Chat directo con ${bridge.lead_name} terminó*\n\nSARA retoma el seguimiento automático.\n\n💡 Para enviar otro mensaje: *"mensaje ${bridge.lead_name}"*`
+            );
+            // Continuar con el flujo normal para procesar el mensaje actual
+          }
+        }
 
         // Detectar selección de lead con número (1, 2, 3...)
         if (notes?.pending_lead_selection) {
@@ -3795,8 +4962,10 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
             const leadSeleccionado = notes.pending_lead_selection.leads[seleccion - 1];
             console.log('✅ Lead seleccionado:', leadSeleccionado.name);
 
-            // Guardar pending_message_to_lead con el lead seleccionado
+            // Preservar citas_preguntadas y agregar pending_message_to_lead
+            const { pending_lead_selection, ...notasSinPending } = notes;
             const notesData = JSON.stringify({
+              ...notasSinPending,
               pending_message_to_lead: {
                 lead_id: leadSeleccionado.id,
                 lead_name: leadSeleccionado.name,
@@ -3810,7 +4979,7 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
               .update({ notes: notesData })
               .eq('id', vendedor.id);
 
-            await this.twilio.sendWhatsAppMessage(from,
+            await this.meta.sendWhatsAppMessage(from,
               `📝 *¿Qué mensaje quieres enviar a ${leadSeleccionado.name}?*\n\n💡 Escribe el mensaje y lo envío.`
             );
             return;
@@ -3830,10 +4999,14 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
             const leadSeleccionado = notes.pending_hipoteca_selection.leads[seleccion - 1];
             console.log('✅ Lead seleccionado para hipoteca:', leadSeleccionado.name);
 
-            // Limpiar notes
+            // Limpiar pending pero preservar citas_preguntadas
+            const { pending_hipoteca_selection, ...notasSinPending } = notes;
+            const notasLimpias = Object.keys(notasSinPending).length > 0
+              ? JSON.stringify(notasSinPending)
+              : null;
             await this.supabase.client
               .from('team_members')
-              .update({ notes: null })
+              .update({ notes: notasLimpias })
               .eq('id', vendedor.id);
 
             // Cargar teamMembers para el round robin
@@ -3846,6 +5019,341 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
             await this.asignarHipotecaALead(from, leadSeleccionado, vendedor, teamMembersData || []);
             return;
           }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // FEEDBACK POST-VISITA (después de confirmar que sí llegó)
+        // Vendedor responde 1-4 sobre cómo fue la cita
+        // ═══════════════════════════════════════════════════════════
+        if (notes?.pending_post_visit_feedback) {
+          const respuesta = mensaje.trim();
+          const feedback = notes.pending_post_visit_feedback;
+
+          // Opciones: 1=Muy interesado, 2=Quiere más opciones, 3=No le convenció, 4=Solo vino a conocer
+          const opcion = respuesta === '1' ? 'muy_interesado' :
+                         respuesta === '2' ? 'quiere_opciones' :
+                         respuesta === '3' ? 'no_convencio' :
+                         respuesta === '4' ? 'solo_conocer' : null;
+
+          if (opcion) {
+            console.log(`📋 Feedback post-visita: ${opcion} para ${feedback.lead_name}`);
+
+            let nuevoStatus = 'visited';
+            let mensajeVendedor = '';
+            let mensajeCliente = '';
+            const nombreCliente = feedback.lead_name?.split(' ')[0] || 'el cliente';
+
+            // CONFIRMACIÓN CLARA del lead actualizado
+            const confirmacionLead = `✅ *GUARDADO para ${feedback.lead_name}*\n\n`;
+
+            switch (opcion) {
+              case 'muy_interesado':
+                nuevoStatus = 'negotiation';
+                mensajeVendedor = confirmacionLead + `🔥 *Muy interesado* → Status: En negociación\n\n💡 *Siguiente paso:* Contacta hoy para hablar de apartado y formas de pago.`;
+                break;
+
+              case 'quiere_opciones':
+                nuevoStatus = 'visited';
+                mensajeVendedor = confirmacionLead + `👍 *Quiere más opciones* → Status: Visitado\n\n💡 *Siguiente paso:* Pregúntale qué busca diferente.`;
+                if (feedback.lead_phone) {
+                  mensajeCliente = `¡Hola ${nombreCliente}! 🏠\n\nMe comentó tu asesor que te gustaría ver más opciones.\n\n¿Qué te gustaría diferente?\n• ¿Más recámaras o espacio?\n• ¿Precio más accesible?\n• ¿Otra ubicación?\n\nCuéntame y te busco opciones que se ajusten mejor. 😊`;
+                }
+                break;
+
+              case 'no_convencio':
+                nuevoStatus = 'visited';
+                mensajeVendedor = confirmacionLead + `📝 *No le convenció* → Status: Visitado\n\n💡 *Siguiente paso:* Dale seguimiento en unos días.`;
+                break;
+
+              case 'solo_conocer':
+                nuevoStatus = 'visited';
+                mensajeVendedor = confirmacionLead + `👀 *Solo vino a conocer* → Status: Visitado\n\n💡 SARA le dará seguimiento automático.`;
+                break;
+            }
+
+            // Actualizar lead con nuevo status, feedback estructurado y propiedad
+            if (feedback.lead_id) {
+              const { data: leadActual } = await this.supabase.client
+                .from('leads')
+                .select('notes, score')
+                .eq('id', feedback.lead_id)
+                .single();
+
+              // Construir notas estructuradas preservando las existentes
+              const notasExistentes = typeof leadActual?.notes === 'object' ? leadActual.notes :
+                                      typeof leadActual?.notes === 'string' ? { texto: leadActual.notes } : {};
+
+              const notasActualizadas = {
+                ...notasExistentes,
+                post_visit_feedback: opcion,
+                post_visit_date: new Date().toISOString(),
+                property: feedback.property || notasExistentes.property
+              };
+
+              // Calcular nuevo score basado en feedback
+              let nuevoScore = leadActual?.score || 50;
+              if (opcion === 'muy_interesado') nuevoScore = Math.min(100, nuevoScore + 30);
+              else if (opcion === 'quiere_opciones') nuevoScore = Math.min(100, nuevoScore + 10);
+              else if (opcion === 'no_convencio') nuevoScore = Math.max(0, nuevoScore - 10);
+              else if (opcion === 'solo_conocer') nuevoScore = Math.max(0, nuevoScore - 5);
+
+              await this.supabase.client
+                .from('leads')
+                .update({
+                  status: nuevoStatus,
+                  score: nuevoScore,
+                  property_interest: feedback.property || undefined,
+                  notes: notasActualizadas,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', feedback.lead_id);
+
+              console.log(`📊 Lead ${feedback.lead_name} actualizado: status=${nuevoStatus}, score=${nuevoScore}, feedback=${opcion}`);
+            }
+
+            // Actualizar appointment con feedback
+            if (feedback.appointment_id) {
+              await this.supabase.client
+                .from('appointments')
+                .update({
+                  notes: `Feedback vendedor: ${opcion}`
+                })
+                .eq('id', feedback.appointment_id);
+            }
+
+            // Preservar citas_preguntadas al limpiar notas del vendedor
+            const notasLimpias = {
+              citas_preguntadas: notes?.citas_preguntadas || []
+            };
+            await this.supabase.client
+              .from('team_members')
+              .update({ notes: JSON.stringify(notasLimpias) })
+              .eq('id', vendedor.id);
+
+            // Enviar mensaje al vendedor
+            await this.twilio.sendWhatsAppMessage(from, mensajeVendedor);
+
+            // Enviar mensaje al cliente si aplica
+            if (mensajeCliente && feedback.lead_phone) {
+              await this.meta.sendWhatsAppMessage(feedback.lead_phone, mensajeCliente);
+              console.log(`📤 Mensaje de seguimiento enviado a ${feedback.lead_name}`);
+            }
+
+            return;
+          }
+          // Si no es 1-4, continuar con flujo normal (puede estar escribiendo otra cosa)
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // CONFIRMACIÓN DE ASISTENCIA A CITA (NO-SHOW DETECTION)
+        // Vendedor responde 1 (sí llegó) o 2 (no llegó)
+        // ═══════════════════════════════════════════════════════════
+        if (notes?.pending_show_confirmation) {
+          const respuesta = mensaje.trim();
+          const confirmacion = notes.pending_show_confirmation;
+
+          // Aceptar "1", "si", "sí", "si llego", "sí llegó", etc.
+          const siLlego = respuesta === '1' || respuesta === 'si' || respuesta === 'sí' ||
+                          respuesta.includes('si lleg') || respuesta.includes('sí lleg') ||
+                          respuesta.includes('si, lleg') || respuesta.includes('sí, lleg');
+
+          // Aceptar "2", "no", "no llego", "no llegó", etc.
+          const noLlego = respuesta === '2' || respuesta === 'no' ||
+                          respuesta.includes('no lleg') || respuesta.includes('no vino') ||
+                          respuesta.includes('no se present');
+
+          if (siLlego) {
+            console.log('✅ Vendedor confirma: Cliente SÍ llegó a la cita');
+
+            // Actualizar cita a completed
+            await this.supabase.client
+              .from('appointments')
+              .update({
+                status: 'completed',
+                notes: 'Asistencia confirmada por vendedor vía WhatsApp'
+              })
+              .eq('id', confirmacion.appointment_id);
+
+            // Actualizar lead a visited
+            if (confirmacion.lead_id) {
+              await this.supabase.client
+                .from('leads')
+                .update({
+                  status: 'visited',
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', confirmacion.lead_id);
+            }
+
+            // Preservar citas_preguntadas al actualizar notas
+            const notasActualizadas = {
+              ...notes, // Mantener datos existentes como citas_preguntadas
+              pending_show_confirmation: undefined, // Quitar la confirmación pendiente
+              pending_post_visit_feedback: {
+                appointment_id: confirmacion.appointment_id,
+                lead_id: confirmacion.lead_id,
+                lead_name: confirmacion.lead_name,
+                lead_phone: confirmacion.lead_phone,
+                property: confirmacion.property,
+                asked_at: new Date().toISOString()
+              }
+            };
+            // Limpiar undefined
+            delete notasActualizadas.pending_show_confirmation;
+
+            await this.supabase.client
+              .from('team_members')
+              .update({ notes: JSON.stringify(notasActualizadas) })
+              .eq('id', vendedor.id);
+
+            // Registrar actividad de visita completada
+            if (confirmacion.lead_id) {
+              await this.supabase.client.from('lead_activities').insert({
+                lead_id: confirmacion.lead_id,
+                team_member_id: vendedor.id,
+                activity_type: 'visit',
+                notes: `Visita completada en ${confirmacion.property || 'propiedad'}`,
+                created_at: new Date().toISOString()
+              });
+              console.log(`📝 Actividad de visita registrada para lead ${confirmacion.lead_id}`);
+            }
+
+            // Preguntar al vendedor cómo fue la cita - NOMBRE MUY CLARO
+            await this.meta.sendWhatsAppMessage(from,
+              `✅ *CITA COMPLETADA: ${confirmacion.lead_name?.toUpperCase()}*\n\n¿Cómo fue la visita con *${confirmacion.lead_name}*?\n\n1️⃣ Muy interesado (quiere avanzar)\n2️⃣ Quiere ver más opciones\n3️⃣ No le convenció\n4️⃣ Solo vino a conocer`
+            );
+
+            // Enviar encuesta al cliente usando TEMPLATE
+            if (confirmacion.lead_phone && confirmacion.lead_id) {
+              const nombreCliente = confirmacion.lead_name?.split(' ')[0] || 'amigo';
+              const propiedad = confirmacion.property || 'la propiedad';
+
+              try {
+                // Usar template: encuesta_post_visita
+                // Template: ¡Hola {{1}}! 👋 Gracias por visitarnos hoy en *{{2}}*...
+                const templateComponents = [
+                  {
+                    type: 'body',
+                    parameters: [
+                      { type: 'text', text: nombreCliente },
+                      { type: 'text', text: propiedad }
+                    ]
+                  }
+                ];
+
+                await this.meta.sendTemplate(confirmacion.lead_phone, 'encuesta_post_visita', 'es_MX', templateComponents);
+                console.log(`📤 Encuesta post-visita (template) enviada a cliente ${confirmacion.lead_name}`);
+              } catch (templateErr) {
+                // Fallback a mensaje normal si el template falla
+                console.log(`⚠️ Template falló, usando mensaje normal:`, templateErr);
+                const mensajeCliente = `¡Hola ${nombreCliente}! 👋\n\nGracias por visitarnos hoy en *${propiedad}*. 🏠\n\n¿Qué te pareció? Responde:\n1️⃣ Me encantó\n2️⃣ Quiero ver más opciones\n3️⃣ Tengo dudas\n\nEstoy aquí para ayudarte 😊`;
+                await this.meta.sendWhatsAppMessage(confirmacion.lead_phone, mensajeCliente);
+              }
+
+              // Guardar en el lead que tiene encuesta pendiente
+              const { data: leadActual } = await this.supabase.client
+                .from('leads')
+                .select('notes')
+                .eq('id', confirmacion.lead_id)
+                .single();
+
+              const notasLead = typeof leadActual?.notes === 'object' ? leadActual.notes : {};
+              await this.supabase.client
+                .from('leads')
+                .update({
+                  notes: {
+                    ...notasLead,
+                    pending_client_survey: {
+                      sent_at: new Date().toISOString(),
+                      property: confirmacion.property,
+                      vendedor_id: vendedor.id,
+                      vendedor_name: vendedor.name
+                    }
+                  }
+                })
+                .eq('id', confirmacion.lead_id);
+            }
+
+            return;
+
+          } else if (noLlego) {
+            console.log('❌ Vendedor confirma: Cliente NO llegó a la cita');
+
+            // Actualizar cita a no_show
+            await this.supabase.client
+              .from('appointments')
+              .update({
+                status: 'no_show',
+                notes: 'No-show confirmado por vendedor vía WhatsApp'
+              })
+              .eq('id', confirmacion.appointment_id);
+
+            // Regresar lead a contacted
+            if (confirmacion.lead_id) {
+              await this.supabase.client
+                .from('leads')
+                .update({
+                  status: 'contacted',
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', confirmacion.lead_id);
+            }
+
+            // Registrar actividad de no-show
+            if (confirmacion.lead_id) {
+              await this.supabase.client.from('lead_activities').insert({
+                lead_id: confirmacion.lead_id,
+                team_member_id: vendedor.id,
+                activity_type: 'no_show',
+                notes: `No se presentó a la cita de las ${confirmacion.hora} en ${confirmacion.property || 'propiedad'}`,
+                created_at: new Date().toISOString()
+              });
+              console.log(`📝 Actividad de no-show registrada para lead ${confirmacion.lead_id}`);
+            }
+
+            // Enviar mensaje de reagendar al lead usando TEMPLATE
+            if (confirmacion.lead_phone) {
+              const nombreCliente = confirmacion.lead_name?.split(' ')[0] || 'Hola';
+              const propiedad = confirmacion.property || 'la propiedad';
+
+              try {
+                // Usar template: reagendar_noshow
+                // Template: 👋 Hola {{1}}, Notamos que no pudiste llegar a tu cita en *{{2}}*...
+                const templateComponents = [
+                  {
+                    type: 'body',
+                    parameters: [
+                      { type: 'text', text: nombreCliente },
+                      { type: 'text', text: propiedad }
+                    ]
+                  }
+                ];
+
+                await this.meta.sendTemplate(confirmacion.lead_phone, 'reagendar_noshow', 'es_MX', templateComponents);
+                console.log(`📤 Mensaje reagendar no-show (template) enviado a ${confirmacion.lead_name}`);
+              } catch (templateErr) {
+                // Fallback a mensaje normal si el template falla
+                console.log(`⚠️ Template falló, usando mensaje normal:`, templateErr);
+                const mensajeLead = `👋 Hola ${nombreCliente},\n\nNotamos que no pudiste llegar a tu cita en *${propiedad}*.\n\n¡No te preocupes! 😊 ¿Te gustaría reagendar?\n\nSolo dime qué día y hora te funcionan mejor. 📅`;
+                await this.meta.sendWhatsAppMessage(confirmacion.lead_phone, mensajeLead);
+              }
+            }
+
+            // Preservar citas_preguntadas al limpiar notas
+            const notasLimpias = {
+              citas_preguntadas: notes?.citas_preguntadas || []
+            };
+            await this.supabase.client
+              .from('team_members')
+              .update({ notes: JSON.stringify(notasLimpias) })
+              .eq('id', vendedor.id);
+
+            await this.meta.sendWhatsAppMessage(from,
+              `📝 *No-show registrado*\n\nHe enviado un mensaje a *${confirmacion.lead_name}* ofreciendo reagendar.\n\n💡 Te recomiendo dar seguimiento mañana si no responde hoy.`
+            );
+            return;
+          }
+          // Si no es 1 ni 2, continuar con el flujo normal (el vendedor puede estar escribiendo otra cosa)
         }
       } catch (e) {
         console.log('⚠️ Error parseando notes:', e);
@@ -3937,8 +5445,17 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
       return;
     }
 
-    // FUNNEL: Reservó/Apartó
-    if (mensaje.includes('reserv') || mensaje.includes('reserb') || mensaje.includes('apart')) {
+    // FUNNEL: Reservó/Apartó CON DATOS DE ENGANCHE
+    // Formato: "apartar Juan García en Distrito Falco 50000 para el 20 enero"
+    // Captura: nombre (hasta "en"), propiedad, enganche, fecha
+    const apartadoCompletoMatch = body.match(/^apartar?\s+(.+?)\s+en\s+(.+?)\s+\$?([0-9,\.]+)\s*(?:k|mil|m|pesos)?\s*(?:para\s+(?:el\s+)?)?(.+)?$/i);
+    if (apartadoCompletoMatch) {
+      await this.vendedorRegistrarApartado(from, body, vendedor, apartadoCompletoMatch);
+      return;
+    }
+
+    // FUNNEL: Reservó/Apartó (básico sin datos extras)
+    if ((mensaje.includes('reserv') || mensaje.includes('reserb') || mensaje.includes('apart')) && !mensaje.includes('apartar ')) {
       await this.vendedorCambiarEtapa(from, body, vendedor, 'reserved', '📝 RESERVADO');
       return;
     }
@@ -3976,6 +5493,20 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
         mensaje === 'hipotecas' || mensaje === 'mis hipotecas' || mensaje === 'ver creditos' || mensaje === 'ver créditos') {
       await this.vendedorConsultarCredito(from, '', vendedor); // Sin nombre = muestra todos
       return;
+    }
+
+    // =====================================================
+    // COMANDO STATUS LEAD: "status [nombre]" - Ver resumen del lead en funnel
+    // Formatos: "status vanessa", "cómo va vanessa", "resumen vanessa"
+    // =====================================================
+    const statusLeadMatch = body.match(/^(?:status|estatus|resumen(?:\s+de)?|c[oó]mo\s+va)\s+([a-zA-ZáéíóúñÁÉÍÓÚÑ\s]+)$/i);
+    if (statusLeadMatch) {
+      const nombreBuscar = statusLeadMatch[1].trim();
+      // Evitar que capture "status credito X"
+      if (!nombreBuscar.toLowerCase().startsWith('credito') && !nombreBuscar.toLowerCase().startsWith('crédito')) {
+        await this.vendedorStatusLead(from, nombreBuscar, vendedor);
+        return;
+      }
     }
 
     // =====================================================
@@ -4019,8 +5550,9 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
 
     // =====================================================
     // MENSAJE [nombre] - Enviar WhatsApp al lead
+    // Soporta: "mensaje a Juan", "enviar mensaje a Juan", "whatsapp Juan", "escribir a Juan"
     // =====================================================
-    const mensajeLeadMatch = body.match(/^(?:mensaje|whatsapp|wa|escribir)\s+(?:a\s+)?([a-zA-ZáéíóúñÁÉÍÓÚÑ\s\d]+)$/i);
+    const mensajeLeadMatch = body.match(/^(?:enviar\s+)?(?:mensaje|whatsapp|wa|escribir)\s+(?:a\s+)?([a-zA-ZáéíóúñÁÉÍÓÚÑ\s\d]+)$/i);
     if (mensajeLeadMatch) {
       const nombreLead = mensajeLeadMatch[1].trim();
       await this.enviarMensajeLead(from, nombreLead, vendedor);
@@ -4252,6 +5784,36 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
       return;
     }
 
+    // 1.2.1 VER COMPRADORES - Leads que ya compraron (delivered)
+    if (mensaje.includes('ver compradores') || mensaje.includes('mis compradores') || mensaje.includes('compradores')) {
+      await this.verLeadsPorTipo(from, vendedor, 'compradores');
+      return;
+    }
+
+    // 1.2.2 VER CAÍDOS - Leads que cayeron
+    if (mensaje.includes('ver caídos') || mensaje.includes('ver caidos') || mensaje.includes('mis caídos') || mensaje.includes('mis caidos')) {
+      await this.verLeadsPorTipo(from, vendedor, 'caidos');
+      return;
+    }
+
+    // 1.2.3 VER INACTIVOS - Leads sin actividad en 30+ días
+    if (mensaje.includes('ver inactivos') || mensaje.includes('mis inactivos') || mensaje.includes('leads inactivos')) {
+      await this.verLeadsPorTipo(from, vendedor, 'inactivos');
+      return;
+    }
+
+    // 1.2.4 VER TODOS - Todos los leads incluyendo delivered/fallen
+    if (mensaje === 'ver todos' || mensaje === 'todos mis leads' || mensaje === 'ver todos los leads') {
+      await this.verLeadsPorTipo(from, vendedor, 'todos');
+      return;
+    }
+
+    // 1.2.5 VER ARCHIVADOS - Solo leads archivados
+    if (mensaje.includes('ver archivados') || mensaje.includes('mis archivados') || mensaje.includes('archivados')) {
+      await this.verLeadsPorTipo(from, vendedor, 'archivados');
+      return;
+    }
+
     // 1.3 FUNNEL DE [NOMBRE] - Ver detalle de un lead
     const matchFunnelLead = body.match(/(?:funnel de|ver a|estado de|info de)\s+([a-záéíóúñA-ZÁÉÍÓÚÑ\s]+)/i);
     if (matchFunnelLead) {
@@ -4265,9 +5827,10 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
       return;
     }
 
-    // 3. ¿Cuántos leads tengo? (excluir "crear lead" y "registrar lead")
+    // 3. ¿Cuántos leads tengo? (excluir comandos que contienen "lead")
     if ((mensaje.includes('lead') || mensaje.includes('prospectos') || mensaje.includes('clientes nuevos')) &&
-        !mensaje.startsWith('crear ') && !mensaje.startsWith('registrar ') && !mensaje.startsWith('nuevo ')) {
+        !mensaje.startsWith('crear ') && !mensaje.startsWith('registrar ') && !mensaje.startsWith('nuevo ') &&
+        !mensaje.startsWith('archivar ') && !mensaje.startsWith('desarchivar ') && !mensaje.startsWith('reactivar ')) {
       await this.vendedorResumenLeads(from, vendedor, nombreVendedor);
       return;
     }
@@ -4302,6 +5865,26 @@ Soy SARA, tu asistente de marketing. Aquí todos mis comandos:
       }
     }
 
+    // 6.6 ARCHIVAR LEAD - Para spam/números erróneos
+    const matchArchivar = body.match(/archivar\s+(?:a\s+)?(?:lead\s+)?([a-záéíóúñA-ZÁÉÍÓÚÑ\s]+)/i);
+    if (matchArchivar) {
+      await this.archivarDesarchivarLead(from, matchArchivar[1].trim(), vendedor, true);
+      return;
+    }
+
+    // 6.7 DESARCHIVAR LEAD
+    const matchDesarchivar = body.match(/desarchivar\s+(?:a\s+)?(?:lead\s+)?([a-záéíóúñA-ZÁÉÍÓÚÑ\s]+)/i);
+    if (matchDesarchivar) {
+      await this.archivarDesarchivarLead(from, matchDesarchivar[1].trim(), vendedor, false);
+      return;
+    }
+
+    // 6.8 REACTIVAR LEAD - Cambiar de fallen a new
+    const matchReactivar = body.match(/reactivar\s+(?:a\s+)?(?:lead\s+)?([a-záéíóúñA-ZÁÉÍÓÚÑ\s]+)/i);
+    if (matchReactivar) {
+      await this.reactivarLead(from, matchReactivar[1].trim(), vendedor);
+      return;
+    }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // COMANDOS DE ACTUALIZACIÓN
@@ -4839,19 +6422,48 @@ ${i + 1}. *${hora}* - ${clienteNombre}`;
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   private async vendedorMiFunnel(from: string, vendedor: any, nombre: string): Promise<void> {
     // Si es admin/coordinador, ver TODOS los leads. Si es vendedor, solo los suyos.
+    // FILTRO: Solo pipeline activo (excluir delivered, fallen, archived)
     let query = this.supabase.client
       .from('leads')
-      .select('id, name, status, score, phone, updated_at, lead_category')
+      .select('id, name, status, score, phone, updated_at, lead_category, archived')
+      .not('status', 'in', '("delivered","fallen")')
       .order('updated_at', { ascending: false });
 
     if (vendedor.role !== 'admin' && vendedor.role !== 'coordinador') {
       query = query.eq('assigned_to', vendedor.id);
     }
 
+    // Filtrar archivados (si el campo existe)
+    query = query.or('archived.is.null,archived.eq.false');
+
     const { data: leads } = await query;
 
+    // Contar compradores y caídos para mostrar al final
+    const { count: countCompradores } = await this.supabase.client
+      .from('leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'delivered')
+      .eq(vendedor.role !== 'admin' && vendedor.role !== 'coordinador' ? 'assigned_to' : 'id',
+          vendedor.role !== 'admin' && vendedor.role !== 'coordinador' ? vendedor.id : undefined as any)
+      .or('archived.is.null,archived.eq.false');
+
+    const { count: countCaidos } = await this.supabase.client
+      .from('leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'fallen')
+      .eq(vendedor.role !== 'admin' && vendedor.role !== 'coordinador' ? 'assigned_to' : 'id',
+          vendedor.role !== 'admin' && vendedor.role !== 'coordinador' ? vendedor.id : undefined as any)
+      .or('archived.is.null,archived.eq.false');
+
     if (!leads || leads.length === 0) {
-      await this.twilio.sendWhatsAppMessage(from, `📌 No tienes leads asignados aún.`);
+      let msg = `📌 No tienes leads en pipeline activo.\n\n`;
+      if (countCompradores && countCompradores > 0) {
+        msg += `🎉 Tienes ${countCompradores} compradores → *ver compradores*\n`;
+      }
+      if (countCaidos && countCaidos > 0) {
+        msg += `❌ Tienes ${countCaidos} caídos → *ver caídos*\n`;
+      }
+      await this.twilio.sendWhatsAppMessage(from, msg);
       return;
     }
 
@@ -4864,7 +6476,7 @@ ${i + 1}. *${hora}* - ${clienteNombre}`;
       leadsPorEtapa[l.status].push(l);
     });
 
-    // Funnel con etapas en orden
+    // Funnel con etapas ACTIVAS (sin delivered/fallen)
     const funnel = [
       { name: 'Nuevos', status: 'new', emoji: '📌' },
       { name: 'Contactados', status: 'contacted', emoji: '📞' },
@@ -4873,11 +6485,10 @@ ${i + 1}. *${hora}* - ${clienteNombre}`;
       { name: 'Negociación', status: 'negotiation', emoji: '💰' },
       { name: 'Reservado', status: 'reserved', emoji: '📝' },
       { name: 'Cerrado', status: 'closed', emoji: '✅' },
-      { name: 'Entregado', status: 'delivered', emoji: '🎉' },
     ];
 
     const esAdmin = vendedor.role === 'admin' || vendedor.role === 'coordinador';
-    let msg = `📊 *${esAdmin ? 'FUNNEL GENERAL' : 'MIS LEADS'}*\n━━━━━━━━━━━━━━━━━━━━\n`;
+    let msg = `📊 *${esAdmin ? 'PIPELINE ACTIVO' : 'MIS LEADS'}*\n━━━━━━━━━━━━━━━━━━━━\n`;
 
     // Mostrar leads agrupados por etapa con nombres
     for (const etapa of funnel) {
@@ -4896,18 +6507,255 @@ ${i + 1}. *${hora}* - ${clienteNombre}`;
       }
     }
 
-    // Caídos aparte
-    const caidos = leadsPorEtapa['fallen'] || [];
-    if (caidos.length > 0) {
-      msg += `\n❌ *Caídos* (${caidos.length}):\n`;
-      caidos.slice(0, 3).forEach((l: any) => {
-        msg += `   • ${l.name}\n`;
-      });
+    msg += `\n━━━━━━━━━━━━━━━━━━━━`;
+    msg += `\n📊 *Pipeline activo:* ${total} leads`;
+
+    // Mostrar accesos rápidos a otras vistas
+    if (countCompradores && countCompradores > 0) {
+      msg += `\n🎉 *Compradores:* ${countCompradores} → "ver compradores"`;
+    }
+    if (countCaidos && countCaidos > 0) {
+      msg += `\n❌ *Caídos:* ${countCaidos} → "ver caídos"`;
     }
 
-    msg += `\n━━━━━━━━━━━━━━━━━━━━\n📊 *Total:* ${total} leads`;
+    await this.twilio.sendWhatsAppMessage(from, msg);
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // VER LEADS POR TIPO - compradores, caídos, inactivos, todos, archivados
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async verLeadsPorTipo(from: string, vendedor: any, tipo: string): Promise<void> {
+    const esAdmin = vendedor.role === 'admin' || vendedor.role === 'coordinador';
+
+    let query = this.supabase.client
+      .from('leads')
+      .select('id, name, status, phone, updated_at, last_activity_at, property_interest, archived')
+      .order('updated_at', { ascending: false });
+
+    if (!esAdmin) {
+      query = query.eq('assigned_to', vendedor.id);
+    }
+
+    let titulo = '';
+    let emoji = '';
+
+    switch (tipo) {
+      case 'compradores':
+        query = query.eq('status', 'delivered');
+        query = query.or('archived.is.null,archived.eq.false');
+        titulo = 'COMPRADORES';
+        emoji = '🎉';
+        break;
+
+      case 'caidos':
+        query = query.eq('status', 'fallen');
+        query = query.or('archived.is.null,archived.eq.false');
+        titulo = 'CAÍDOS';
+        emoji = '❌';
+        break;
+
+      case 'inactivos':
+        // Leads con más de 30 días sin actividad
+        const hace30Dias = new Date();
+        hace30Dias.setDate(hace30Dias.getDate() - 30);
+        query = query.or('archived.is.null,archived.eq.false');
+        query = query.not('status', 'in', '("delivered","fallen")');
+        // Filtrar por last_activity_at o updated_at < 30 días
+        query = query.or(`last_activity_at.lt.${hace30Dias.toISOString()},last_activity_at.is.null`);
+        titulo = 'INACTIVOS (+30 días)';
+        emoji = '😴';
+        break;
+
+      case 'todos':
+        // Todos excepto archivados
+        query = query.or('archived.is.null,archived.eq.false');
+        titulo = 'TODOS LOS LEADS';
+        emoji = '📋';
+        break;
+
+      case 'archivados':
+        query = query.eq('archived', true);
+        titulo = 'ARCHIVADOS';
+        emoji = '🗄️';
+        break;
+    }
+
+    const { data: leads } = await query;
+
+    if (!leads || leads.length === 0) {
+      await this.twilio.sendWhatsAppMessage(from, `${emoji} No hay leads en "${titulo.toLowerCase()}".`);
+      return;
+    }
+
+    let msg = `${emoji} *${titulo}*\n━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `Total: ${leads.length}\n\n`;
+
+    // Mostrar leads con info relevante según tipo
+    const maxShow = 15;
+    leads.slice(0, maxShow).forEach((l: any, i: number) => {
+      const tel = l.phone?.slice(-4) || '';
+      const desarrollo = l.property_interest ? ` (${l.property_interest})` : '';
+
+      if (tipo === 'compradores') {
+        msg += `${i + 1}. ${l.name}${desarrollo}\n`;
+        msg += `   📱 ...${tel}\n`;
+      } else if (tipo === 'caidos') {
+        msg += `${i + 1}. ${l.name}${desarrollo}\n`;
+        msg += `   💡 Reactivar: "reactivar ${l.name?.split(' ')[0]}"\n`;
+      } else if (tipo === 'inactivos') {
+        const ultimaAct = l.last_activity_at || l.updated_at;
+        const dias = ultimaAct ? Math.floor((Date.now() - new Date(ultimaAct).getTime()) / (1000 * 60 * 60 * 24)) : '?';
+        msg += `${i + 1}. ${l.name} - ${l.status}\n`;
+        msg += `   ⏰ ${dias} días sin actividad\n`;
+      } else {
+        msg += `${i + 1}. ${l.name} - ${l.status}${l.archived ? ' 🗄️' : ''}\n`;
+      }
+    });
+
+    if (leads.length > maxShow) {
+      msg += `\n_...y ${leads.length - maxShow} más_`;
+    }
+
+    // Agregar acciones sugeridas según tipo
+    msg += `\n━━━━━━━━━━━━━━━━━━━━`;
+
+    if (tipo === 'compradores') {
+      msg += `\n💡 *Acciones:*`;
+      msg += `\n• Pedir referidos: "enviar a compradores: ¿Conoces a alguien que busque casa?"`;
+    } else if (tipo === 'caidos') {
+      msg += `\n💡 *Acciones:*`;
+      msg += `\n• Reactivar: "reactivar [nombre]"`;
+      msg += `\n• Campaña: "enviar a caídos: Tenemos nuevas promociones"`;
+    } else if (tipo === 'inactivos') {
+      msg += `\n💡 *Acciones:*`;
+      msg += `\n• Contactar: "llamar a [nombre]"`;
+      msg += `\n• Campaña: "enviar a inactivos: ¿Sigues buscando casa?"`;
+    } else if (tipo === 'archivados') {
+      msg += `\n💡 Desarchivar: "desarchivar [nombre]"`;
+    }
 
     await this.twilio.sendWhatsAppMessage(from, msg);
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // ARCHIVAR/DESARCHIVAR LEAD - Para spam, números erróneos, etc
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async archivarDesarchivarLead(from: string, nombreLead: string, vendedor: any, archivar: boolean): Promise<void> {
+    const esAdmin = vendedor.role === 'admin' || vendedor.role === 'coordinador';
+
+    let query = this.supabase.client
+      .from('leads')
+      .select('id, name, status, phone, archived')
+      .ilike('name', '%' + nombreLead + '%');
+
+    if (!esAdmin) {
+      query = query.eq('assigned_to', vendedor.id);
+    }
+
+    const { data: leads } = await query;
+
+    if (!leads || leads.length === 0) {
+      await this.twilio.sendWhatsAppMessage(from, `❌ No encontré a "${nombreLead}".`);
+      return;
+    }
+
+    if (leads.length > 1) {
+      let msg = `Encontré ${leads.length} leads:\n`;
+      leads.forEach((l: any, i: number) => {
+        msg += `${i + 1}. ${l.name} - ${l.status}${l.archived ? ' 🗄️' : ''}\n`;
+      });
+      msg += `\nEscribe el nombre completo.`;
+      await this.twilio.sendWhatsAppMessage(from, msg);
+      return;
+    }
+
+    const lead = leads[0];
+
+    // Verificar si ya está en el estado deseado
+    if (archivar && lead.archived) {
+      await this.twilio.sendWhatsAppMessage(from, `⚠️ *${lead.name}* ya está archivado.`);
+      return;
+    }
+
+    if (!archivar && !lead.archived) {
+      await this.twilio.sendWhatsAppMessage(from, `⚠️ *${lead.name}* no está archivado.`);
+      return;
+    }
+
+    // Actualizar
+    await this.supabase.client
+      .from('leads')
+      .update({ archived: archivar, updated_at: new Date().toISOString() })
+      .eq('id', lead.id);
+
+    if (archivar) {
+      await this.twilio.sendWhatsAppMessage(from,
+        `🗄️ *${lead.name}* archivado.\n\n` +
+        `Ya no aparecerá en tus listas.\n` +
+        `Para recuperarlo: "desarchivar ${lead.name?.split(' ')[0]}"`
+      );
+    } else {
+      await this.twilio.sendWhatsAppMessage(from,
+        `✅ *${lead.name}* desarchivado.\n\n` +
+        `Ahora aparecerá en tus listas normalmente.`
+      );
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // REACTIVAR LEAD - Cambiar de fallen a new
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async reactivarLead(from: string, nombreLead: string, vendedor: any): Promise<void> {
+    const esAdmin = vendedor.role === 'admin' || vendedor.role === 'coordinador';
+
+    let query = this.supabase.client
+      .from('leads')
+      .select('id, name, status, phone')
+      .ilike('name', '%' + nombreLead + '%')
+      .eq('status', 'fallen');
+
+    if (!esAdmin) {
+      query = query.eq('assigned_to', vendedor.id);
+    }
+
+    const { data: leads } = await query;
+
+    if (!leads || leads.length === 0) {
+      await this.twilio.sendWhatsAppMessage(from,
+        `❌ No encontré a "${nombreLead}" en caídos.\n\n` +
+        `💡 Ver caídos: "ver caídos"`
+      );
+      return;
+    }
+
+    if (leads.length > 1) {
+      let msg = `Encontré ${leads.length} leads caídos:\n`;
+      leads.forEach((l: any, i: number) => {
+        msg += `${i + 1}. ${l.name}\n`;
+      });
+      msg += `\nEscribe el nombre completo.`;
+      await this.twilio.sendWhatsAppMessage(from, msg);
+      return;
+    }
+
+    const lead = leads[0];
+
+    // Reactivar: cambiar status a 'new' y actualizar last_activity
+    await this.supabase.client
+      .from('leads')
+      .update({
+        status: 'new',
+        updated_at: new Date().toISOString(),
+        last_activity_at: new Date().toISOString()
+      })
+      .eq('id', lead.id);
+
+    await this.twilio.sendWhatsAppMessage(from,
+      `🔄 *${lead.name}* reactivado!\n\n` +
+      `• Status: fallen → new\n` +
+      `• Ahora aparece en tu pipeline activo\n\n` +
+      `💡 Ver estado: "funnel de ${lead.name?.split(' ')[0]}"`
+    );
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -5163,6 +7011,7 @@ ${hot > 0 ? '💡 _Tip: Los HOT tienen alta probabilidad de cierre. ¡Llámalos 
     // Leads sin contactar en más de 3 días
     const hace3Dias = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
 
+    // 1. Leads sin seguimiento
     const { data: pendientes } = await this.supabase.client
       .from('leads')
       .select('name, phone, temperature, updated_at')
@@ -5172,30 +7021,74 @@ ${hot > 0 ? '💡 _Tip: Los HOT tienen alta probabilidad de cierre. ¡Llámalos 
       .order('temperature', { ascending: false })
       .limit(5);
 
-    if (!pendientes || pendientes.length === 0) {
-      await this.twilio.sendWhatsAppMessage(from, 
-        `✅ *${nombre}, no tienes pendientes urgentes!*
+    // 2. Propuestas de follow-up pendientes de aprobación
+    const vendedorPhone = from.replace('whatsapp:+', '').replace(/^521/, '52');
+    const { data: propuestas } = await this.supabase.client
+      .from('followup_approvals')
+      .select('id, lead_name, mensaje_propuesto, categoria, created_at, approval_code')
+      .eq('status', 'pending')
+      .or(`vendedor_phone.eq.${vendedorPhone},vendedor_phone.eq.521${vendedorPhone.substring(2)}`)
+      .order('created_at', { ascending: false })
+      .limit(5);
 
-Todos tus leads han sido contactados recientemente. ¡Sigue así! 💪`
-      );
+    // 3. Historial reciente de follow-ups enviados
+    const { data: enviados } = await this.supabase.client
+      .from('followup_approvals')
+      .select('lead_name, mensaje_final, sent_at, status')
+      .eq('vendedor_id', vendedor.id)
+      .in('status', ['sent', 'approved', 'edited'])
+      .order('sent_at', { ascending: false })
+      .limit(3);
+
+    const sinPendientes = (!pendientes || pendientes.length === 0);
+    const sinPropuestas = (!propuestas || propuestas.length === 0);
+
+    if (sinPendientes && sinPropuestas) {
+      let msg = `✅ *${nombre}, no tienes pendientes urgentes!*\n\nTodos tus leads han sido contactados recientemente. ¡Sigue así! 💪`;
+
+      if (enviados && enviados.length > 0) {
+        msg += `\n\n📤 *Últimos follow-ups enviados:*`;
+        enviados.forEach((e: any) => {
+          const cuando = e.sent_at ? new Date(e.sent_at).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) : '';
+          msg += `\n• ${e.lead_name} (${cuando})`;
+        });
+      }
+
+      await this.twilio.sendWhatsAppMessage(from, msg);
       return;
     }
 
-    let respuesta = `📊 *Pendientes de follow-up ${nombre}:*
-`;
+    let respuesta = `📊 *Pendientes ${nombre}:*\n`;
 
-    pendientes.forEach((lead: any, i: number) => {
-      const temp = lead.temperature === 'HOT' ? '🔥' : lead.temperature === 'WARM' ? '😊' : '❄️';
-      const dias = Math.floor((Date.now() - new Date(lead.updated_at).getTime()) / (1000 * 60 * 60 * 24));
-      respuesta += `
-${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
-      respuesta += `
-   📱 ${lead.phone} • ${dias} días sin contacto`;
-    });
+    // Mostrar propuestas de follow-up primero (son más urgentes)
+    if (propuestas && propuestas.length > 0) {
+      respuesta += `\n📬 *Mensajes propuestos (${propuestas.length}):*`;
+      propuestas.forEach((p: any, i: number) => {
+        const preview = p.mensaje_propuesto.substring(0, 40) + (p.mensaje_propuesto.length > 40 ? '...' : '');
+        respuesta += `\n${i + 1}. *${p.lead_name}*: "${preview}"`;
+      });
+      respuesta += `\n\n_Responde *ok* para aprobar, *no* para rechazar, o escribe tu mensaje_`;
+    }
 
-    respuesta += `
+    // Mostrar leads sin seguimiento
+    if (pendientes && pendientes.length > 0) {
+      respuesta += `\n\n⏰ *Leads sin contacto (${pendientes.length}):*`;
+      pendientes.forEach((lead: any, i: number) => {
+        const temp = lead.temperature === 'HOT' ? '🔥' : lead.temperature === 'WARM' ? '😊' : '❄️';
+        const dias = Math.floor((Date.now() - new Date(lead.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+        respuesta += `\n${temp} *${lead.name || 'Sin nombre'}* • ${dias} días`;
+      });
+    }
 
-💡 _Llama primero a los 🔥_`;
+    // Mostrar historial reciente
+    if (enviados && enviados.length > 0) {
+      respuesta += `\n\n✅ *Últimos enviados:*`;
+      enviados.forEach((e: any) => {
+        const cuando = e.sent_at ? new Date(e.sent_at).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) : '';
+        respuesta += `\n• ${e.lead_name} (${cuando})`;
+      });
+    }
+
     await this.twilio.sendWhatsAppMessage(from, respuesta);
   }
 
@@ -5226,7 +7119,10 @@ ${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
             const leadSeleccionado = notes.pending_lead_selection.leads[seleccion - 1];
             console.log('✅ Asesor seleccionó lead:', leadSeleccionado.name);
 
+            // Preservar otros datos y agregar pending_message_to_lead
+            const { pending_lead_selection, ...notasSinPending } = notes;
             const notesData = JSON.stringify({
+              ...notasSinPending,
               pending_message_to_lead: {
                 lead_id: leadSeleccionado.id,
                 lead_name: leadSeleccionado.name,
@@ -5240,7 +7136,7 @@ ${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*`;
               .update({ notes: notesData })
               .eq('id', asesor.id);
 
-            await this.twilio.sendWhatsAppMessage(from,
+            await this.meta.sendWhatsAppMessage(from,
               `📝 *¿Qué mensaje quieres enviar a ${leadSeleccionado.name}?*\n\n💡 Escribe el mensaje y lo envío.`
             );
             return;
@@ -6757,11 +8653,12 @@ Soy SARA, tu asistente hipotecario. Aquí todos mis comandos:
     // Actualizar en Supabase
     const { error } = await this.supabase.client
       .from('leads')
-      .update({ 
+      .update({
         status: nuevaEtapa,
         status_changed_at: new Date().toISOString(),
         stalled_alert_sent: false,
         updated_at: new Date().toISOString(),
+        last_activity_at: new Date().toISOString(),
         score: newScore,
         lead_score: newScore,
         lead_category: nuevaCategoria
@@ -7050,6 +8947,181 @@ ${statusAnterior} → ${statusNuevo}
     await this.twilio.sendWhatsAppMessage(from, 
       `✅ *${lead.name}* enviado a *${bancoEncontrado}*\n\n🏦 Asesor: ${asesorAsignado?.name || 'Por asignar'}\n📋 Solicitud creada\n\nTe avisaré cuando haya novedades.`
     );
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // STATUS LEAD - Ver resumen del lead en funnel
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  private async vendedorStatusLead(from: string, nombreLead: string, vendedor: any): Promise<void> {
+    console.log(`📋 VENDEDOR STATUS LEAD: buscando "${nombreLead}" para vendedor ${vendedor.name}`);
+
+    // Buscar lead por nombre (del vendedor)
+    const { data: leads } = await this.supabase.client
+      .from('leads')
+      .select('*')
+      .eq('assigned_to', vendedor.id)
+      .ilike('name', `%${nombreLead}%`)
+      .order('updated_at', { ascending: false })
+      .limit(5);
+
+    if (!leads || leads.length === 0) {
+      // Buscar si existe en toda la base (asignado a otro vendedor)
+      const { data: leadsOtros } = await this.supabase.client
+        .from('leads')
+        .select('*, team_members!leads_assigned_to_fkey(name)')
+        .ilike('name', `%${nombreLead}%`)
+        .limit(3);
+
+      if (leadsOtros && leadsOtros.length > 0) {
+        let mensaje = `📋 "*${nombreLead}*" no está en tu cartera, pero encontré:\n\n`;
+        leadsOtros.forEach((l: any) => {
+          const vendedorNombre = l.team_members?.name || 'Sin asignar';
+          mensaje += `• *${l.name}* → ${vendedorNombre}\n`;
+        });
+        await this.twilio.sendWhatsAppMessage(from, mensaje);
+      } else {
+        await this.twilio.sendWhatsAppMessage(from,
+          `❌ No encontré ningún lead con nombre "*${nombreLead}*".\n\n💡 Intenta con el nombre o apellido exacto.`
+        );
+      }
+      return;
+    }
+
+    // Si hay múltiples coincidencias, mostrar lista
+    if (leads.length > 1) {
+      let lista = `📋 Encontré ${leads.length} leads con ese nombre:\n\n`;
+      leads.forEach((l: any, i: number) => {
+        const statusEmoji = this.getStatusEmoji(l.status);
+        lista += `${i + 1}. ${statusEmoji} *${l.name}*\n`;
+      });
+      lista += `\n💡 Especifica el nombre completo: *"status ${leads[0].name}"*`;
+      await this.twilio.sendWhatsAppMessage(from, lista);
+      return;
+    }
+
+    const lead = leads[0];
+
+    // Buscar última cita
+    const { data: ultimaCita } = await this.supabase.client
+      .from('appointments')
+      .select('*')
+      .eq('lead_id', lead.id)
+      .order('date', { ascending: false })
+      .limit(1)
+      .single();
+
+    // Buscar última actividad
+    const { data: ultimaActividad } = await this.supabase.client
+      .from('activities')
+      .select('*')
+      .eq('lead_id', lead.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    // Formatear status bonito
+    const statusMap: Record<string, string> = {
+      'new': '🆕 Nuevo',
+      'contacted': '📞 Contactado',
+      'qualified': '✅ Calificado',
+      'scheduled': '📅 Con cita',
+      'visited': '🏠 Visitó',
+      'negotiation': '🤝 En negociación',
+      'reserved': '📝 Reservado',
+      'sold': '💰 Vendido',
+      'closed': '🎉 Cerrado',
+      'delivered': '🔑 Entregado',
+      'fallen': '❌ Caído',
+      'lost': '👻 Perdido'
+    };
+
+    const statusTexto = statusMap[lead.status] || lead.status;
+
+    // Extraer info de notas
+    const notas = typeof lead.notes === 'object' ? lead.notes : {};
+    const feedback = notas?.post_visit_feedback || notas?.feedback || null;
+    const interes = lead.property_interest || notas?.property || 'Sin especificar';
+
+    // Construir resumen
+    let resumen = `📋 *Resumen de ${lead.name}*\n\n`;
+    resumen += `📍 Status: ${statusTexto}\n`;
+    resumen += `🔥 Score: ${lead.score || 0}\n`;
+    resumen += `🏠 Interés: ${interes}\n`;
+
+    // Fecha de visita si existe
+    if (ultimaCita) {
+      const fechaCita = new Date(ultimaCita.date);
+      const fechaFormateada = fechaCita.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' });
+      const citaStatus = ultimaCita.status === 'completed' ? '✅' : ultimaCita.status === 'no_show' ? '❌' : '📅';
+      resumen += `📅 Última cita: ${fechaFormateada} ${citaStatus}\n`;
+    }
+
+    // Feedback si existe
+    if (feedback) {
+      const feedbackTexto = feedback === 'muy_interesado' ? 'Muy interesado' :
+                           feedback === 'quiere_opciones' ? 'Quiere más opciones' :
+                           feedback === 'no_convencio' ? 'No le convenció' :
+                           feedback === 'solo_conocer' ? 'Solo vino a conocer' : feedback;
+      resumen += `💬 Feedback: ${feedbackTexto}\n`;
+    }
+
+    // Última actividad
+    if (ultimaActividad) {
+      const tipoActividad = ultimaActividad.type === 'call' ? '📞 Llamada' :
+                           ultimaActividad.type === 'whatsapp' ? '💬 WhatsApp' :
+                           ultimaActividad.type === 'visit' ? '🏠 Visita' :
+                           ultimaActividad.type === 'quote' ? '📄 Cotización' : ultimaActividad.type;
+      const fechaAct = new Date(ultimaActividad.created_at);
+      const diasHace = Math.floor((Date.now() - fechaAct.getTime()) / (1000 * 60 * 60 * 24));
+      resumen += `📊 Última actividad: ${tipoActividad} (hace ${diasHace} días)\n`;
+    }
+
+    // Sugerencia de siguiente paso según status
+    resumen += `\n📝 *Siguiente paso:*\n`;
+    switch (lead.status) {
+      case 'new':
+        resumen += '→ Contactar para agendar cita';
+        break;
+      case 'contacted':
+        resumen += '→ Dar seguimiento para agendar visita';
+        break;
+      case 'qualified':
+        resumen += '→ Agendar cita en propiedad';
+        break;
+      case 'scheduled':
+        resumen += '→ Confirmar asistencia a la cita';
+        break;
+      case 'visited':
+        resumen += '→ Dar seguimiento para cerrar';
+        break;
+      case 'negotiation':
+        resumen += '→ Hablar de apartado y financiamiento';
+        break;
+      case 'reserved':
+        resumen += '→ Coordinar firma de contrato';
+        break;
+      case 'sold':
+        resumen += '→ Coordinar entrega';
+        break;
+      case 'fallen':
+        resumen += '→ Intentar rescatar o cerrar expediente';
+        break;
+      default:
+        resumen += '→ Revisar expediente en CRM';
+    }
+
+    await this.twilio.sendWhatsAppMessage(from, resumen);
+    console.log(`✅ Status de ${lead.name} enviado a vendedor ${vendedor.name}`);
+  }
+
+  private getStatusEmoji(status: string): string {
+    const emojis: Record<string, string> = {
+      'new': '🆕', 'contacted': '📞', 'qualified': '✅', 'scheduled': '📅',
+      'visited': '🏠', 'negotiation': '🤝', 'reserved': '📝', 'sold': '💰',
+      'closed': '🎉', 'delivered': '🔑', 'fallen': '❌', 'lost': '👻'
+    };
+    return emojis[status] || '•';
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -7496,7 +9568,24 @@ ${statusAnterior} → ${statusNuevo}
           phone: l.phone?.replace(/\D/g, '').slice(-10) || ''
         }));
 
+        // Obtener notas actuales para preservar citas_preguntadas
+        const { data: usuarioActual } = await this.supabase.client
+          .from('team_members')
+          .select('notes')
+          .eq('id', usuario.id)
+          .single();
+
+        let notasExistentes: any = {};
+        try {
+          if (usuarioActual?.notes) {
+            notasExistentes = typeof usuarioActual.notes === 'string'
+              ? JSON.parse(usuarioActual.notes)
+              : usuarioActual.notes;
+          }
+        } catch (e) { /* ignore */ }
+
         const notesData = JSON.stringify({
+          ...notasExistentes,
           pending_lead_selection: {
             leads: leadsOptions,
             action: 'mensaje',
@@ -7523,12 +9612,29 @@ ${statusAnterior} → ${statusNuevo}
       const telefono = lead.phone?.replace(/\D/g, '').slice(-10) || '';
 
       if (!telefono) {
-        await this.twilio.sendWhatsAppMessage(from, `⚠️ *${lead.name}* no tiene teléfono registrado.`);
+        await this.meta.sendWhatsAppMessage(from, `⚠️ *${lead.name}* no tiene teléfono registrado.`);
         return;
       }
 
-      // Guardar pending para esperar el mensaje
+      // Obtener notas actuales para preservar citas_preguntadas
+      const { data: usuarioActual } = await this.supabase.client
+        .from('team_members')
+        .select('notes')
+        .eq('id', usuario.id)
+        .single();
+
+      let notasExistentes: any = {};
+      try {
+        if (usuarioActual?.notes) {
+          notasExistentes = typeof usuarioActual.notes === 'string'
+            ? JSON.parse(usuarioActual.notes)
+            : usuarioActual.notes;
+        }
+      } catch (e) { /* ignore */ }
+
+      // Guardar pending para esperar el mensaje (preservando citas_preguntadas)
       const notesData = JSON.stringify({
+        ...notasExistentes,
         pending_message_to_lead: {
           lead_id: lead.id,
           lead_name: lead.name,
@@ -7564,6 +9670,7 @@ ${statusAnterior} → ${statusNuevo}
 
   // ═══════════════════════════════════════════════════════════════
   // Enviar mensaje pendiente al lead (cuando el usuario escribe el contenido)
+  // Activa un "bridge" temporal de 10 minutos para chat directo
   // ═══════════════════════════════════════════════════════════════
   private async enviarMensajePendienteLead(from: string, mensaje: string, usuario: any, pendingData: any): Promise<void> {
     try {
@@ -7572,30 +9679,85 @@ ${statusAnterior} → ${statusNuevo}
       // Enviar mensaje al lead
       await this.meta.sendWhatsAppMessage(lead_phone, mensaje);
 
-      // Limpiar pending
-      await this.supabase.client
+      // Obtener notas actuales para preservar datos
+      const { data: usuarioActual } = await this.supabase.client
         .from('team_members')
-        .update({ notes: null })
-        .eq('id', usuario.id);
+        .select('notes')
+        .eq('id', usuario.id)
+        .single();
 
-      // Confirmar al usuario
-      await this.twilio.sendWhatsAppMessage(from,
-        `✅ Mensaje enviado a *${lead_name}*\n\n📤 "${mensaje.substring(0, 50)}${mensaje.length > 50 ? '...' : ''}"`
-      );
+      let notasExistentes: any = {};
+      try {
+        if (usuarioActual?.notes) {
+          notasExistentes = typeof usuarioActual.notes === 'string'
+            ? JSON.parse(usuarioActual.notes)
+            : usuarioActual.notes;
+        }
+      } catch (e) { /* ignore */ }
 
-      // Registrar actividad
-      await this.supabase.client.from('activities').insert({
-        lead_id: lead_id,
-        type: 'whatsapp',
-        description: `WhatsApp: "${mensaje.substring(0, 100)}"`,
-        created_at: new Date().toISOString(),
-        created_by: usuario.id
+      // Remover pending_message_to_lead y activar bridge de 10 minutos
+      const { pending_message_to_lead, ...notasSinPending } = notasExistentes;
+      const bridgeExpiry = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutos
+
+      const notasConBridge = JSON.stringify({
+        ...notasSinPending,
+        active_bridge: {
+          lead_id: lead_id,
+          lead_name: lead_name,
+          lead_phone: lead_phone,
+          vendedor_phone: from,
+          started_at: new Date().toISOString(),
+          expires_at: bridgeExpiry,
+          last_activity: new Date().toISOString()
+        }
       });
 
-      console.log(`💬 Mensaje enviado a ${lead_name} por ${usuario.name}: ${mensaje.substring(0, 30)}...`);
+      await this.supabase.client
+        .from('team_members')
+        .update({ notes: notasConBridge })
+        .eq('id', usuario.id);
+
+      // También guardar referencia en el lead para detectar respuestas
+      const { data: leadActual } = await this.supabase.client
+        .from('leads')
+        .select('notes')
+        .eq('id', lead_id)
+        .single();
+
+      const notasLead = typeof leadActual?.notes === 'object' ? leadActual.notes : {};
+      await this.supabase.client
+        .from('leads')
+        .update({
+          notes: {
+            ...notasLead,
+            active_bridge_to_vendedor: {
+              vendedor_id: usuario.id,
+              vendedor_name: usuario.name,
+              vendedor_phone: from,
+              expires_at: bridgeExpiry
+            }
+          }
+        })
+        .eq('id', lead_id);
+
+      // Confirmar al usuario
+      await this.meta.sendWhatsAppMessage(from,
+        `✅ *Mensaje enviado a ${lead_name}*\n\n📤 "${mensaje.substring(0, 50)}${mensaje.length > 50 ? '...' : ''}"\n\n🔗 *Chat directo activo por 10 min*\nTe reenvío sus respuestas. Escribe para responderle directamente.`
+      );
+
+      // Registrar actividad en lead_activities
+      await this.supabase.client.from('lead_activities').insert({
+        lead_id: lead_id,
+        team_member_id: usuario.id,
+        activity_type: 'whatsapp',
+        notes: `Mensaje enviado: "${mensaje.substring(0, 100)}"`,
+        created_at: new Date().toISOString()
+      });
+
+      console.log(`💬 Mensaje enviado a ${lead_name} por ${usuario.name} - Bridge activo hasta ${bridgeExpiry}`);
     } catch (e) {
       console.log('❌ Error enviando mensaje pendiente:', e);
-      await this.twilio.sendWhatsAppMessage(from, `❌ Error enviando mensaje. Intenta de nuevo.`);
+      await this.meta.sendWhatsAppMessage(from, `❌ Error enviando mensaje. Intenta de nuevo.`);
     }
   }
 
@@ -7660,6 +9822,155 @@ ${statusAnterior} → ${statusNuevo}
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // FUNCIONES DE ACTUALIZACIÓN DEL VENDEDOR
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  // ═══════════════════════════════════════════════════════════════
+  // APARTADO COMPLETO - Con enganche y fecha de pago
+  // Formato: "apartar Juan en Distrito Falco 50000 para el 20 enero"
+  // ═══════════════════════════════════════════════════════════════
+  private async vendedorRegistrarApartado(from: string, body: string, vendedor: any, match: RegExpMatchArray): Promise<void> {
+    try {
+      const nombreLead = match[1].trim();
+      const propiedad = match[2]?.trim() || '';
+      let enganche = match[3]?.replace(/[,\.]/g, '') || '0';
+      const fechaTexto = match[4]?.trim() || '';
+
+      console.log('📝 APARTADO - nombre:', nombreLead, 'propiedad:', propiedad, 'enganche:', enganche, 'fecha:', fechaTexto);
+
+      // Normalizar enganche (k=miles, m=millones)
+      if (body.toLowerCase().includes('k') || body.toLowerCase().includes('mil')) {
+        enganche = String(parseInt(enganche) * 1000);
+      } else if (body.toLowerCase().includes('m') && !body.toLowerCase().includes('mil')) {
+        enganche = String(parseInt(enganche) * 1000000);
+      }
+
+      // Buscar lead
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('*')
+        .eq('assigned_to', vendedor.id)
+        .ilike('name', '%' + nombreLead + '%')
+        .limit(3);
+
+      if (!leads || leads.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads`);
+        return;
+      }
+
+      // Si hay múltiples leads, verificar si son duplicados (mismo nombre esencial)
+      let lead = leads[0];
+      if (leads.length > 1) {
+        // Normalizar nombres: quitar "lead", "nuevo", etc. y comparar
+        const normalizarNombre = (n: string) => n?.toLowerCase()
+          .replace(/^(lead|nuevo|nueva|cliente|sr|sra|lic)\s+/i, '')
+          .trim() || '';
+        const nombresUnicos = [...new Set(leads.map((l: any) => normalizarNombre(l.name)))];
+        if (nombresUnicos.length === 1) {
+          // Son duplicados, tomar el que tenga actividad más reciente
+          lead = leads.sort((a: any, b: any) =>
+            new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+          )[0];
+          console.log(`📋 Duplicados detectados, usando el más reciente: ${lead.id}`);
+        } else {
+          // Nombres diferentes, pedir que especifique
+          let msg = `🤔 Encontré ${leads.length} leads:\n`;
+          leads.forEach((l: any, i: number) => {
+            msg += `${i+1}. ${l.name}\n`;
+          });
+          msg += `\nEscribe el nombre completo.`;
+          await this.twilio.sendWhatsAppMessage(from, msg);
+          return;
+        }
+      }
+
+      // Parsear fecha de pago
+      let fechaPago: string | null = null;
+      if (fechaTexto) {
+        const meses: { [key: string]: number } = {
+          'ene': 0, 'feb': 1, 'mar': 2, 'abr': 3, 'may': 4, 'jun': 5,
+          'jul': 6, 'ago': 7, 'sep': 8, 'oct': 9, 'nov': 10, 'dic': 11
+        };
+
+        const matchFecha = fechaTexto.match(/(\d{1,2})[\s\/\-]?(?:de\s+)?(\w+)?/i);
+        if (matchFecha) {
+          const dia = parseInt(matchFecha[1]);
+          const mesTexto = matchFecha[2]?.toLowerCase().slice(0, 3) || '';
+          const mes = meses[mesTexto] !== undefined ? meses[mesTexto] : new Date().getMonth();
+
+          const ahora = new Date();
+          let año = ahora.getFullYear();
+          // Si el mes ya pasó, usar el próximo año
+          if (mes < ahora.getMonth() || (mes === ahora.getMonth() && dia < ahora.getDate())) {
+            año++;
+          }
+
+          fechaPago = new Date(año, mes, dia).toISOString().split('T')[0];
+        }
+      }
+
+      // Guardar datos de apartado
+      const apartadoData = {
+        propiedad: propiedad,
+        enganche: parseInt(enganche),
+        fecha_apartado: new Date().toISOString().split('T')[0],
+        fecha_pago: fechaPago,
+        vendedor_id: vendedor.id,
+        vendedor_nombre: vendedor.name,
+        recordatorios_enviados: 0
+      };
+
+      await this.supabase.client
+        .from('leads')
+        .update({
+          status: 'reserved',
+          status_changed_at: new Date().toISOString(),
+          notes: { ...(lead.notes || {}), apartado: apartadoData },
+          property_interest: propiedad || lead.property_interest,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', lead.id);
+
+      // Mensaje al vendedor
+      const enganacheFormato = parseInt(enganche).toLocaleString('es-MX');
+      let respuesta = `🎉 *¡APARTADO REGISTRADO!*\n\n` +
+        `👤 *Cliente:* ${lead.name}\n` +
+        `🏠 *Propiedad:* ${propiedad || 'Por definir'}\n` +
+        `💰 *Enganche:* $${enganacheFormato}\n`;
+
+      if (fechaPago) {
+        const fechaFormateada = new Date(fechaPago + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+        respuesta += `📅 *Fecha pago:* ${fechaFormateada}\n\n` +
+          `⏰ Le enviaré recordatorios automáticos:\n` +
+          `• 5 días antes\n• 1 día antes\n• El día del pago`;
+      } else {
+        respuesta += `\n⚠️ Sin fecha de pago definida. Puedes agregar después con:\n"fecha pago ${lead.name?.split(' ')[0]} 20 enero"`;
+      }
+
+      await this.twilio.sendWhatsAppMessage(from, respuesta);
+
+      // Mensaje de felicitación al cliente
+      if (lead.phone) {
+        const clientePhone = lead.phone.replace(/[^0-9]/g, '');
+        const clienteFormatted = clientePhone.startsWith('52') ? clientePhone : '52' + clientePhone.slice(-10);
+        const primerNombre = lead.name?.split(' ')[0] || 'cliente';
+
+        const mensajeCliente = `🎉 *¡Felicidades ${primerNombre}!*\n\n` +
+          `Tu apartado en *${propiedad || 'tu nueva propiedad'}* ha sido registrado exitosamente.\n\n` +
+          `Tu asesor ${vendedor.name?.split(' ')[0]} te acompañará en todo el proceso.\n\n` +
+          `📄 *Próximos pasos:*\n` +
+          `1. Subir documentos (INE, domicilio, SAT)\n` +
+          `2. Firma de contrato de apartado\n` +
+          `3. Proceso de crédito hipotecario\n\n` +
+          `¡Estamos muy contentos de tenerte como parte de nuestra familia! 🏠`;
+
+        await this.twilio.sendWhatsAppMessage(this.formatPhoneMX(clienteFormatted), mensajeCliente);
+        console.log('📤 Mensaje de felicitación enviado a cliente:', lead.name);
+      }
+
+    } catch (e) {
+      console.log('❌ Error en vendedorRegistrarApartado:', e);
+      await this.twilio.sendWhatsAppMessage(from, '❌ Error registrando apartado. Intenta de nuevo.');
+    }
+  }
 
   private async vendedorCerrarVenta(from: string, body: string, vendedor: any, nombre: string): Promise<void> {
     // Extraer nombre del lead del mensaje
@@ -9152,22 +11463,14 @@ Responde SOLO con el intent, nada más.`;
       // Ejecutar según intent
       switch (intent) {
         case 'ayuda_citas':
-          await this.twilio.sendWhatsAppMessage(from,
-            `📅 *Para agendar cita escribe:*\n\n"Cita con [nombre] [día] [hora] en [desarrollo]"\n\n*Ejemplos:*\n• "Cita con Ana mañana 10am en Distrito Falco"\n• "Agendar Juan viernes 3pm"\n\n*Para cancelar:* "Cancelar cita con Ana"\n*Para mover:* "Reagendar Ana para lunes 3pm"`
-          );
-          break;
         case 'ayuda_notas':
-          await this.twilio.sendWhatsAppMessage(from,
-            `📝 *Para agregar nota escribe:*\n\n"Nota [nombre]: [texto]"\n\n*Ejemplos:*\n• "Nota Juan: le interesa jardín"\n• "Apunte María: presupuesto 2M"\n\n*Para ver notas:* "Notas de Juan"`
-          );
-          break;
         case 'ayuda_ventas':
-          await this.twilio.sendWhatsAppMessage(from,
-            `🎉 *Para cerrar venta:*\n"Cerré venta con [nombre]"\n\n*Para cambiar etapa:*\n"[nombre] pasó a [etapa]"\n\n*Etapas:* contactado, cita agendada, visitó, negociación, cierre`
-          );
+          // Usar respuesta inteligente para todos los casos de ayuda
+          await this.vendedorRespuestaInteligente(from, body, vendedor, nombre);
           break;
         case 'ayuda_general':
-          await this.vendedorAyuda(from, nombre);
+          // Usar respuesta inteligente para enseñar comandos en lugar de menú estático
+          await this.vendedorRespuestaInteligente(from, body, vendedor, nombre);
           break;
         case 'briefing':
           await this.vendedorBriefing(from, vendedor, nombre);
@@ -9206,10 +11509,133 @@ Responde SOLO con el intent, nada más.`;
           await this.vendedorCrearLead(from, body, vendedor, nombre);
           break;
         default:
-          await this.vendedorAyuda(from, nombre);
+          // Respuesta inteligente con Claude en lugar de solo mostrar ayuda
+          await this.vendedorRespuestaInteligente(from, body, vendedor, nombre);
       }
     } catch (error) {
-      console.error('❌’ Error en IA Intent:', error);
+      console.error('❌ Error en IA Intent:', error);
+      await this.vendedorAyuda(from, nombre);
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // RESPUESTA INTELIGENTE CON CLAUDE
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async vendedorRespuestaInteligente(from: string, mensaje: string, vendedor: any, nombre: string): Promise<void> {
+    try {
+      console.log('🤖 Generando respuesta inteligente para:', mensaje);
+
+      // Obtener contexto del vendedor
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('name, status, temperature, updated_at')
+        .eq('assigned_to', vendedor.id)
+        .not('status', 'in', '("lost","fallen")')
+        .order('updated_at', { ascending: false })
+        .limit(10);
+
+      const { data: citasHoy } = await this.supabase.client
+        .from('appointments')
+        .select('lead_name, time, property')
+        .eq('team_member_id', vendedor.id)
+        .gte('date', new Date().toISOString().split('T')[0])
+        .lte('date', new Date().toISOString().split('T')[0]);
+
+      const leadsHot = leads?.filter((l: any) => l.temperature === 'HOT' || ['negotiation', 'reserved'].includes(l.status)).length || 0;
+      const totalActivos = leads?.length || 0;
+      const citasCount = citasHoy?.length || 0;
+
+      const contexto = `
+CONTEXTO DEL VENDEDOR:
+- Nombre: ${vendedor.name}
+- Leads activos: ${totalActivos}
+- Leads HOT: ${leadsHot}
+- Citas hoy: ${citasCount}
+${citasHoy && citasHoy.length > 0 ? `- Próximas citas: ${citasHoy.map((c: any) => `${c.lead_name} a las ${c.time}`).join(', ')}` : ''}
+${leads && leads.length > 0 ? `- Últimos leads: ${leads.slice(0, 5).map((l: any) => `${l.name} (${l.status})`).join(', ')}` : ''}`;
+
+      const documentacionComandos = `
+📚 DOCUMENTACIÓN COMPLETA DE COMANDOS SARA:
+
+═══ RESÚMENES Y REPORTES ═══
+• "briefing" o "resumen" → Resumen completo del día: leads nuevos, citas, pendientes
+• "meta" o "avance" → Tu avance hacia la meta mensual de ventas
+• "pipeline" o "mis leads" → Lista de todos tus leads activos por etapa
+• "funnel" → Visualización del embudo de ventas
+
+═══ CITAS Y AGENDA ═══
+• "citas" o "agenda" → Ver todas tus citas de hoy
+• "cita con Ana mañana 10am" → Agendar cita (puedes decir: hoy, mañana, lunes, martes, etc)
+• "cita con Juan viernes 3pm en Distrito Falco" → Agendar con desarrollo específico
+• "cancelar cita con Ana" → Cancelar una cita
+• "reagendar Ana para lunes 3pm" → Mover cita a otra fecha
+
+═══ GESTIÓN DE LEADS ═══
+• "nota Ana: le interesa casa con jardín" → Agregar nota/comentario a un lead
+• "notas de Ana" → Ver historial de notas de un lead
+• "Ana pasó a negociación" → Cambiar etapa (contactado, visitó, negociación, reservado, cierre)
+• "Ana está caliente" o "Ana está fría" → Cambiar temperatura del lead
+• "cerré con Ana" o "cerré venta Ana" → Registrar venta cerrada 🎉
+• "perdí a Ana" o "Ana se cayó" → Marcar lead como perdido
+• "crear lead Juan 5512345678" → Crear lead manualmente
+
+═══ MENSAJES A LEADS ═══
+• "mensaje a Ana: Hola, ¿cómo vas?" → Enviar WhatsApp a un lead
+• "dile a Ana que..." → Enviar mensaje rápido
+
+═══ ANÁLISIS Y COACHING ═══
+• "coaching Ana" → Consejos de IA para cerrar ese lead específico
+• "¿qué hago con Ana?" → Sugerencias para avanzar con un lead
+• "tips" o "consejos" → Tips generales de ventas
+
+═══ BÚSQUEDAS ═══
+• "buscar García" → Buscar leads por nombre
+• "leads hot" o "leads calientes" → Ver solo leads HOT
+• "leads fríos" → Ver leads que necesitan seguimiento
+
+═══ OTROS ═══
+• "ayuda" → Ver menú de ayuda rápida
+• "hola" o "qué onda" → Saludar (respondo inteligentemente)
+`;
+
+      const systemPrompt = `Eres SARA, la asistente de ventas con IA más avanzada para el equipo de Santa Rita Residencial.
+Estás hablando con ${nombre}, un vendedor del equipo.
+
+${contexto}
+
+${documentacionComandos}
+
+═══ TU PERSONALIDAD ═══
+- Eres experta en ventas inmobiliarias y conoces todos los trucos del negocio
+- Eres amigable, motivadora y siempre positiva
+- Hablas como colega, no como robot
+- Usas emojis con moderación para dar calidez
+- Eres directa y práctica
+
+═══ INSTRUCCIONES ═══
+1. Si preguntan cómo usar comandos, ENSÉÑALES con ejemplos claros de la documentación
+2. Si preguntan sobre sus leads/citas/ventas, usa el contexto real para responder
+3. Si piden tips o consejos de ventas, dales consejos prácticos y accionables
+4. Si es conversación casual, responde natural y breve
+5. Si preguntan algo que no sabes, sugiere qué comando pueden usar
+6. Usa *negritas* para destacar comandos o info importante
+7. Puedes dar respuestas más largas si están pidiendo que les enseñes algo
+8. Siempre termina motivándolos a vender más 💪
+
+═══ EJEMPLOS DE RESPUESTAS ═══
+- "¿Cómo agendo cita?" → Explica: escribe "cita con [nombre] [día] [hora]", ejemplo: "cita con Ana mañana 10am"
+- "Enséñame los comandos" → Lista los comandos principales con ejemplos
+- "¿Cómo voy?" → Usa su contexto real (X leads, X citas) para responderle
+- "Dame tips" → Da 2-3 consejos prácticos de ventas inmobiliarias`;
+
+      const respuesta = await this.claude.chat([], mensaje, systemPrompt);
+
+      await this.twilio.sendWhatsAppMessage(from, respuesta);
+      console.log('🤖 Respuesta inteligente enviada');
+
+    } catch (error) {
+      console.error('❌ Error en respuesta inteligente:', error);
+      // Fallback a ayuda si falla Claude
       await this.vendedorAyuda(from, nombre);
     }
   }
@@ -9517,24 +11943,34 @@ SÉ MUY CONCRETO. NO repitas los datos, ANALÍÍZALOS. Máximo 200 palabras.`;
         // ═══ TEMPLATE (lead nunca ha escrito o hace más de 24h) ═══
         console.log('📤 Enviando TEMPLATE (lead inactivo o nuevo)');
 
-        // Template Meta: ¡Hola {{1}}! Gracias por agendar con {{2}}. Tu cita para el {{3}} a las {{4}} está confirmada. Te esperamos en: {{5}}.
-        const templateComponents = [
+        // Template Meta appointment_confirmation_v2: ¡Hola {{1}}! Gracias por agendar con {{2}}. Tu cita {{3}} el {{4}} a las {{5}} está confirmada.
+        // Botón dinámico: https://maps.app.goo.gl/{{1}}
+        const gpsCode = conf.gps_link ? conf.gps_link.replace(/^https?:\/\/maps\.app\.goo\.gl\//, '') : 'qR8vK3xYz9M';
+        const templateComponents: any[] = [
           {
             type: 'body',
             parameters: [
               { type: 'text', text: lead.name?.split(' ')[0] || 'cliente' },           // {{1}} Nombre
               { type: 'text', text: 'Grupo Santa Rita' },                              // {{2}} Empresa
-              { type: 'text', text: conf.fecha },                                      // {{3}} Fecha → "Tu cita para el sábado 10 ene"
-              { type: 'text', text: conf.hora },                                       // {{4}} Hora → "a las 11:00"
-              { type: 'text', text: conf.desarrollo || 'nuestras oficinas' }           // {{5}} Lugar → "Te esperamos en: Distrito Falco"
+              { type: 'text', text: `visita a ${conf.desarrollo || 'nuestras oficinas'}` }, // {{3}} Visita
+              { type: 'text', text: conf.fecha },                                      // {{4}} Fecha
+              { type: 'text', text: conf.hora }                                        // {{5}} Hora
+            ]
+          },
+          {
+            type: 'button',
+            sub_type: 'url',
+            index: '0',
+            parameters: [
+              { type: 'text', text: gpsCode }                                          // {{1}} Sufijo GPS
             ]
           }
         ];
 
-        await this.meta.sendTemplate(leadPhone, 'appointment_confirmation_1', 'es', templateComponents);
-        console.log('📤 Template appointment_confirmation_1 enviado a:', lead.name);
+        await this.meta.sendTemplate(leadPhone, 'appointment_confirmation_v2', 'es', templateComponents);
+        console.log('📤 Template appointment_confirmation_v2 enviado a:', lead.name);
 
-        // Enviar mensaje de seguimiento con ubicación
+        // Mensaje extra con detalles del vendedor (el template no puede incluir esto)
         let msgDetalles = '';
         if (conf.gps_link) msgDetalles += `🗺️ *Ubicación:* ${conf.gps_link}\n`;
         if (conf.vendedor_name) msgDetalles += `👤 *Te atiende:* ${conf.vendedor_name}\n`;
@@ -10942,6 +13378,43 @@ Soy SARA, tu asistente. Aquí todos mis comandos:
     return conCarga[0];
   }
 
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // HELPER: Buscar vendedor por nombre (para asignación específica)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async buscarVendedorPorNombre(nombreBuscado: string): Promise<any | null> {
+    if (!nombreBuscado) return null;
+
+    const nombreLower = nombreBuscado.toLowerCase().trim();
+    console.log('🔍 Buscando vendedor por nombre:', nombreBuscado);
+
+    const { data: vendedores } = await this.supabase.client
+      .from('team_members')
+      .select('*')
+      .eq('role', 'vendedor')
+      .eq('active', true);
+
+    if (!vendedores?.length) {
+      console.log('⚠️ No hay vendedores activos');
+      return null;
+    }
+
+    // Buscar coincidencia por nombre (puede ser nombre o apellido)
+    const encontrado = vendedores.find(v => {
+      const nombreCompleto = v.name?.toLowerCase() || '';
+      const partes = nombreCompleto.split(' ');
+      // Coincidencia exacta con primer nombre o cualquier parte del nombre
+      return partes.some(parte => parte === nombreLower) ||
+             nombreCompleto.includes(nombreLower);
+    });
+
+    if (encontrado) {
+      console.log('✅ Vendedor preferido encontrado:', encontrado.name);
+      return encontrado;
+    }
+
+    console.log('⚠️ No se encontró vendedor con nombre:', nombreBuscado);
+    return null;
+  }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // HELPER: Obtener URL del brochure - Usa resourceService centralizado
@@ -11149,14 +13622,15 @@ Soy SARA, tu asistente. Aquí todos mis comandos:
 
   private async analyzeWithAI(message: string, lead: any, properties: any[]): Promise<AIAnalysis> {
     
-    // Formatear historial para OpenAI - asegurar que content sea siempre string
+    // Formatear historial para OpenAI - asegurar que content sea siempre string válido
     const historialParaOpenAI = (lead?.conversation_history || [])
       .slice(-8)
-      .map((m: any) => ({ 
-        role: m.role, 
-        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) 
+      .filter((m: any) => m && m.content !== undefined && m.content !== null)
+      .map((m: any) => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: typeof m.content === 'string' ? m.content : String(m.content || '')
       }))
-      .filter((m: any) => m.content && typeof m.content === 'string');
+      .filter((m: any) => m.content && typeof m.content === 'string' && m.content.trim() !== '');
 
     // ═══ DETECTAR CONVERSACIÓN NUEVA ═══
     // Si el historial está vacío o muy corto, es una conversación nueva
@@ -11627,14 +14101,13 @@ SECUENCIA OBLIGATORIA:
 - NUNCA confirmes cita sin los 3 datos completos
 - NUNCA saltes a preguntar por crédito sin haber confirmado la cita primero
 
-PASO 6: AL CONFIRMAR CITA ➜ SIEMPRE pregunta por crédito
-⚠️ OBLIGATORIO: Cuando confirmes la cita, SIEMPRE termina con:
-"¿Te gustaría que te ayudemos con el crédito hipotecario? Responde *SÍ* para orientarte 😊"
+PASO 6: AL CONFIRMAR CITA ➜ Confirmar y despedir
+✅ Cuando confirmes la cita, termina de forma limpia:
+"¡Listo [nombre]! Te agendo para [fecha] a las [hora] en *[desarrollo]*. ¡Te esperamos con mucho gusto! 😊"
 
-Ejemplo de confirmación completa:
-"¡Listo [nombre]! Te agendo para [fecha] a las [hora] en *[desarrollo]*. Te esperamos con mucho gusto. 😊
-
-¿Te gustaría que te ayudemos con el crédito hipotecario? Responde *SÍ* para orientarte 😊"
+⚠️ NO preguntes por crédito después de confirmar cita - eso se maneja DESPUÉS de la visita
+⚠️ NO hagas preguntas genéricas como "¿Tienes alguna otra duda?" después de confirmar
+✅ Termina la confirmación de forma positiva y ya. El cliente te escribirá si necesita algo más.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️⚠️⚠️ CONTROL DE RECURSOS (VIDEO/MATTERPORT) ⚠️⚠️⚠️
@@ -11649,18 +14122,18 @@ Ejemplo de confirmación completa:
 - Estás recopilando datos de crédito (ingreso, enganche, banco, modalidad)
 - Tu mensaje termina con una pregunta importante
 
-⚠️ ORDEN CORRECTO DEL FLUJO - VENDEMOS CASAS, NO CRÉDITOS:
+⚠️ ORDEN CORRECTO DEL FLUJO - VENDEMOS CASAS:
 1. Cliente pregunta por desarrollo
 2. Tú respondes CON INFORMACIÓN ÚTIL del desarrollo
 3. Preguntas nombre (si no lo tienes)
 4. ENFÓCATE EN LA CASA PRIMERO - guía hacia una visita
-5. DESPUÉS de confirmar cita → pregunta por crédito
-6. DESPUÉS de completar el flujo principal → se envían recursos automáticamente
+5. Confirma cita y despide de forma limpia (SIN preguntas adicionales)
+6. Los recursos se envían automáticamente
 
-🏠🏠🏠 PRIORIDAD: CASA PRIMERO, CRÉDITO DESPUÉS 🏠🏠🏠
+🏠🏠🏠 PRIORIDAD: VENDER LA VISITA 🏠🏠🏠
 Si el cliente menciona AMBOS (casas y crédito), SIEMPRE:
 ✅ Primero: Muestra las casas, guía hacia una visita
-✅ Segundo: Una vez agendada la cita, pregunta por crédito
+✅ Segundo: Una vez agendada la cita, termina de forma limpia (el crédito se maneja después de la visita presencial)
 
 EJEMPLO:
 Cliente: "quiero conocer sus casas y saber si tienen crédito"
@@ -11693,13 +14166,13 @@ Cuando el cliente menciona CASA + CRÉDITO juntos:
 1. Muestra las casas con detalles
 2. Pregunta "¿Cuál te llama la atención?"
 3. Cuando diga cuál le gusta → "¿Te gustaría visitarla?"
-4. Agenda la cita PRIMERO
-5. DESPUÉS de la cita confirmada → pregunta por crédito
+4. Agenda la cita
+5. Confirma cita y despide de forma limpia (SIN preguntas adicionales)
 
 ❌ INCORRECTO:
 - Preguntar por ingreso/enganche ANTES de que elija casa
-- Mandar al asesor de crédito SIN agendar visita
-- Ignorar el interés en casas y enfocarte en crédito
+- Preguntar por crédito DESPUÉS de confirmar cita
+- Hacer preguntas genéricas después de confirmar ("¿alguna otra duda?")
 
 EJEMPLO:
 Cliente: "quiero conocer casas y necesito crédito"
@@ -11708,21 +14181,21 @@ SARA: "¡Claro [nombre]! Te presento nuestros desarrollos: [lista con precios]
 → NO preguntes por ingreso todavía
 → Guía hacia que elija una casa
 → Luego ofrece visita
-→ DESPUÉS de la cita, pregunta por crédito
+→ Confirma cita y TERMINA. El crédito se maneja después de la visita presencial
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
-CONVERSACIÓN SOBRE CRÉDITO - SOLO DESPUÉS DE CITA
+CONVERSACIÓN SOBRE CRÉDITO - SOLO SI EL CLIENTE LO PIDE
 ━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️ EL CRÉDITO ES SECUNDARIO - LA CASA ES LO PRINCIPAL
 
-🚫 NUNCA preguntes por ingreso/enganche si:
-- El cliente NO tiene cita agendada
-- El cliente apenas está viendo opciones de casas
-- No ha dicho cuál casa le gusta
+🚫 NUNCA preguntes proactivamente por crédito:
+- NI antes de la cita
+- NI después de confirmar la cita
+- NI al despedirte
 
-✅ SOLO pregunta por crédito cuando:
-- Ya tiene cita confirmada, O
+✅ SOLO habla de crédito cuando:
 - El cliente INSISTE en hablar de crédito primero
+- El cliente PREGUNTA específicamente por crédito
 
 ⚠️ "NO NECESITO CRÉDITO":
 - Si dice "no necesito", "pago de contado" ➜ NO insistas
@@ -11849,9 +14322,14 @@ CUANDO PIDA UN MODELO ESPECÍÍFICO:
 - Termina con: "¿Qué te parece? ¿Te gustaría visitarlo? 😊"
 
 CUANDO CONFIRME QUE QUIERE BROCHURE/VIDEO:
-- Si responde "sí", "mándamelo", "dale", "va", "el brochure", "el video" a tu oferta
-- ⚠️ SÍ activa send_video_desarrollo: true
+- Si responde "sí", "mándamelo", "dale", "va", "el brochure", "el video", "quiero verlo", "mándalo" a tu oferta de video/brochure
+- ⚠️⚠️⚠️ CRÍTICO: SÍ activa send_video_desarrollo: true ⚠️⚠️⚠️
+- NO describas el video, SOLO activa el flag y di algo como: "¡Te lo envío! 🎬"
 - Termina con: "¿Qué te parece? ¿Te gustaría visitarlo? 😊"
+
+⚠️ IMPORTANTE: Si tu último mensaje ofrecía video/brochure y el cliente responde AFIRMATIVAMENTE (sí, va, dale, mándamelo, etc):
+- SIEMPRE activa send_video_desarrollo: true
+- NO digas "te envío el video" sin activar el flag - el sistema NO enviará nada si no activas el flag
 
 CUANDO QUIERA "HABLAR CON ASESOR":
 - Explícale que con gusto un asesor humano lo va a contactar.
@@ -11960,8 +14438,11 @@ Ejemplo:
 📌 **CONVERSACIÓN CASUAL / SALUDOS:**
 Si solo dice: "hola", "buenos días", "qué tal", "hey"
 
-DEBES responder como persona, NO como robot:
-"¡Hola! Soy SARA de Grupo Santa Rita. ¿Cómo te llamas y en qué puedo ayudarte? 😊"
+⚠️ IMPORTANTE: Solo usa el saludo completo si es el PRIMER mensaje de la conversación (no hay historial).
+- PRIMER CONTACTO: "¡Hola! Soy SARA de Grupo Santa Rita. ¿Cómo te llamas y en qué puedo ayudarte? 😊"
+- YA HAY CONVERSACIÓN: "¡Hola de nuevo! ¿En qué más te puedo ayudar?" o continúa el tema anterior
+
+⚠️ NUNCA digas "Soy SARA" si ya tienes historial de conversación con el cliente. NO te re-presentes.
 
 📌 **PERSONALIDAD - CÓMO HABLAR:**
 Eres SARA, una persona real. Hablas como alguien de Zacatecas que le apasiona su trabajo:
@@ -12255,7 +14736,8 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
     "current_housing": null,
     "urgency": null,
     "occupation": null,
-    "age_range": null
+    "age_range": null,
+    "vendedor_preferido": null
   },
   "response": "Tu respuesta conversacional para WhatsApp",
   "send_video_desarrollo": false,
@@ -12330,6 +14812,14 @@ Extrae estos datos cuando el cliente los mencione NATURALMENTE en la conversaci�
 - "tengo 28 años" ➜ age_range: "25-35"
 - "tengo 40 años" ➜ age_range: "35-45"
 - "ya estoy jubilado" ➜ age_range: "55+"
+
+👤 vendedor_preferido (si menciona un nombre de vendedor específico):
+- "Quiero que me atienda Oscar" ➜ vendedor_preferido: "Oscar"
+- "Mi amigo me recomendó con Leticia" ➜ vendedor_preferido: "Leticia"
+- "Ya hablé con Fabian antes" ➜ vendedor_preferido: "Fabian"
+- "Quisiera hablar con la señora Nancy" ➜ vendedor_preferido: "Nancy"
+- "Me atendió Sofia la otra vez" ➜ vendedor_preferido: "Sofia"
+⚠️ Si el cliente menciona a un vendedor específico, extrae SOLO el nombre (sin apellido a menos que lo diga).
 
 ⚠️ IMPORTANTE: NO preguntes estos datos directamente. Extráelos solo cuando el cliente los mencione naturalmente.
 Excepción: Puedes preguntar "¿Cómo supiste de nosotros?" de forma casual después de dar información.
@@ -13070,7 +15560,233 @@ Tú dime, ¿por dónde empezamos?`;
       });
       
       console.log('🎯 DECISIÓN CONTEXTO:', contextoDecision.accion, contextoDecision.flujoActivo || '');
-      
+
+      // ═══════════════════════════════════════════════════════════════════════════
+      // PRIORIDAD ABSOLUTA: Bridge activo vendedor ↔ lead
+      // Reenviar mensaje del lead al vendedor sin procesar con SARA
+      // ═══════════════════════════════════════════════════════════════════════════
+      if (contextoDecision.accion === 'bridge_to_vendedor') {
+        const bridgeData = (contextoDecision as any).bridge_data;
+        const mensajeOriginal = (contextoDecision as any).mensaje_original;
+
+        console.log(`🔗 BRIDGE: Reenviando mensaje de ${lead.name} a vendedor ${bridgeData.vendedor_name}`);
+
+        // Reenviar al vendedor
+        await this.meta.sendWhatsAppMessage(bridgeData.vendedor_phone,
+          `💬 *${lead.name}:*\n${mensajeOriginal}`
+        );
+
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // DETECCIÓN DE INTENCIONES DE CITA EN MENSAJE DEL LEAD
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        const intencionLead = this.detectarIntencionCita(mensajeOriginal);
+        if (intencionLead.detectado && intencionLead.fecha && intencionLead.hora) {
+          console.log(`📅 Detectada intención de cita en mensaje del lead:`, intencionLead);
+
+          // Obtener notas del vendedor para guardar pending
+          const { data: vendedorData } = await this.supabase.client
+            .from('team_members')
+            .select('notes')
+            .eq('id', bridgeData.vendedor_id)
+            .single();
+
+          let notasVendedor: any = {};
+          try {
+            notasVendedor = typeof vendedorData?.notes === 'string'
+              ? JSON.parse(vendedorData.notes)
+              : (vendedorData?.notes || {});
+          } catch (e) { /* ignore */ }
+
+          // Guardar pendiente para confirmación
+          notasVendedor.pending_bridge_appointment = {
+            fecha: intencionLead.fecha,
+            hora: intencionLead.hora,
+            tipo: intencionLead.tipo,
+            from_lead: true,
+            detected_at: new Date().toISOString()
+          };
+          await this.supabase.client
+            .from('team_members')
+            .update({ notes: JSON.stringify(notasVendedor) })
+            .eq('id', bridgeData.vendedor_id);
+
+          const fechaObj = new Date(intencionLead.fecha + 'T' + intencionLead.hora + ':00');
+          const fechaFormateada = fechaObj.toLocaleDateString('es-MX', {
+            weekday: 'long', day: 'numeric', month: 'long'
+          });
+          const horaFormateada = fechaObj.toLocaleTimeString('es-MX', {
+            hour: '2-digit', minute: '2-digit'
+          });
+
+          // Preguntar al vendedor si quiere agendar
+          setTimeout(async () => {
+            await this.meta.sendWhatsAppMessage(bridgeData.vendedor_phone,
+              `📅 *${lead.name} mencionó una fecha*\n\n` +
+              `¿Agendo ${intencionLead.tipo}?\n` +
+              `📆 ${fechaFormateada}\n` +
+              `🕐 ${horaFormateada}\n\n` +
+              `Responde *#si* o *#no*`
+            );
+          }, 1500);
+        }
+
+        // Extender el bridge 5 minutos más
+        const nuevoExpiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+        // Actualizar en el lead
+        const notasLeadActuales = typeof lead.notes === 'object' ? lead.notes : {};
+        await this.supabase.client
+          .from('leads')
+          .update({
+            notes: {
+              ...notasLeadActuales,
+              active_bridge_to_vendedor: {
+                ...bridgeData,
+                expires_at: nuevoExpiry,
+                last_message: mensajeOriginal,
+                last_message_at: new Date().toISOString()
+              }
+            },
+            last_interaction: new Date().toISOString(),
+            last_response: new Date().toISOString()
+          })
+          .eq('id', lead.id);
+
+        // Actualizar en el vendedor también
+        const { data: vendedorData } = await this.supabase.client
+          .from('team_members')
+          .select('notes')
+          .eq('id', bridgeData.vendedor_id)
+          .single();
+
+        if (vendedorData?.notes) {
+          let notasVendedor: any = {};
+          try {
+            notasVendedor = typeof vendedorData.notes === 'string'
+              ? JSON.parse(vendedorData.notes)
+              : vendedorData.notes;
+          } catch (e) { /* ignore */ }
+
+          if (notasVendedor.active_bridge) {
+            notasVendedor.active_bridge.expires_at = nuevoExpiry;
+            notasVendedor.active_bridge.last_activity = new Date().toISOString();
+            await this.supabase.client
+              .from('team_members')
+              .update({ notes: JSON.stringify(notasVendedor) })
+              .eq('id', bridgeData.vendedor_id);
+          }
+        }
+
+        // Registrar en historial de conversación
+        const historialActual = lead.conversation_history || [];
+        historialActual.push({
+          role: 'user',
+          content: mensajeOriginal,
+          timestamp: new Date().toISOString(),
+          bridge_active: true,
+          forwarded_to: bridgeData.vendedor_name
+        });
+        await this.supabase.client
+          .from('leads')
+          .update({ conversation_history: historialActual.slice(-50) })
+          .eq('id', lead.id);
+
+        // Registrar actividad
+        await this.supabase.client.from('lead_activities').insert({
+          lead_id: lead.id,
+          team_member_id: bridgeData.vendedor_id,
+          activity_type: 'whatsapp_received',
+          notes: `Chat directo - Lead dijo: "${mensajeOriginal.substring(0, 100)}"`,
+          created_at: new Date().toISOString()
+        });
+
+        console.log(`✅ Mensaje de ${lead.name} reenviado a ${bridgeData.vendedor_name}`);
+        return; // No procesar más, el vendedor responderá
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════════
+      // PRIORIDAD MÁXIMA: Encuesta post-visita
+      // ═══════════════════════════════════════════════════════════════════════════
+      if (contextoDecision.accion === 'encuesta_post_visita' && contextoDecision.respuesta) {
+        console.log('📋 ENCUESTA POST-VISITA: Procesando respuesta tipo:', (contextoDecision as any).tipo_encuesta);
+
+        const surveyData = (contextoDecision as any).survey_data;
+        const tipoRespuesta = (contextoDecision as any).tipo_encuesta;
+
+        // Enviar respuesta al cliente
+        await this.meta.sendWhatsAppMessage(from, contextoDecision.respuesta);
+
+        // Registrar actividad de encuesta respondida
+        const labelEncuesta: Record<string, string> = {
+          'muy_interesado': 'Cliente muy interesado - quiere avanzar',
+          'quiere_opciones': 'Cliente quiere ver más opciones',
+          'tiene_dudas': 'Cliente tiene dudas por resolver',
+          'texto_libre': 'Cliente envió comentario libre'
+        };
+        await this.supabase.client.from('lead_activities').insert({
+          lead_id: lead.id,
+          team_member_id: surveyData?.vendedor_id || lead.assigned_to,
+          activity_type: 'survey_response',
+          notes: `Encuesta post-visita: ${labelEncuesta[tipoRespuesta] || tipoRespuesta}. Respuesta: "${originalMessage}"`,
+          created_at: new Date().toISOString()
+        });
+        console.log(`📝 Actividad de encuesta registrada para lead ${lead.id}`);
+
+        // Notificar al vendedor
+        if (surveyData?.vendedor_id) {
+          const { data: vendedor } = await this.supabase.client
+            .from('team_members')
+            .select('phone, name')
+            .eq('id', surveyData.vendedor_id)
+            .single();
+
+          if (vendedor?.phone) {
+            const leadPhone = lead.phone?.replace(/^521/, '') || lead.phone || 'N/A';
+            let notifVendedor = '';
+            if (tipoRespuesta === 'muy_interesado') {
+              notifVendedor = `🔥 *¡${lead.name} quiere avanzar!*\n📱 ${leadPhone}\n\nRespondió a la encuesta post-visita:\n"Me encantó, quiero avanzar"\n\n💡 Contáctalo hoy para hablar de apartado.`;
+            } else if (tipoRespuesta === 'quiere_opciones') {
+              notifVendedor = `📋 *${lead.name} quiere ver más opciones*\n📱 ${leadPhone}\n\nRespondió a la encuesta post-visita:\n"Me gustó pero quiero ver más opciones"\n\n💡 Pregúntale qué busca diferente.`;
+            } else if (tipoRespuesta === 'tiene_dudas') {
+              notifVendedor = `🤔 *${lead.name} tiene dudas*\n📱 ${leadPhone}\n\nRespondió a la encuesta post-visita:\n"Tengo dudas que resolver"\n\n💡 Dale seguimiento para aclarar sus dudas.`;
+            } else {
+              notifVendedor = `💬 *${lead.name} respondió a la encuesta*\n📱 ${leadPhone}\n\nSu respuesta:\n"${originalMessage}"\n\n💡 Dale seguimiento según su comentario.`;
+            }
+            await this.meta.sendWhatsAppMessage(vendedor.phone, notifVendedor);
+            console.log(`📤 Notificación enviada a vendedor ${vendedor.name}`);
+          }
+        }
+
+        // Limpiar encuesta pendiente y guardar respuesta
+        const notasActuales = typeof lead.notes === 'object' ? lead.notes : {};
+        const { pending_client_survey, ...notasSinEncuesta } = notasActuales;
+        await this.supabase.client
+          .from('leads')
+          .update({
+            notes: {
+              ...notasSinEncuesta,
+              client_survey_response: tipoRespuesta,
+              client_survey_text: originalMessage,
+              client_survey_responded_at: new Date().toISOString()
+            }
+          })
+          .eq('id', lead.id);
+
+        console.log(`✅ Encuesta post-visita procesada: ${tipoRespuesta}`);
+
+        // Guardar en historial
+        const nuevoHistorial = [...historialCompleto];
+        nuevoHistorial.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
+        nuevoHistorial.push({ role: 'assistant', content: contextoDecision.respuesta, timestamp: new Date().toISOString() });
+
+        await this.supabase.client
+          .from('leads')
+          .update({ conversation_history: nuevoHistorial })
+          .eq('id', lead.id);
+
+        return;
+      }
+
       // Si el contexto determina una respuesta directa, enviarla y procesar
       if (contextoDecision.accion === 'respuesta_directa' && contextoDecision.respuesta) {
         console.log('🎯 CONTEXTO INTELIGENTE: Respuesta directa determinada');
@@ -14196,11 +16912,16 @@ Tú dime, ¿por dónde empezamos?`;
                              msg?.content?.includes('Te interesa visitarnos'));
     
     const contenidoLower = ultimoMsgSara?.content?.toLowerCase() || '';
-    const preguntabaModalidad = (contenidoLower.includes('cómo prefieres que te contacte') ||
-                                 contenidoLower.includes('llamada telef') ||
-                                 contenidoLower.includes('1️⃣')) &&
-                                (contenidoLower.includes('videollamada') || contenidoLower.includes('2️⃣')) &&
-                                (contenidoLower.includes('presencial') || contenidoLower.includes('3️⃣'));
+    // IMPORTANTE: NO confundir con encuesta post-visita que también tiene 1️⃣2️⃣3️⃣
+    const esEncuestaPostVisitaAnalisis = contenidoLower.includes('¿qué te pareció?') ||
+                                         contenidoLower.includes('me encantó, quiero avanzar') ||
+                                         contenidoLower.includes('quiero ver más opciones') ||
+                                         contenidoLower.includes('gracias por visitarnos');
+
+    const preguntabaModalidad = !esEncuestaPostVisitaAnalisis && (
+                                 (contenidoLower.includes('cómo prefieres que te contacte') ||
+                                  contenidoLower.includes('llamada telef')) &&
+                                 (contenidoLower.includes('videollamada') || contenidoLower.includes('presencial')));
     
     let respuestaAfirmativa = /^(sí|si|claro|dale|ok|por favor|quiero|va|órale|orale|porfa|yes|yeah|simón|simon|arre|sale)$/i.test(originalMessage.trim()) ||
                                 /^(sí|si|claro|dale|ok)\s/i.test(originalMessage.trim());
@@ -16799,28 +19520,14 @@ ${msgContacto}`;
     const score = lead.lead_score || 0;
     const temp = score >= 70 ? 'HOT 🔥' : score >= 40 ? 'WARM ⚠️' : 'COLD ❄️';
     
-    // CORRECCIÓN: Verificar crédito de múltiples fuentes
-    let necesitaCredito = lead.needs_mortgage === true || 
-                          analysis.extracted_data?.necesita_credito === true ||
-                          analysis.extracted_data?.quiere_asesor === true;
-    
-    // También verificar si existe mortgage_application
-    if (!necesitaCredito) {
-      try {
-        const { data: mortgageExists } = await this.supabase.client
-          .from('mortgage_applications')
-          .select('id')
-          .eq('lead_id', lead.id)
-          .limit(1);
-        if (mortgageExists && mortgageExists.length > 0) {
-          necesitaCredito = true;
-          console.log('💳 Lead tiene mortgage_application → necesitaCredito = true');
-        }
-      } catch (e) {
-        // Ignorar error
-      }
-    }
-    console.log('💳 ¿Necesita crédito?', necesitaCredito, '| needs_mortgage:', lead.needs_mortgage, '| quiere_asesor:', analysis.extracted_data?.quiere_asesor);
+    // ✅ FIX 09-ENE-2026: Solo incluir asesor de crédito si el cliente lo pidió EXPLÍCITAMENTE en esta conversación
+    // NO incluir solo porque needs_mortgage=true (podría ser de conversación anterior)
+    // El asesor de crédito se contacta DESPUÉS de la visita, no en la cita inicial
+    let necesitaCredito = analysis.extracted_data?.quiere_asesor === true;
+
+    // Solo si EXPLÍCITAMENTE dijo que quiere asesor EN ESTE MENSAJE
+    console.log('💳 ¿Incluir asesor en cita?', necesitaCredito, '| quiere_asesor:', analysis.extracted_data?.quiere_asesor);
+    console.log('ℹ️ needs_mortgage en DB:', lead.needs_mortgage, '(ignorado para citas iniciales)');
 
     // Buscar propiedad para obtener dirección y GPS (properties ya viene como parámetro)
     // VALIDACIÓN DEFENSIVA: asegurar que properties es un array
@@ -17220,6 +19927,30 @@ ${infoContactos}
 
       await this.twilio.sendWhatsAppMessage(from, confirmacion);
       console.log('✅ Confirmación de cita enviada');
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // CAPTURA DE CUMPLEAÑOS - Momento natural después de cita
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      if (!lead.birthday) {
+        await new Promise(r => setTimeout(r, 1500)); // Pausa para que lea la confirmación
+        await this.twilio.sendWhatsAppMessage(from,
+          `Por cierto ${clientName}, ¿cuándo es tu cumpleaños? 🎂\nPor si hay algo especial para ti 🎁\n\n_(ej: 15 marzo)_`
+        );
+        console.log('🎂 Pregunta de cumpleaños enviada');
+
+        // Marcar que esperamos respuesta de cumpleaños
+        try {
+          const notasActuales = typeof lead.notes === 'object' ? lead.notes : {};
+          await this.supabase.client
+            .from('leads')
+            .update({
+              notes: { ...notasActuales, pending_birthday_response: true }
+            })
+            .eq('id', lead.id);
+        } catch (e) {
+          console.log('⚠️ Error marcando pending_birthday');
+        }
+      }
 
       // ═══ TEMPLATE ELIMINADO - El mensaje de texto ya tiene toda la info ═══
       // El template era redundante y el cliente recibía 2 confirmaciones
@@ -17737,6 +20468,27 @@ ${ingresoFinal > 0 ? `📊 Capacidad estimada: $${Math.round(ingresoFinal * 60).
       console.log('🎂 Rango edad:', data.age_range);
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // VENDEDOR PREFERIDO - Reasignar si el cliente lo solicita
+    // ═══════════════════════════════════════════════════════════
+    if (data.vendedor_preferido) {
+      const vendedorPreferido = await this.buscarVendedorPorNombre(data.vendedor_preferido);
+      if (vendedorPreferido && vendedorPreferido.id !== lead.assigned_to) {
+        updates.assigned_to = vendedorPreferido.id;
+        console.log('👤 Lead reasignado a vendedor preferido:', vendedorPreferido.name);
+
+        // Notificar al nuevo vendedor
+        if (vendedorPreferido.phone) {
+          const mensajeVendedor = `🔔 *LEAD ASIGNADO A TI*\n\n` +
+            `👤 *${lead.name || 'Cliente nuevo'}*\n` +
+            `📱 ${lead.phone}\n` +
+            `🏠 Interés: ${lead.property_interest || 'Por definir'}\n\n` +
+            `💡 El cliente pidió ser atendido por ti específicamente.`;
+          await this.twilio.sendWhatsAppMessage(vendedorPreferido.phone, mensajeVendedor);
+        }
+      }
+    }
+
     // Calcular score
     let score = lead.lead_score || 0;
     
@@ -18121,17 +20873,140 @@ ${ingresoFinal > 0 ? `📊 Capacidad estimada: $${Math.round(ingresoFinal * 60).
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   private async procesarRespuestaEncuesta(phone: string, mensaje: string): Promise<string | null> {
     try {
+      // Normalizar teléfono - probar con diferentes formatos
+      const last10 = phone.slice(-10);
+      const phoneVariants = [
+        phone,
+        phone.replace(/^\+/, ''),
+        phone.replace(/^521/, ''), // Quitar 521 (México móvil)
+        phone.replace(/^52/, ''),  // Quitar 52
+        `52${last10}`,             // Agregar 52 a los últimos 10
+        `521${last10}`,            // Agregar 521 a los últimos 10
+        last10                     // Solo últimos 10 dígitos
+      ];
+
+      // ═══════════════════════════════════════════════════════════
+      // PRIMERO: Verificar si hay encuesta post-visita en notas del lead
+      // ═══════════════════════════════════════════════════════════
+      console.log(`📋 ENCUESTA POST-VISITA: Buscando lead con phone like %${last10}`);
+
+      const { data: leadsConEncuesta, error: leadError } = await this.supabase.client
+        .from('leads')
+        .select('id, name, notes, assigned_to, phone')
+        .like('phone', `%${last10}`)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (leadError) {
+        console.log(`📋 ENCUESTA POST-VISITA: Error buscando lead:`, leadError.message);
+      }
+
+      const leadConEncuesta = leadsConEncuesta?.[0];
+      console.log(`📋 ENCUESTA POST-VISITA: Lead encontrado: ${leadConEncuesta?.name || 'ninguno'}, phone: ${leadConEncuesta?.phone || 'N/A'}`);
+
+      if (leadConEncuesta) {
+        const notas = typeof leadConEncuesta.notes === 'object' ? leadConEncuesta.notes : {};
+        console.log(`📋 ENCUESTA POST-VISITA: Notas tiene pending_client_survey: ${!!notas.pending_client_survey}`);
+
+        if (notas.pending_client_survey) {
+          console.log(`📋 ENCUESTA POST-VISITA: Lead ${leadConEncuesta.name} tiene encuesta pendiente`);
+          const textoLimpio = mensaje.trim().toLowerCase();
+          const nombreCorto = leadConEncuesta.name?.split(' ')[0] || 'Cliente';
+          const survey = notas.pending_client_survey;
+
+          // Detectar respuesta (1, 2, 3 o texto libre)
+          let respuestaDetectada: string | null = null;
+          let feedbackCliente = '';
+          let notificarVendedor = '';
+
+          if (textoLimpio === '1' || textoLimpio.includes('encant') || textoLimpio.includes('avanzar') || textoLimpio.includes('apartar')) {
+            respuestaDetectada = 'muy_interesado';
+            feedbackCliente = `¡Excelente ${nombreCorto}! 🎉 Me alegra mucho que te haya encantado.\n\nTu asesor *${survey.vendedor_name}* se pondrá en contacto contigo para los siguientes pasos. ¡Estás muy cerca de tu nuevo hogar! 🏠`;
+            notificarVendedor = `🔥 *¡${leadConEncuesta.name} quiere avanzar!*\n\nRespondió a la encuesta post-visita:\n"Me encantó, quiero avanzar"\n\n💡 Contáctalo hoy para hablar de apartado.`;
+          } else if (textoLimpio === '2' || textoLimpio.includes('más opciones') || textoLimpio.includes('mas opciones') || textoLimpio.includes('ver más') || textoLimpio.includes('otras')) {
+            respuestaDetectada = 'quiere_opciones';
+            feedbackCliente = `Entendido ${nombreCorto} 👍\n\n¿Qué te gustaría diferente?\n• ¿Más espacio?\n• ¿Precio más accesible?\n• ¿Otra ubicación?\n\nCuéntame y te busco opciones que se ajusten mejor. 😊`;
+            notificarVendedor = `📋 *${leadConEncuesta.name} quiere ver más opciones*\n\nRespondió a la encuesta post-visita:\n"Me gustó pero quiero ver más opciones"\n\n💡 Pregúntale qué busca diferente.`;
+          } else if (textoLimpio === '3' || textoLimpio.includes('duda') || textoLimpio.includes('pregunta')) {
+            respuestaDetectada = 'tiene_dudas';
+            feedbackCliente = `Claro ${nombreCorto}, con gusto te ayudo 🤝\n\n¿Cuáles son tus dudas? Puedo ayudarte con:\n• Precios y formas de pago\n• Financiamiento\n• Ubicación y amenidades\n• Tiempos de entrega\n\nPregúntame lo que necesites. 😊`;
+            notificarVendedor = `🤔 *${leadConEncuesta.name} tiene dudas*\n\nRespondió a la encuesta post-visita:\n"Tengo dudas que resolver"\n\n💡 Dale seguimiento para aclarar sus dudas.`;
+          } else {
+            // Respuesta de texto libre - también es válida
+            respuestaDetectada = 'texto_libre';
+            feedbackCliente = `¡Gracias por tu respuesta ${nombreCorto}! 🙏\n\nTu asesor *${survey.vendedor_name}* revisará tu comentario y te contactará pronto.\n\nEstoy aquí si necesitas algo más. 😊`;
+            notificarVendedor = `💬 *${leadConEncuesta.name} respondió a la encuesta*\n\nSu respuesta:\n"${mensaje}"\n\n💡 Dale seguimiento según su comentario.`;
+          }
+
+          // Guardar feedback en el lead y limpiar encuesta pendiente
+          const { pending_client_survey, ...notasSinEncuesta } = notas;
+          await this.supabase.client
+            .from('leads')
+            .update({
+              notes: {
+                ...notasSinEncuesta,
+                client_survey_response: respuestaDetectada,
+                client_survey_text: mensaje,
+                client_survey_responded_at: new Date().toISOString()
+              }
+            })
+            .eq('id', leadConEncuesta.id);
+
+          // Notificar al vendedor
+          if (survey.vendedor_id) {
+            const { data: vendedor } = await this.supabase.client
+              .from('team_members')
+              .select('phone')
+              .eq('id', survey.vendedor_id)
+              .single();
+
+            if (vendedor?.phone) {
+              await this.twilio.sendWhatsAppMessage(vendedor.phone, notificarVendedor);
+              console.log(`📤 Notificación enviada a vendedor ${survey.vendedor_name}`);
+            }
+          }
+
+          console.log(`✅ Encuesta post-visita procesada: ${respuestaDetectada}`);
+          return feedbackCliente;
+        }
+      }
+
+      // Eliminar duplicados
+      const uniqueVariants = [...new Set(phoneVariants)];
+
+      console.log(`📋 ENCUESTA: Buscando para ${phone}`);
+      console.log(`📋 ENCUESTA: Variantes: ${uniqueVariants.join(', ')}`);
+
+      // Primero ver todas las encuestas pendientes para debug
+      const { data: allSurveys } = await this.supabase.client
+        .from('surveys')
+        .select('id, lead_phone, lead_name, status, survey_type')
+        .in('status', ['sent', 'awaiting_feedback'])
+        .order('sent_at', { ascending: false })
+        .limit(5);
+
+      console.log(`📋 ENCUESTA: Encuestas pendientes en DB:`, JSON.stringify(allSurveys));
+
       // Buscar encuesta pendiente o esperando comentario
-      const { data: encuesta } = await this.supabase.client
+      const { data: encuesta, error } = await this.supabase.client
         .from('surveys')
         .select('*')
-        .eq('lead_phone', phone)
+        .or(uniqueVariants.map(p => `lead_phone.eq.${p}`).join(','))
         .in('status', ['sent', 'awaiting_feedback'])
         .order('sent_at', { ascending: false })
         .limit(1)
         .single();
 
-      if (!encuesta) return null;
+      if (error) {
+        console.log(`📋 ENCUESTA: No encontrada para ${phone}:`, error.message);
+      }
+
+      if (!encuesta) {
+        console.log(`📋 ENCUESTA: Sin encuesta activa para ${phone}`);
+        return null;
+      }
+
+      console.log(`📋 Encuesta encontrada: ${encuesta.id} tipo=${encuesta.survey_type} status=${encuesta.status}`);
 
       const textoLimpio = mensaje.trim();
       const nombreCorto = encuesta.lead_name?.split(' ')[0] || 'Cliente';
@@ -18213,6 +21088,59 @@ ${ingresoFinal > 0 ? `📊 Capacidad estimada: $${Math.round(ingresoFinal * 60).
         }
       }
 
+      // ═══════════════════════════════════════════════════════════
+      // Encuestas custom/satisfaction/rescate - manejo flexible
+      // ═══════════════════════════════════════════════════════════
+      const tiposFlexibles = ['custom', 'satisfaction', 'rescate', 'post_cierre'];
+      if (tiposFlexibles.includes(encuesta.survey_type)) {
+        // Aceptar números 1-5 o 1-10
+        const rating = parseInt(textoLimpio);
+        if (rating >= 1 && rating <= 10) {
+          // Normalizar a escala 1-5 si es necesario
+          const ratingNormalizado = rating <= 5 ? rating : Math.ceil(rating / 2);
+
+          await this.supabase.client
+            .from('surveys')
+            .update({
+              status: 'awaiting_feedback',
+              rating: ratingNormalizado,
+              nps_score: rating
+            })
+            .eq('id', encuesta.id);
+
+          if (rating >= 4 || (rating > 5 && rating >= 8)) {
+            return `¡Gracias *${nombreCorto}*! 🌟\n\n¿Tienes algún comentario adicional?\n\n_Escribe tu comentario o "no" para terminar_`;
+          } else {
+            return `Gracias por tu respuesta *${nombreCorto}*.\n\n¿Qué podemos mejorar? Tu opinión es importante.\n\n_Escribe tu comentario_`;
+          }
+        }
+
+        // También aceptar SI/NO para preguntas de tipo yesno
+        const respuestaLower = textoLimpio.toLowerCase();
+        if (respuestaLower === 'si' || respuestaLower === 'sí' || respuestaLower === 'yes') {
+          await this.supabase.client
+            .from('surveys')
+            .update({
+              status: 'awaiting_feedback',
+              would_recommend: true
+            })
+            .eq('id', encuesta.id);
+          return `¡Gracias *${nombreCorto}*! 🙏\n\n¿Algo más que quieras compartir?\n\n_Escribe tu comentario o "no" para terminar_`;
+        }
+
+        if (respuestaLower === 'no') {
+          // Si dice "no" a una pregunta, preguntar por qué
+          await this.supabase.client
+            .from('surveys')
+            .update({
+              status: 'awaiting_feedback',
+              would_recommend: false
+            })
+            .eq('id', encuesta.id);
+          return `Entendido *${nombreCorto}*.\n\n¿Nos podrías decir por qué?\n\n_Tu feedback nos ayuda a mejorar_`;
+        }
+      }
+
       return null;
     } catch (e) {
       console.log('Error procesando respuesta encuesta:', e);
@@ -18290,6 +21218,208 @@ _${new Date().toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', mo
       }
     } catch (e) {
       console.log('Error notificando resultado de encuesta:', e);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DETECCIÓN Y CREACIÓN DE REFERIDOS
+  // ═══════════════════════════════════════════════════════════════════════════
+  private async detectarYCrearReferido(clienteReferidor: any, mensaje: string, clientePhone: string, from: string): Promise<boolean> {
+    try {
+      // Buscar números de teléfono en el mensaje
+      // Formatos: 5214921234567, 521 492 123 4567, 4921234567, etc.
+      const telefonoRegex = /(?:52)?1?[0-9]{10}/g;
+      const telefonosEnMensaje = mensaje.replace(/[\s\-\(\)\.]/g, '').match(telefonoRegex);
+
+      if (!telefonosEnMensaje || telefonosEnMensaje.length === 0) {
+        // No hay teléfono en el mensaje, no es un referido
+        return false;
+      }
+
+      // Limpiar el teléfono encontrado
+      let telefonoReferido = telefonosEnMensaje[0];
+      // Normalizar a formato 521XXXXXXXXXX
+      if (telefonoReferido.length === 10) {
+        telefonoReferido = '521' + telefonoReferido;
+      } else if (telefonoReferido.length === 12 && telefonoReferido.startsWith('52')) {
+        telefonoReferido = '521' + telefonoReferido.slice(2);
+      }
+
+      // Verificar que no sea el mismo número del cliente
+      const clienteDigits = clientePhone.replace(/\D/g, '').slice(-10);
+      const referidoDigits = telefonoReferido.slice(-10);
+      if (clienteDigits === referidoDigits) {
+        return false; // Es su propio número
+      }
+
+      // Verificar si el referido ya existe
+      const { data: existeReferido } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone')
+        .like('phone', '%' + referidoDigits)
+        .single();
+
+      if (existeReferido) {
+        await this.meta.sendWhatsAppMessage(from,
+          `¡Gracias por la recomendación! 🙏\n\n` +
+          `Sin embargo, *${existeReferido.name || 'esta persona'}* ya está registrada en nuestro sistema.\n\n` +
+          `¿Tienes a alguien más que puedas recomendar?`
+        );
+        return true;
+      }
+
+      // Extraer nombre del mensaje (todo lo que no sea el teléfono)
+      let nombreReferido = mensaje
+        .replace(telefonoRegex, '')
+        .replace(/[\s\-\(\)\.]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      // Limpiar palabras comunes
+      const palabrasIgnorar = ['te', 'paso', 'el', 'la', 'contacto', 'de', 'mi', 'es', 'se', 'llama', 'su', 'numero', 'número', 'tel', 'telefono', 'teléfono', 'whatsapp', 'wsp', 'cel', 'celular', 'aqui', 'aquí', 'va', 'ahí', 'ahi', 'recomiendo', 'recomendar', 'a', 'un', 'una', 'amigo', 'amiga', 'primo', 'prima', 'conocido', 'conocida', 'familiar', 'vecino', 'vecina', 'compa', 'cuñado', 'cuñada', 'hermano', 'hermana', 'papa', 'papá', 'mama', 'mamá', 'tio', 'tía', 'tia', 'sobrino', 'sobrina', 'les', 'le', 'dejo', 'mando', 'envio', 'envío', 'este', 'esta', 'para', 'que', 'lo', 'los', 'con', 'hijo', 'hija', 'esposo', 'esposa', 'novio', 'novia', 'jefe', 'jefa', 'colega', 'compañero', 'compañera', 'cuate', 'compadre', 'comadre', 'suegro', 'suegra', 'yerno', 'nuera', 'abuelo', 'abuela', 'nieto', 'nieta', 'busca', 'casa', 'quiere', 'necesita', 'interesa', 'interesado', 'interesada', 'comprar', 'rentar', 'ver', 'visitar', 'conocer', 'cada', 'también', 'tambien', 'igual', 'anda', 'buscando', 'departamento', 'depa', 'terreno', 'propiedad'];
+      nombreReferido = nombreReferido
+        .split(' ')
+        .filter(p => p.length > 1 && !palabrasIgnorar.includes(p.toLowerCase()) && !/^\d+$/.test(p))
+        .join(' ')
+        .trim();
+
+      // Si no hay nombre, usar genérico
+      if (!nombreReferido || nombreReferido.length < 2) {
+        nombreReferido = `Referido de ${clienteReferidor.name || 'cliente'}`;
+      }
+
+      // Capitalizar nombre
+      nombreReferido = nombreReferido
+        .split(' ')
+        .map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+        .join(' ');
+
+      console.log(`🎯 REFERIDO DETECTADO: ${nombreReferido} - ${telefonoReferido}`);
+      console.log(`   Referido por: ${clienteReferidor.name} (${clienteReferidor.id})`);
+
+      // ASIGNACIÓN ROUND-ROBIN: Obtener vendedor con menos leads activos
+      const { data: vendedoresActivos } = await this.supabase.client
+        .from('team_members')
+        .select('id, name, phone')
+        .eq('role', 'vendedor')
+        .eq('active', true);
+
+      let vendedorAsignado: any = null;
+      if (vendedoresActivos && vendedoresActivos.length > 0) {
+        // Contar leads activos por vendedor
+        const conteos: Record<string, number> = {};
+        for (const v of vendedoresActivos) {
+          const { count } = await this.supabase.client
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('assigned_to', v.id)
+            .in('status', ['new', 'contacted', 'qualified', 'scheduled', 'visited']);
+          conteos[v.id] = count || 0;
+        }
+        // Asignar al que tenga menos
+        vendedorAsignado = vendedoresActivos.reduce((min, v) =>
+          conteos[v.id] < conteos[min.id] ? v : min
+        );
+        console.log(`👤 Referido asignado a: ${vendedorAsignado.name} (${conteos[vendedorAsignado.id]} leads activos)`);
+      }
+
+      const vendedorId = vendedorAsignado?.id || null;
+
+      // Crear el nuevo lead referido
+      const nuevoReferido = {
+        name: nombreReferido,
+        phone: telefonoReferido,
+        status: 'new',
+        lead_category: 'HOT', // Referidos son HOT por defecto
+        assigned_to: vendedorId,
+        source: 'referral',
+        referred_by: clienteReferidor.id,
+        referred_by_name: clienteReferidor.name,
+        referral_date: new Date().toISOString(),
+        notes: {
+          referido: {
+            referidor_id: clienteReferidor.id,
+            referidor_nombre: clienteReferidor.name,
+            referidor_telefono: clientePhone,
+            fecha: new Date().toISOString(),
+            mensaje_original: mensaje
+          }
+        },
+        conversation_history: [],
+        score: 0,
+        lead_score: 70, // Score alto por ser referido
+        needs_mortgage: null,
+        mortgage_data: {}
+      };
+
+      const { data: leadCreado, error } = await this.supabase.client
+        .from('leads')
+        .insert([nuevoReferido])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ Error creando lead referido:', error);
+        await this.meta.sendWhatsAppMessage(from,
+          `¡Gracias por la recomendación! 🙏\n\nHubo un problema guardando el contacto. ¿Podrías enviarlo de nuevo?`
+        );
+        return true;
+      }
+
+      console.log(`✅ Lead referido creado: ${leadCreado.id}`);
+
+      // Actualizar contador de referidos del cliente
+      const referidosActuales = clienteReferidor.notes?.referidos_enviados || 0;
+      await this.supabase.client
+        .from('leads')
+        .update({
+          notes: {
+            ...clienteReferidor.notes,
+            referidos_enviados: referidosActuales + 1,
+            ultimo_referido: new Date().toISOString()
+          }
+        })
+        .eq('id', clienteReferidor.id);
+
+      // Agradecer al cliente
+      await this.meta.sendWhatsAppMessage(from,
+        `¡Muchas gracias por recomendar a *${nombreReferido}*! 🎉\n\n` +
+        `Ya lo registramos en nuestro sistema y lo contactaremos pronto.\n\n` +
+        `Recuerda que si ${nombreReferido} compra, tienes un *bono de agradecimiento* 🎁\n\n` +
+        `¿Tienes a alguien más que puedas recomendar?`
+      );
+
+      // Notificar al vendedor asignado
+      if (vendedorAsignado?.phone) {
+        await this.meta.sendWhatsAppMessage(vendedorAsignado.phone,
+          `🎯 *NUEVO LEAD REFERIDO*\n\n` +
+          `*${nombreReferido}*\n` +
+          `📱 ${telefonoReferido}\n\n` +
+          `Referido por: *${clienteReferidor.name || 'Cliente'}*\n` +
+          `Categoría: 🔥 HOT\n\n` +
+          `¡Te fue asignado por round-robin! Los referidos tienen alta probabilidad de conversión. ¡Contáctalo pronto!`
+        );
+        console.log(`📤 Notificación enviada a ${vendedorAsignado.name}`);
+      }
+
+      // Enviar mensaje de bienvenida al referido
+      try {
+        await this.meta.sendWhatsAppMessage(telefonoReferido,
+          `¡Hola ${nombreReferido.split(' ')[0]}! 👋\n\n` +
+          `*${clienteReferidor.name?.split(' ')[0] || 'Un amigo'}* nos compartió tu contacto porque cree que podemos ayudarte a encontrar tu hogar ideal.\n\n` +
+          `Somos especialistas en bienes raíces y tenemos excelentes opciones.\n\n` +
+          `¿Te gustaría que te platique sobre lo que tenemos disponible? 🏡`
+        );
+        console.log(`📤 Mensaje de bienvenida enviado a referido ${telefonoReferido}`);
+      } catch (e) {
+        console.log('⚠️ No se pudo enviar mensaje al referido (puede que no tenga WhatsApp):', e);
+      }
+
+      return true;
+
+    } catch (e) {
+      console.error('Error en detectarYCrearReferido:', e);
+      return false;
     }
   }
 }

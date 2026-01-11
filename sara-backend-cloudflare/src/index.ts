@@ -7,6 +7,7 @@ import { WhatsAppHandler } from './handlers/whatsapp';
 import { handleTeamRoutes } from './routes/team-routes';
 import { handlePromotionRoutes } from './routes/promotions';
 import { FollowupService } from './services/followupService';
+import { FollowupApprovalService } from './services/followupApprovalService';
 
 export interface Env {
   SUPABASE_URL: string;
@@ -173,6 +174,36 @@ export default {
         return corsResponse(JSON.stringify({ ok: true, message: "Briefing enviado a " + yo.name }));
       }
       return corsResponse(JSON.stringify({ ok: false, message: "Usuario no encontrado" }));
+    }
+
+    // Test briefing de supervisión (coordinadores)
+    if (url.pathname === "/test-supervision" && request.method === "GET") {
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      // Para test, enviarlo a mi número
+      const testPhone = "5215610016226";
+      await enviarBriefingSupervisionTest(supabase, meta, testPhone);
+      return corsResponse(JSON.stringify({ ok: true, message: "Briefing supervisión enviado a " + testPhone }));
+    }
+
+    // Test re-engagement automático
+    if (url.pathname === "/test-reengagement" && request.method === "GET") {
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await verificarReengagement(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: "Re-engagement ejecutado - revisa logs" }));
+    }
+
+    // Test seguimiento post-venta
+    if (url.pathname === "/test-postventa" && request.method === "GET") {
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await seguimientoPostVenta(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: "Post-venta ejecutado - revisa logs" }));
+    }
+
+    // Test leads fríos / re-engagement directo
+    if (url.pathname === "/test-leads-frios" && request.method === "GET") {
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await reengagementDirectoLeads(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: "Leads fríos ejecutado - revisa logs" }));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -512,7 +543,7 @@ ${statusAnterior} → ${statusNuevo}
             .select('name, phone')
             .eq('id', body.assigned_to)
             .single();
-          
+
           if (vendedor?.phone) {
             const mensaje = `📋 *Lead Reasignado*
 ━━━━━━━━━━━━━━━━━━
@@ -522,7 +553,7 @@ ${statusAnterior} → ${statusNuevo}
 📍 *Notas:* ${data.notes || 'Sin notas'}
 ━━━━━━━━━━━━━━━━━━
 ⚡ *¡Contactar pronto!*`;
-            
+
             await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
             console.log('📤 Notificación enviada a', vendedor.name);
           }
@@ -530,7 +561,61 @@ ${statusAnterior} → ${statusNuevo}
           console.log('⚠️ Error notificando:', e);
         }
       }
-      
+
+      // ═══════════════════════════════════════════════════════════════
+      // NOTIFICAR AL ASESOR HIPOTECARIO CUANDO SE LE ASIGNA UN LEAD
+      // ═══════════════════════════════════════════════════════════════
+      if (data && body.asesor_banco_id && oldLead?.asesor_banco_id !== body.asesor_banco_id) {
+        try {
+          const { data: asesor } = await supabase.client
+            .from('team_members')
+            .select('name, phone')
+            .eq('id', body.asesor_banco_id)
+            .single();
+
+          // Obtener vendedor para incluir en notificación
+          const { data: vendedorLead } = await supabase.client
+            .from('team_members')
+            .select('name, phone')
+            .eq('id', data.assigned_to)
+            .single();
+
+          if (asesor?.phone) {
+            const mensaje = `🏦 *LEAD ASIGNADO PARA CRÉDITO*
+━━━━━━━━━━━━━━━━━━━━━━
+
+👤 *Cliente:* ${data.name || 'Sin nombre'}
+📱 *Tel:* ${data.phone || 'Sin teléfono'}
+🏠 *Desarrollo:* ${data.property_interest || 'No especificado'}
+
+${vendedorLead ? `👔 *Vendedor:* ${vendedorLead.name}\n📱 *Tel vendedor:* ${vendedorLead.phone}` : ''}
+
+━━━━━━━━━━━━━━━━━━━━━━
+💳 *¡Contactar para iniciar trámite!*`;
+
+            await meta.sendWhatsAppMessage(asesor.phone, mensaje);
+            console.log('📤 Notificación enviada a asesor hipotecario:', asesor.name);
+          }
+
+          // También notificar al vendedor que su lead fue asignado a un asesor
+          if (vendedorLead?.phone && asesor?.name) {
+            const msgVendedor = `💳 *TU LEAD CON ASESOR HIPOTECARIO*
+━━━━━━━━━━━━━━━━━━━━━━
+
+👤 *${data.name}* ahora está siendo atendido por:
+🏦 *Asesor:* ${asesor.name}
+${asesor.phone ? `📱 *Tel:* ${asesor.phone}` : ''}
+
+¡Coordina con el asesor para cerrar! 💪`;
+
+            await meta.sendWhatsAppMessage(vendedorLead.phone, msgVendedor);
+            console.log('📤 Vendedor notificado de asignación a asesor');
+          }
+        } catch (e) {
+          console.log('⚠️ Error notificando asesor hipotecario:', e);
+        }
+      }
+
       return corsResponse(JSON.stringify(data || {}));
     }
 
@@ -1073,21 +1158,32 @@ Cancelada por: ${body.cancelled_by || 'CRM'}`;
           try {
             const phoneCliente = body.lead_phone.replace(/[^0-9]/g, '');
 
-            // Preparar variables del template appointment_confirmation_1
-            // Template: ¡Hola {{1}}! Tu cita para visita a {{2}} el {{3}} a las {{4}} está confirmada.
-            const templateComponents = [
+            // Preparar variables del template appointment_confirmation_v2
+            // Template Meta: ¡Hola {{1}}! Gracias por agendar con {{2}}. Tu cita {{3}} el {{4}} a las {{5}} está confirmada.
+            // Botón dinámico: https://maps.app.goo.gl/{{1}}
+            const gpsCode = gpsLink ? gpsLink.replace(/^https?:\/\/maps\.app\.goo\.gl\//, '') : '';
+            const templateComponents: any[] = [
               {
                 type: 'body',
                 parameters: [
-                  { type: 'text', text: body.lead_name || 'cliente' },           // {{1}} Nombre
-                  { type: 'text', text: body.property_name || 'nuestras oficinas' }, // {{2}} Desarrollo
-                  { type: 'text', text: fechaFormateada },                        // {{3}} Fecha
-                  { type: 'text', text: citaHora }                                // {{4}} Hora
+                  { type: 'text', text: body.lead_name || 'cliente' },                          // {{1}} Nombre
+                  { type: 'text', text: 'Grupo Santa Rita' },                                   // {{2}} Empresa
+                  { type: 'text', text: `visita a ${body.property_name || 'nuestras oficinas'}` }, // {{3}} Visita → "visita a Distrito Falco"
+                  { type: 'text', text: fechaFormateada },                                      // {{4}} Fecha
+                  { type: 'text', text: citaHora }                                              // {{5}} Hora
+                ]
+              },
+              {
+                type: 'button',
+                sub_type: 'url',
+                index: '0',
+                parameters: [
+                  { type: 'text', text: gpsCode || 'qR8vK3xYz9M' }                              // {{1}} Sufijo GPS
                 ]
               }
             ];
 
-            await meta.sendTemplate(phoneCliente, 'appointment_confirmation_1', 'es', templateComponents);
+            await meta.sendTemplate(phoneCliente, 'appointment_confirmation_v2', 'es', templateComponents);
             confirmationSent = true;
             console.log('📤 Template appointment_confirmation enviado a:', body.lead_name);
 
@@ -1589,10 +1685,28 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
     // REPORTE MENSUAL
     if (url.pathname === '/api/reportes/mensual' && request.method === 'GET') {
       const hoy = new Date();
-      const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
-      const finMes = new Date(hoy.getFullYear(), hoy.getMonth(), 0);
-      const mesAnterior = new Date(hoy.getFullYear(), hoy.getMonth() - 2, 1);
-      const finMesAnterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 0);
+
+      // Permitir seleccionar mes específico con ?mes=1&año=2026
+      const mesParam = url.searchParams.get('mes');
+      const añoParam = url.searchParams.get('año') || url.searchParams.get('ano');
+
+      let mesSeleccionado = hoy.getMonth(); // Mes actual (0-11)
+      let añoSeleccionado = hoy.getFullYear();
+
+      if (mesParam) {
+        mesSeleccionado = parseInt(mesParam) - 1; // Convertir 1-12 a 0-11
+      }
+      if (añoParam) {
+        añoSeleccionado = parseInt(añoParam);
+      }
+
+      // Inicio y fin del mes seleccionado
+      const inicioMes = new Date(añoSeleccionado, mesSeleccionado, 1);
+      const finMes = new Date(añoSeleccionado, mesSeleccionado + 1, 0); // Último día del mes
+
+      // Mes anterior para comparación
+      const mesAnterior = new Date(añoSeleccionado, mesSeleccionado - 1, 1);
+      const finMesAnterior = new Date(añoSeleccionado, mesSeleccionado, 0);
 
       const { data: leadsMes } = await supabase.client.from('leads').select('*').gte('created_at', inicioMes.toISOString()).lte('created_at', finMes.toISOString());
       const { data: leadsMesAnterior } = await supabase.client.from('leads').select('*').gte('created_at', mesAnterior.toISOString()).lte('created_at', finMesAnterior.toISOString());
@@ -1670,6 +1784,100 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
     }
 
 
+    // ═══════════════════════════════════════════════════════════
+    // CHAT IA PARA REPORTES - Preguntas sobre datos
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/api/reportes/ask' && request.method === 'POST') {
+      try {
+        const body = await request.json() as any;
+        const { pregunta, contexto } = body;
+
+        if (!pregunta) {
+          return corsResponse(JSON.stringify({ error: 'Falta pregunta' }), 400);
+        }
+
+        // Preparar resumen de datos para Claude
+        let resumenDatos = 'DATOS DE REPORTES CEO:\n\n';
+        resumenDatos += '📅 REPORTE DIARIO (' + (contexto?.diario?.fecha || 'hoy') + '):\n';
+        resumenDatos += '- Leads nuevos ayer: ' + (contexto?.diario?.ayer?.leads_nuevos || 0) + '\n';
+        resumenDatos += '- Cierres ayer: ' + (contexto?.diario?.ayer?.cierres || 0) + '\n';
+        resumenDatos += '- Citas hoy: ' + (contexto?.diario?.hoy?.citas_agendadas || 0) + '\n';
+        resumenDatos += '- Leads HOT: ' + (contexto?.diario?.pipeline?.leads_hot || 0) + '\n';
+        resumenDatos += '- Leads sin contactar: ' + (contexto?.diario?.pipeline?.leads_estancados || 0) + '\n\n';
+
+        resumenDatos += '📈 REPORTE SEMANAL (' + (contexto?.semanal?.fecha_inicio || 'N/A') + ' al ' + (contexto?.semanal?.fecha_fin || 'N/A') + '):\n';
+        resumenDatos += '- Leads nuevos: ' + (contexto?.semanal?.resumen?.leads_nuevos || 0) + '\n';
+        resumenDatos += '- Citas totales: ' + (contexto?.semanal?.resumen?.citas_totales || 0) + '\n';
+        resumenDatos += '- Cierres: ' + (contexto?.semanal?.resumen?.cierres || 0) + '\n';
+        resumenDatos += '- Revenue: ' + (contexto?.semanal?.resumen?.revenue_formatted || '$0') + '\n';
+        resumenDatos += '- Conversión lead a cierre: ' + (contexto?.semanal?.conversion?.lead_a_cierre || 0) + '%\n\n';
+
+        resumenDatos += '📉 REPORTE MENSUAL (' + (contexto?.mensual?.mes || 'N/A') + ' ' + (contexto?.mensual?.año || 'N/A') + '):\n';
+        resumenDatos += '- Leads nuevos: ' + (contexto?.mensual?.resumen?.leads_nuevos || 0) + '\n';
+        resumenDatos += '- Crecimiento vs mes anterior: ' + (contexto?.mensual?.resumen?.crecimiento_leads || 0) + '%\n';
+        resumenDatos += '- Citas totales: ' + (contexto?.mensual?.resumen?.citas_totales || 0) + '\n';
+        resumenDatos += '- Cierres: ' + (contexto?.mensual?.resumen?.cierres || 0) + '\n';
+        resumenDatos += '- Revenue: ' + (contexto?.mensual?.resumen?.revenue_formatted || '$0') + '\n';
+        resumenDatos += '- Conversión lead a cierre: ' + (contexto?.mensual?.conversion?.lead_a_cierre || 0) + '%\n\n';
+
+        resumenDatos += '🏆 RANKING VENDEDORES (mensual):\n';
+        if (contexto?.mensual?.ranking_vendedores) {
+          for (const v of contexto.mensual.ranking_vendedores) {
+            resumenDatos += v.posicion + '. ' + v.name + ': ' + v.ventas + ' ventas, ' + v.citas + ' citas, $' + (v.revenue/1000000).toFixed(1) + 'M\n';
+          }
+        } else {
+          resumenDatos += 'Sin datos\n';
+        }
+
+        resumenDatos += '\n🏘️ VENTAS POR DESARROLLO:\n';
+        if (contexto?.mensual?.desarrollos) {
+          for (const d of contexto.mensual.desarrollos) {
+            resumenDatos += '- ' + d.desarrollo + ': ' + d.ventas + ' ventas, ' + d.revenue_formatted + '\n';
+          }
+        } else {
+          resumenDatos += 'Sin datos\n';
+        }
+
+        resumenDatos += '\n📣 FUENTES DE LEADS:\n';
+        if (contexto?.mensual?.fuentes) {
+          for (const f of contexto.mensual.fuentes) {
+            resumenDatos += '- ' + f.fuente + ': ' + f.leads + ' leads\n';
+          }
+        } else {
+          resumenDatos += 'Sin datos\n';
+        }
+
+        // Llamar a Claude para responder
+        const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': env.ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: 'claude-3-5-haiku-20241022',
+            max_tokens: 500,
+            messages: [
+              {
+                role: 'user',
+                content: 'Eres un asistente de análisis de datos para Santa Rita Residencial. Responde preguntas sobre los reportes de ventas de forma clara y concisa.\n\n' + resumenDatos + '\n\nPREGUNTA DEL CEO: ' + pregunta + '\n\nResponde de forma directa y útil. Si necesitas hacer cálculos, hazlos. Usa emojis para hacer la respuesta más visual.'
+              }
+            ]
+          })
+        });
+
+        const claudeData = await claudeResponse.json() as any;
+        const respuesta = claudeData?.content?.[0]?.text || 'No pude procesar la pregunta.';
+
+        return corsResponse(JSON.stringify({ respuesta }));
+
+      } catch (err) {
+        console.error('Error en chat IA reportes:', err);
+        return corsResponse(JSON.stringify({ error: 'Error procesando pregunta', respuesta: 'Hubo un error al procesar tu pregunta. Por favor intenta de nuevo.' }), 500);
+      }
+    }
+
     // ═══════════════════════════════════════════════════════════
     // Endpoint de prueba - Enviar TEMPLATE
     // Endpoint para ver templates aprobados de Meta
@@ -1703,6 +1911,140 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
       }
     }
 
+    // Crear TODOS los templates del funnel
+    if (url.pathname === '/api/create-all-templates' && request.method === 'POST') {
+      try {
+        const WABA_ID = '1227849769248437';
+        const results: any[] = [];
+
+        const templates = [
+          {
+            name: 'recordatorio_cita_24h',
+            category: 'UTILITY',
+            text: '📅 ¡Hola {{1}}! Te recordamos tu cita mañana.\n\n🏠 {{2}}\n📍 {{3}}\n⏰ {{4}}\n\n¿Nos confirmas tu asistencia? Responde *Sí* o *No*.\n\n¡Te esperamos! 🙌',
+            example: [['María', 'Monte Verde', 'Av. Principal 123', '10:00 AM']]
+          },
+          {
+            name: 'recordatorio_cita_2h',
+            category: 'UTILITY',
+            text: '⏰ ¡{{1}}, tu cita es en 2 horas!\n\n🏠 {{2}}\n📍 {{3}}\n\n¡Te esperamos! 🏡',
+            example: [['María', 'Monte Verde', 'Av. Principal 123']]
+          },
+          {
+            name: 'encuesta_post_visita',
+            category: 'MARKETING',
+            text: '¡Hola {{1}}! 👋\n\nGracias por visitarnos hoy en *{{2}}*. 🏠\n\n¿Qué te pareció? Responde:\n1️⃣ Me encantó\n2️⃣ Quiero ver más opciones\n3️⃣ Tengo dudas\n\nEstoy aquí para ayudarte 😊',
+            example: [['María', 'Monte Verde']]
+          },
+          {
+            name: 'reagendar_noshow',
+            category: 'UTILITY',
+            text: '👋 Hola {{1}},\n\nNotamos que no pudiste llegar a tu cita en *{{2}}*.\n\n¡No te preocupes! 😊 ¿Te gustaría reagendar?\n\nSolo dime qué día y hora te funcionan mejor. 📅',
+            example: [['María', 'Monte Verde']]
+          },
+          {
+            name: 'info_credito',
+            category: 'MARKETING',
+            text: '🏦 ¡Hola {{1}}!\n\nTe comparto información sobre crédito hipotecario para *{{2}}*:\n\n✅ Hasta 20 años de plazo\n✅ Tasa competitiva\n✅ Varios bancos disponibles\n\n¿Te gustaría que un asesor te contacte? Responde *Sí*.',
+            example: [['María', 'Monte Verde']]
+          },
+          {
+            name: 'referidos_postventa',
+            category: 'MARKETING',
+            text: '🎉 ¡Hola {{1}}!\n\nYa pasó un mes desde que elegiste tu nuevo hogar en *{{2}}*. ¡Esperamos que lo estés disfrutando!\n\n🎁 *Programa de Referidos*\nSi conoces a alguien buscando casa, envíanos:\n*Referido Nombre Teléfono*\n\n¡Y ganas premios! 🏆',
+            example: [['María', 'Monte Verde']]
+          },
+          {
+            name: 'feliz_cumple',
+            category: 'MARKETING',
+            text: '🎂 ¡Feliz cumpleaños {{1}}! 🎉\n\nTodo el equipo te desea un día increíble.\n\nGracias por ser parte de nuestra familia. 🏠💙',
+            example: [['María']]
+          }
+        ];
+
+        for (const tmpl of templates) {
+          const payload = {
+            name: tmpl.name,
+            language: 'es_MX',
+            category: tmpl.category,
+            components: [
+              {
+                type: 'BODY',
+                text: tmpl.text,
+                example: { body_text: tmpl.example }
+              }
+            ]
+          };
+
+          const response = await fetch(`https://graph.facebook.com/v22.0/${WABA_ID}/message_templates`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${env.META_ACCESS_TOKEN}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          const result = await response.json();
+          results.push({
+            name: tmpl.name,
+            success: response.ok,
+            status: response.status,
+            result
+          });
+        }
+
+        return corsResponse(JSON.stringify({ templates_created: results }, null, 2));
+
+      } catch (error: any) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+    }
+
+    // Crear template individual (legacy)
+    if (url.pathname === '/api/create-reengagement-template' && request.method === 'POST') {
+      try {
+        const WABA_ID = '1227849769248437';
+
+        const templatePayload = {
+          name: 'seguimiento_lead',
+          language: 'es_MX',
+          category: 'MARKETING',
+          components: [
+            {
+              type: 'BODY',
+              text: '¡Hola {{1}}! 👋\n\nHace unos días platicamos sobre *{{2}}* y quería saber si aún te interesa conocer más.\n\n¿Tienes alguna duda que pueda resolver? Responde *Sí* y con gusto te ayudo. 🏠',
+              example: {
+                body_text: [['Juan', 'Monte Verde']]
+              }
+            }
+          ]
+        };
+
+        const createUrl = `https://graph.facebook.com/v22.0/${WABA_ID}/message_templates`;
+        const response = await fetch(createUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${env.META_ACCESS_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(templatePayload)
+        });
+
+        const result = await response.json();
+
+        return corsResponse(JSON.stringify({
+          success: response.ok,
+          status: response.status,
+          template_name: 'seguimiento_lead',
+          result
+        }, null, 2));
+
+      } catch (error: any) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+    }
+
     // Debug endpoint - probar con diferentes configuraciones de template
     if (url.pathname === '/api/test-send' && request.method === 'POST') {
       try {
@@ -1715,25 +2057,34 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
 
         const url = `https://graph.facebook.com/v22.0/${env.META_PHONE_NUMBER_ID}/messages`;
 
-        // Template tiene 5 parametros segun error de Meta
-        // Probablemente: nombre, desarrollo, fecha, hora, direccion/vendedor
+        // Template Meta appointment_confirmation_v2: ¡Hola {{1}}! Gracias por agendar con {{2}}. Tu cita {{3}} el {{4}} a las {{5}} está confirmada.
+        // Botón dinámico: https://maps.app.goo.gl/{{1}}
+        const gpsCode = body.gps_link ? body.gps_link.replace(/^https?:\/\/maps\.app\.goo\.gl\//, '') : (body.gps_code || 'qR8vK3xYz9M');
         const payload = {
           messaging_product: 'whatsapp',
           recipient_type: 'individual',
           to: phoneNormalized,
           type: 'template',
           template: {
-            name: 'appointment_confirmation_1',
+            name: 'appointment_confirmation_v2',
             language: { code: 'es' },
             components: [
               {
                 type: 'body',
                 parameters: [
-                  { type: 'text', text: body.nombre || 'Cliente' },
-                  { type: 'text', text: body.desarrollo || 'Santa Rita' },
-                  { type: 'text', text: body.fecha || '10 de enero' },
-                  { type: 'text', text: body.hora || '5:00 PM' },
-                  { type: 'text', text: body.extra || 'Santa Rita Residencial' }
+                  { type: 'text', text: body.nombre || 'Cliente' },                              // {{1}} Nombre
+                  { type: 'text', text: 'Grupo Santa Rita' },                                    // {{2}} Empresa
+                  { type: 'text', text: `visita a ${body.desarrollo || 'nuestras oficinas'}` },  // {{3}} Visita
+                  { type: 'text', text: body.fecha || '10 de enero' },                           // {{4}} Fecha
+                  { type: 'text', text: body.hora || '5:00 PM' }                                 // {{5}} Hora
+                ]
+              },
+              {
+                type: 'button',
+                sub_type: 'url',
+                index: '0',
+                parameters: [
+                  { type: 'text', text: gpsCode }                                                // {{1}} Sufijo GPS
                 ]
               }
             ]
@@ -2012,16 +2363,23 @@ Mensaje: ${mensaje}`;
 
     if (url.pathname === '/webhook/meta' && request.method === 'POST') {
       try {
+        console.log('📥 WEBHOOK META: Recibiendo mensaje...');
         const body = await request.json() as any;
+        console.log('📥 Body recibido:', JSON.stringify(body).substring(0, 500));
+
         const entry = body?.entry?.[0];
         const changes = entry?.changes?.[0];
         const value = changes?.value;
         const messages = value?.messages;
 
+        console.log('📥 Messages encontrados:', messages?.length || 0);
+
         if (messages && messages.length > 0) {
           const message = messages[0];
           const from = message.from;
           const text = message.text?.body || '';
+
+          console.log(`📥 Procesando mensaje de ${from}: "${text.substring(0, 50)}..."`);
 
           const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
           const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
@@ -2030,14 +2388,18 @@ Mensaje: ${mensaje}`;
 
           await handler.handleIncomingMessage(`whatsapp:+${from}`, text, env);
 
+          console.log('✅ Mensaje procesado correctamente');
+
           // Cancelar follow-ups cuando el lead responde
           const followupService = new FollowupService(supabase);
           await followupService.cancelarPorRespuesta('', from);
+        } else {
+          console.log('⚠️ No hay mensajes en el webhook (puede ser status update)');
         }
 
         return new Response('OK', { status: 200 });
       } catch (error) {
-        console.error('Meta Webhook Error:', error);
+        console.error('❌ Meta Webhook Error:', error);
         return new Response('OK', { status: 200 });
       }
     }
@@ -2248,11 +2610,17 @@ Mensaje: ${mensaje}`;
           const googleEventIds = events.map((e: any) => e.id);
           
           // 1. DETECTAR EVENTOS ELIMINADOS: Buscar citas que tienen google_event_id pero ya no existen en Google
+          // IMPORTANTE: Solo verificar citas dentro del rango de fechas que consultamos a Google
+          const yesterdayStr = yesterday.toISOString().split('T')[0];
+          const nextMonthStr = nextMonth.toISOString().split('T')[0];
+
           const { data: citasConGoogle } = await supabase.client
             .from('appointments')
             .select('*')
             .not('google_event_vendedor_id', 'is', null)
-            .eq('status', 'scheduled');
+            .eq('status', 'scheduled')
+            .gte('scheduled_date', yesterdayStr)  // Solo citas desde ayer
+            .lte('scheduled_date', nextMonthStr); // Hasta próximo mes
           
           if (citasConGoogle) {
             for (const cita of citasConGoogle) {
@@ -2992,6 +3360,919 @@ Mensaje: ${mensaje}`;
     }
 
     // ═══════════════════════════════════════════════════════════
+    // Test: Sistema de Aprobación de Follow-ups
+    // ═══════════════════════════════════════════════════════════
+
+    // Crear propuesta de follow-up para un lead
+    if (url.pathname === '/test-proponer-followup') {
+      const leadId = url.searchParams.get('lead_id');
+      const categoria = url.searchParams.get('categoria') || 'inactivo_3dias';
+      const razon = url.searchParams.get('razon') || 'Lead sin actividad - prueba manual';
+
+      if (!leadId) {
+        return corsResponse(JSON.stringify({ error: 'Falta lead_id' }), 400);
+      }
+
+      // Obtener lead
+      const { data: lead, error: leadError } = await supabase.client
+        .from('leads')
+        .select('*')
+        .eq('id', leadId)
+        .single();
+
+      if (leadError || !lead) {
+        return corsResponse(JSON.stringify({ error: 'Lead no encontrado' }), 404);
+      }
+
+      if (!lead.assigned_to) {
+        return corsResponse(JSON.stringify({ error: 'Lead sin vendedor asignado', leadName: lead.name }), 400);
+      }
+
+      // Obtener vendedor
+      const { data: vendedor } = await supabase.client
+        .from('team_members')
+        .select('id, name, phone')
+        .eq('id', lead.assigned_to)
+        .single();
+
+      if (!vendedor?.phone) {
+        return corsResponse(JSON.stringify({
+          error: 'Vendedor sin teléfono',
+          leadName: lead.name,
+          vendedorName: vendedor?.name || 'desconocido',
+          vendedorId: lead.assigned_to
+        }), 400);
+      }
+
+      const approvalService = new FollowupApprovalService(supabase);
+      const result = await approvalService.proponerFollowup(
+        leadId,
+        lead.assigned_to,
+        categoria,
+        razon,
+        lead.property_interest || 'Santa Rita'
+      );
+
+      return corsResponse(JSON.stringify({
+        ok: result.success,
+        approvalId: result.approvalId,
+        leadName: lead.name,
+        vendedorName: lead.team_members?.name,
+        categoria,
+        message: result.success
+          ? `Propuesta creada. El vendedor recibirá un mensaje en el próximo ciclo del CRON.`
+          : 'Error creando propuesta'
+      }));
+    }
+
+    // Enviar propuestas pendientes a vendedores (manual)
+    if (url.pathname === '/test-enviar-propuestas') {
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      const approvalService = new FollowupApprovalService(supabase);
+      const enviadas = await approvalService.enviarPropuestasPendientes(async (phone, message) => {
+        try {
+          await meta.sendWhatsAppMessage(phone, message);
+          return true;
+        } catch (e) {
+          console.log('Error enviando propuesta:', e);
+          return false;
+        }
+      });
+      return corsResponse(JSON.stringify({ ok: true, propuestasEnviadas: enviadas }));
+    }
+
+    // Pedir status a vendedores sobre leads estancados (manual)
+    if (url.pathname === '/test-pedir-status') {
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      const approvalService = new FollowupApprovalService(supabase);
+      const enviados = await approvalService.pedirStatusLeadsEstancados(async (phone, message) => {
+        try {
+          await meta.sendWhatsAppMessage(phone, message);
+          return true;
+        } catch (e) {
+          console.log('Error pidiendo status:', e);
+          return false;
+        }
+      });
+      return corsResponse(JSON.stringify({ ok: true, solicitudesEnviadas: enviados }));
+    }
+
+    // Ver aprobaciones pendientes
+    if (url.pathname === '/api/followup-approvals') {
+      const vendedorPhone = url.searchParams.get('vendedor_phone');
+      const vendedorId = url.searchParams.get('vendedor_id');
+      const leadId = url.searchParams.get('lead_id');
+      const status = url.searchParams.get('status'); // null = todos
+      const desde = url.searchParams.get('desde'); // fecha ISO
+      const hasta = url.searchParams.get('hasta'); // fecha ISO
+
+      let query = supabase.client
+        .from('followup_approvals')
+        .select('*, team_members:vendedor_id(name, phone)')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (status) {
+        query = query.eq('status', status);
+      }
+      if (vendedorId) {
+        query = query.eq('vendedor_id', vendedorId);
+      }
+      if (leadId) {
+        query = query.eq('lead_id', leadId);
+      }
+      if (vendedorPhone) {
+        const cleanPhone = vendedorPhone.replace(/\D/g, '');
+        query = query.like('vendedor_phone', `%${cleanPhone.slice(-10)}`);
+      }
+      if (desde) {
+        query = query.gte('created_at', desde);
+      }
+      if (hasta) {
+        query = query.lte('created_at', hasta);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+      return corsResponse(JSON.stringify({ ok: true, approvals: data, count: data?.length || 0 }));
+    }
+
+    // Estadísticas de follow-ups (para dashboard CRM)
+    if (url.pathname === '/api/followup-stats') {
+      const hoy = new Date();
+      const inicioHoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()).toISOString();
+      const hace7Dias = new Date(hoy.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const hace30Dias = new Date(hoy.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+      // Stats de hoy
+      const { data: hoyData } = await supabase.client
+        .from('followup_approvals')
+        .select('status')
+        .gte('created_at', inicioHoy);
+
+      // Stats últimos 7 días
+      const { data: semanaData } = await supabase.client
+        .from('followup_approvals')
+        .select('status')
+        .gte('created_at', hace7Dias);
+
+      // Stats últimos 30 días
+      const { data: mesData } = await supabase.client
+        .from('followup_approvals')
+        .select('status, vendedor_id')
+        .gte('created_at', hace30Dias);
+
+      // Pendientes actuales
+      const { data: pendientesData } = await supabase.client
+        .from('followup_approvals')
+        .select('vendedor_id, lead_name, created_at')
+        .eq('status', 'pending');
+
+      const calcStats = (data: any[]) => ({
+        total: data?.length || 0,
+        enviados: data?.filter(d => d.status === 'sent').length || 0,
+        aprobados: data?.filter(d => d.status === 'approved').length || 0,
+        editados: data?.filter(d => d.status === 'edited').length || 0,
+        rechazados: data?.filter(d => d.status === 'rejected').length || 0,
+        pendientes: data?.filter(d => d.status === 'pending').length || 0,
+        expirados: data?.filter(d => d.status === 'expired').length || 0
+      });
+
+      // Ranking por vendedor (últimos 30 días)
+      const porVendedor: Record<string, {enviados: number, rechazados: number}> = {};
+      mesData?.forEach(d => {
+        if (!porVendedor[d.vendedor_id]) {
+          porVendedor[d.vendedor_id] = { enviados: 0, rechazados: 0 };
+        }
+        if (d.status === 'sent') porVendedor[d.vendedor_id].enviados++;
+        if (d.status === 'rejected') porVendedor[d.vendedor_id].rechazados++;
+      });
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        hoy: calcStats(hoyData || []),
+        semana: calcStats(semanaData || []),
+        mes: calcStats(mesData || []),
+        pendientes_actuales: pendientesData?.length || 0,
+        pendientes_detalle: pendientesData?.slice(0, 10) || [],
+        por_vendedor: porVendedor
+      }));
+    }
+
+    // Test follow-up de leads inactivos
+    if (url.pathname === '/test-followup-inactivos') {
+      console.log('🧪 TEST: Ejecutando follow-up de leads inactivos...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await followUpLeadsInactivos(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Follow-up de leads inactivos ejecutado' }));
+    }
+
+    // Test post-visita: simula que SARA preguntó si llegó el cliente
+    if (url.pathname === '/test-post-visita-setup') {
+      const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6';
+      const leadName = url.searchParams.get('lead_name') || 'María García Test';
+      const leadPhone = url.searchParams.get('lead_phone') || '5215510001234';
+      const property = url.searchParams.get('property') || 'Distrito Falco';
+
+      // Simular que hay una confirmación pendiente
+      const notesTest = JSON.stringify({
+        pending_show_confirmation: {
+          appointment_id: 'test-apt-' + Date.now(),
+          lead_id: 'test-lead-' + Date.now(),
+          lead_name: leadName,
+          lead_phone: leadPhone,
+          property: property,
+          hora: '3:00 pm',
+          asked_at: new Date().toISOString()
+        }
+      });
+
+      await supabase.client
+        .from('team_members')
+        .update({ notes: notesTest })
+        .eq('id', vendedorId);
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        message: `Setup completado. Ahora el vendedor puede responder "sí llegó" o "1" para probar el flujo post-visita.`,
+        vendedor_id: vendedorId,
+        lead_name: leadName,
+        instructions: 'Envía "1" o "sí llegó" desde el WhatsApp del vendedor para activar el flujo post-visita'
+      }));
+    }
+
+    // Test: Limpiar notas de vendedor (preservando citas_preguntadas)
+    if (url.pathname === '/test-clear-vendor-notes') {
+      const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6';
+
+      // Obtener notas actuales para preservar citas_preguntadas
+      const { data: vendedorData } = await supabase.client
+        .from('team_members')
+        .select('notes')
+        .eq('id', vendedorId)
+        .single();
+
+      let citasPreguntadas: string[] = [];
+      try {
+        if (vendedorData?.notes) {
+          const notasActuales = typeof vendedorData.notes === 'string'
+            ? JSON.parse(vendedorData.notes)
+            : vendedorData.notes;
+          citasPreguntadas = notasActuales?.citas_preguntadas || [];
+        }
+      } catch (e) {
+        console.log('Error parseando notas:', e);
+      }
+
+      // Preservar solo citas_preguntadas, limpiar todo lo demás
+      const notasLimpias = citasPreguntadas.length > 0
+        ? JSON.stringify({ citas_preguntadas: citasPreguntadas })
+        : null;
+
+      await supabase.client
+        .from('team_members')
+        .update({ notes: notasLimpias })
+        .eq('id', vendedorId);
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        message: `Notas de vendedor limpiadas (preservando ${citasPreguntadas.length} citas en historial)`,
+        vendedor_id: vendedorId,
+        citas_preguntadas_preservadas: citasPreguntadas.length
+      }));
+    }
+
+    // Test: Agregar cita a citas_preguntadas (para evitar que se vuelva a preguntar)
+    if (url.pathname === '/test-add-cita-preguntada') {
+      const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6';
+      const citaId = url.searchParams.get('cita_id');
+
+      if (!citaId) {
+        return corsResponse(JSON.stringify({ error: 'Falta cita_id' }), 400);
+      }
+
+      // Obtener notas actuales
+      const { data: vendedorData } = await supabase.client
+        .from('team_members')
+        .select('notes, name')
+        .eq('id', vendedorId)
+        .single();
+
+      let notasActuales: any = {};
+      try {
+        if (vendedorData?.notes) {
+          notasActuales = typeof vendedorData.notes === 'string'
+            ? JSON.parse(vendedorData.notes)
+            : vendedorData.notes;
+        }
+      } catch (e) {
+        notasActuales = {};
+      }
+
+      // Agregar cita a la lista
+      if (!notasActuales.citas_preguntadas) {
+        notasActuales.citas_preguntadas = [];
+      }
+      if (!notasActuales.citas_preguntadas.includes(citaId)) {
+        notasActuales.citas_preguntadas.push(citaId);
+      }
+
+      // Limpiar pending_show_confirmation si existe
+      delete notasActuales.pending_show_confirmation;
+
+      await supabase.client
+        .from('team_members')
+        .update({ notes: JSON.stringify(notasActuales) })
+        .eq('id', vendedorId);
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        message: `Cita ${citaId} agregada a historial de ${vendedorData?.name}`,
+        citas_preguntadas: notasActuales.citas_preguntadas
+      }));
+    }
+
+    // Test: Ver notas de vendedor (debug)
+    if (url.pathname === '/test-vendor-notes') {
+      const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6';
+
+      const { data: vendedorData } = await supabase.client
+        .from('team_members')
+        .select('notes, name, phone')
+        .eq('id', vendedorId)
+        .single();
+
+      let notasParsed: any = null;
+      try {
+        if (vendedorData?.notes) {
+          notasParsed = typeof vendedorData.notes === 'string'
+            ? JSON.parse(vendedorData.notes)
+            : vendedorData.notes;
+        }
+      } catch (e) {
+        notasParsed = { error: 'No se pudo parsear', raw: vendedorData?.notes };
+      }
+
+      return corsResponse(JSON.stringify({
+        vendedor: vendedorData?.name,
+        phone: vendedorData?.phone,
+        notes_raw: vendedorData?.notes,
+        notes_parsed: notasParsed
+      }));
+    }
+
+    // Test: Enviar encuesta post-visita a un teléfono específico
+    if (url.pathname === '/test-send-client-survey') {
+      const phone = url.searchParams.get('phone') || '522224558475';
+      const leadName = url.searchParams.get('lead_name') || 'Cliente Test';
+      const property = url.searchParams.get('property') || 'Distrito Falco';
+      const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6';
+
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      // Obtener vendedor
+      const { data: vendedor } = await supabase.client
+        .from('team_members')
+        .select('name')
+        .eq('id', vendedorId)
+        .single();
+
+      // Buscar o crear lead
+      let lead;
+      const { data: existingLead } = await supabase.client
+        .from('leads')
+        .select('id, name, notes')
+        .like('phone', `%${phone.slice(-10)}`)
+        .single();
+
+      if (existingLead) {
+        lead = existingLead;
+      } else {
+        const { data: newLead } = await supabase.client
+          .from('leads')
+          .insert({
+            name: leadName,
+            phone: phone,
+            status: 'visited',
+            assigned_to: vendedorId
+          })
+          .select()
+          .single();
+        lead = newLead;
+      }
+
+      if (!lead) {
+        return corsResponse(JSON.stringify({ error: 'No se pudo crear/encontrar lead' }), 500);
+      }
+
+      const nombreCorto = lead.name?.split(' ')[0] || leadName.split(' ')[0];
+
+      // Guardar pending_client_survey en el lead
+      const notasExistentes = typeof lead.notes === 'object' ? lead.notes : {};
+      await supabase.client
+        .from('leads')
+        .update({
+          notes: {
+            ...notasExistentes,
+            pending_client_survey: {
+              sent_at: new Date().toISOString(),
+              property: property,
+              vendedor_id: vendedorId,
+              vendedor_name: vendedor?.name || 'Tu asesor'
+            }
+          }
+        })
+        .eq('id', lead.id);
+
+      // Enviar encuesta
+      const mensajeEncuesta = `¡Hola ${nombreCorto}! 👋
+
+Gracias por visitarnos hoy en *${property}*. 🏠
+
+¿Qué te pareció? Responde con el número:
+
+1️⃣ Me encantó, quiero avanzar
+2️⃣ Me gustó pero quiero ver más opciones
+3️⃣ Tengo dudas que me gustaría resolver
+
+Estoy aquí para ayudarte. 😊`;
+
+      await meta.sendWhatsAppMessage(phone, mensajeEncuesta);
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        message: `Encuesta enviada a ${phone}`,
+        lead_id: lead.id,
+        lead_name: lead.name || leadName,
+        instructions: 'El cliente puede responder 1, 2, 3 o texto libre'
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // TEST: Simular flujo completo de confirmación de cita
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/test-full-confirmation-flow') {
+      const leadId = url.searchParams.get('lead_id') || 'dd3c007d-1c93-432d-bd3d-d56474b1bbf7'; // Ana Portales
+      const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6'; // Edson
+      const respuesta = url.searchParams.get('respuesta') || '1'; // 1=sí llegó, 2=no llegó
+
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      // 1. Obtener lead
+      const { data: lead, error: leadError } = await supabase.client
+        .from('leads')
+        .select('*')
+        .eq('id', leadId)
+        .single();
+
+      if (leadError || !lead) {
+        return corsResponse(JSON.stringify({ error: 'Lead no encontrado', details: leadError }), 400);
+      }
+
+      // 2. Obtener vendedor
+      const { data: vendedor, error: vendedorError } = await supabase.client
+        .from('team_members')
+        .select('*')
+        .eq('id', vendedorId)
+        .single();
+
+      if (vendedorError || !vendedor) {
+        return corsResponse(JSON.stringify({ error: 'Vendedor no encontrado', details: vendedorError }), 400);
+      }
+
+      const results: any = {
+        lead_before: { id: lead.id, name: lead.name, status: lead.status },
+        vendedor: vendedor.name,
+        respuesta_simulada: respuesta
+      };
+
+      // 3. Simular que el vendedor confirma
+      if (respuesta === '1') {
+        // Actualizar cita a completed (buscar una cita del lead)
+        const { data: cita } = await supabase.client
+          .from('appointments')
+          .select('id')
+          .eq('lead_id', leadId)
+          .eq('status', 'scheduled')
+          .order('scheduled_date', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (cita) {
+          await supabase.client
+            .from('appointments')
+            .update({ status: 'completed', notes: 'TEST: Asistencia confirmada' })
+            .eq('id', cita.id);
+          results.cita_actualizada = cita.id;
+        }
+
+        // Actualizar lead a visited
+        await supabase.client
+          .from('leads')
+          .update({ status: 'visited', updated_at: new Date().toISOString() })
+          .eq('id', leadId);
+        results.lead_status_updated = 'visited';
+
+        // Registrar actividad
+        const { data: actividadCreada, error: actError } = await supabase.client
+          .from('lead_activities')
+          .insert({
+            lead_id: leadId,
+            team_member_id: vendedorId,
+            activity_type: 'visit',
+            notes: `TEST: Visita completada en propiedad`,
+            created_at: new Date().toISOString()
+          })
+          .select()
+          .single();
+
+        results.actividad_creada = actividadCreada ? 'OK' : actError?.message;
+
+        // Enviar mensaje al vendedor
+        await meta.sendWhatsAppMessage(vendedor.phone,
+          `✅ *TEST: CITA COMPLETADA - ${lead.name?.toUpperCase()}*\n\n¿Cómo fue la visita?\n\n1️⃣ Muy interesado\n2️⃣ Quiere ver más opciones\n3️⃣ No le convenció\n4️⃣ Solo vino a conocer`
+        );
+        results.mensaje_vendedor = 'enviado';
+
+        // Enviar encuesta al cliente
+        if (lead.phone) {
+          const nombreCorto = lead.name?.split(' ')[0] || 'Cliente';
+          await meta.sendWhatsAppMessage(lead.phone,
+            `¡Hola ${nombreCorto}! 👋\n\nGracias por visitarnos hoy. 🏠\n\n¿Qué te pareció? Responde:\n\n1️⃣ Me encantó, quiero avanzar\n2️⃣ Quiero ver más opciones\n3️⃣ Tengo dudas\n\nEstoy aquí para ayudarte. 😊`
+          );
+          results.encuesta_cliente = 'enviada';
+
+          // Guardar pending_client_survey en lead
+          const notasLead = typeof lead.notes === 'object' ? lead.notes : {};
+          await supabase.client
+            .from('leads')
+            .update({
+              notes: {
+                ...notasLead,
+                pending_client_survey: {
+                  sent_at: new Date().toISOString(),
+                  property: lead.property_interest || 'Propiedad',
+                  vendedor_id: vendedorId,
+                  vendedor_name: vendedor.name
+                }
+              }
+            })
+            .eq('id', leadId);
+          results.survey_guardada_en_lead = 'OK';
+        }
+
+      } else if (respuesta === '2') {
+        // No-show
+        const { data: cita } = await supabase.client
+          .from('appointments')
+          .select('id')
+          .eq('lead_id', leadId)
+          .eq('status', 'scheduled')
+          .order('scheduled_date', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (cita) {
+          await supabase.client
+            .from('appointments')
+            .update({ status: 'no_show', notes: 'TEST: No-show confirmado' })
+            .eq('id', cita.id);
+          results.cita_actualizada = cita.id;
+        }
+
+        // Regresar lead a contacted
+        await supabase.client
+          .from('leads')
+          .update({ status: 'contacted', updated_at: new Date().toISOString() })
+          .eq('id', leadId);
+        results.lead_status_updated = 'contacted';
+
+        // Registrar actividad no-show
+        const { data: actividadCreada, error: actError } = await supabase.client
+          .from('lead_activities')
+          .insert({
+            lead_id: leadId,
+            team_member_id: vendedorId,
+            activity_type: 'no_show',
+            notes: `TEST: No se presentó a la cita`,
+            created_at: new Date().toISOString()
+          })
+          .select()
+          .single();
+
+        results.actividad_creada = actividadCreada ? 'OK' : actError?.message;
+
+        // Mensajes
+        await meta.sendWhatsAppMessage(vendedor.phone,
+          `📝 *TEST: No-show registrado - ${lead.name}*\n\nSe envió mensaje ofreciendo reagendar.`
+        );
+        results.mensaje_vendedor = 'enviado';
+
+        if (lead.phone) {
+          await meta.sendWhatsAppMessage(lead.phone,
+            `👋 Hola ${lead.name},\n\nNotamos que no pudiste llegar a tu cita.\n\n¡No te preocupes! 😊 ¿Te gustaría reagendar?`
+          );
+          results.mensaje_cliente = 'enviado';
+        }
+      }
+
+      // 4. Verificar resultado
+      const { data: leadAfter } = await supabase.client
+        .from('leads')
+        .select('id, name, status, notes')
+        .eq('id', leadId)
+        .single();
+
+      results.lead_after = { id: leadAfter?.id, name: leadAfter?.name, status: leadAfter?.status, notes: leadAfter?.notes };
+
+      // Verificar actividades
+      const { data: actividades } = await supabase.client
+        .from('lead_activities')
+        .select('*')
+        .eq('lead_id', leadId)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      results.actividades_recientes = actividades?.map(a => ({
+        type: a.activity_type,
+        notes: a.notes,
+        created_at: a.created_at
+      }));
+
+      return corsResponse(JSON.stringify(results, null, 2));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // TEST: Reasignar lead a otro vendedor
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/test-reassign-lead') {
+      const leadId = url.searchParams.get('lead_id');
+      const vendedorId = url.searchParams.get('vendedor_id');
+
+      if (!leadId || !vendedorId) {
+        return corsResponse(JSON.stringify({ error: 'Faltan lead_id o vendedor_id' }), 400);
+      }
+
+      const { error } = await supabase.client
+        .from('leads')
+        .update({ assigned_to: vendedorId })
+        .eq('id', leadId);
+
+      if (error) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        message: `Lead ${leadId} reasignado a vendedor ${vendedorId}`
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // TEST: ENCUESTAS
+    // ═══════════════════════════════════════════════════════════
+
+    // Test encuesta post-cita manual a un teléfono específico
+    if (url.pathname.startsWith('/test-encuesta-postcita/')) {
+      const phone = url.pathname.split('/')[2];
+      if (!phone) return corsResponse(JSON.stringify({ error: 'Falta teléfono' }), 400);
+      const phoneFormatted = phone.startsWith('52') ? phone : `52${phone}`;
+      console.log(`TEST: Enviando encuesta post-cita a ${phoneFormatted}...`);
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      // Buscar una cita completada reciente para este teléfono
+      const { data: lead } = await supabase.client
+        .from('leads')
+        .select('id, name, phone')
+        .eq('phone', phoneFormatted)
+        .single();
+
+      if (!lead) {
+        return corsResponse(JSON.stringify({ error: 'Lead no encontrado' }), 404);
+      }
+
+      const nombreCorto = lead.name?.split(' ')[0] || 'Cliente';
+
+      // Crear encuesta en BD
+      await supabase.client.from('surveys').insert({
+        lead_id: lead.id,
+        lead_phone: phoneFormatted,
+        lead_name: lead.name,
+        survey_type: 'post_cita',
+        status: 'sent',
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+      });
+
+      // Enviar encuesta
+      const msgEncuesta = `📋 *¡Hola ${nombreCorto}!*
+
+¿Cómo fue tu experiencia en tu visita reciente?
+
+Por favor califica del *1 al 4*:
+1️⃣ Excelente
+2️⃣ Buena
+3️⃣ Regular
+4️⃣ Mala
+
+_Solo responde con el número_ 🙏`;
+
+      await meta.sendWhatsAppMessage(phoneFormatted, msgEncuesta);
+      return corsResponse(JSON.stringify({ ok: true, message: `Encuesta post-cita enviada a ${phoneFormatted}` }));
+    }
+
+    // Test encuesta NPS manual a un teléfono específico
+    if (url.pathname.startsWith('/test-encuesta-nps/')) {
+      const phone = url.pathname.split('/')[2];
+      if (!phone) return corsResponse(JSON.stringify({ error: 'Falta teléfono' }), 400);
+      const phoneFormatted = phone.startsWith('52') ? phone : `52${phone}`;
+      console.log(`TEST: Enviando encuesta NPS a ${phoneFormatted}...`);
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      const { data: lead } = await supabase.client
+        .from('leads')
+        .select('id, name, phone')
+        .eq('phone', phoneFormatted)
+        .single();
+
+      if (!lead) {
+        return corsResponse(JSON.stringify({ error: 'Lead no encontrado' }), 404);
+      }
+
+      const nombreCorto = lead.name?.split(' ')[0] || 'Cliente';
+
+      // Crear encuesta NPS en BD
+      await supabase.client.from('surveys').insert({
+        lead_id: lead.id,
+        lead_phone: phoneFormatted,
+        lead_name: lead.name,
+        survey_type: 'nps',
+        status: 'sent',
+        expires_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+      });
+
+      const msgNPS = `🌟 *¡Felicidades por tu nuevo hogar, ${nombreCorto}!*
+
+Tu opinión es muy importante para nosotros.
+
+Del *0 al 10*, ¿qué tan probable es que nos recomiendes con un amigo o familiar?
+
+0️⃣ = Nada probable
+🔟 = Muy probable
+
+_Solo responde con el número_ 🙏`;
+
+      await meta.sendWhatsAppMessage(phoneFormatted, msgNPS);
+      return corsResponse(JSON.stringify({ ok: true, message: `Encuesta NPS enviada a ${phoneFormatted}` }));
+    }
+
+    // Ver todas las encuestas
+    if (url.pathname === '/surveys') {
+      const { data } = await supabase.client
+        .from('surveys')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      return corsResponse(JSON.stringify(data || []));
+    }
+
+    // Forzar procesamiento de encuestas post-cita
+    if (url.pathname === '/test-encuestas-postcita') {
+      console.log('🧪 TEST: Forzando verificación de encuestas post-cita...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await enviarEncuestasPostCita(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Encuestas post-cita procesadas' }));
+    }
+
+    // Forzar procesamiento de encuestas NPS
+    if (url.pathname === '/test-encuestas-nps') {
+      console.log('🧪 TEST: Forzando verificación de encuestas NPS...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await enviarEncuestasNPS(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Encuestas NPS procesadas' }));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ENVIAR ENCUESTAS DESDE CRM (con plantillas personalizadas)
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/api/send-surveys' && request.method === 'POST') {
+      try {
+        const body = await request.json() as {
+          template: {
+            id: string
+            name: string
+            type: string
+            greeting: string
+            questions: { text: string; type: string }[]
+            closing: string
+          }
+          leads: { id: string; phone: string; name: string }[]
+          message?: string
+          targetType?: 'leads' | 'vendedores' | 'manual'
+        };
+
+        const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+        const { template, leads, message, targetType } = body;
+        const isVendedores = targetType === 'vendedores';
+
+        console.log(`📋 Enviando encuesta "${template.name}" a ${leads.length} ${isVendedores ? 'vendedores' : 'leads'}...`);
+
+        let enviados = 0;
+        let errores = 0;
+
+        for (const lead of leads) {
+          try {
+            if (!lead.phone) {
+              console.log(`⚠️ ${lead.name} sin teléfono, saltando...`);
+              continue;
+            }
+
+            // Personalizar mensaje con nombre
+            const nombreCliente = lead.name?.split(' ')[0] || 'Cliente';
+            const saludo = template.greeting.replace('{nombre}', nombreCliente);
+
+            // NUEVO: Enviar solo la PRIMERA pregunta (flujo secuencial)
+            const primeraQ = template.questions[0];
+            let mensajeEncuesta = `${saludo}\n\n`;
+
+            if (primeraQ) {
+              if (primeraQ.type === 'rating') {
+                mensajeEncuesta += `${primeraQ.text}\n_Responde del 1 al 5_`;
+              } else if (primeraQ.type === 'yesno') {
+                mensajeEncuesta += `${primeraQ.text}\n_Responde SI o NO_`;
+              } else {
+                mensajeEncuesta += `${primeraQ.text}`;
+              }
+            }
+
+            // Agregar mensaje adicional si existe
+            if (message) {
+              mensajeEncuesta = `${message}\n\n${mensajeEncuesta}`;
+            }
+
+            // Enviar por WhatsApp
+            console.log(`📤 Enviando encuesta a ${lead.name} (${lead.phone})...`);
+            await meta.sendWhatsAppMessage(lead.phone, mensajeEncuesta);
+
+            // Registrar en base de datos
+            const validSurveyTypes = ['nps', 'post_cita'];
+            const surveyType = validSurveyTypes.includes(template.type) ? template.type : 'nps';
+
+            // Preparar datos - NO usar lead_id para evitar foreign key errors
+            // Solo usamos lead_phone para matching de respuestas
+            const surveyData: any = {
+              lead_phone: lead.phone,
+              lead_name: lead.name,
+              survey_type: surveyType,
+              status: 'sent',
+              sent_at: new Date().toISOString(),
+              expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+            };
+
+            if (isVendedores) {
+              // Para vendedores: usar vendedor_id y vendedor_name
+              surveyData.vendedor_id = lead.id;
+              surveyData.vendedor_name = lead.name;
+            }
+            // NO agregamos lead_id - evita foreign key constraint errors
+            // El matching de respuestas usa lead_phone, no necesitamos lead_id
+
+            console.log(`💾 Guardando encuesta en DB para ${lead.phone} (tipo: ${surveyType}, isVendedor: ${isVendedores})...`);
+            const { error: insertError } = await supabase.client.from('surveys').insert(surveyData);
+
+            if (insertError) {
+              console.log(`❌ Error guardando encuesta en DB:`, insertError);
+            } else {
+              console.log(`✅ Encuesta guardada en DB para ${lead.phone}`);
+            }
+
+            console.log(`✅ Encuesta enviada a ${lead.name}`);
+            enviados++;
+
+            // Rate limiting
+            await new Promise(r => setTimeout(r, 1000));
+          } catch (e) {
+            console.log(`❌ Error enviando a ${lead.name}:`, e);
+            errores++;
+          }
+        }
+
+        console.log(`📊 Encuestas: ${enviados} enviadas, ${errores} errores`);
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          enviados,
+          errores,
+          message: `Encuesta "${template.name}" enviada a ${enviados} leads`
+        }));
+      } catch (e) {
+        console.error('Error en /api/send-surveys:', e);
+        return corsResponse(JSON.stringify({ ok: false, error: 'Error procesando encuestas' }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // FORZAR ENVÍO DE VIDEOS PENDIENTES
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/force-send-videos') {
@@ -2999,6 +4280,44 @@ Mensaje: ${mensaje}`;
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       await verificarVideosPendientes(supabase, meta, env);
       return corsResponse(JSON.stringify({ ok: true, message: 'Videos pendientes procesados' }));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // API: OBTENER ENCUESTAS
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/api/surveys' || url.pathname === '/pending-surveys') {
+      const status = url.searchParams.get('status'); // all, sent, answered, awaiting_feedback
+      const limit = parseInt(url.searchParams.get('limit') || '50');
+
+      let query = supabase.client
+        .from('surveys')
+        .select('*')
+        .order('sent_at', { ascending: false })
+        .limit(limit);
+
+      if (status && status !== 'all') {
+        query = query.eq('status', status);
+      }
+
+      const { data } = await query;
+
+      // Calcular métricas
+      const allSurveys = data || [];
+      const answered = allSurveys.filter(s => s.status === 'answered');
+      const npsScores = answered.filter(s => s.nps_score !== null).map(s => s.nps_score);
+
+      const metrics = {
+        total: allSurveys.length,
+        sent: allSurveys.filter(s => s.status === 'sent').length,
+        awaiting_feedback: allSurveys.filter(s => s.status === 'awaiting_feedback').length,
+        answered: answered.length,
+        avg_nps: npsScores.length > 0 ? (npsScores.reduce((a, b) => a + b, 0) / npsScores.length).toFixed(1) : null,
+        promoters: npsScores.filter(s => s >= 9).length,
+        passives: npsScores.filter(s => s >= 7 && s < 9).length,
+        detractors: npsScores.filter(s => s < 7).length
+      };
+
+      return corsResponse(JSON.stringify({ surveys: allSurveys, metrics }));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -4502,11 +5821,396 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     // ═══════════════════════════════════════════════════════════════
     // TEST: Seguimiento hipotecas
     // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-reactivacion') {
+      console.log('TEST: Ejecutando reactivación de leads perdidos...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await reactivarLeadsPerdidos(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Reactivación de leads perdidos ejecutada' }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST: Configurar captura de cumpleaños (lead o equipo)
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-cumple-setup') {
+      const phone = url.searchParams.get('phone') || '5215610016226';
+      const phoneClean = phone.replace(/\D/g, '');
+      const phoneFormatted = phoneClean.startsWith('52') ? phoneClean : `52${phoneClean}`;
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      // Primero buscar si es miembro del equipo (usar misma lógica que webhook)
+      const phone10 = phoneClean.slice(-10); // últimos 10 dígitos
+
+      // Obtener todos los team members y hacer match manual (como el webhook)
+      const { data: allTeamMembers, error: tmError } = await supabase.client
+        .from('team_members')
+        .select('id, name, phone, notes')
+        .eq('active', true);
+
+      if (tmError) console.log('❌ Error cargando team_members:', tmError);
+
+      const teamMember = allTeamMembers?.find((tm: any) => {
+        if (!tm.phone) return false;
+        const tmPhone = tm.phone.replace(/\D/g, '').slice(-10);
+        return tmPhone === phone10;
+      });
+
+      console.log(`🔍 Buscando equipo: phone10=${phone10} -> ${teamMember?.name || 'NO ENCONTRADO'}`);
+
+      if (teamMember) {
+        // Es miembro del equipo
+        const notasActuales = typeof teamMember.notes === 'object' ? teamMember.notes : {};
+        await supabase.client
+          .from('team_members')
+          .update({
+            birthday: null,
+            notes: { ...notasActuales, pending_birthday_response: true }
+          })
+          .eq('id', teamMember.id);
+
+        const nombre = teamMember.name?.split(' ')[0] || '';
+        await meta.sendWhatsAppMessage(
+          phoneFormatted,
+          `¡Hola ${nombre}! 👋\n\n¿Cuándo es tu cumpleaños? 🎂\nPara tenerte una sorpresa ese día 🎁\n\n_(ej: 15 marzo)_`
+        );
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          tipo: 'equipo',
+          message: 'Miembro del equipo configurado para captura de cumpleaños',
+          persona: { id: teamMember.id, name: teamMember.name, phone: teamMember.phone },
+          instrucciones: 'Responde al WhatsApp con tu fecha (ej: "15 marzo" o "5/3")'
+        }));
+      }
+
+      // Si no es equipo, buscar como lead
+      const { data: lead } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, birthday, notes')
+        .or(`phone.eq.${phoneFormatted},phone.eq.${phoneClean}`)
+        .limit(1)
+        .single();
+
+      if (!lead) {
+        return corsResponse(JSON.stringify({ error: 'No encontrado (ni equipo ni lead)', phone: phoneFormatted }), 404);
+      }
+
+      // Configurar lead para captura de cumpleaños
+      const notasActuales = typeof lead.notes === 'object' ? lead.notes : {};
+      await supabase.client
+        .from('leads')
+        .update({
+          birthday: null,
+          notes: { ...notasActuales, pending_birthday_response: true }
+        })
+        .eq('id', lead.id);
+
+      const nombre = lead.name?.split(' ')[0] || '';
+      await meta.sendWhatsAppMessage(
+        phoneFormatted,
+        `Por cierto ${nombre}, ¿cuándo es tu cumpleaños? 🎂\nPor si hay algo especial para ti 🎁\n\n_(ej: 15 marzo)_`
+      );
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        tipo: 'lead',
+        message: 'Lead configurado para captura de cumpleaños',
+        persona: { id: lead.id, name: lead.name, phone: lead.phone },
+        instrucciones: 'Responde al WhatsApp con tu fecha (ej: "15 marzo" o "5/3")'
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST: Felicitaciones de cumpleaños a leads
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-cumpleanos') {
+      console.log('TEST: Ejecutando felicitaciones de cumpleaños...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await felicitarCumpleañosLeads(supabase, meta);
+      await felicitarCumpleañosEquipo(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Felicitaciones de cumpleaños ejecutadas (leads + equipo)' }));
+    }
+
+    // TEST: Aniversario de compra de casa
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-aniversario') {
+      console.log('TEST: Ejecutando felicitaciones de aniversario de compra...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await felicitarAniversarioCompra(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Felicitaciones de aniversario de compra ejecutadas' }));
+    }
+
+    // TEST: Configurar lead para probar aniversario
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-aniversario-setup') {
+      const phone = url.searchParams.get('phone') || '5215610016226';
+      const años = parseInt(url.searchParams.get('años') || '1');
+      const phoneClean = phone.replace(/\D/g, '');
+      const phoneFormatted = phoneClean.startsWith('52') ? phoneClean : `52${phoneClean}`;
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      // Buscar lead por teléfono
+      const { data: lead } = await supabase.client
+        .from('leads')
+        .select('*')
+        .or(`phone.eq.${phoneFormatted},phone.eq.${phoneClean}`)
+        .single();
+
+      if (!lead) {
+        return corsResponse(JSON.stringify({ error: 'Lead no encontrado', phone: phoneFormatted }), 404);
+      }
+
+      // Calcular fecha de hace X años (mismo día/mes, año anterior)
+      const hoy = new Date();
+      const fechaAniversario = new Date(hoy.getFullYear() - años, hoy.getMonth(), hoy.getDate(), 12, 0, 0);
+
+      // Actualizar lead a status delivered con fecha de hace X años
+      const { error: updateError } = await supabase.client
+        .from('leads')
+        .update({
+          status: 'delivered',
+          status_changed_at: fechaAniversario.toISOString(),
+          notes: {} // Limpiar notas para que no tenga marca de ya felicitado
+        })
+        .eq('id', lead.id);
+
+      if (updateError) {
+        return corsResponse(JSON.stringify({ error: 'Error actualizando lead', details: updateError }), 500);
+      }
+
+      // Verificar que el update funcionó
+      const { data: leadVerify } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, status, status_changed_at')
+        .eq('id', lead.id)
+        .single();
+
+      console.log(`✅ Lead configurado: ${JSON.stringify(leadVerify)}`);
+      console.log(`📅 Fecha aniversario: ${fechaAniversario.toISOString()}, años=${años}`);
+
+      // Ahora ejecutar la función de aniversario
+      await felicitarAniversarioCompra(supabase, meta);
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        message: `Lead configurado y aniversario ejecutado`,
+        lead: lead.name,
+        phone: phoneFormatted,
+        años: años,
+        status_changed_at: fechaAniversario.toISOString()
+      }));
+    }
+
+    if (url.pathname.startsWith('/test-lead/')) {
+      const phone = url.pathname.split('/')[2];
+      if (!phone) return corsResponse(JSON.stringify({ error: 'Falta teléfono' }), 400);
+      const phoneFormatted = phone.startsWith('52') ? phone : `52${phone}`;
+
+      const { data: lead } = await supabase.client
+        .from('leads')
+        .select('*')
+        .eq('phone', phoneFormatted)
+        .single();
+
+      if (!lead) return corsResponse(JSON.stringify({ error: 'Lead no encontrado' }), 404);
+
+      return corsResponse(JSON.stringify({
+        phone: lead.phone,
+        name: lead.name,
+        lead_score: lead.lead_score,
+        lead_category: lead.lead_category,
+        property_interest: lead.property_interest,
+        needs_mortgage: lead.needs_mortgage,
+        how_found_us: lead.how_found_us,
+        family_size: lead.family_size,
+        current_housing: lead.current_housing,
+        num_bedrooms_wanted: lead.num_bedrooms_wanted,
+        occupation: lead.occupation,
+        urgency: lead.urgency,
+        age_range: lead.age_range,
+        created_at: lead.created_at,
+        updated_at: lead.updated_at
+      }, null, 2));
+    }
+
     if (url.pathname === '/test-hipotecas') {
       console.log('TEST: Verificando hipotecas estancadas...');
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       await seguimientoHipotecas(supabase, meta);
       return corsResponse(JSON.stringify({ ok: true, message: 'Seguimiento hipotecas ejecutado' }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST: Ver citas recientes con estado de Google Calendar
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-citas-recientes') {
+      const { data: citas, error: citasError } = await supabase.client
+        .from('appointments')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (citasError) {
+        return corsResponse(JSON.stringify({ error: citasError.message }, null, 2), 500);
+      }
+
+      return corsResponse(JSON.stringify({
+        total: citas?.length || 0,
+        citas: citas?.map(c => ({
+          lead_name: c.lead_name,
+          fecha: c.scheduled_date,
+          hora: c.scheduled_time,
+          status: c.status,
+          google_event: c.google_event_vendedor_id || 'NULL',
+          notes: c.notes || 'NULL',
+          created_at: c.created_at
+        }))
+      }, null, 2));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // FIX: Agregar cita existente a Google Calendar
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/fix-cita-calendar') {
+      const leadName = url.searchParams.get('lead_name');
+      if (!leadName) {
+        return corsResponse(JSON.stringify({ error: 'Falta lead_name' }), 400);
+      }
+
+      // Buscar la cita
+      const { data: cita, error: citaError } = await supabase.client
+        .from('appointments')
+        .select('*, leads(name, phone)')
+        .eq('lead_name', leadName)
+        .is('google_event_vendedor_id', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (citaError || !cita) {
+        return corsResponse(JSON.stringify({ error: 'Cita no encontrada', details: citaError?.message }), 404);
+      }
+
+      // Crear evento en Google Calendar
+      const fechaEvento = new Date(`${cita.scheduled_date}T${cita.scheduled_time}`);
+      const endEvento = new Date(fechaEvento.getTime() + 60 * 60 * 1000);
+
+      const formatDate = (d: Date) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const hours = String(d.getHours()).padStart(2, '0');
+        const minutes = String(d.getMinutes()).padStart(2, '0');
+        return `${year}-${month}-${day}T${hours}:${minutes}:00`;
+      };
+
+      try {
+        // Crear instancia local de CalendarService
+        const calendarLocal = new CalendarService(
+          env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+          env.GOOGLE_PRIVATE_KEY,
+          env.GOOGLE_CALENDAR_ID
+        );
+
+        const eventData = {
+          summary: `🏠 Visita - ${cita.lead_name} (${cita.property_name || 'Desarrollo'})`,
+          description: `👤 Cliente: ${cita.lead_name}\n📱 Tel: ${cita.lead_phone || 'N/A'}\n🏠 Desarrollo: ${cita.property_name || 'Por definir'}`,
+          location: cita.location || cita.property_name || '',
+          start: { dateTime: formatDate(fechaEvento), timeZone: 'America/Mexico_City' },
+          end: { dateTime: formatDate(endEvento), timeZone: 'America/Mexico_City' }
+        };
+
+        const eventResult = await calendarLocal.createEvent(eventData);
+
+        // Actualizar la cita con el google_event_vendedor_id
+        await supabase.client
+          .from('appointments')
+          .update({ google_event_vendedor_id: eventResult.id })
+          .eq('id', cita.id);
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          message: `Cita de ${cita.lead_name} agregada a Google Calendar`,
+          google_event_id: eventResult.id,
+          cita_id: cita.id
+        }));
+      } catch (calError: any) {
+        return corsResponse(JSON.stringify({ error: 'Error creando evento', details: calError?.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST: Diagnóstico de Google Calendar
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-calendar') {
+      console.log('TEST: Diagnóstico de Google Calendar...');
+
+      const diagnostico: any = {
+        timestamp: new Date().toISOString(),
+        env_vars: {
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? 'SET (' + env.GOOGLE_SERVICE_ACCOUNT_EMAIL.substring(0, 20) + '...)' : 'NOT SET',
+          GOOGLE_PRIVATE_KEY: env.GOOGLE_PRIVATE_KEY ? 'SET (length: ' + env.GOOGLE_PRIVATE_KEY.length + ')' : 'NOT SET',
+          GOOGLE_CALENDAR_ID: env.GOOGLE_CALENDAR_ID ? 'SET (' + env.GOOGLE_CALENDAR_ID + ')' : 'NOT SET'
+        }
+      };
+
+      if (!env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !env.GOOGLE_PRIVATE_KEY || !env.GOOGLE_CALENDAR_ID) {
+        diagnostico.error = 'Faltan variables de entorno de Google Calendar';
+        return corsResponse(JSON.stringify(diagnostico, null, 2), 500);
+      }
+
+      try {
+        const calendar = new CalendarService(
+          env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+          env.GOOGLE_PRIVATE_KEY,
+          env.GOOGLE_CALENDAR_ID
+        );
+
+        // Intentar crear un evento de prueba
+        const ahora = new Date();
+        const enUnaHora = new Date(ahora.getTime() + 60 * 60 * 1000);
+
+        const testEvent = {
+          summary: '🧪 TEST - Eliminar este evento',
+          description: 'Evento de prueba creado por diagnóstico de SARA',
+          start: {
+            dateTime: ahora.toISOString(),
+            timeZone: 'America/Mexico_City'
+          },
+          end: {
+            dateTime: enUnaHora.toISOString(),
+            timeZone: 'America/Mexico_City'
+          }
+        };
+
+        console.log('📅 Intentando crear evento de prueba...');
+        const result = await calendar.createEvent(testEvent);
+
+        diagnostico.success = true;
+        diagnostico.event_created = {
+          id: result?.id,
+          htmlLink: result?.htmlLink,
+          status: result?.status
+        };
+
+        // Eliminar el evento de prueba
+        if (result?.id) {
+          try {
+            await calendar.deleteEvent(result.id);
+            diagnostico.event_deleted = true;
+          } catch (delErr) {
+            diagnostico.event_deleted = false;
+            diagnostico.delete_error = String(delErr);
+          }
+        }
+
+        return corsResponse(JSON.stringify(diagnostico, null, 2));
+      } catch (calError: any) {
+        diagnostico.success = false;
+        diagnostico.error = String(calError);
+        diagnostico.error_message = calError?.message || 'Unknown error';
+        console.error('❌ Error Calendar:', calError);
+        return corsResponse(JSON.stringify(diagnostico, null, 2), 500);
+      }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -4805,11 +6509,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       });
     }
 
-    // 9am: Felicitaciones de cumpleanos (solo primer ejecucion de la hora)
-    if (mexicoHour === 9 && isFirstRunOfHour) {
-      console.log('🎂 Enviando felicitaciones...');
-      await enviarFelicitaciones(supabase, meta);
-    }
+    // (Cumpleaños movido más abajo para incluir leads + equipo)
 
     // 8am L-V: Briefing matutino (solo primer ejecucion de la hora)
     console.log(`📋 BRIEFING CHECK: hora=${mexicoHour}===8? ${mexicoHour === 8}, isFirst=${isFirstRunOfHour}, dia=${dayOfWeek} (1-5)? ${dayOfWeek >= 1 && dayOfWeek <= 5}, vendedores=${!!vendedores}`);
@@ -4839,6 +6539,12 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       console.log(`📊 BRIEFING RESULTADO: ${enviados} enviados, ${saltados} saltados`);
     } else {
       console.log(`⏭️ BRIEFING NO EJECUTADO - condiciones no cumplidas`);
+    }
+
+    // 8am L-V: Briefing de supervisión para admins
+    if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('👁️ Enviando briefing de supervisión a admins...');
+      await enviarBriefingSupervision(supabase, meta);
     }
 
     // 8am L-V: Reporte diario CEO/Admin
@@ -4922,6 +6628,12 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       await enviarReporteDiarioAsesores(supabase, meta);
     }
 
+    // 10am L-V: Alertas de leads fríos (vendedores, asesores, CEO)
+    if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('🥶 Enviando alertas de leads fríos...');
+      await enviarAlertasLeadsFrios(supabase, meta);
+    }
+
     // 7pm L-V: Reporte diario marketing
     if (mexicoHour === 19 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
       console.log('📊 Enviando reporte diario a marketing...');
@@ -4947,6 +6659,14 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     console.log('🔔 Verificando recordatorios de citas...');
     await enviarRecordatoriosCitas(supabase, meta);
 
+    // NO-SHOWS - detectar citas donde no se presentó el lead (cada 2 min)
+    console.log('👻 Verificando no-shows...');
+    await detectarNoShows(supabase, meta);
+
+    // TIMEOUT VENDEDOR - si no responde en 2hrs, enviar encuesta al lead
+    console.log('⏰ Verificando timeouts de confirmación...');
+    await verificarTimeoutConfirmaciones(supabase, meta);
+
     // Verificar videos pendientes
     console.log('🎬 Verificando videos pendientes...');
     await verificarVideosPendientes(supabase, meta, env);
@@ -4963,6 +6683,50 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         return false;
       }
     });
+
+    // ═══════════════════════════════════════════════════════════
+    // FOLLOW-UPS CON APROBACIÓN - Sistema de aprobación por vendedor
+    // ═══════════════════════════════════════════════════════════
+    const approvalService = new FollowupApprovalService(supabase);
+
+    // Enviar propuestas pendientes a vendedores (cada ejecución)
+    console.log('📋 Enviando propuestas de follow-up a vendedores...');
+    await approvalService.enviarPropuestasPendientes(async (phone, message) => {
+      try {
+        await meta.sendWhatsAppMessage(phone, message);
+        return true;
+      } catch (e) {
+        console.log('Error enviando propuesta:', e);
+        return false;
+      }
+    });
+
+    // Expirar aprobaciones viejas (cada ejecución)
+    await approvalService.expirarAprobacionesViejas();
+
+    // 10am L-V: Pedir status a vendedores sobre leads estancados
+    if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('📊 Pidiendo status a vendedores sobre leads estancados...');
+      await approvalService.pedirStatusLeadsEstancados(async (phone, message) => {
+        try {
+          await meta.sendWhatsAppMessage(phone, message);
+          return true;
+        } catch (e) {
+          console.log('Error pidiendo status:', e);
+          return false;
+        }
+      });
+    }
+
+    // ENCUESTAS AUTOMÁTICAS - cada hora verifica citas completadas hace 2h
+    console.log('📋 Verificando encuestas post-cita pendientes...');
+    await enviarEncuestasPostCita(supabase, meta);
+
+    // ENCUESTAS NPS - 10am L-V, 7 días después del cierre
+    if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('📊 Verificando encuestas NPS pendientes...');
+      await enviarEncuestasNPS(supabase, meta);
+    }
 
     // ═══════════════════════════════════════════════════════════
     // NOTA: Las siguientes tareas ahora están CONSOLIDADAS en el
@@ -4988,6 +6752,37 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       await remarketingLeadsFrios(supabase, meta);
     }
 
+    // PRIMER LUNES DEL MES 10am: Reactivación de leads perdidos
+    const dayOfMonth = new Date().getDate();
+    if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek === 1 && dayOfMonth <= 7) {
+      console.log('🔄 Ejecutando reactivación de leads perdidos...');
+      await reactivarLeadsPerdidos(supabase, meta);
+    }
+
+    // 9am DIARIO (TODOS LOS DÍAS): Felicitaciones de cumpleaños (leads + equipo)
+    if (mexicoHour === 9 && isFirstRunOfHour) {
+      console.log('🎂 Enviando felicitaciones de cumpleaños...');
+      await felicitarCumpleañosLeads(supabase, meta);
+      await felicitarCumpleañosEquipo(supabase, meta);
+      // Aniversarios solo L-V
+      if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+        console.log('🏠 Verificando aniversarios de compra...');
+        await felicitarAniversarioCompra(supabase, meta);
+      }
+    }
+
+    // 11am L-V: Follow-up automático a leads inactivos (3+ días sin responder)
+    if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('📬 Ejecutando follow-up de leads inactivos...');
+      await followUpLeadsInactivos(supabase, meta);
+    }
+
+    // 10am DIARIO: Recordatorios de pago de apartados (5 días antes, 1 día antes, día del pago)
+    if (mexicoHour === 10 && isFirstRunOfHour) {
+      console.log('💰 Verificando recordatorios de pago de apartados...');
+      await recordatoriosPagoApartado(supabase, meta);
+    }
+
     // 2pm L-V: Alerta leads HOT sin contactar hoy
     if (mexicoHour === 14 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
       console.log('🔥 Verificando leads HOT sin contactar hoy...');
@@ -5004,6 +6799,41 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     if (mexicoHour === 8 && isFirstRunOfHour && (dayOfWeek === 2 || dayOfWeek === 4)) {
       console.log('🏦 Verificando hipotecas estancadas...');
       await seguimientoHipotecas(supabase, meta);
+    }
+
+    // RE-ENGAGEMENT AUTOMÁTICO: Cada hora de 9am a 7pm L-V
+    // Envía mensajes a leads que no han respondido en 48h+
+    if (isFirstRunOfHour && mexicoHour >= 9 && mexicoHour <= 19 && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('🔄 Verificando leads para re-engagement...');
+      await verificarReengagement(supabase, meta);
+    }
+
+    // LEADS FRÍOS - Secuencia de mensajes directos al lead
+    // 11am y 5pm L-S: Día 3, Día 7, Día 14
+    if (isFirstRunOfHour && (mexicoHour === 11 || mexicoHour === 17) && dayOfWeek >= 1 && dayOfWeek <= 6) {
+      console.log('❄️ Verificando leads fríos para re-engagement directo...');
+      await reengagementDirectoLeads(supabase, meta);
+    }
+
+    // SEGUIMIENTO POST-VENTA: 10am diario
+    // Mensajes a clientes que compraron: 30 días (cómo estás), 60 días (referidos), 90 días (recordatorio)
+    if (mexicoHour === 10 && isFirstRunOfHour) {
+      console.log('🎉 Verificando seguimiento post-venta...');
+      await seguimientoPostVenta(supabase, meta);
+    }
+
+    // CUMPLEAÑOS: 9am diario
+    // Enviar felicitación a leads/clientes que cumplen años hoy
+    if (mexicoHour === 9 && isFirstRunOfHour) {
+      console.log('🎂 Verificando cumpleaños del día...');
+      await enviarFelicitacionesCumple(supabase, meta);
+    }
+
+    // SEGUIMIENTO CRÉDITO: 12pm L-V
+    // Leads que necesitan crédito pero no han avanzado
+    if (mexicoHour === 12 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('🏦 Verificando seguimiento de crédito...');
+      await seguimientoCredito(supabase, meta);
     }
   },
 };
@@ -5156,6 +6986,13 @@ async function enviarReporteDiarioCEO(supabase: SupabaseService, meta: MetaWhats
   const { data: cierresMes } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMes);
   const { data: leadsMes } = await supabase.client.from('leads').select('id').gte('created_at', inicioMes);
 
+  // Follow-ups de ayer
+  const { data: followupsAyer } = await supabase.client
+    .from('followup_approvals')
+    .select('status')
+    .gte('created_at', inicioAyer)
+    .lt('created_at', inicioHoy);
+
   // === CÁLCULOS ===
   let revenueAyer = 0, pipelineValueDiario = 0;
   cierresAyer?.forEach(c => revenueAyer += c.properties?.price || 2000000);
@@ -5207,10 +7044,15 @@ async function enviarReporteDiarioCEO(supabase: SupabaseService, meta: MetaWhats
     citasHoyDetalle.push(`• ${hora} - ${cliente} (${vendedor})`);
   });
 
+  // Follow-ups stats
+  const followupsEnviadosAyer = followupsAyer?.filter(f => f.status === 'sent').length || 0;
+  const followupsPendientesAyer = followupsAyer?.filter(f => f.status === 'pending').length || 0;
+
   // Alertas
   const alertasDiarias: string[] = [];
   if (estancados && estancados.length > 0) alertasDiarias.push(`• ${estancados.length} leads sin contactar >24h`);
   if (perdidosAyer && perdidosAyer.length > 0) alertasDiarias.push(`• ${perdidosAyer.length} leads perdidos ayer`);
+  if (followupsPendientesAyer > 0) alertasDiarias.push(`• ${followupsPendientesAyer} follow-ups sin aprobar`);
 
   // === CONSTRUIR MENSAJE ===
   const msg = `☀️ *BUENOS DÍAS CEO*
@@ -5223,6 +7065,7 @@ _${fechaFormato}_
 • Cierres: *${cierresAyerCount}* ${calcVarDiario(cierresAyerCount, cierresSemPasadaCount)}
 • Revenue: *$${(revenueAyer/1000000).toFixed(1)}M*
 • Citas: ${citasAyerCompletadas}/${citasAyerTotal} (${showRateAyer}% show)
+${followupsEnviadosAyer > 0 ? `• Follow-ups enviados: *${followupsEnviadosAyer}*` : ''}
 
 ━━━━━━━━━━━━━━━━━━━━━
 📅 *AGENDA DE HOY*
@@ -6010,6 +7853,250 @@ _¡Éxito esta semana!_ 🚀`;
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ENCUESTAS AUTOMÁTICAS
+// ═══════════════════════════════════════════════════════════════
+
+// Enviar encuesta post-cita (2 horas después de cita completada)
+async function enviarEncuestasPostCita(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace2Horas = new Date(ahora.getTime() - 2 * 60 * 60 * 1000);
+    const hace3Horas = new Date(ahora.getTime() - 3 * 60 * 60 * 1000);
+
+    // Buscar citas completadas hace 2-3 horas que no tengan encuesta enviada
+    const { data: citasCompletadas } = await supabase.client
+      .from('appointments')
+      .select('*, leads(id, name, phone), team_members:vendedor_id(id, name)')
+      .eq('status', 'completed')
+      .gte('updated_at', hace3Horas.toISOString())
+      .lte('updated_at', hace2Horas.toISOString());
+
+    if (!citasCompletadas || citasCompletadas.length === 0) return;
+
+    for (const cita of citasCompletadas) {
+      const lead = cita.leads as any;
+      const vendedor = cita.team_members as any;
+      if (!lead?.phone) continue;
+
+      // Verificar si ya se envió encuesta para esta cita
+      const { data: encuestaExistente } = await supabase.client
+        .from('surveys')
+        .select('id')
+        .eq('appointment_id', cita.id)
+        .eq('survey_type', 'post_cita')
+        .single();
+
+      if (encuestaExistente) continue;
+
+      const nombreCliente = lead.name?.split(' ')[0] || 'Cliente';
+      const nombreVendedor = vendedor?.name?.split(' ')[0] || 'nuestro asesor';
+
+      const mensaje = `Hola *${nombreCliente}* 👋
+
+¿Cómo calificas tu cita con *${nombreVendedor}*?
+
+1️⃣ Excelente
+2️⃣ Buena
+3️⃣ Regular
+4️⃣ Mala
+
+_Responde con el número_
+
+Tu opinión nos ayuda a mejorar 🙏`;
+
+      try {
+        await meta.sendWhatsAppMessage(lead.phone, mensaje);
+
+        // Registrar encuesta enviada
+        await supabase.client.from('surveys').insert({
+          lead_id: lead.id,
+          lead_phone: lead.phone,
+          lead_name: lead.name,
+          vendedor_id: vendedor?.id,
+          vendedor_name: vendedor?.name,
+          appointment_id: cita.id,
+          survey_type: 'post_cita',
+          status: 'sent',
+          expires_at: new Date(ahora.getTime() + 24 * 60 * 60 * 1000).toISOString() // Expira en 24h
+        });
+
+        console.log(`📋 Encuesta post-cita enviada a ${lead.name}`);
+      } catch (e) {
+        console.log(`Error enviando encuesta a ${lead.name}:`, e);
+      }
+
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  } catch (e) {
+    console.log('Error en encuestas post-cita:', e);
+  }
+}
+
+// Enviar encuesta NPS post-cierre (7 días después)
+async function enviarEncuestasNPS(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace7Dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const hace8Dias = new Date(ahora.getTime() - 8 * 24 * 60 * 60 * 1000);
+
+    // Buscar leads que cerraron hace 7-8 días
+    const { data: cierres } = await supabase.client
+      .from('leads')
+      .select('*, team_members:assigned_to(id, name)')
+      .in('status', ['closed', 'delivered'])
+      .gte('status_changed_at', hace8Dias.toISOString())
+      .lte('status_changed_at', hace7Dias.toISOString());
+
+    if (!cierres || cierres.length === 0) return;
+
+    for (const lead of cierres) {
+      if (!lead.phone) continue;
+
+      // Verificar si ya se envió encuesta NPS
+      const { data: encuestaExistente } = await supabase.client
+        .from('surveys')
+        .select('id')
+        .eq('lead_id', lead.id)
+        .eq('survey_type', 'nps')
+        .single();
+
+      if (encuestaExistente) continue;
+
+      const nombreCliente = lead.name?.split(' ')[0] || 'Cliente';
+      const vendedor = lead.team_members as any;
+
+      const mensaje = `¡Hola *${nombreCliente}*! 🏠
+
+¡Felicidades por tu nueva casa!
+
+Del *0 al 10*, ¿qué tan probable es que nos recomiendes con amigos o familia?
+
+0 = Nada probable
+10 = Muy probable
+
+_Responde con un número del 0 al 10_
+
+¡Gracias por confiar en nosotros! 🙏`;
+
+      try {
+        await meta.sendWhatsAppMessage(lead.phone, mensaje);
+
+        await supabase.client.from('surveys').insert({
+          lead_id: lead.id,
+          lead_phone: lead.phone,
+          lead_name: lead.name,
+          vendedor_id: vendedor?.id,
+          vendedor_name: vendedor?.name,
+          survey_type: 'nps',
+          status: 'sent',
+          expires_at: new Date(ahora.getTime() + 72 * 60 * 60 * 1000).toISOString() // Expira en 72h
+        });
+
+        console.log(`📋 Encuesta NPS enviada a ${lead.name}`);
+      } catch (e) {
+        console.log(`Error enviando encuesta NPS a ${lead.name}:`, e);
+      }
+
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  } catch (e) {
+    console.log('Error en encuestas NPS:', e);
+  }
+}
+
+// Procesar respuesta de encuesta
+async function procesarRespuestaEncuesta(supabase: SupabaseService, phone: string, mensaje: string): Promise<string | null> {
+  try {
+    // Buscar encuesta pendiente para este teléfono
+    const { data: encuesta } = await supabase.client
+      .from('surveys')
+      .select('*')
+      .eq('lead_phone', phone)
+      .eq('status', 'sent')
+      .order('sent_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!encuesta) return null;
+
+    const textoLimpio = mensaje.trim();
+
+    // Encuesta post-cita (espera 1-4)
+    if (encuesta.survey_type === 'post_cita') {
+      const respuesta = parseInt(textoLimpio);
+      if (respuesta >= 1 && respuesta <= 4) {
+        const ratings: { [key: number]: { rating: number; texto: string } } = {
+          1: { rating: 5, texto: 'Excelente' },
+          2: { rating: 4, texto: 'Buena' },
+          3: { rating: 3, texto: 'Regular' },
+          4: { rating: 2, texto: 'Mala' }
+        };
+
+        await supabase.client
+          .from('surveys')
+          .update({
+            status: 'answered',
+            answered_at: new Date().toISOString(),
+            rating: ratings[respuesta].rating,
+            feedback: ratings[respuesta].texto
+          })
+          .eq('id', encuesta.id);
+
+        const respuestas: { [key: number]: string } = {
+          1: `¡Gracias *${encuesta.lead_name?.split(' ')[0]}*! 🌟\n\nNos alegra que tu experiencia haya sido excelente. ¡Seguiremos trabajando para ti!`,
+          2: `¡Gracias *${encuesta.lead_name?.split(' ')[0]}*! 😊\n\nNos da gusto que hayas tenido una buena experiencia.`,
+          3: `Gracias por tu respuesta *${encuesta.lead_name?.split(' ')[0]}*.\n\n¿Hay algo específico que podamos mejorar? Tu opinión es muy valiosa para nosotros.`,
+          4: `Lamentamos que tu experiencia no haya sido buena *${encuesta.lead_name?.split(' ')[0]}*.\n\nNos gustaría saber qué pasó para mejorar. Un supervisor se pondrá en contacto contigo.`
+        };
+
+        // Si fue mala, notificar al admin
+        if (respuesta === 4) {
+          const { data: admins } = await supabase.client
+            .from('team_members')
+            .select('phone')
+            .eq('role', 'admin')
+            .eq('active', true);
+
+          // Notificación asíncrona - no esperamos
+          console.log(`⚠️ Encuesta negativa de ${encuesta.lead_name} sobre ${encuesta.vendedor_name}`);
+        }
+
+        return respuestas[respuesta];
+      }
+    }
+
+    // Encuesta NPS (espera 0-10)
+    if (encuesta.survey_type === 'nps') {
+      const nps = parseInt(textoLimpio);
+      if (nps >= 0 && nps <= 10) {
+        await supabase.client
+          .from('surveys')
+          .update({
+            status: 'answered',
+            answered_at: new Date().toISOString(),
+            nps_score: nps,
+            would_recommend: nps >= 7
+          })
+          .eq('id', encuesta.id);
+
+        if (nps >= 9) {
+          return `¡Wow, gracias *${encuesta.lead_name?.split(' ')[0]}*! 🌟\n\nTu recomendación significa mucho para nosotros. ¡Que disfrutes tu nuevo hogar!`;
+        } else if (nps >= 7) {
+          return `¡Gracias *${encuesta.lead_name?.split(' ')[0]}*! 😊\n\nNos alegra haberte ayudado. ¡Disfruta tu nueva casa!`;
+        } else {
+          return `Gracias por tu honestidad *${encuesta.lead_name?.split(' ')[0]}*.\n\n¿Hay algo que pudimos haber hecho mejor? Nos encantaría escucharte.`;
+        }
+      }
+    }
+
+    return null;
+  } catch (e) {
+    console.log('Error procesando respuesta encuesta:', e);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // REPORTE DIARIO INDIVIDUAL VENDEDORES - L-V 7pm
 // ═══════════════════════════════════════════════════════════════
 
@@ -6086,6 +8173,13 @@ async function enviarReporteDiarioVendedores(supabase: SupabaseService, meta: Me
       .select('*, properties(price)')
       .in('status', ['new', 'contacted', 'qualified', 'negotiation', 'scheduled', 'visited']);
 
+    // Follow-ups de hoy
+    const { data: followupsHoy } = await supabase.client
+      .from('followup_approvals')
+      .select('vendedor_id, status, sent_at')
+      .gte('created_at', inicioHoy.toISOString())
+      .lte('created_at', finHoy.toISOString());
+
     // Calcular ranking del día por cierres
     const vendedoresConCierres = vendedores.map(v => {
       const cierresV = todosCierresHoy?.filter(c => c.assigned_to === v.id) || [];
@@ -6143,6 +8237,11 @@ async function enviarReporteDiarioVendedores(supabase: SupabaseService, meta: Me
       const leadsContactados = pipelineVendedor.filter(p => ['contacted', 'qualified'].includes(p.status)).length;
       const leadsNegociacion = pipelineVendedor.filter(p => ['negotiation', 'scheduled', 'visited'].includes(p.status)).length;
 
+      // Follow-ups del vendedor hoy
+      const followupsVendedor = followupsHoy?.filter(f => f.vendedor_id === vendedor.id) || [];
+      const followupsEnviados = followupsVendedor.filter(f => f.status === 'sent').length;
+      const followupsPendientes = followupsVendedor.filter(f => f.status === 'pending').length;
+
       // Tiempo de respuesta hoy
       let tiemposRespuesta: number[] = [];
       for (const l of leadsVendedorHoy) {
@@ -6199,6 +8298,14 @@ async function enviarReporteDiarioVendedores(supabase: SupabaseService, meta: Me
 
       if (citasVendedorManana.length > 0) {
         insights.push(`📅 Mañana: ${citasVendedorManana.length} cita${citasVendedorManana.length > 1 ? 's' : ''}`);
+      }
+
+      if (followupsEnviados > 0) {
+        insights.push(`📤 ${followupsEnviados} follow-up${followupsEnviados > 1 ? 's' : ''} enviado${followupsEnviados > 1 ? 's' : ''}`);
+      }
+
+      if (followupsPendientes > 0) {
+        insights.push(`📬 ${followupsPendientes} mensaje${followupsPendientes > 1 ? 's' : ''} pendiente${followupsPendientes > 1 ? 's' : ''} de aprobar`);
       }
 
       const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buen trabajo hoy!';
@@ -6334,6 +8441,14 @@ async function enviarReporteMensualVendedores(supabase: SupabaseService, meta: M
       .select('id, vendedor_id, status')
       .gte('scheduled_date', inicioMesAnterior.toISOString().split('T')[0])
       .lte('scheduled_date', finMesAnterior.toISOString().split('T')[0]);
+
+    // Encuestas del mes
+    const { data: todasEncuestasMes } = await supabase.client
+      .from('surveys')
+      .select('*')
+      .eq('status', 'answered')
+      .gte('answered_at', inicioMesReporte.toISOString())
+      .lte('answered_at', finMesReporte.toISOString());
 
     // Calcular ranking por revenue
     const vendedoresConRevenue = vendedores.map(v => {
@@ -6476,6 +8591,54 @@ async function enviarReporteMensualVendedores(supabase: SupabaseService, meta: M
         insights.push(`📅 Mejor semana: S${mejorSemanaNum} (${mejorSemana} cierres)`);
       }
 
+      // ═══════════════════════════════════════════════════════════
+      // ENCUESTAS DE SATISFACCIÓN
+      // ═══════════════════════════════════════════════════════════
+      const encuestasVendedor = todasEncuestasMes?.filter(e => e.vendedor_id === vendedor.id) || [];
+      const encuestasPostCita = encuestasVendedor.filter(e => e.survey_type === 'post_cita');
+      const encuestasNPS = encuestasVendedor.filter(e => e.survey_type === 'nps');
+
+      // Promedio de calificación post-cita (rating 1-5)
+      const ratingsPostCita = encuestasPostCita.filter(e => e.rating).map(e => e.rating);
+      const promedioRating = ratingsPostCita.length > 0
+        ? (ratingsPostCita.reduce((a: number, b: number) => a + b, 0) / ratingsPostCita.length).toFixed(1)
+        : null;
+
+      // NPS Score
+      const scoresNPS = encuestasNPS.filter(e => e.nps_score !== null).map(e => e.nps_score);
+      const promedioNPS = scoresNPS.length > 0
+        ? Math.round(scoresNPS.reduce((a: number, b: number) => a + b, 0) / scoresNPS.length)
+        : null;
+
+      // Promotores, Pasivos, Detractores
+      const promotores = scoresNPS.filter(s => s >= 9).length;
+      const pasivos = scoresNPS.filter(s => s >= 7 && s < 9).length;
+      const detractores = scoresNPS.filter(s => s < 7).length;
+
+      // Calcular NPS real (% promotores - % detractores)
+      const npsReal = scoresNPS.length > 0
+        ? Math.round(((promotores - detractores) / scoresNPS.length) * 100)
+        : null;
+
+      // Emojis según calificación
+      const getRatingEmoji = (rating: number) => {
+        if (rating >= 4.5) return '⭐⭐⭐⭐⭐';
+        if (rating >= 3.5) return '⭐⭐⭐⭐';
+        if (rating >= 2.5) return '⭐⭐⭐';
+        return '⭐⭐';
+      };
+
+      // Insights de encuestas
+      if (promedioRating && parseFloat(promedioRating) >= 4.5) {
+        insights.push(`⭐ Excelente satisfacción: ${promedioRating}/5`);
+      } else if (promedioRating && parseFloat(promedioRating) < 3.5) {
+        insights.push(`💡 Mejorar satisfacción del cliente`);
+      }
+
+      if (npsReal !== null && npsReal >= 50) {
+        insights.push(`🌟 NPS excepcional: ${npsReal > 0 ? '+' : ''}${npsReal}`);
+      }
+
       const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buen mes!';
 
       const nombreCorto = vendedor.name?.split(' ')[0] || 'Vendedor';
@@ -6512,6 +8675,11 @@ Hola *${nombreCorto}* 👋
 • Posición: *${posicionStr}* de ${totalVendedores}
 • Aportaste: *${porcentajeEquipo}%* del revenue total
 • Revenue equipo: $${(revenueEquipo/1000000).toFixed(1)}M
+${encuestasVendedor.length > 0 ? `
+━━━━━━━━━━━━━━━━━━━━━
+⭐ *SATISFACCIÓN CLIENTES*
+━━━━━━━━━━━━━━━━━━━━━
+• Encuestas: ${encuestasVendedor.length}${promedioRating ? `\n• Calificación: *${promedioRating}/5* ${getRatingEmoji(parseFloat(promedioRating))}` : ''}${npsReal !== null ? `\n• NPS: *${npsReal > 0 ? '+' : ''}${npsReal}* (${promotores}👍 ${pasivos}😐 ${detractores}👎)` : ''}` : ''}
 
 ━━━━━━━━━━━━━━━━━━━━━
 💡 *RESUMEN DEL MES*
@@ -7357,20 +9525,36 @@ async function enviarRecordatoriosCitas(supabase: SupabaseService, meta: MetaWha
     const lead = cita.leads;
     if (!lead?.phone) continue;
 
-    const fecha = cita.scheduled_date;
-    const hora = cita.scheduled_time || '12:00';
+    const nombreCorto = lead.name?.split(' ')[0] || 'Hola';
+    const desarrollo = cita.property_interest || 'Santa Rita';
+    const ubicacion = cita.location || desarrollo;
+    const hora = cita.scheduled_time || '10:00 AM';
 
-    const mensaje = `📅 *Recordatorio de tu cita mañana*\n\n` +
-      `Hola ${lead.name}, te recordamos tu cita:\n` +
-      `📍 ${cita.property_interest || 'Santa Rita'}\n` +
-      `📍 ${fecha} a las ${hora}\n\n` +
-      `¡Te esperamos! 🏠`;
+    try {
+      // Usar template: recordatorio_cita_24h
+      // Template: 📅 ¡Hola {{1}}! Te recordamos tu cita mañana. 🏠 {{2}} 📍 {{3}} ⏰ {{4}}
+      const templateComponents = [
+        {
+          type: 'body',
+          parameters: [
+            { type: 'text', text: nombreCorto },
+            { type: 'text', text: desarrollo },
+            { type: 'text', text: ubicacion },
+            { type: 'text', text: hora }
+          ]
+        }
+      ];
 
-    await meta.sendWhatsAppMessage(lead.phone, mensaje);
-    await supabase.client
-      .from('appointments')
-      .update({ reminder_24h_sent: true })
-      .eq('id', cita.id);
+      await meta.sendTemplate(lead.phone, 'recordatorio_cita_24h', 'es_MX', templateComponents);
+      console.log(`📅 Recordatorio 24h (template) enviado a ${lead.name}`);
+
+      await supabase.client
+        .from('appointments')
+        .update({ reminder_24h_sent: true })
+        .eq('id', cita.id);
+    } catch (err) {
+      console.error(`❌ Error enviando recordatorio 24h a ${lead.name}:`, err);
+    }
   }
 
   // Recordatorio 2h antes
@@ -7386,15 +9570,34 @@ async function enviarRecordatoriosCitas(supabase: SupabaseService, meta: MetaWha
     const lead = cita.leads;
     if (!lead?.phone) continue;
 
-    const mensaje = `⏰ *Tu cita es en 2 horas*\n\n` +
-      `${lead.name}, te esperamos en ${cita.property_interest || 'Santa Rita'}.\n\n` +
-      `¿Necesitas indicaciones? Responde a este mensaje. 📍`;
+    const nombreCorto = lead.name?.split(' ')[0] || 'Hola';
+    const desarrollo = cita.property_interest || 'Santa Rita';
+    const ubicacion = cita.location || desarrollo;
 
-    await meta.sendWhatsAppMessage(lead.phone, mensaje);
-    await supabase.client
-      .from('appointments')
-      .update({ reminder_2h_sent: true })
-      .eq('id', cita.id);
+    try {
+      // Usar template: recordatorio_cita_2h
+      // Template: ⏰ ¡{{1}}, tu cita es en 2 horas! 🏠 {{2}} 📍 {{3}}
+      const templateComponents = [
+        {
+          type: 'body',
+          parameters: [
+            { type: 'text', text: nombreCorto },
+            { type: 'text', text: desarrollo },
+            { type: 'text', text: ubicacion }
+          ]
+        }
+      ];
+
+      await meta.sendTemplate(lead.phone, 'recordatorio_cita_2h', 'es_MX', templateComponents);
+      console.log(`⏰ Recordatorio 2h (template) enviado a ${lead.name}`);
+
+      await supabase.client
+        .from('appointments')
+        .update({ reminder_2h_sent: true })
+        .eq('id', cita.id);
+    } catch (err) {
+      console.error(`❌ Error enviando recordatorio 2h a ${lead.name}:`, err);
+    }
   }
 }
 
@@ -7470,6 +9673,473 @@ ${asesor.name}, tienes ${hipotecasSinMover.length} solicitud(es) sin actualizar 
       await meta.sendWhatsAppMessage(asesor.phone, mensaje);
       console.log('📤 Recordatorio enviado a asesor:', asesor.name, '-', hipotecasSinMover.length, 'hipotecas');
     }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ALERTAS DE LEADS FRÍOS - Diario 10am L-V
+// ═══════════════════════════════════════════════════════════════
+async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('🥶 Iniciando verificación de leads fríos...');
+
+    const ahora = new Date();
+    const hace2Dias = new Date(ahora.getTime() - 2 * 24 * 60 * 60 * 1000);
+    const hace3Dias = new Date(ahora.getTime() - 3 * 24 * 60 * 60 * 1000);
+    const hace5Dias = new Date(ahora.getTime() - 5 * 24 * 60 * 60 * 1000);
+    const hace7Dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    // Obtener todos los leads activos (no cerrados ni caídos)
+    const { data: leadsActivos } = await supabase.client
+      .from('leads')
+      .select('*, team_members!leads_assigned_to_fkey(id, name, phone, role)')
+      .not('status', 'in', '("closed","delivered","fallen")')
+      .order('updated_at', { ascending: true });
+
+    if (!leadsActivos || leadsActivos.length === 0) {
+      console.log('✅ No hay leads activos para revisar');
+      return;
+    }
+
+    // Categorizar leads fríos
+    const leadsFrios: {
+      vendedor: any;
+      leads: { lead: any; razon: string; diasSinContacto: number }[];
+    }[] = [];
+
+    // Agrupar por vendedor
+    const vendedoresMap = new Map<string, any>();
+    const leadsPorVendedor = new Map<string, { lead: any; razon: string; diasSinContacto: number }[]>();
+
+    for (const lead of leadsActivos) {
+      const vendedor = lead.team_members;
+      if (!vendedor?.id) continue;
+
+      const ultimaActividad = new Date(lead.updated_at || lead.created_at);
+      const diasSinContacto = Math.floor((ahora.getTime() - ultimaActividad.getTime()) / (1000 * 60 * 60 * 24));
+
+      let razon = '';
+      let esFrio = false;
+
+      // Reglas de lead frío
+      if (lead.status === 'new' && ultimaActividad < hace2Dias) {
+        razon = '🆕 Lead NUEVO sin atender';
+        esFrio = true;
+      } else if (lead.status === 'contacted' && ultimaActividad < hace3Dias) {
+        razon = '📞 Contactado pero sin avance';
+        esFrio = true;
+      } else if (lead.status === 'scheduled' && ultimaActividad < hace3Dias) {
+        razon = '📅 Cita sin seguimiento';
+        esFrio = true;
+      } else if (lead.status === 'visited' && ultimaActividad < hace5Dias) {
+        razon = '🏠 Visitó pero sin avance';
+        esFrio = true;
+      } else if ((lead.status === 'negotiation' || lead.status === 'reserved') && ultimaActividad < hace7Dias) {
+        razon = '💰 Negociación ESTANCADA';
+        esFrio = true;
+      }
+
+      if (esFrio) {
+        if (!vendedoresMap.has(vendedor.id)) {
+          vendedoresMap.set(vendedor.id, vendedor);
+          leadsPorVendedor.set(vendedor.id, []);
+        }
+        leadsPorVendedor.get(vendedor.id)!.push({ lead, razon, diasSinContacto });
+      }
+    }
+
+    // Enviar alertas a cada vendedor
+    let alertasEnviadas = 0;
+    for (const [vendedorId, vendedor] of vendedoresMap) {
+      const leadsDelVendedor = leadsPorVendedor.get(vendedorId) || [];
+      if (leadsDelVendedor.length === 0 || !vendedor.phone) continue;
+
+      // Ordenar por días sin contacto (más críticos primero)
+      leadsDelVendedor.sort((a, b) => b.diasSinContacto - a.diasSinContacto);
+
+      // Tomar máximo 5 leads para no saturar
+      const top5 = leadsDelVendedor.slice(0, 5);
+
+      let mensaje = `🥶 *ALERTA: ${leadsDelVendedor.length} LEAD(S) ENFRIÁNDOSE*\n`;
+      mensaje += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+      for (const { lead, razon, diasSinContacto } of top5) {
+        mensaje += `${razon}\n`;
+        mensaje += `👤 *${lead.name || 'Sin nombre'}*\n`;
+        mensaje += `📱 ${lead.phone}\n`;
+        mensaje += `⏰ ${diasSinContacto} días sin contacto\n`;
+        if (lead.property_interest) mensaje += `🏠 ${lead.property_interest}\n`;
+        mensaje += `\n`;
+      }
+
+      if (leadsDelVendedor.length > 5) {
+        mensaje += `_...y ${leadsDelVendedor.length - 5} más_\n\n`;
+      }
+
+      mensaje += `⚡ *¡Contacta hoy para no perderlos!*`;
+
+      await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+      alertasEnviadas++;
+      console.log(`📤 Alerta enviada a ${vendedor.name}: ${leadsDelVendedor.length} leads fríos`);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ALERTA A ASESORES HIPOTECARIOS
+    // ═══════════════════════════════════════════════════════════
+    const { data: hipotecasFrias } = await supabase.client
+      .from('mortgage_applications')
+      .select('*, leads(name, phone, property_interest), team_members!mortgage_applications_assigned_advisor_id_fkey(id, name, phone)')
+      .not('status', 'in', '("approved","rejected","cancelled")')
+      .lt('updated_at', hace5Dias.toISOString());
+
+    if (hipotecasFrias && hipotecasFrias.length > 0) {
+      // Agrupar por asesor
+      const hipotecasPorAsesor = new Map<string, any[]>();
+      const asesoresMap = new Map<string, any>();
+
+      for (const hip of hipotecasFrias) {
+        const asesor = hip.team_members;
+        if (!asesor?.id || !asesor?.phone) continue;
+        if (!asesoresMap.has(asesor.id)) {
+          asesoresMap.set(asesor.id, asesor);
+          hipotecasPorAsesor.set(asesor.id, []);
+        }
+        hipotecasPorAsesor.get(asesor.id)!.push(hip);
+      }
+
+      for (const [asesorId, asesor] of asesoresMap) {
+        const hipotecas = hipotecasPorAsesor.get(asesorId) || [];
+        if (hipotecas.length === 0) continue;
+
+        let mensaje = `🥶 *ALERTA: ${hipotecas.length} CRÉDITO(S) SIN MOVIMIENTO*\n`;
+        mensaje += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+        for (const hip of hipotecas.slice(0, 5)) {
+          const diasSinMov = Math.floor((ahora.getTime() - new Date(hip.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+          mensaje += `👤 *${hip.leads?.name || 'Sin nombre'}*\n`;
+          mensaje += `📱 ${hip.leads?.phone || 'N/A'}\n`;
+          mensaje += `⏰ ${diasSinMov} días sin movimiento\n`;
+          mensaje += `📊 Status: ${hip.status}\n\n`;
+        }
+
+        if (hipotecas.length > 5) {
+          mensaje += `_...y ${hipotecas.length - 5} más_\n\n`;
+        }
+
+        mensaje += `⚡ *¡Dar seguimiento para no perder la venta!*`;
+
+        await meta.sendWhatsAppMessage(asesor.phone, mensaje);
+        alertasEnviadas++;
+        console.log(`📤 Alerta créditos enviada a ${asesor.name}: ${hipotecas.length} créditos fríos`);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ALERTA A CEO/ADMIN - Resumen de leads críticos
+    // ═══════════════════════════════════════════════════════════
+    const { data: admins } = await supabase.client
+      .from('team_members')
+      .select('*')
+      .in('role', ['admin', 'ceo', 'coordinador'])
+      .eq('active', true);
+
+    if (admins && admins.length > 0) {
+      // Contar totales por categoría
+      let totalNuevosSinAtender = 0;
+      let totalNegociacionEstancada = 0;
+      let totalCreditosSinMover = 0;
+
+      for (const [, leads] of leadsPorVendedor) {
+        for (const { razon } of leads) {
+          if (razon.includes('NUEVO')) totalNuevosSinAtender++;
+          if (razon.includes('ESTANCADA')) totalNegociacionEstancada++;
+        }
+      }
+      totalCreditosSinMover = hipotecasFrias?.length || 0;
+
+      const hayAlertasCriticas = totalNuevosSinAtender > 0 || totalNegociacionEstancada > 0 || totalCreditosSinMover > 2;
+
+      if (hayAlertasCriticas) {
+        let mensaje = `📊 *REPORTE LEADS FRÍOS*\n`;
+        mensaje += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+        if (totalNuevosSinAtender > 0) {
+          mensaje += `🚨 *${totalNuevosSinAtender}* leads NUEVOS sin atender (+2 días)\n`;
+        }
+        if (totalNegociacionEstancada > 0) {
+          mensaje += `💰 *${totalNegociacionEstancada}* negociaciones ESTANCADAS (+7 días)\n`;
+        }
+        if (totalCreditosSinMover > 0) {
+          mensaje += `🏦 *${totalCreditosSinMover}* créditos sin movimiento (+5 días)\n`;
+        }
+
+        mensaje += `\n_Ya se notificó a los vendedores y asesores._`;
+
+        for (const admin of admins) {
+          if (admin.phone) {
+            await meta.sendWhatsAppMessage(admin.phone, mensaje);
+            alertasEnviadas++;
+            console.log(`📤 Resumen enviado a ${admin.name} (${admin.role})`);
+          }
+        }
+      }
+    }
+
+    console.log(`✅ Alertas de leads fríos completadas: ${alertasEnviadas} mensajes enviados`);
+
+  } catch (error) {
+    console.error('❌ Error en alertas de leads fríos:', error);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// NO-SHOW DETECTION & RESCHEDULE
+// Pregunta al vendedor si el cliente se presentó a la cita
+// ═══════════════════════════════════════════════════════════════
+async function detectarNoShows(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('👻 Verificando citas para confirmar asistencia...');
+
+    const ahora = new Date();
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar citas de hoy que estén en status 'scheduled'
+    // (no fueron marcadas como completadas ni canceladas)
+    const { data: citasPotenciales, error: errorCitas } = await supabase.client
+      .from('appointments')
+      .select('*')
+      .eq('status', 'scheduled')
+      .eq('scheduled_date', hoyStr);
+
+    console.log(`📋 Citas encontradas: ${citasPotenciales?.length || 0}, error: ${errorCitas?.message || 'ninguno'}`);
+
+    if (!citasPotenciales || citasPotenciales.length === 0) {
+      console.log('✅ No hay citas pendientes de confirmar');
+      return;
+    }
+
+    let preguntasEnviadas = 0;
+
+    for (const cita of citasPotenciales) {
+      console.log(`🔍 Evaluando cita ${cita.id}: ${cita.lead_name} a las ${cita.scheduled_time}`);
+
+      // Parsear fecha y hora de la cita
+      const horaCita = cita.scheduled_time || '12:00';
+
+      // Crear fecha/hora completa de la cita
+      const [horas, minutos] = horaCita.split(':').map(Number);
+      const fechaHoraCita = new Date(hoyStr + 'T00:00:00Z'); // Forzar UTC
+      fechaHoraCita.setUTCHours(horas || 12, minutos || 0, 0, 0);
+
+      // La hora de la cita está en tiempo México (UTC-6)
+      // Convertir a UTC sumando 6 horas
+      const fechaHoraCitaUTC = new Date(fechaHoraCita.getTime() + 6 * 60 * 60 * 1000);
+
+      // Buffer de 1 HORA después de la hora de la cita para preguntar
+      const tiempoParaPreguntar = new Date(fechaHoraCitaUTC.getTime() + 60 * 60 * 1000);
+
+      console.log(`⏰ Hora cita México: ${horas}:${minutos}, UTC: ${fechaHoraCitaUTC.toISOString()}, Preguntar después de: ${tiempoParaPreguntar.toISOString()}, Ahora: ${ahora.toISOString()}`);
+
+      // Si aún no ha pasado el tiempo, no preguntar todavía
+      if (ahora < tiempoParaPreguntar) {
+        console.log(`⏭️ Aún no es momento de preguntar (faltan ${Math.round((tiempoParaPreguntar.getTime() - ahora.getTime()) / 60000)} min)`);
+        continue;
+      }
+
+      // Buscar el vendedor manualmente
+      let vendedor: any = null;
+      if (cita.vendedor_id) {
+        const { data: vendedorData } = await supabase.client
+          .from('team_members')
+          .select('id, name, phone')
+          .eq('id', cita.vendedor_id)
+          .single();
+        vendedor = vendedorData;
+      }
+
+      // Buscar el lead manualmente si existe
+      let lead: any = null;
+      if (cita.lead_id) {
+        const { data: leadData } = await supabase.client
+          .from('leads')
+          .select('id, name, phone, property_interest')
+          .eq('id', cita.lead_id)
+          .single();
+        lead = leadData;
+      }
+
+      if (!vendedor?.phone) {
+        console.log(`⚠️ Cita ${cita.id} sin vendedor o sin teléfono, saltando`);
+        continue;
+      }
+
+      // Verificar si ya preguntamos sobre esta cita (revisar notes del vendedor)
+      const { data: vendedorData } = await supabase.client
+        .from('team_members')
+        .select('notes')
+        .eq('id', vendedor.id)
+        .single();
+
+      let notasActuales: any = {};
+      try {
+        if (vendedorData?.notes) {
+          // Puede ser string o ya un objeto
+          notasActuales = typeof vendedorData.notes === 'string'
+            ? JSON.parse(vendedorData.notes)
+            : vendedorData.notes;
+        }
+      } catch (e) {
+        console.log(`⚠️ Error parseando notas de ${vendedor.name}:`, e);
+        notasActuales = {};
+      }
+
+      // Si ya tiene CUALQUIER confirmación pendiente o feedback pendiente, saltar (no saturar al vendedor)
+      if (notasActuales?.pending_show_confirmation || notasActuales?.pending_post_visit_feedback) {
+        console.log(`⏭️ Vendedor ${vendedor.name} ya tiene confirmación/feedback pendiente, saltando cita ${cita.id}`);
+        continue;
+      }
+
+      // Verificar si ya preguntamos sobre ESTA cita específica (evitar duplicados)
+      const citasPreguntadas = notasActuales?.citas_preguntadas || [];
+      if (citasPreguntadas.includes(cita.id)) {
+        console.log(`⏭️ Ya se preguntó sobre cita ${cita.id}, saltando`);
+        continue;
+      }
+
+      // Formatear hora bonita
+      const ampm = horas >= 12 ? 'pm' : 'am';
+      const hora12 = horas > 12 ? horas - 12 : (horas === 0 ? 12 : horas);
+      const horaFormateada = `${hora12}:${String(minutos || 0).padStart(2, '0')} ${ampm}`;
+
+      // Mensaje al vendedor preguntando si llegó el cliente - NOMBRE MUY CLARO
+      const leadName = lead?.name || cita.lead_name || 'el cliente';
+      const mensajeVendedor = `📋 *¿LLEGÓ ${leadName.toUpperCase()}?*
+
+Cita de las ${horaFormateada}
+🏠 ${cita.property_interest || cita.property_name || cita.location || 'la propiedad'}
+
+Responde para *${leadName}*:
+1️⃣ Sí llegó
+2️⃣ No llegó`;
+
+      await meta.sendWhatsAppMessage(vendedor.phone, mensajeVendedor);
+      console.log(`📤 Pregunta de asistencia enviada a ${vendedor.name} para cita ${cita.id}`);
+
+      // Guardar en team_member_notes que estamos esperando confirmación
+      const propertyName = cita.property_interest || cita.property_name || cita.location || 'la propiedad';
+      notasActuales.pending_show_confirmation = {
+        appointment_id: cita.id,
+        lead_id: lead?.id || null,
+        lead_name: lead?.name || cita.lead_name,
+        lead_phone: lead?.phone || cita.lead_phone,
+        property: propertyName,
+        hora: horaFormateada,
+        asked_at: ahora.toISOString()
+      };
+
+      // Agregar esta cita a la lista de citas preguntadas para evitar duplicados
+      if (!notasActuales.citas_preguntadas) {
+        notasActuales.citas_preguntadas = [];
+      }
+      notasActuales.citas_preguntadas.push(cita.id);
+
+      await supabase.client
+        .from('team_members')
+        .update({ notes: JSON.stringify(notasActuales) })
+        .eq('id', vendedor.id);
+
+      preguntasEnviadas++;
+    }
+
+    console.log(`✅ Preguntas de asistencia enviadas: ${preguntasEnviadas}`);
+
+  } catch (error) {
+    console.error('❌ Error verificando asistencia:', error);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TIMEOUT DE CONFIRMACIONES
+// Si el vendedor no responde en 2 horas, enviar encuesta al lead de todas formas
+// ═══════════════════════════════════════════════════════════════
+async function verificarTimeoutConfirmaciones(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('⏰ Verificando confirmaciones expiradas...');
+
+    const ahora = new Date();
+    const dosHorasAtras = new Date(ahora.getTime() - 2 * 60 * 60 * 1000);
+
+    // Buscar vendedores con confirmaciones pendientes
+    const { data: vendedores } = await supabase.client
+      .from('team_members')
+      .select('id, name, phone, notes')
+      .eq('role', 'vendedor');
+
+    if (!vendedores || vendedores.length === 0) return;
+
+    let timeoutsEncontrados = 0;
+
+    for (const vendedor of vendedores) {
+      let notes: any = {};
+      try {
+        if (vendedor.notes) {
+          notes = typeof vendedor.notes === 'string'
+            ? JSON.parse(vendedor.notes)
+            : vendedor.notes;
+        }
+      } catch (e) {
+        continue;
+      }
+
+      // Verificar si tiene confirmación pendiente
+      const confirmacion = notes?.pending_show_confirmation;
+      if (!confirmacion?.asked_at) continue;
+
+      // Si ya enviamos recordatorio, no enviar otro
+      if (confirmacion.reminder_sent) {
+        console.log(`⏭️ Ya se envió recordatorio a ${vendedor.name} sobre ${confirmacion.lead_name}, saltando`);
+        continue;
+      }
+
+      const preguntadoEn = new Date(confirmacion.asked_at);
+
+      // Si ya pasaron 2 horas sin respuesta
+      if (preguntadoEn < dosHorasAtras) {
+        console.log(`⏰ TIMEOUT: Vendedor ${vendedor.name} no respondió sobre ${confirmacion.lead_name}`);
+        timeoutsEncontrados++;
+
+        // NO enviamos encuesta automáticamente - solo recordamos al vendedor
+        if (vendedor.phone) {
+          await meta.sendWhatsAppMessage(vendedor.phone,
+            `⏰ *Recordatorio pendiente*\n\n` +
+            `No respondiste sobre la cita con *${confirmacion.lead_name}*.\n\n` +
+            `¿Llegó a la visita?\n` +
+            `1️⃣ Sí llegó\n` +
+            `2️⃣ No llegó\n\n` +
+            `_Responde para que pueda dar seguimiento adecuado._`
+          );
+          console.log(`📤 Recordatorio enviado a ${vendedor.name} sobre ${confirmacion.lead_name}`);
+        }
+
+        // Marcar que ya enviamos recordatorio (no limpiar, solo marcar)
+        const notasActualizadas = { ...notes };
+        notasActualizadas.pending_show_confirmation = {
+          ...confirmacion,
+          reminder_sent: true,
+          reminder_sent_at: new Date().toISOString()
+        };
+
+        await supabase.client
+          .from('team_members')
+          .update({ notes: JSON.stringify(notasActualizadas) })
+          .eq('id', vendedor.id);
+      }
+    }
+
+    console.log(`⏰ Timeouts procesados: ${timeoutsEncontrados}`);
+
+  } catch (error) {
+    console.error('❌ Error verificando timeouts:', error);
   }
 }
 
@@ -8391,6 +11061,832 @@ async function remarketingLeadsFrios(supabase: SupabaseService, meta: MetaWhatsA
 // HEALTH CHECK / MONITOREO
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+// REACTIVACIÓN DE LEADS PERDIDOS
+// ═══════════════════════════════════════════════════════════════
+// FOLLOW-UP AUTOMÁTICO A LEADS INACTIVOS (3+ días sin responder)
+// Se ejecuta a las 11am L-V
+// ═══════════════════════════════════════════════════════════════
+async function followUpLeadsInactivos(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('📬 Iniciando follow-up de leads inactivos...');
+
+    const ahora = new Date();
+    const hace3dias = new Date(ahora.getTime() - 3 * 24 * 60 * 60 * 1000);
+    const hace30dias = new Date(ahora.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const hoy = ahora.toISOString().split('T')[0];
+
+    // Buscar leads contactados pero sin respuesta en 3-30 días
+    const { data: leadsInactivos, error } = await supabase.client
+      .from('leads')
+      .select('*, team_members!leads_assigned_to_fkey(id, name, phone)')
+      .in('status', ['new', 'contacted', 'appointment_scheduled'])
+      .lt('updated_at', hace3dias.toISOString())
+      .gt('updated_at', hace30dias.toISOString())
+      .not('phone', 'is', null)
+      .is('archived', null)
+      .limit(50);
+
+    if (error) {
+      console.error('❌ Error buscando leads inactivos:', error);
+      return;
+    }
+
+    if (!leadsInactivos || leadsInactivos.length === 0) {
+      console.log('📭 No hay leads inactivos para follow-up');
+      return;
+    }
+
+    // Filtrar leads que ya recibieron follow-up hoy o recientemente
+    const leadsParaFollowup = leadsInactivos.filter(lead => {
+      const notes = lead.notes || '';
+      // No enviar si ya recibió follow-up en los últimos 7 días
+      const tieneFollowupReciente = notes.includes(`[Follow-up ${hoy}`) ||
+        notes.match(/\[Follow-up 20\d{2}-\d{2}-\d{2}\]/);
+      if (tieneFollowupReciente) {
+        // Verificar si el último follow-up fue hace menos de 7 días
+        const matches = notes.match(/\[Follow-up (20\d{2}-\d{2}-\d{2})\]/g);
+        if (matches) {
+          const ultimoFollow = matches[matches.length - 1].match(/20\d{2}-\d{2}-\d{2}/)?.[0];
+          if (ultimoFollow) {
+            const fechaUltimo = new Date(ultimoFollow);
+            const hace7dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+            if (fechaUltimo > hace7dias) {
+              return false; // Ya tuvo follow-up reciente
+            }
+          }
+        }
+      }
+      return true;
+    }).slice(0, 10); // Máximo 10 por día
+
+    if (leadsParaFollowup.length === 0) {
+      console.log('📭 Todos los leads inactivos ya tienen follow-up reciente');
+      return;
+    }
+
+    console.log(`📋 Enviando follow-up a ${leadsParaFollowup.length} leads inactivos`);
+
+    const mensajesFollowup = [
+      `¡Hola {nombre}! 👋\n\n¿Todo bien? Te escribo de *Santa Rita Residencial* para saber si aún te interesa conocer nuestras casas.\n\nSi tienes alguna duda o quieres agendar una visita, con gusto te ayudo. 🏠`,
+      `¡Hola {nombre}! 🏡\n\n¿Sigues buscando casa? Quedamos pendientes de platicar y me encantaría ayudarte.\n\n¿Tienes 5 minutos para que te cuente las opciones que tenemos? 😊`,
+      `¡Hola {nombre}! ✨\n\nSoy de Santa Rita. Vi que quedamos pendientes y no quería dejarte sin seguimiento.\n\n¿Hay algo en lo que pueda ayudarte? ¿Quizá agendar una visita? 🏠`
+    ];
+
+    let enviados = 0;
+    const notificacionesVendedor = new Map<string, string[]>();
+
+    for (const lead of leadsParaFollowup) {
+      if (!lead.phone) continue;
+
+      const nombre = lead.name?.split(' ')[0] || 'amigo';
+      const mensaje = mensajesFollowup[Math.floor(Math.random() * mensajesFollowup.length)]
+        .replace('{nombre}', nombre);
+
+      try {
+        await meta.sendWhatsAppMessage(lead.phone, mensaje);
+
+        // Marcar en notes
+        const notesActuales = lead.notes || '';
+        await supabase.client
+          .from('leads')
+          .update({
+            notes: notesActuales + `\n[Follow-up ${hoy}] Mensaje automático enviado`,
+            last_interaction: ahora.toISOString()
+          })
+          .eq('id', lead.id);
+
+        console.log(`✅ Follow-up enviado a ${lead.name} (${lead.phone})`);
+        enviados++;
+
+        // Agrupar para notificar al vendedor
+        if (lead.assigned_to && lead.team_members) {
+          const vendedorId = lead.assigned_to;
+          if (!notificacionesVendedor.has(vendedorId)) {
+            notificacionesVendedor.set(vendedorId, []);
+          }
+          notificacionesVendedor.get(vendedorId)?.push(lead.name);
+        }
+
+      } catch (e) {
+        console.log(`❌ Error enviando follow-up a ${lead.name}:`, e);
+      }
+    }
+
+    // Notificar a vendedores sobre los follow-ups enviados
+    for (const [vendedorId, leadNames] of notificacionesVendedor) {
+      const vendedor = leadsParaFollowup.find(l => l.assigned_to === vendedorId)?.team_members;
+      if (vendedor?.phone) {
+        const msg = `📬 *Follow-up automático enviado*\n\nSARA contactó a ${leadNames.length} lead(s) inactivos que tienes asignados:\n\n${leadNames.map(n => `• ${n}`).join('\n')}\n\n💡 Si responden, te avisaré para que les des seguimiento.`;
+        await meta.sendWhatsAppMessage(vendedor.phone, msg);
+      }
+    }
+
+    console.log(`✅ Follow-up completado: ${enviados} mensajes enviados`);
+
+  } catch (error) {
+    console.error('❌ Error en followUpLeadsInactivos:', error);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RECORDATORIOS DE PAGO DE APARTADOS
+// Envía recordatorios 5 días antes, 1 día antes y el día del pago
+// ═══════════════════════════════════════════════════════════════
+async function recordatoriosPagoApartado(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('💰 Verificando recordatorios de pago de apartados...');
+
+    const hoy = new Date();
+    const hoyStr = hoy.toISOString().split('T')[0];
+
+    // Calcular fechas para recordatorios
+    const en5dias = new Date(hoy.getTime() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const en1dia = new Date(hoy.getTime() + 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    // Buscar leads en status "reserved" con datos de apartado
+    const { data: leadsReservados, error } = await supabase.client
+      .from('leads')
+      .select('*, team_members!leads_assigned_to_fkey(id, name, phone)')
+      .eq('status', 'reserved')
+      .not('notes', 'is', null);
+
+    if (error) {
+      console.error('❌ Error buscando leads reservados:', error);
+      return;
+    }
+
+    if (!leadsReservados || leadsReservados.length === 0) {
+      console.log('📭 No hay leads con apartado pendiente');
+      return;
+    }
+
+    console.log(`📋 Verificando ${leadsReservados.length} leads reservados...`);
+
+    let recordatoriosEnviados = 0;
+
+    for (const lead of leadsReservados) {
+      const notes = lead.notes || {};
+      const apartado = notes.apartado;
+
+      if (!apartado || !apartado.fecha_pago) {
+        continue; // Sin fecha de pago definida
+      }
+
+      const fechaPago = apartado.fecha_pago;
+      const recordatoriosYaEnviados = apartado.recordatorios_enviados || 0;
+      const vendedor = lead.team_members;
+
+      let tipoRecordatorio: '5dias' | '1dia' | 'hoy' | 'vencido' | null = null;
+      let mensajeCliente = '';
+      let mensajeVendedor = '';
+
+      const fechaPagoDate = new Date(fechaPago + 'T12:00:00');
+      const diasParaPago = Math.ceil((fechaPagoDate.getTime() - hoy.getTime()) / (24 * 60 * 60 * 1000));
+      const engancheFormato = apartado.enganche?.toLocaleString('es-MX') || '0';
+      const primerNombre = lead.name?.split(' ')[0] || 'Cliente';
+      const fechaFormateada = fechaPagoDate.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+
+      // Determinar tipo de recordatorio
+      if (fechaPago === en5dias && recordatoriosYaEnviados < 1) {
+        tipoRecordatorio = '5dias';
+        mensajeCliente = `👋 Hola ${primerNombre}!\n\n` +
+          `Te recordamos que tu *pago de enganche* está programado para el *${fechaFormateada}*.\n\n` +
+          `💰 *Monto:* $${engancheFormato}\n` +
+          `🏠 *Propiedad:* ${apartado.propiedad || 'Tu nueva casa'}\n\n` +
+          `Si tienes alguna duda sobre la forma de pago, tu asesor ${vendedor?.name?.split(' ')[0] || ''} puede ayudarte.\n\n` +
+          `¡Gracias por confiar en nosotros! 🏡`;
+        mensajeVendedor = `⏰ *RECORDATORIO 5 DÍAS*\n\n` +
+          `El pago de *${lead.name}* está programado para el ${fechaFormateada}.\n\n` +
+          `💰 Enganche: $${engancheFormato}\n` +
+          `🏠 Propiedad: ${apartado.propiedad || 'Por definir'}\n\n` +
+          `📤 Ya le envié recordatorio al cliente.`;
+      } else if (fechaPago === en1dia && recordatoriosYaEnviados < 2) {
+        tipoRecordatorio = '1dia';
+        mensajeCliente = `👋 Hola ${primerNombre}!\n\n` +
+          `¡Tu pago de enganche es *mañana*! 📅\n\n` +
+          `💰 *Monto:* $${engancheFormato}\n` +
+          `🏠 *Propiedad:* ${apartado.propiedad || 'Tu nueva casa'}\n\n` +
+          `Si necesitas hacer el pago hoy o tienes dudas, contáctanos.\n\n` +
+          `¡Ya casi es tuya! 🎉`;
+        mensajeVendedor = `⚠️ *PAGO MAÑANA*\n\n` +
+          `*${lead.name}* debe pagar mañana.\n\n` +
+          `💰 Enganche: $${engancheFormato}\n` +
+          `🏠 Propiedad: ${apartado.propiedad || 'Por definir'}\n\n` +
+          `📤 Ya le envié recordatorio.`;
+      } else if (fechaPago === hoyStr && recordatoriosYaEnviados < 3) {
+        tipoRecordatorio = 'hoy';
+        mensajeCliente = `🔔 ¡Hola ${primerNombre}!\n\n` +
+          `*¡Hoy es el día de tu pago de enganche!*\n\n` +
+          `💰 *Monto:* $${engancheFormato}\n` +
+          `🏠 *Propiedad:* ${apartado.propiedad || 'Tu nueva casa'}\n\n` +
+          `Una vez realizado el pago, envíanos tu comprobante para confirmarlo.\n\n` +
+          `¿Tienes dudas? Estamos para ayudarte 😊`;
+        mensajeVendedor = `🔴 *PAGO HOY*\n\n` +
+          `*${lead.name}* debe pagar HOY.\n\n` +
+          `💰 Enganche: $${engancheFormato}\n` +
+          `🏠 Propiedad: ${apartado.propiedad || 'Por definir'}\n\n` +
+          `📤 Recordatorio enviado. Confirma cuando recibas el pago.`;
+      } else if (diasParaPago < 0 && diasParaPago >= -3 && recordatoriosYaEnviados < 4) {
+        tipoRecordatorio = 'vencido';
+        const diasVencido = Math.abs(diasParaPago);
+        mensajeCliente = `👋 Hola ${primerNombre}\n\n` +
+          `Notamos que tu pago de enganche estaba programado hace ${diasVencido} día(s).\n\n` +
+          `💰 *Monto pendiente:* $${engancheFormato}\n\n` +
+          `Si ya realizaste el pago, por favor envíanos el comprobante.\n` +
+          `Si necesitas más tiempo o tienes algún inconveniente, platícanos para buscar opciones.\n\n` +
+          `Estamos para ayudarte 🤝`;
+        mensajeVendedor = `⚠️ *PAGO VENCIDO (${diasVencido} días)*\n\n` +
+          `*${lead.name}* no ha completado su pago.\n\n` +
+          `💰 Enganche: $${engancheFormato}\n` +
+          `📅 Fecha límite: ${fechaFormateada}\n\n` +
+          `Contacta al cliente para dar seguimiento.`;
+      }
+
+      if (tipoRecordatorio) {
+        try {
+          // Enviar al cliente
+          if (lead.phone && mensajeCliente) {
+            await meta.sendWhatsAppMessage(lead.phone, mensajeCliente);
+            console.log(`📤 Recordatorio ${tipoRecordatorio} enviado a ${lead.name}`);
+          }
+
+          // Enviar al vendedor
+          if (vendedor?.phone && mensajeVendedor) {
+            await meta.sendWhatsAppMessage(vendedor.phone, mensajeVendedor);
+          }
+
+          // Actualizar contador de recordatorios
+          const nuevoContador = tipoRecordatorio === '5dias' ? 1 :
+                               tipoRecordatorio === '1dia' ? 2 :
+                               tipoRecordatorio === 'hoy' ? 3 : 4;
+
+          await supabase.client
+            .from('leads')
+            .update({
+              notes: {
+                ...notes,
+                apartado: {
+                  ...apartado,
+                  recordatorios_enviados: nuevoContador,
+                  ultimo_recordatorio: hoyStr
+                }
+              }
+            })
+            .eq('id', lead.id);
+
+          recordatoriosEnviados++;
+          await new Promise(r => setTimeout(r, 1000)); // Rate limiting
+        } catch (e) {
+          console.log(`❌ Error enviando recordatorio a ${lead.name}:`, e);
+        }
+      }
+    }
+
+    console.log(`✅ Recordatorios de pago: ${recordatoriosEnviados} enviados`);
+
+  } catch (error) {
+    console.error('❌ Error en recordatoriosPagoApartado:', error);
+  }
+}
+
+// Contacta leads marcados como "lost" o "fallen" después de 30 días
+// ═══════════════════════════════════════════════════════════════
+async function reactivarLeadsPerdidos(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('🔄 Iniciando reactivación de leads perdidos...');
+
+    const ahora = new Date();
+    const hace30dias = new Date(ahora.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const hace180dias = new Date(ahora.getTime() - 180 * 24 * 60 * 60 * 1000);
+
+    // Buscar leads perdidos hace 30-180 días
+    const { data: leadsPerdidos, error } = await supabase.client
+      .from('leads')
+      .select('*')
+      .in('status', ['lost', 'fallen'])
+      .lt('status_changed_at', hace30dias.toISOString())
+      .gt('status_changed_at', hace180dias.toISOString())
+      .not('phone', 'is', null)
+      .limit(50); // Traer más para filtrar después
+
+    if (error) {
+      console.error('❌ Error buscando leads perdidos:', error);
+      return;
+    }
+
+    if (!leadsPerdidos || leadsPerdidos.length === 0) {
+      console.log('📭 No hay leads perdidos para reactivar');
+      return;
+    }
+
+    // Filtrar leads que ya recibieron reactivación (revisar notes)
+    const leadsParaReactivar = leadsPerdidos.filter(lead => {
+      const notes = lead.notes || '';
+      return !notes.includes('Reactivación automática enviada');
+    }).slice(0, 15); // Máximo 15
+
+    if (leadsParaReactivar.length === 0) {
+      console.log('📭 Todos los leads perdidos ya fueron reactivados anteriormente');
+      return;
+    }
+
+    console.log(`📋 Encontrados ${leadsParaReactivar.length} leads para reactivar (de ${leadsPerdidos.length} perdidos)`);
+
+    // Cargar vendedores para notificaciones
+    const { data: teamMembers } = await supabase.client
+      .from('team_members')
+      .select('id, name, phone')
+      .eq('active', true);
+
+    const mensajesReactivacion = [
+      `¡Hola {nombre}! 👋\n\nSoy de Santa Rita Residencial. Hace tiempo platicamos sobre tu búsqueda de casa.\n\nEntendemos que en ese momento no era el tiempo adecuado, pero quería contarte que *tenemos nuevas opciones y promociones* que podrían interesarte.\n\n¿Te gustaría que te platique las novedades? 🏠`,
+      `¡Hola {nombre}! 🏡\n\nTe escribo de Santa Rita. Sé que hace un tiempo las cosas no se dieron, pero las circunstancias cambian.\n\n*Tenemos casas con facilidades de pago* y me encantaría ayudarte si sigues buscando.\n\n¿Platicamos? Sin compromiso 😊`,
+      `¡Hola {nombre}! ✨\n\n¿Sigues pensando en comprar casa? Te escribo porque tenemos *promociones especiales este mes* que no queríamos que te perdieras.\n\nSi tu situación ha cambiado y te interesa retomar la búsqueda, aquí estamos para ayudarte.\n\n¿Qué dices? 🏠`
+    ];
+
+    let reactivados = 0;
+    const leadsPorVendedor = new Map<string, any[]>();
+
+    for (const lead of leadsParaReactivar) {
+      if (!lead.phone) continue;
+
+      const mensajeBase = mensajesReactivacion[Math.floor(Math.random() * mensajesReactivacion.length)];
+      const nombre = lead.name?.split(' ')[0] || 'amigo';
+      const mensaje = mensajeBase.replace('{nombre}', nombre);
+
+      try {
+        await meta.sendWhatsAppMessage(lead.phone, mensaje);
+
+        await supabase.client
+          .from('leads')
+          .update({
+            status: 'contacted',
+            updated_at: ahora.toISOString(),
+            notes: (lead.notes || '') + `\n[${ahora.toISOString().split('T')[0]}] Reactivación automática enviada`
+          })
+          .eq('id', lead.id);
+
+        console.log(`📤 Reactivación enviada a ${lead.name} (${lead.phone})`);
+        reactivados++;
+
+        // Buscar vendedor asignado
+        const vendedor = teamMembers?.find(tm => tm.id === lead.assigned_to);
+        if (vendedor?.id) {
+          if (!leadsPorVendedor.has(vendedor.id)) {
+            leadsPorVendedor.set(vendedor.id, []);
+          }
+          leadsPorVendedor.get(vendedor.id)!.push({ lead, vendedor });
+        }
+      } catch (e) {
+        console.log(`❌ Error reactivando ${lead.name}:`, e);
+      }
+
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    // Notificar a vendedores
+    for (const [vendedorId, leads] of leadsPorVendedor) {
+      const vendedor = leads[0].vendedor;
+      if (!vendedor?.phone) continue;
+
+      let msg = `🔄 *LEADS REACTIVADOS*\n\nSe enviaron mensajes a ${leads.length} lead(s) que habías dado por perdidos:\n\n`;
+      for (const { lead } of leads.slice(0, 5)) {
+        msg += `• *${lead.name}* - ${lead.phone}\n`;
+        if (lead.lost_reason) msg += `  _Razón: ${lead.lost_reason}_\n`;
+      }
+      if (leads.length > 5) msg += `\n_...y ${leads.length - 5} más_\n`;
+      msg += `\n💡 *Si responden, ya están en tu pipeline como "contactados".*`;
+
+      await meta.sendWhatsAppMessage(vendedor.phone, msg);
+    }
+
+    console.log(`✅ Reactivación completada: ${reactivados} leads contactados`);
+  } catch (error) {
+    console.error('❌ Error en reactivación:', error);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FELICITACIONES DE CUMPLEAÑOS A LEADS
+// Envía mensaje personalizado a leads que cumplen años hoy
+// ═══════════════════════════════════════════════════════════════
+async function felicitarCumpleañosLeads(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('🎂 Verificando cumpleaños de leads...');
+
+    const hoy = new Date();
+    const mes = String(hoy.getMonth() + 1).padStart(2, '0');
+    const dia = String(hoy.getDate()).padStart(2, '0');
+    const fechaHoy = `${mes}-${dia}`;
+    const añoActual = hoy.getFullYear();
+
+    // Buscar leads cuyo cumpleaños sea hoy (formato: YYYY-MM-DD o MM-DD)
+    const { data: leadsCumple, error } = await supabase.client
+      .from('leads')
+      .select('*, team_members!leads_assigned_to_fkey(id, name, phone)')
+      .or(`birthday.ilike.%-${fechaHoy},birthday.ilike.${fechaHoy}%`)
+      .not('phone', 'is', null)
+      .not('status', 'in', '("lost","fallen")');
+
+    if (error) {
+      // Si falla el join, intentar sin él
+      const { data: leadsSimple } = await supabase.client
+        .from('leads')
+        .select('*')
+        .or(`birthday.ilike.%-${fechaHoy},birthday.ilike.${fechaHoy}%`)
+        .not('phone', 'is', null)
+        .not('status', 'in', '("lost","fallen")');
+
+      if (!leadsSimple || leadsSimple.length === 0) {
+        console.log('🎂 No hay leads cumpliendo años hoy');
+        return;
+      }
+
+      // Procesar sin info de vendedor
+      await procesarCumpleañosLeads(supabase, meta, leadsSimple, null, fechaHoy);
+      return;
+    }
+
+    if (!leadsCumple || leadsCumple.length === 0) {
+      console.log('🎂 No hay leads cumpliendo años hoy');
+      return;
+    }
+
+    // Cargar vendedores por si el join falló
+    const { data: teamMembers } = await supabase.client
+      .from('team_members')
+      .select('id, name, phone')
+      .eq('active', true);
+
+    await procesarCumpleañosLeads(supabase, meta, leadsCumple, teamMembers, fechaHoy);
+
+  } catch (error) {
+    console.error('❌ Error en felicitaciones de cumpleaños:', error);
+  }
+}
+
+async function procesarCumpleañosLeads(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  leads: any[],
+  teamMembers: any[] | null,
+  fechaHoy: string
+): Promise<void> {
+  console.log(`🎂 Encontrados ${leads.length} leads cumpliendo años hoy`);
+
+  const mensajesCumple = [
+    `🎂 *¡Feliz Cumpleaños {nombre}!* 🎉\n\nDesde Santa Rita Residencial te deseamos un día lleno de alegría y que todos tus sueños se hagan realidad.\n\n¡Que este nuevo año de vida te traiga muchas bendiciones! 🌟`,
+    `🎊 *¡Muchísimas felicidades {nombre}!* 🎂\n\nHoy es tu día especial y queremos desearte lo mejor.\n\nQue este año venga cargado de éxitos, salud y mucha felicidad. ¡Disfruta tu día! 🥳`,
+    `✨ *¡Feliz Cumpleaños {nombre}!* 🎁\n\nEn Santa Rita te enviamos un cálido abrazo en tu día.\n\nQue la vida te siga llenando de momentos increíbles. ¡Pásala increíble! 🎈`
+  ];
+
+  let felicitados = 0;
+  const cumplesPorVendedor = new Map<string, any[]>();
+
+  for (const lead of leads) {
+    if (!lead.phone) continue;
+
+    // Verificar si ya lo felicitamos este año (revisar notes)
+    const notes = lead.notes || '';
+    if (notes.includes(`Cumpleaños ${fechaHoy}`)) {
+      console.log(`⏭️ Ya felicitamos a ${lead.name} este año`);
+      continue;
+    }
+
+    const nombre = lead.name?.split(' ')[0] || 'amigo';
+    const mensaje = mensajesCumple[Math.floor(Math.random() * mensajesCumple.length)]
+      .replace('{nombre}', nombre);
+
+    try {
+      await meta.sendWhatsAppMessage(lead.phone, mensaje);
+
+      // Marcar en notes que ya lo felicitamos
+      await supabase.client
+        .from('leads')
+        .update({
+          notes: notes + `\n[Cumpleaños ${fechaHoy}] Felicitación enviada`
+        })
+        .eq('id', lead.id);
+
+      console.log(`🎂 Felicitación enviada a ${lead.name} (${lead.phone})`);
+      felicitados++;
+
+      // Agrupar por vendedor para notificarle
+      const vendedorId = lead.assigned_to;
+      const vendedor = lead.team_members || teamMembers?.find(tm => tm.id === vendedorId);
+      if (vendedor?.id) {
+        if (!cumplesPorVendedor.has(vendedor.id)) {
+          cumplesPorVendedor.set(vendedor.id, []);
+        }
+        cumplesPorVendedor.get(vendedor.id)!.push({ lead, vendedor });
+      }
+
+    } catch (e) {
+      console.log(`❌ Error felicitando a ${lead.name}:`, e);
+    }
+
+    // Esperar entre mensajes
+    await new Promise(r => setTimeout(r, 1500));
+  }
+
+  // Notificar a vendedores sobre cumpleaños de sus leads
+  for (const [vendedorId, cumples] of cumplesPorVendedor) {
+    const vendedor = cumples[0].vendedor;
+    if (!vendedor?.phone) continue;
+
+    let msg = `🎂 *CUMPLEAÑOS DE TUS CLIENTES*\n\n`;
+    msg += `Hoy cumplen años ${cumples.length} de tus leads:\n\n`;
+
+    for (const { lead } of cumples) {
+      msg += `• *${lead.name}*\n`;
+      msg += `  📱 ${lead.phone}\n`;
+      if (lead.property_interest) msg += `  🏠 Interés: ${lead.property_interest}\n`;
+      msg += `\n`;
+    }
+
+    msg += `💡 *Ya les enviamos felicitación automática.*\n`;
+    msg += `_Es buen momento para dar seguimiento personalizado._`;
+
+    try {
+      await meta.sendWhatsAppMessage(vendedor.phone, msg);
+      console.log(`📤 Notificación de cumpleaños enviada a vendedor ${vendedor.name}`);
+    } catch (e) {
+      console.log(`Error notificando a vendedor:`, e);
+    }
+  }
+
+  console.log(`✅ Felicitaciones de cumpleaños completadas: ${felicitados} leads`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FELICITACIONES DE CUMPLEAÑOS AL EQUIPO
+// Envía mensaje personalizado a vendedores/asesores que cumplen años
+// ═══════════════════════════════════════════════════════════════
+async function felicitarCumpleañosEquipo(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('🎂 Verificando cumpleaños del equipo...');
+
+    const hoy = new Date();
+    const mes = String(hoy.getMonth() + 1).padStart(2, '0');
+    const dia = String(hoy.getDate()).padStart(2, '0');
+    const fechaHoy = `${mes}-${dia}`;
+
+    // Buscar miembros del equipo cuyo cumpleaños sea hoy
+    const { data: equipoCumple, error } = await supabase.client
+      .from('team_members')
+      .select('*')
+      .or(`birthday.ilike.%-${fechaHoy},birthday.ilike.${fechaHoy}%`)
+      .eq('active', true)
+      .not('phone', 'is', null);
+
+    if (error || !equipoCumple || equipoCumple.length === 0) {
+      console.log('🎂 No hay miembros del equipo cumpliendo años hoy');
+      return;
+    }
+
+    console.log(`🎂 Encontrados ${equipoCumple.length} del equipo cumpliendo años hoy`);
+
+    const mensajesCumple = [
+      `🎂 *¡Feliz Cumpleaños {nombre}!* 🎉\n\nTodo el equipo de Santa Rita te desea un día increíble lleno de alegría.\n\n¡Que este nuevo año de vida te traiga muchos éxitos! 🌟`,
+      `🎊 *¡Muchísimas felicidades {nombre}!* 🎂\n\nHoy celebramos contigo este día tan especial.\n\nGracias por ser parte del equipo. ¡Disfruta tu día al máximo! 🥳`,
+      `✨ *¡Feliz Cumpleaños {nombre}!* 🎁\n\nEn Santa Rita te enviamos un fuerte abrazo.\n\n¡Que la vida te siga llenando de momentos increíbles! 🎈`
+    ];
+
+    let felicitados = 0;
+
+    for (const miembro of equipoCumple) {
+      if (!miembro.phone) continue;
+
+      // Verificar si ya lo felicitamos (revisar notes)
+      const notes = typeof miembro.notes === 'object' ? miembro.notes : {};
+      const notesStr = JSON.stringify(notes);
+      if (notesStr.includes(`cumple_felicitado_${fechaHoy}`)) {
+        console.log(`⏭️ ${miembro.name} ya felicitado hoy`);
+        continue;
+      }
+
+      const nombre = miembro.name?.split(' ')[0] || 'compañero';
+      const mensaje = mensajesCumple[felicitados % mensajesCumple.length].replace('{nombre}', nombre);
+
+      try {
+        await meta.sendWhatsAppMessage(miembro.phone, mensaje);
+        felicitados++;
+        console.log(`🎂 Felicitado: ${miembro.name}`);
+
+        // Marcar como felicitado
+        await supabase.client.from('team_members').update({
+          notes: { ...notes, [`cumple_felicitado_${fechaHoy}`]: true }
+        }).eq('id', miembro.id);
+
+      } catch (e) {
+        console.log(`❌ Error felicitando a ${miembro.name}:`, e);
+      }
+
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    // Notificar al grupo/CEO si alguien cumple años
+    if (felicitados > 0) {
+      // Buscar CEO o admin para notificar
+      const { data: admins } = await supabase.client
+        .from('team_members')
+        .select('phone, name')
+        .or(`role.eq.ceo,role.eq.admin,role.ilike.%director%`)
+        .eq('active', true)
+        .not('phone', 'is', null);
+
+      if (admins && admins.length > 0) {
+        let msgGrupo = `🎂 *CUMPLEAÑOS DEL EQUIPO HOY*\n\n`;
+        for (const m of equipoCumple) {
+          msgGrupo += `• *${m.name}* (${m.role || m.position || 'Equipo'})\n`;
+        }
+        msgGrupo += `\n🎉 ¡Ya les enviamos felicitación automática!`;
+
+        for (const admin of admins) {
+          // No notificar al cumpleañero mismo si es admin
+          if (equipoCumple.find(e => e.phone === admin.phone)) continue;
+
+          try {
+            await meta.sendWhatsAppMessage(admin.phone, msgGrupo);
+          } catch (e) {
+            console.log('Error notificando admin:', e);
+          }
+        }
+      }
+    }
+
+    console.log(`✅ Felicitaciones al equipo completadas: ${felicitados} personas`);
+  } catch (error) {
+    console.error('❌ Error en felicitaciones de cumpleaños al equipo:', error);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FELICITACIONES DE ANIVERSARIO DE COMPRA
+// Envía mensaje a clientes que cumplen 1, 2, 3... años de haber comprado
+// ═══════════════════════════════════════════════════════════════
+async function felicitarAniversarioCompra(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('🏠 Verificando aniversarios de compra...');
+
+    const hoy = new Date();
+    const mesHoy = hoy.getMonth() + 1;
+    const diaHoy = hoy.getDate();
+
+    // Buscar leads que compraron (delivered) y cuyo mes/día de status_changed_at coincide con hoy
+    const { data: clientesDelivered, error } = await supabase.client
+      .from('leads')
+      .select('*')
+      .eq('status', 'delivered')
+      .not('status_changed_at', 'is', null)
+      .not('phone', 'is', null);
+
+    console.log(`🏠 DEBUG: error=${JSON.stringify(error)}, clientes=${clientesDelivered?.length || 0}`);
+    if (clientesDelivered && clientesDelivered.length > 0) {
+      console.log(`🏠 DEBUG: Primer cliente: ${JSON.stringify({ name: clientesDelivered[0].name, phone: clientesDelivered[0].phone, status: clientesDelivered[0].status, status_changed_at: clientesDelivered[0].status_changed_at })}`);
+    }
+
+    if (error || !clientesDelivered || clientesDelivered.length === 0) {
+      console.log('🏠 No hay clientes con status delivered');
+      return;
+    }
+
+    // Filtrar los que cumplen aniversario hoy
+    const aniversariosHoy = clientesDelivered.filter((cliente: any) => {
+      if (!cliente.status_changed_at) return false;
+      const fechaCompra = new Date(cliente.status_changed_at);
+      const mesCompra = fechaCompra.getMonth() + 1;
+      const diaCompra = fechaCompra.getDate();
+      const añoCompra = fechaCompra.getFullYear();
+      const añosTranscurridos = hoy.getFullYear() - añoCompra;
+
+      // Solo si es aniversario (mismo día/mes) y ya pasó al menos 1 año
+      return mesCompra === mesHoy && diaCompra === diaHoy && añosTranscurridos >= 1;
+    });
+
+    if (aniversariosHoy.length === 0) {
+      console.log('🏠 No hay aniversarios de compra hoy');
+      return;
+    }
+
+    console.log(`🏠 Encontrados ${aniversariosHoy.length} aniversarios de compra hoy`);
+
+    // Cargar vendedores por si el join falló
+    const { data: teamMembers } = await supabase.client
+      .from('team_members')
+      .select('id, name, phone')
+      .eq('active', true);
+
+    let felicitados = 0;
+    const aniversariosPorVendedor = new Map<string, any[]>();
+
+    for (const cliente of aniversariosHoy) {
+      if (!cliente.phone) continue;
+
+      // Calcular años transcurridos
+      const fechaCompra = new Date(cliente.status_changed_at);
+      const años = hoy.getFullYear() - fechaCompra.getFullYear();
+
+      // Verificar si ya felicitamos este año (revisar notes)
+      const notes = cliente.notes || '';
+      const añoActual = hoy.getFullYear();
+      if (typeof notes === 'string' && notes.includes(`Aniversario ${añoActual}`)) {
+        console.log(`⏭️ ${cliente.name} ya felicitado este año`);
+        continue;
+      }
+      if (typeof notes === 'object' && JSON.stringify(notes).includes(`Aniversario ${añoActual}`)) {
+        console.log(`⏭️ ${cliente.name} ya felicitado este año`);
+        continue;
+      }
+
+      const nombre = cliente.name?.split(' ')[0] || 'vecino';
+      const añoTexto = años === 1 ? 'un año' : `${años} años`;
+      const desarrollo = cliente.property_interest || 'Santa Rita';
+
+      // Mensaje personalizado según el año
+      let mensaje = '';
+      if (años === 1) {
+        mensaje = `🏠🎉 *¡Feliz primer aniversario en tu hogar, ${nombre}!*
+
+Hace exactamente un año comenzaste esta nueva etapa en *${desarrollo}*.
+
+Esperamos que este tiempo haya sido lleno de momentos increíbles. ¡Gracias por ser parte de nuestra comunidad!
+
+¿Cómo te ha ido? Nos encantaría saber de ti 😊`;
+      } else {
+        mensaje = `🏠🎉 *¡Felicidades ${nombre}!*
+
+Hoy se cumplen *${añoTexto}* desde que recibiste las llaves de tu hogar en *${desarrollo}*.
+
+Esperamos que sigas disfrutando tu casa y creando recuerdos increíbles. ¡Gracias por seguir siendo parte de la familia Santa Rita!
+
+🎁 Recuerda que tenemos beneficios especiales para ti si nos recomiendas.`;
+      }
+
+      try {
+        await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+        felicitados++;
+        console.log(`🏠 Aniversario ${años} año(s) felicitado: ${cliente.name}`);
+
+        // Marcar como felicitado
+        const notesActuales = typeof cliente.notes === 'object' ? cliente.notes : {};
+        await supabase.client.from('leads').update({
+          notes: typeof notesActuales === 'object'
+            ? { ...notesActuales, [`Aniversario ${añoActual}`]: true }
+            : `${notesActuales}\n[Aniversario ${añoActual}] Felicitado`
+        }).eq('id', cliente.id);
+
+        // Agrupar por vendedor para notificar
+        const vendedorId = cliente.assigned_to;
+        if (vendedorId) {
+          if (!aniversariosPorVendedor.has(vendedorId)) {
+            aniversariosPorVendedor.set(vendedorId, []);
+          }
+          aniversariosPorVendedor.get(vendedorId)!.push({ cliente, años });
+        }
+
+      } catch (e) {
+        console.log(`❌ Error felicitando aniversario de ${cliente.name}:`, e);
+      }
+
+      await new Promise(r => setTimeout(r, 1500));
+    }
+
+    // Notificar a vendedores sobre aniversarios de sus clientes
+    for (const [vendedorId, clientes] of aniversariosPorVendedor) {
+      const vendedor = teamMembers?.find(tm => tm.id === vendedorId) ||
+                       (clientes[0].cliente.team_members as any);
+      if (!vendedor?.phone) continue;
+
+      let msg = `🏠 *ANIVERSARIOS DE COMPRA*\n\n`;
+      msg += `Hoy celebran aniversario ${clientes.length} de tus clientes:\n\n`;
+
+      for (const { cliente, años } of clientes.slice(0, 5)) {
+        msg += `• *${cliente.name}* - ${años} año(s)\n`;
+        msg += `  📱 ${cliente.phone}\n`;
+        if (cliente.property_interest) msg += `  🏠 ${cliente.property_interest}\n`;
+        msg += `\n`;
+      }
+      if (clientes.length > 5) msg += `_...y ${clientes.length - 5} más_\n`;
+
+      msg += `💡 *Ya les enviamos felicitación automática.*\n`;
+      msg += `_Buen momento para pedir referidos 🎁_`;
+
+      try {
+        await meta.sendWhatsAppMessage(vendedor.phone, msg);
+        console.log(`📤 Notificación de aniversarios enviada a ${vendedor.name}`);
+      } catch (e) {
+        console.log('Error notificando vendedor:', e);
+      }
+    }
+
+    console.log(`✅ Felicitaciones de aniversario completadas: ${felicitados} clientes`);
+  } catch (error) {
+    console.error('❌ Error en felicitaciones de aniversario:', error);
+  }
+}
+
 async function getHealthStatus(supabase: SupabaseService): Promise<any> {
   const checks: any = {
     timestamp: new Date().toISOString(),
@@ -8716,5 +12212,1425 @@ async function enviarRecordatoriosPromociones(supabase: SupabaseService, meta: M
 
   } catch (e) {
     console.error('Error en recordatorios de promociones:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BRIEFING DE SUPERVISIÓN - Para admins, resumen de todo el funnel
+// ═══════════════════════════════════════════════════════════════════════════
+async function enviarBriefingSupervision(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    // Obtener admins activos
+    const { data: admins } = await supabase.client
+      .from('team_members')
+      .select('*')
+      .eq('role', 'admin')
+      .eq('active', true);
+
+    if (!admins || admins.length === 0) {
+      console.log('⏭️ No hay admins activos para enviar briefing de supervisión');
+      return;
+    }
+
+    // Fechas
+    const ahora = new Date();
+    const hoyMexico = new Date(ahora.getTime() - 6 * 60 * 60 * 1000);
+    const hoyStr = hoyMexico.toISOString().split('T')[0];
+    const hace24h = new Date(ahora.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const hace48h = new Date(ahora.getTime() - 48 * 60 * 60 * 1000).toISOString();
+    const hace7d = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const finSemana = new Date(hoyMexico.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    // Obtener vendedores para mapear nombres
+    const { data: vendedores } = await supabase.client
+      .from('team_members')
+      .select('id, name')
+      .eq('role', 'vendedor')
+      .eq('active', true);
+    const vendedorMap = new Map((vendedores || []).map(v => [v.id, v.name]));
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 1. LEADS NUEVOS SIN CONTACTAR (+24h)
+    // ═══════════════════════════════════════════════════════════════════
+    const { data: leadsSinContactar } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, assigned_to, created_at')
+      .eq('status', 'new')
+      .lt('created_at', hace24h)
+      .order('created_at', { ascending: true });
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 2. CITAS DE HOY SIN CONFIRMAR
+    // ═══════════════════════════════════════════════════════════════════
+    const { data: citasSinConfirmar } = await supabase.client
+      .from('appointments')
+      .select('id, lead_name, scheduled_time, vendedor_id, status')
+      .eq('scheduled_date', hoyStr)
+      .eq('status', 'scheduled');
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 3. PAGOS DE APARTADO PRÓXIMOS (esta semana)
+    // ═══════════════════════════════════════════════════════════════════
+    const { data: leadsApartado } = await supabase.client
+      .from('leads')
+      .select('id, name, notes, assigned_to')
+      .eq('status', 'reserved');
+
+    const pagosPendientes: any[] = [];
+    const pagosVencidos: any[] = [];
+
+    if (leadsApartado) {
+      for (const lead of leadsApartado) {
+        const apartado = lead.notes?.apartado;
+        if (apartado?.fecha_pago) {
+          const fechaPago = apartado.fecha_pago;
+          const diffDays = Math.ceil((new Date(fechaPago).getTime() - hoyMexico.getTime()) / (1000 * 60 * 60 * 24));
+
+          if (diffDays < 0) {
+            pagosVencidos.push({ ...lead, diasVencido: Math.abs(diffDays) });
+          } else if (diffDays <= 7) {
+            pagosPendientes.push({ ...lead, diasRestantes: diffDays });
+          }
+        }
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 4. LEADS ESTANCADOS POR ETAPA
+    // ═══════════════════════════════════════════════════════════════════
+    // Contacted > 48h sin avanzar
+    const { data: leadsContactedEstancados } = await supabase.client
+      .from('leads')
+      .select('id, name, assigned_to, updated_at')
+      .eq('status', 'contacted')
+      .lt('updated_at', hace48h);
+
+    // Qualified > 7 días sin cita
+    const { data: leadsQualifiedEstancados } = await supabase.client
+      .from('leads')
+      .select('id, name, assigned_to, updated_at')
+      .eq('status', 'qualified')
+      .lt('updated_at', hace7d);
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 5. FOLLOW-UPS PENDIENTES
+    // ═══════════════════════════════════════════════════════════════════
+    const { data: followupsPendientes } = await supabase.client
+      .from('follow_ups')
+      .select('id, lead_id, vendedor_id, scheduled_for, notes')
+      .eq('status', 'pending')
+      .lte('scheduled_for', ahora.toISOString())
+      .order('scheduled_for', { ascending: true });
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 6. NO-SHOWS DE AYER
+    // ═══════════════════════════════════════════════════════════════════
+    const ayerStr = new Date(hoyMexico.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const { data: noShowsAyer } = await supabase.client
+      .from('appointments')
+      .select('id, lead_name, vendedor_id')
+      .eq('scheduled_date', ayerStr)
+      .eq('status', 'no-show');
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 7. RESUMEN DEL PIPELINE
+    // ═══════════════════════════════════════════════════════════════════
+    const { data: pipelineCounts } = await supabase.client
+      .from('leads')
+      .select('status');
+
+    const pipeline: Record<string, number> = {};
+    if (pipelineCounts) {
+      for (const lead of pipelineCounts) {
+        pipeline[lead.status] = (pipeline[lead.status] || 0) + 1;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // CONSTRUIR MENSAJE
+    // ═══════════════════════════════════════════════════════════════════
+    let mensaje = `👁️ *BRIEFING DE SUPERVISIÓN*\n`;
+    mensaje += `📅 ${hoyStr}\n`;
+    mensaje += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    // Alertas críticas primero
+    let hayAlertas = false;
+
+    if (pagosVencidos.length > 0) {
+      hayAlertas = true;
+      mensaje += `🚨 *PAGOS VENCIDOS (${pagosVencidos.length})*\n`;
+      for (const p of pagosVencidos.slice(0, 5)) {
+        const vendedor = vendedorMap.get(p.assigned_to) || '?';
+        mensaje += `   • ${p.name} - ${p.diasVencido} días (${vendedor})\n`;
+      }
+      if (pagosVencidos.length > 5) {
+        mensaje += `   _... y ${pagosVencidos.length - 5} más_\n`;
+      }
+      mensaje += `\n`;
+    }
+
+    if ((leadsSinContactar?.length || 0) > 0) {
+      hayAlertas = true;
+      mensaje += `⚠️ *LEADS SIN CONTACTAR +24h (${leadsSinContactar!.length})*\n`;
+      for (const l of leadsSinContactar!.slice(0, 5)) {
+        const vendedor = vendedorMap.get(l.assigned_to) || '?';
+        const horasTranscurridas = Math.floor((ahora.getTime() - new Date(l.created_at).getTime()) / (1000 * 60 * 60));
+        const nombreLead = l.name || l.phone || 'Sin nombre';
+        mensaje += `   • ${nombreLead} - ${horasTranscurridas}h (${vendedor})\n`;
+      }
+      if (leadsSinContactar!.length > 5) {
+        mensaje += `   _... y ${leadsSinContactar!.length - 5} más_\n`;
+      }
+      mensaje += `\n`;
+    }
+
+    if ((noShowsAyer?.length || 0) > 0) {
+      hayAlertas = true;
+      mensaje += `👻 *NO-SHOWS AYER (${noShowsAyer!.length})*\n`;
+      for (const ns of noShowsAyer!.slice(0, 5)) {
+        const vendedor = vendedorMap.get(ns.vendedor_id) || '?';
+        mensaje += `   • ${ns.lead_name} (${vendedor})\n`;
+      }
+      if (noShowsAyer!.length > 5) {
+        mensaje += `   _... y ${noShowsAyer!.length - 5} más_\n`;
+      }
+      mensaje += `\n`;
+    }
+
+    // Atención requerida
+    mensaje += `📋 *ATENCIÓN HOY*\n`;
+
+    if ((citasSinConfirmar?.length || 0) > 0) {
+      mensaje += `   📅 Citas sin confirmar: ${citasSinConfirmar!.length}\n`;
+      for (const c of citasSinConfirmar!.slice(0, 3)) {
+        const vendedor = vendedorMap.get(c.vendedor_id) || '?';
+        mensaje += `      • ${c.lead_name} ${c.scheduled_time?.slice(0, 5)} (${vendedor})\n`;
+      }
+    } else {
+      mensaje += `   📅 Citas: ✅ Todas confirmadas\n`;
+    }
+
+    if (pagosPendientes.length > 0) {
+      mensaje += `   💰 Pagos esta semana: ${pagosPendientes.length}\n`;
+      for (const p of pagosPendientes.slice(0, 3)) {
+        const vendedor = vendedorMap.get(p.assigned_to) || '?';
+        mensaje += `      • ${p.name} en ${p.diasRestantes}d (${vendedor})\n`;
+      }
+    }
+
+    if ((followupsPendientes?.length || 0) > 0) {
+      mensaje += `   📞 Follow-ups vencidos: ${followupsPendientes!.length}\n`;
+    }
+
+    mensaje += `\n`;
+
+    // Leads estancados
+    const totalEstancados = (leadsContactedEstancados?.length || 0) + (leadsQualifiedEstancados?.length || 0);
+    if (totalEstancados > 0) {
+      mensaje += `⏳ *LEADS ESTANCADOS (${totalEstancados})*\n`;
+      if ((leadsContactedEstancados?.length || 0) > 0) {
+        mensaje += `   • Contacted +48h: ${leadsContactedEstancados!.length}\n`;
+      }
+      if ((leadsQualifiedEstancados?.length || 0) > 0) {
+        mensaje += `   • Qualified +7d: ${leadsQualifiedEstancados!.length}\n`;
+      }
+      mensaje += `\n`;
+    }
+
+    // Resumen pipeline
+    mensaje += `📊 *PIPELINE ACTUAL*\n`;
+    mensaje += `   New: ${pipeline['new'] || 0} | Contacted: ${pipeline['contacted'] || 0}\n`;
+    mensaje += `   Qualified: ${pipeline['qualified'] || 0} | Visited: ${pipeline['visited'] || 0}\n`;
+    mensaje += `   Reserved: ${pipeline['reserved'] || 0} | Sold: ${pipeline['sold'] || 0}\n`;
+    mensaje += `\n`;
+
+    // Análisis por vendedor - quién necesita atención
+    const vendedorStats: Record<string, { sinContactar: number; estancados: number; citasPendientes: number }> = {};
+
+    // Inicializar todos los vendedores
+    for (const [id, name] of vendedorMap) {
+      vendedorStats[name] = { sinContactar: 0, estancados: 0, citasPendientes: 0 };
+    }
+
+    // Contar leads sin contactar por vendedor
+    if (leadsSinContactar) {
+      for (const l of leadsSinContactar) {
+        const v = vendedorMap.get(l.assigned_to) || 'Sin asignar';
+        if (!vendedorStats[v]) vendedorStats[v] = { sinContactar: 0, estancados: 0, citasPendientes: 0 };
+        vendedorStats[v].sinContactar++;
+      }
+    }
+
+    // Contar estancados por vendedor
+    if (leadsContactedEstancados) {
+      for (const l of leadsContactedEstancados) {
+        const v = vendedorMap.get(l.assigned_to) || 'Sin asignar';
+        if (!vendedorStats[v]) vendedorStats[v] = { sinContactar: 0, estancados: 0, citasPendientes: 0 };
+        vendedorStats[v].estancados++;
+      }
+    }
+    if (leadsQualifiedEstancados) {
+      for (const l of leadsQualifiedEstancados) {
+        const v = vendedorMap.get(l.assigned_to) || 'Sin asignar';
+        if (!vendedorStats[v]) vendedorStats[v] = { sinContactar: 0, estancados: 0, citasPendientes: 0 };
+        vendedorStats[v].estancados++;
+      }
+    }
+
+    // Contar citas pendientes por vendedor
+    if (citasSinConfirmar) {
+      for (const c of citasSinConfirmar) {
+        const v = vendedorMap.get(c.vendedor_id) || 'Sin asignar';
+        if (!vendedorStats[v]) vendedorStats[v] = { sinContactar: 0, estancados: 0, citasPendientes: 0 };
+        vendedorStats[v].citasPendientes++;
+      }
+    }
+
+    // Vendedores que necesitan atención (tienen pendientes)
+    const vendedoresConProblemas = Object.entries(vendedorStats)
+      .filter(([_, stats]) => stats.sinContactar > 0 || stats.estancados > 0 || stats.citasPendientes > 0)
+      .sort((a, b) => (b[1].sinContactar + b[1].estancados) - (a[1].sinContactar + a[1].estancados))
+      .slice(0, 5);
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ANÁLISIS INTELIGENTE - Detectar situación crítica
+    // ═══════════════════════════════════════════════════════════════════
+    mensaje += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+
+    const totalSinContactar = leadsSinContactar?.length || 0;
+    const pipelineParado = (pipeline['contacted'] || 0) === 0 && (pipeline['qualified'] || 0) === 0;
+    const leadMasViejo = leadsSinContactar?.[0];
+    const horasMasViejo = leadMasViejo ? Math.floor((ahora.getTime() - new Date(leadMasViejo.created_at).getTime()) / (1000 * 60 * 60)) : 0;
+
+    // Determinar nivel de criticidad
+    const esCritico = totalSinContactar >= 10 || horasMasViejo > 48 || pipelineParado;
+    const esPreocupante = totalSinContactar >= 5 || horasMasViejo > 24;
+
+    if (esCritico) {
+      mensaje += `🚨 *SITUACIÓN CRÍTICA*\n\n`;
+
+      if (pipelineParado && totalSinContactar > 0) {
+        mensaje += `⛔ El pipeline está PARADO:\n`;
+        mensaje += `   • ${pipeline['new'] || 0} leads en "new"\n`;
+        mensaje += `   • 0 avanzando a siguiente etapa\n`;
+        mensaje += `   • Los leads se van a enfriar\n\n`;
+      }
+
+      if (totalSinContactar >= 10) {
+        mensaje += `⚠️ ${totalSinContactar} leads sin primer contacto\n`;
+        mensaje += `   • El más viejo: ${horasMasViejo}h (${Math.floor(horasMasViejo/24)} días)\n`;
+        mensaje += `   • Probabilidad de conversión cayendo\n\n`;
+      }
+
+      mensaje += `📢 *ACCIÓN INMEDIATA REQUERIDA*\n`;
+      mensaje += `1. Junta urgente con vendedores\n`;
+      mensaje += `2. Cada uno debe contactar sus leads HOY\n`;
+      mensaje += `3. Meta: 0 leads +24h para mañana\n\n`;
+
+    } else if (esPreocupante) {
+      mensaje += `⚠️ *ATENCIÓN REQUERIDA*\n\n`;
+      mensaje += `${totalSinContactar} leads esperando contacto\n`;
+      mensaje += `Lead más viejo: ${horasMasViejo}h\n\n`;
+    }
+
+    // Mostrar vendedores con problemas
+    if (vendedoresConProblemas.length > 0) {
+      mensaje += `👥 *VENDEDORES CON PENDIENTES*\n`;
+      for (const [nombre, stats] of vendedoresConProblemas) {
+        const problemas: string[] = [];
+        if (stats.sinContactar > 0) problemas.push(`${stats.sinContactar} sin contactar`);
+        if (stats.estancados > 0) problemas.push(`${stats.estancados} estancados`);
+        if (stats.citasPendientes > 0) problemas.push(`${stats.citasPendientes} citas`);
+        mensaje += `• ${nombre}: ${problemas.join(', ')}\n`;
+      }
+      mensaje += `\n`;
+    }
+
+    // Acciones concretas del día
+    mensaje += `📌 *CHECKLIST DE HOY*\n`;
+
+    if (esCritico) {
+      mensaje += `☐ Llamar a cada vendedor para revisar leads\n`;
+      if (totalSinContactar > 0) {
+        mensaje += `☐ Asegurar contacto de ${Math.min(totalSinContactar, 10)} leads\n`;
+      }
+    }
+
+    if (pagosVencidos.length > 0) {
+      mensaje += `☐ Cobrar ${pagosVencidos.length} pago(s) vencido(s)\n`;
+    }
+
+    if ((citasSinConfirmar?.length || 0) > 0) {
+      mensaje += `☐ Confirmar ${citasSinConfirmar!.length} cita(s) de hoy\n`;
+    }
+
+    if (pagosPendientes.length > 0) {
+      const proximo = pagosPendientes.sort((a, b) => a.diasRestantes - b.diasRestantes)[0];
+      mensaje += `☐ Recordar pago: ${proximo.name} (${proximo.diasRestantes}d)\n`;
+    }
+
+    if (!esCritico && !esPreocupante && pagosVencidos.length === 0 && (citasSinConfirmar?.length || 0) === 0) {
+      mensaje += `✅ Todo en orden - buen trabajo!\n`;
+    }
+
+    // Enviar a cada admin
+    for (const admin of admins) {
+      if (!admin.phone) continue;
+      try {
+        await meta.sendWhatsAppMessage(admin.phone, mensaje);
+        console.log(`✅ Briefing supervisión enviado a ${admin.name}`);
+      } catch (err) {
+        console.error(`❌ Error enviando briefing a ${admin.name}:`, err);
+      }
+    }
+
+  } catch (e) {
+    console.error('Error en briefing de supervisión:', e);
+  }
+}
+
+// Versión test para enviar a un número específico
+async function enviarBriefingSupervisionTest(supabase: SupabaseService, meta: MetaWhatsAppService, testPhone: string): Promise<void> {
+  try {
+    // Fechas
+    const ahora = new Date();
+    const hoyMexico = new Date(ahora.getTime() - 6 * 60 * 60 * 1000);
+    const hoyStr = hoyMexico.toISOString().split('T')[0];
+    const hace24h = new Date(ahora.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const hace48h = new Date(ahora.getTime() - 48 * 60 * 60 * 1000).toISOString();
+    const hace7d = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Obtener vendedores para mapear nombres
+    const { data: vendedores } = await supabase.client
+      .from('team_members')
+      .select('id, name')
+      .eq('role', 'vendedor')
+      .eq('active', true);
+    const vendedorMap = new Map((vendedores || []).map(v => [v.id, v.name]));
+
+    // 1. LEADS NUEVOS SIN CONTACTAR (+24h)
+    const { data: leadsSinContactar } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, assigned_to, created_at')
+      .eq('status', 'new')
+      .lt('created_at', hace24h)
+      .order('created_at', { ascending: true });
+
+    // 2. CITAS DE HOY SIN CONFIRMAR
+    const { data: citasSinConfirmar } = await supabase.client
+      .from('appointments')
+      .select('id, lead_name, scheduled_time, vendedor_id, status')
+      .eq('scheduled_date', hoyStr)
+      .eq('status', 'scheduled');
+
+    // 3. PAGOS DE APARTADO
+    const { data: leadsApartado } = await supabase.client
+      .from('leads')
+      .select('id, name, notes, assigned_to')
+      .eq('status', 'reserved');
+
+    const pagosPendientes: any[] = [];
+    const pagosVencidos: any[] = [];
+
+    if (leadsApartado) {
+      for (const lead of leadsApartado) {
+        const apartado = lead.notes?.apartado;
+        if (apartado?.fecha_pago) {
+          const fechaPago = apartado.fecha_pago;
+          const diffDays = Math.ceil((new Date(fechaPago).getTime() - hoyMexico.getTime()) / (1000 * 60 * 60 * 24));
+          if (diffDays < 0) {
+            pagosVencidos.push({ ...lead, diasVencido: Math.abs(diffDays) });
+          } else if (diffDays <= 7) {
+            pagosPendientes.push({ ...lead, diasRestantes: diffDays });
+          }
+        }
+      }
+    }
+
+    // 4. LEADS ESTANCADOS
+    const { data: leadsContactedEstancados } = await supabase.client
+      .from('leads')
+      .select('id, name, assigned_to, updated_at')
+      .eq('status', 'contacted')
+      .lt('updated_at', hace48h);
+
+    const { data: leadsQualifiedEstancados } = await supabase.client
+      .from('leads')
+      .select('id, name, assigned_to, updated_at')
+      .eq('status', 'qualified')
+      .lt('updated_at', hace7d);
+
+    // 5. FOLLOW-UPS PENDIENTES
+    const { data: followupsPendientes } = await supabase.client
+      .from('follow_ups')
+      .select('id, lead_id, vendedor_id, scheduled_for, notes')
+      .eq('status', 'pending')
+      .lte('scheduled_for', ahora.toISOString());
+
+    // 6. NO-SHOWS DE AYER
+    const ayerStr = new Date(hoyMexico.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const { data: noShowsAyer } = await supabase.client
+      .from('appointments')
+      .select('id, lead_name, vendedor_id')
+      .eq('scheduled_date', ayerStr)
+      .eq('status', 'no-show');
+
+    // 7. PIPELINE
+    const { data: pipelineCounts } = await supabase.client.from('leads').select('status');
+    const pipeline: Record<string, number> = {};
+    if (pipelineCounts) {
+      for (const lead of pipelineCounts) {
+        pipeline[lead.status] = (pipeline[lead.status] || 0) + 1;
+      }
+    }
+
+    // CONSTRUIR MENSAJE
+    let mensaje = `👁️ *BRIEFING DE SUPERVISIÓN*\n`;
+    mensaje += `📅 ${hoyStr}\n`;
+    mensaje += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    let hayAlertas = false;
+
+    if (pagosVencidos.length > 0) {
+      hayAlertas = true;
+      mensaje += `🚨 *PAGOS VENCIDOS (${pagosVencidos.length})*\n`;
+      for (const p of pagosVencidos.slice(0, 5)) {
+        const vendedor = vendedorMap.get(p.assigned_to) || '?';
+        mensaje += `   • ${p.name} - ${p.diasVencido} días (${vendedor})\n`;
+      }
+      mensaje += `\n`;
+    }
+
+    if ((leadsSinContactar?.length || 0) > 0) {
+      hayAlertas = true;
+      mensaje += `⚠️ *LEADS SIN CONTACTAR +24h (${leadsSinContactar!.length})*\n`;
+      for (const l of leadsSinContactar!.slice(0, 5)) {
+        const vendedor = vendedorMap.get(l.assigned_to) || '?';
+        const horasTranscurridas = Math.floor((ahora.getTime() - new Date(l.created_at).getTime()) / (1000 * 60 * 60));
+        const nombreLead = l.name || l.phone || 'Sin nombre';
+        mensaje += `   • ${nombreLead} - ${horasTranscurridas}h (${vendedor})\n`;
+      }
+      mensaje += `\n`;
+    }
+
+    if ((noShowsAyer?.length || 0) > 0) {
+      hayAlertas = true;
+      mensaje += `👻 *NO-SHOWS AYER (${noShowsAyer!.length})*\n`;
+      for (const ns of noShowsAyer!.slice(0, 5)) {
+        const vendedor = vendedorMap.get(ns.vendedor_id) || '?';
+        mensaje += `   • ${ns.lead_name} (${vendedor})\n`;
+      }
+      mensaje += `\n`;
+    }
+
+    mensaje += `📋 *ATENCIÓN HOY*\n`;
+
+    if ((citasSinConfirmar?.length || 0) > 0) {
+      mensaje += `   📅 Citas sin confirmar: ${citasSinConfirmar!.length}\n`;
+      for (const c of citasSinConfirmar!.slice(0, 3)) {
+        const vendedor = vendedorMap.get(c.vendedor_id) || '?';
+        mensaje += `      • ${c.lead_name} ${c.scheduled_time?.slice(0, 5)} (${vendedor})\n`;
+      }
+    } else {
+      mensaje += `   📅 Citas: ✅ Todas confirmadas\n`;
+    }
+
+    if (pagosPendientes.length > 0) {
+      mensaje += `   💰 Pagos esta semana: ${pagosPendientes.length}\n`;
+      for (const p of pagosPendientes.slice(0, 3)) {
+        const vendedor = vendedorMap.get(p.assigned_to) || '?';
+        mensaje += `      • ${p.name} en ${p.diasRestantes}d (${vendedor})\n`;
+      }
+    }
+
+    if ((followupsPendientes?.length || 0) > 0) {
+      mensaje += `   📞 Follow-ups vencidos: ${followupsPendientes!.length}\n`;
+    }
+
+    mensaje += `\n`;
+
+    const totalEstancados = (leadsContactedEstancados?.length || 0) + (leadsQualifiedEstancados?.length || 0);
+    if (totalEstancados > 0) {
+      mensaje += `⏳ *LEADS ESTANCADOS (${totalEstancados})*\n`;
+      if ((leadsContactedEstancados?.length || 0) > 0) {
+        mensaje += `   • Contacted +48h: ${leadsContactedEstancados!.length}\n`;
+      }
+      if ((leadsQualifiedEstancados?.length || 0) > 0) {
+        mensaje += `   • Qualified +7d: ${leadsQualifiedEstancados!.length}\n`;
+      }
+      mensaje += `\n`;
+    }
+
+    mensaje += `📊 *PIPELINE ACTUAL*\n`;
+    mensaje += `   New: ${pipeline['new'] || 0} | Contacted: ${pipeline['contacted'] || 0}\n`;
+    mensaje += `   Qualified: ${pipeline['qualified'] || 0} | Visited: ${pipeline['visited'] || 0}\n`;
+    mensaje += `   Reserved: ${pipeline['reserved'] || 0} | Sold: ${pipeline['sold'] || 0}\n`;
+    mensaje += `\n`;
+
+    // Análisis por vendedor
+    const vendedorStats: Record<string, { sinContactar: number; estancados: number; citasPendientes: number }> = {};
+
+    for (const [id, name] of vendedorMap) {
+      vendedorStats[name] = { sinContactar: 0, estancados: 0, citasPendientes: 0 };
+    }
+
+    if (leadsSinContactar) {
+      for (const l of leadsSinContactar) {
+        const v = vendedorMap.get(l.assigned_to) || 'Sin asignar';
+        if (!vendedorStats[v]) vendedorStats[v] = { sinContactar: 0, estancados: 0, citasPendientes: 0 };
+        vendedorStats[v].sinContactar++;
+      }
+    }
+
+    if (leadsContactedEstancados) {
+      for (const l of leadsContactedEstancados) {
+        const v = vendedorMap.get(l.assigned_to) || 'Sin asignar';
+        if (!vendedorStats[v]) vendedorStats[v] = { sinContactar: 0, estancados: 0, citasPendientes: 0 };
+        vendedorStats[v].estancados++;
+      }
+    }
+    if (leadsQualifiedEstancados) {
+      for (const l of leadsQualifiedEstancados) {
+        const v = vendedorMap.get(l.assigned_to) || 'Sin asignar';
+        if (!vendedorStats[v]) vendedorStats[v] = { sinContactar: 0, estancados: 0, citasPendientes: 0 };
+        vendedorStats[v].estancados++;
+      }
+    }
+
+    if (citasSinConfirmar) {
+      for (const c of citasSinConfirmar) {
+        const v = vendedorMap.get(c.vendedor_id) || 'Sin asignar';
+        if (!vendedorStats[v]) vendedorStats[v] = { sinContactar: 0, estancados: 0, citasPendientes: 0 };
+        vendedorStats[v].citasPendientes++;
+      }
+    }
+
+    const vendedoresConProblemas = Object.entries(vendedorStats)
+      .filter(([_, stats]) => stats.sinContactar > 0 || stats.estancados > 0 || stats.citasPendientes > 0)
+      .sort((a, b) => (b[1].sinContactar + b[1].estancados) - (a[1].sinContactar + a[1].estancados))
+      .slice(0, 5);
+
+    // Análisis inteligente
+    mensaje += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+
+    const totalSinContactar = leadsSinContactar?.length || 0;
+    const pipelineParado = (pipeline['contacted'] || 0) === 0 && (pipeline['qualified'] || 0) === 0;
+    const leadMasViejo = leadsSinContactar?.[0];
+    const horasMasViejo = leadMasViejo ? Math.floor((ahora.getTime() - new Date(leadMasViejo.created_at).getTime()) / (1000 * 60 * 60)) : 0;
+
+    const esCritico = totalSinContactar >= 10 || horasMasViejo > 48 || pipelineParado;
+    const esPreocupante = totalSinContactar >= 5 || horasMasViejo > 24;
+
+    if (esCritico) {
+      mensaje += `🚨 *SITUACIÓN CRÍTICA*\n\n`;
+
+      if (pipelineParado && totalSinContactar > 0) {
+        mensaje += `⛔ El pipeline está PARADO:\n`;
+        mensaje += `   • ${pipeline['new'] || 0} leads en "new"\n`;
+        mensaje += `   • 0 avanzando a siguiente etapa\n`;
+        mensaje += `   • Los leads se van a enfriar\n\n`;
+      }
+
+      if (totalSinContactar >= 10) {
+        mensaje += `⚠️ ${totalSinContactar} leads sin primer contacto\n`;
+        mensaje += `   • El más viejo: ${horasMasViejo}h (${Math.floor(horasMasViejo/24)} días)\n`;
+        mensaje += `   • Probabilidad de conversión cayendo\n\n`;
+      }
+
+      mensaje += `📢 *ACCIÓN INMEDIATA REQUERIDA*\n`;
+      mensaje += `1. Junta urgente con vendedores\n`;
+      mensaje += `2. Cada uno debe contactar sus leads HOY\n`;
+      mensaje += `3. Meta: 0 leads +24h para mañana\n\n`;
+
+    } else if (esPreocupante) {
+      mensaje += `⚠️ *ATENCIÓN REQUERIDA*\n\n`;
+      mensaje += `${totalSinContactar} leads esperando contacto\n`;
+      mensaje += `Lead más viejo: ${horasMasViejo}h\n\n`;
+    }
+
+    if (vendedoresConProblemas.length > 0) {
+      mensaje += `👥 *VENDEDORES CON PENDIENTES*\n`;
+      for (const [nombre, stats] of vendedoresConProblemas) {
+        const problemas: string[] = [];
+        if (stats.sinContactar > 0) problemas.push(`${stats.sinContactar} sin contactar`);
+        if (stats.estancados > 0) problemas.push(`${stats.estancados} estancados`);
+        if (stats.citasPendientes > 0) problemas.push(`${stats.citasPendientes} citas`);
+        mensaje += `• ${nombre}: ${problemas.join(', ')}\n`;
+      }
+      mensaje += `\n`;
+    }
+
+    mensaje += `📌 *CHECKLIST DE HOY*\n`;
+
+    if (esCritico) {
+      mensaje += `☐ Llamar a cada vendedor para revisar leads\n`;
+      if (totalSinContactar > 0) {
+        mensaje += `☐ Asegurar contacto de ${Math.min(totalSinContactar, 10)} leads\n`;
+      }
+    }
+
+    if (pagosVencidos.length > 0) {
+      mensaje += `☐ Cobrar ${pagosVencidos.length} pago(s) vencido(s)\n`;
+    }
+
+    if ((citasSinConfirmar?.length || 0) > 0) {
+      mensaje += `☐ Confirmar ${citasSinConfirmar!.length} cita(s) de hoy\n`;
+    }
+
+    if (pagosPendientes.length > 0) {
+      const proximo = pagosPendientes.sort((a, b) => a.diasRestantes - b.diasRestantes)[0];
+      mensaje += `☐ Recordar pago: ${proximo.name} (${proximo.diasRestantes}d)\n`;
+    }
+
+    if (!esCritico && !esPreocupante && pagosVencidos.length === 0 && (citasSinConfirmar?.length || 0) === 0) {
+      mensaje += `✅ Todo en orden - buen trabajo!\n`;
+    }
+
+    await meta.sendWhatsAppMessage(testPhone, mensaje);
+    console.log(`✅ Briefing supervisión TEST enviado a ${testPhone}`);
+
+  } catch (e) {
+    console.error('Error en briefing de supervisión test:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RE-ENGAGEMENT - Alerta a vendedores sobre leads sin respuesta
+// ═══════════════════════════════════════════════════════════════════════════
+async function verificarReengagement(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace48h = new Date(ahora.getTime() - 48 * 60 * 60 * 1000).toISOString();
+
+    // Buscar leads que necesitan atención:
+    // - Status: new o contacted
+    // - No han sido actualizados en 48h
+    const { data: leads, error } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, updated_at, assigned_to, lead_category')
+      .in('status', ['new', 'contacted'])
+      .lt('updated_at', hace48h)
+      .not('phone', 'is', null)
+      .order('updated_at', { ascending: true });
+
+    if (error || !leads || leads.length === 0) {
+      console.log('📭 Sin leads para re-engagement');
+      return;
+    }
+
+    console.log(`🔄 Re-engagement: ${leads.length} leads sin respuesta 48h+`);
+
+    // Obtener vendedores
+    const { data: vendedores } = await supabase.client
+      .from('team_members')
+      .select('id, name, phone')
+      .eq('role', 'vendedor')
+      .eq('active', true);
+
+    if (!vendedores) return;
+
+    // Agrupar leads por vendedor
+    const leadsPorVendedor: Record<string, { vendedor: any; leads: any[] }> = {};
+
+    for (const v of vendedores) {
+      leadsPorVendedor[v.id] = { vendedor: v, leads: [] };
+    }
+
+    for (const lead of leads) {
+      if (lead.assigned_to && leadsPorVendedor[lead.assigned_to]) {
+        // Solo incluir si no le hemos alertado hoy
+        const alertaHoy = lead.notes?.reengagement_alert_sent;
+        const hoyStr = ahora.toISOString().split('T')[0];
+
+        if (alertaHoy !== hoyStr) {
+          leadsPorVendedor[lead.assigned_to].leads.push(lead);
+        }
+      }
+    }
+
+    // Enviar alerta a cada vendedor que tenga leads pendientes
+    for (const vendedorId of Object.keys(leadsPorVendedor)) {
+      const { vendedor, leads: leadsVendedor } = leadsPorVendedor[vendedorId];
+
+      if (leadsVendedor.length === 0 || !vendedor.phone) continue;
+
+      // Calcular horas sin respuesta
+      const leadsConHoras = leadsVendedor.map(l => ({
+        ...l,
+        horasSinRespuesta: Math.floor((ahora.getTime() - new Date(l.updated_at).getTime()) / (1000 * 60 * 60))
+      })).slice(0, 5); // Máximo 5 por mensaje
+
+      let mensaje = `🔔 *LEADS SIN RESPUESTA*\n\n`;
+      mensaje += `Tienes ${leadsVendedor.length} lead(s) que no han respondido en 48h+:\n\n`;
+
+      for (const lead of leadsConHoras) {
+        const nombre = lead.name || lead.phone;
+        const categoria = lead.lead_category ? ` (${lead.lead_category})` : '';
+        const interes = lead.notes?.interested_in ? `\n   Interés: ${lead.notes.interested_in}` : '';
+        mensaje += `• *${nombre}*${categoria}\n   ⏰ ${lead.horasSinRespuesta}h sin respuesta${interes}\n\n`;
+      }
+
+      if (leadsVendedor.length > 5) {
+        mensaje += `_...y ${leadsVendedor.length - 5} más_\n\n`;
+      }
+
+      mensaje += `💡 *¿Qué hacer?*\n`;
+      mensaje += `Revisa cada lead y decide si:\n`;
+      mensaje += `• Enviarles un mensaje personalizado\n`;
+      mensaje += `• Llamarles directamente\n`;
+      mensaje += `• Marcarlos como "no interesado"\n`;
+
+      try {
+        await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+        console.log(`   ✅ Alerta enviada a ${vendedor.name}: ${leadsVendedor.length} leads`);
+
+        // Marcar que ya se alertó hoy para estos leads
+        const hoyStr = ahora.toISOString().split('T')[0];
+        for (const lead of leadsVendedor) {
+          await supabase.client
+            .from('leads')
+            .update({
+              notes: {
+                ...lead.notes,
+                reengagement_alert_sent: hoyStr
+              }
+            })
+            .eq('id', lead.id);
+        }
+
+      } catch (err) {
+        console.error(`   ❌ Error alertando a ${vendedor.name}:`, err);
+      }
+    }
+
+    console.log(`🔄 Re-engagement completado`);
+
+  } catch (e) {
+    console.error('Error en verificarReengagement:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LEADS FRÍOS - Secuencia de re-engagement directo al lead
+// Día 3: Recordatorio amigable
+// Día 7: Propuesta de valor / oferta
+// Día 14: Último intento antes de marcar como frío
+// ═══════════════════════════════════════════════════════════════════════════
+async function reengagementDirectoLeads(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+
+    // Fechas límite para cada etapa
+    const hace3dias = new Date(ahora.getTime() - 3 * 24 * 60 * 60 * 1000);
+    const hace7dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const hace14dias = new Date(ahora.getTime() - 14 * 24 * 60 * 60 * 1000);
+    const hace21dias = new Date(ahora.getTime() - 21 * 24 * 60 * 60 * 1000);
+
+    // Buscar leads potenciales para re-engagement
+    // Status: new, contacted, qualified (no scheduled, visited, negotiation, etc.)
+    const { data: leads, error } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, updated_at, assigned_to, property_interest, lead_category')
+      .in('status', ['new', 'contacted', 'qualified'])
+      .lt('updated_at', hace3dias.toISOString())
+      .not('phone', 'is', null)
+      .order('updated_at', { ascending: true })
+      .limit(50);
+
+    if (error || !leads || leads.length === 0) {
+      console.log('❄️ Sin leads fríos para re-engagement');
+      return;
+    }
+
+    console.log(`❄️ Leads fríos encontrados: ${leads.length}`);
+
+    let mensajesEnviados = 0;
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    for (const lead of leads) {
+      if (!lead.phone) continue;
+
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      const ultimaActualizacion = new Date(lead.updated_at);
+      const diasSinRespuesta = Math.floor((ahora.getTime() - ultimaActualizacion.getTime()) / (1000 * 60 * 60 * 24));
+
+      // Verificar qué mensajes ya se enviaron
+      const reengagement = notas?.reengagement || {};
+      const paso1Enviado = reengagement.paso1_sent;
+      const paso2Enviado = reengagement.paso2_sent;
+      const paso3Enviado = reengagement.paso3_sent;
+      const ultimoEnvio = reengagement.last_sent;
+
+      // No enviar si ya enviamos hoy
+      if (ultimoEnvio === hoyStr) {
+        continue;
+      }
+
+      // No enviar si ya completamos la secuencia
+      if (paso3Enviado) {
+        // Si pasaron 21+ días sin respuesta después del paso 3, marcar como frío
+        if (diasSinRespuesta >= 21 && !notas?.marked_cold) {
+          await supabase.client
+            .from('leads')
+            .update({
+              status: 'cold',
+              notes: { ...notas, marked_cold: true, marked_cold_at: ahora.toISOString() }
+            })
+            .eq('id', lead.id);
+          console.log(`🥶 Lead ${lead.name} marcado como FRÍO (21+ días sin respuesta)`);
+        }
+        continue;
+      }
+
+      const nombreCorto = lead.name?.split(' ')[0] || 'amigo';
+      const desarrollo = lead.property_interest || 'nuestros desarrollos';
+      let pasoActual = '';
+
+      // Determinar qué paso enviar
+      // PASO 1: Día 3-6 - Recordatorio amigable
+      if (!paso1Enviado && diasSinRespuesta >= 3 && diasSinRespuesta < 7) {
+        pasoActual = 'paso1';
+      }
+      // PASO 2: Día 7-13 - Segundo intento
+      else if (paso1Enviado && !paso2Enviado && diasSinRespuesta >= 7 && diasSinRespuesta < 14) {
+        pasoActual = 'paso2';
+      }
+      // PASO 3: Día 14+ - Último intento
+      else if (paso1Enviado && paso2Enviado && !paso3Enviado && diasSinRespuesta >= 14) {
+        pasoActual = 'paso3';
+      }
+
+      // Enviar template si corresponde
+      if (pasoActual) {
+        try {
+          // Usar template aprobado "seguimiento_lead" con variables
+          // Template: ¡Hola {{1}}! 👋 Hace unos días platicamos sobre *{{2}}*...
+          const templateComponents = [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: nombreCorto },
+                { type: 'text', text: desarrollo }
+              ]
+            }
+          ];
+
+          await meta.sendTemplate(lead.phone, 'seguimiento_lead', 'es_MX', templateComponents);
+          console.log(`❄️ Re-engagement ${pasoActual} (template) enviado a ${lead.name} (${diasSinRespuesta} días)`);
+
+          // Actualizar tracking
+          const nuevoReengagement = {
+            ...reengagement,
+            [`${pasoActual}_sent`]: hoyStr,
+            last_sent: hoyStr,
+            last_step: pasoActual
+          };
+
+          await supabase.client
+            .from('leads')
+            .update({
+              notes: { ...notas, reengagement: nuevoReengagement }
+            })
+            .eq('id', lead.id);
+
+          // Registrar actividad
+          await supabase.client.from('lead_activities').insert({
+            lead_id: lead.id,
+            team_member_id: lead.assigned_to,
+            activity_type: 'reengagement',
+            notes: `Re-engagement automático ${pasoActual}: ${diasSinRespuesta} días sin respuesta`,
+            created_at: ahora.toISOString()
+          });
+
+          mensajesEnviados++;
+
+          // Limitar a 10 mensajes por ejecución para no saturar
+          if (mensajesEnviados >= 10) {
+            console.log('❄️ Límite de 10 mensajes alcanzado, continuará en próxima ejecución');
+            break;
+          }
+
+        } catch (err) {
+          console.error(`❄️ Error enviando re-engagement a ${lead.name}:`, err);
+        }
+      }
+    }
+
+    console.log(`❄️ Re-engagement directo completado: ${mensajesEnviados} mensajes enviados`);
+
+  } catch (e) {
+    console.error('Error en reengagementDirectoLeads:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SEGUIMIENTO POST-VENTA - Pedir referidos después de la venta
+// ═══════════════════════════════════════════════════════════════════════════
+async function seguimientoPostVenta(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+
+    // Buscar leads con status 'sold'
+    const { data: clientes, error } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, updated_at, assigned_to')
+      .eq('status', 'sold')
+      .not('phone', 'is', null);
+
+    if (error || !clientes || clientes.length === 0) {
+      console.log('📭 Sin clientes para seguimiento post-venta');
+      return;
+    }
+
+    console.log(`🎉 Post-venta: ${clientes.length} clientes vendidos`);
+
+    // Obtener vendedores
+    const { data: vendedores } = await supabase.client
+      .from('team_members')
+      .select('id, name, phone')
+      .eq('role', 'vendedor')
+      .eq('active', true);
+    const vendedorMap = new Map((vendedores || []).map(v => [v.id, v]));
+
+    let enviados = 0;
+
+    for (const cliente of clientes) {
+      // Calcular días desde la venta
+      const fechaVenta = cliente.notes?.fecha_venta || cliente.updated_at;
+      const diasDesdeVenta = Math.floor((ahora.getTime() - new Date(fechaVenta).getTime()) / (1000 * 60 * 60 * 24));
+
+      // Obtener estado de seguimiento
+      const postVenta = cliente.notes?.post_venta || { etapa: 0, ultimo_contacto: null };
+      const nombreCliente = cliente.name?.split(' ')[0] || 'vecino';
+
+      // Determinar qué mensaje enviar
+      let mensaje: string | null = null;
+      let etapaNueva = postVenta.etapa;
+      let notificarVendedor = false;
+
+      // Etapa 0 → 1: A los 30 días, preguntar cómo está
+      if (postVenta.etapa === 0 && diasDesdeVenta >= 30) {
+        mensaje = `¡Hola ${nombreCliente}! 🏡\n\n`;
+        mensaje += `Han pasado unas semanas desde que te entregamos tu nuevo hogar y queríamos saber cómo te ha ido.\n\n`;
+        mensaje += `¿Todo bien con la propiedad? ¿Hay algo en lo que podamos ayudarte?\n\n`;
+        mensaje += `Nos da mucho gusto que seas parte de nuestra comunidad. 😊`;
+        etapaNueva = 1;
+
+      // Etapa 1 → 2: A los 60 días, pedir referidos (usando TEMPLATE)
+      } else if (postVenta.etapa === 1 && diasDesdeVenta >= 60) {
+        // Usar template referidos_postventa
+        const desarrollo = cliente.notes?.property_interest || cliente.notes?.desarrollo || 'tu desarrollo';
+        try {
+          const templateComponents = [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: nombreCliente },
+                { type: 'text', text: desarrollo }
+              ]
+            }
+          ];
+          await meta.sendTemplate(cliente.phone, 'referidos_postventa', 'es_MX', templateComponents);
+          console.log(`   ✅ Post-venta etapa 2 (template referidos) enviado a ${cliente.name}`);
+
+          // Actualizar notas
+          const nuevasNotas = {
+            ...cliente.notes,
+            post_venta: {
+              etapa: 2,
+              ultimo_contacto: ahora.toISOString(),
+              historial: [...(postVenta.historial || []), { etapa: 2, fecha: ahora.toISOString() }]
+            }
+          };
+          await supabase.client.from('leads').update({ notes: nuevasNotas }).eq('id', cliente.id);
+          enviados++;
+
+          // Notificar al vendedor
+          const vendedor = vendedorMap.get(cliente.assigned_to);
+          if (vendedor?.phone) {
+            await meta.sendWhatsAppMessage(vendedor.phone,
+              `🎯 *Oportunidad de referidos*\n\nSe envió mensaje pidiendo referidos a *${cliente.name}*.\n\nSi responde con contactos, dale seguimiento rápido.`
+            );
+          }
+        } catch (templateErr) {
+          console.log(`⚠️ Template referidos falló para ${cliente.name}:`, templateErr);
+        }
+        continue; // Ya procesamos este cliente
+
+      // Etapa 2 → 3: A los 90 días, último recordatorio de referidos
+      } else if (postVenta.etapa === 2 && diasDesdeVenta >= 90) {
+        mensaje = `¡Hola ${nombreCliente}! 🌟\n\n`;
+        mensaje += `¿Cómo va todo con tu casa? Esperamos que de maravilla.\n\n`;
+        mensaje += `Te recordamos que si recomiendas a alguien que compre con nosotros, tienes un *bono de agradecimiento* esperándote.\n\n`;
+        mensaje += `¿Tienes a alguien en mente? Solo mándanos su contacto. 📲\n\n`;
+        mensaje += `¡Gracias por ser parte de nuestra familia! 🏠❤️`;
+        etapaNueva = 3;
+      }
+
+      // Enviar mensaje si corresponde
+      if (mensaje) {
+        try {
+          await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+          console.log(`   ✅ Post-venta etapa ${etapaNueva} enviado a ${cliente.name || cliente.phone}`);
+
+          // Actualizar notas del cliente
+          const nuevasNotas = {
+            ...cliente.notes,
+            post_venta: {
+              etapa: etapaNueva,
+              ultimo_contacto: ahora.toISOString(),
+              historial: [
+                ...(postVenta.historial || []),
+                { etapa: etapaNueva, fecha: ahora.toISOString() }
+              ]
+            }
+          };
+
+          await supabase.client
+            .from('leads')
+            .update({ notes: nuevasNotas })
+            .eq('id', cliente.id);
+
+          // Notificar al vendedor cuando se piden referidos
+          if (notificarVendedor) {
+            const vendedor = vendedorMap.get(cliente.assigned_to);
+            if (vendedor?.phone) {
+              const notif = `🎯 *Oportunidad de referidos*\n\n`;
+              const notifMsg = notif + `Se envió mensaje pidiendo referidos a *${cliente.name}*.\n\nSi responde con contactos, dale seguimiento rápido.`;
+              await meta.sendWhatsAppMessage(vendedor.phone, notifMsg);
+            }
+          }
+
+          enviados++;
+
+        } catch (err) {
+          console.error(`   ❌ Error enviando post-venta a ${cliente.phone}:`, err);
+        }
+      }
+    }
+
+    console.log(`🎉 Post-venta completado: ${enviados} mensajes enviados`);
+
+  } catch (e) {
+    console.error('Error en seguimientoPostVenta:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FELICITACIONES DE CUMPLEAÑOS - USA TEMPLATE feliz_cumple
+// ═══════════════════════════════════════════════════════════════
+async function enviarFelicitacionesCumple(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('🎂 Verificando cumpleaños del día...');
+
+    const hoy = new Date();
+    const mes = String(hoy.getMonth() + 1).padStart(2, '0');
+    const dia = String(hoy.getDate()).padStart(2, '0');
+    const fechaHoy = `${mes}-${dia}`;
+    const añoActual = hoy.getFullYear();
+
+    // Buscar leads cuyo cumpleaños sea hoy (formato: YYYY-MM-DD o MM-DD)
+    const { data: leadsCumple } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, birthday, notes, assigned_to')
+      .or(`birthday.ilike.%-${fechaHoy},birthday.ilike.${fechaHoy}%`)
+      .not('phone', 'is', null)
+      .not('status', 'in', '("lost","fallen")');
+
+    if (!leadsCumple || leadsCumple.length === 0) {
+      console.log('🎂 No hay leads cumpliendo años hoy');
+      return;
+    }
+
+    console.log(`🎂 Encontrados ${leadsCumple.length} leads cumpliendo años hoy`);
+
+    let enviados = 0;
+
+    for (const lead of leadsCumple) {
+      if (!lead.phone) continue;
+
+      // Verificar si ya lo felicitamos este año
+      const notesStr = typeof lead.notes === 'string' ? lead.notes : JSON.stringify(lead.notes || '');
+      if (notesStr.includes(`cumple_felicitado_${añoActual}`)) {
+        console.log(`⏭️ Ya felicitamos a ${lead.name} este año`);
+        continue;
+      }
+
+      const nombreCorto = lead.name?.split(' ')[0] || 'amigo';
+
+      try {
+        // Intentar usar template feliz_cumple
+        const templateComponents = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: nombreCorto }
+            ]
+          }
+        ];
+
+        await meta.sendTemplate(lead.phone, 'feliz_cumple', 'es_MX', templateComponents);
+        console.log(`🎂 Felicitación (template) enviada a ${lead.name}`);
+
+        // Marcar como felicitado
+        const notasActuales = lead.notes || {};
+        const nuevasNotas = typeof notasActuales === 'object'
+          ? { ...notasActuales, [`cumple_felicitado_${añoActual}`]: true }
+          : { [`cumple_felicitado_${añoActual}`]: true };
+
+        await supabase.client
+          .from('leads')
+          .update({ notes: nuevasNotas })
+          .eq('id', lead.id);
+
+        enviados++;
+
+      } catch (templateErr) {
+        console.log(`⚠️ Template feliz_cumple no disponible para ${lead.name}, usando fallback...`);
+
+        // Fallback: mensaje regular (solo si estamos dentro de 24hrs)
+        try {
+          const mensajeFallback = `🎂 ¡Feliz cumpleaños ${nombreCorto}! 🎉\n\n` +
+            `Todo el equipo te desea un día increíble.\n\n` +
+            `Gracias por ser parte de nuestra familia. 🏠💙`;
+
+          await meta.sendWhatsAppMessage(lead.phone, mensajeFallback);
+          console.log(`🎂 Felicitación (fallback) enviada a ${lead.name}`);
+
+          // Marcar como felicitado
+          const notasActuales = lead.notes || {};
+          const nuevasNotas = typeof notasActuales === 'object'
+            ? { ...notasActuales, [`cumple_felicitado_${añoActual}`]: true }
+            : { [`cumple_felicitado_${añoActual}`]: true };
+
+          await supabase.client
+            .from('leads')
+            .update({ notes: nuevasNotas })
+            .eq('id', lead.id);
+
+          enviados++;
+        } catch (fallbackErr) {
+          console.log(`❌ No se pudo enviar felicitación a ${lead.name}:`, fallbackErr);
+        }
+      }
+    }
+
+    // También felicitar al equipo
+    await felicitarEquipoCumple(supabase, meta, fechaHoy, añoActual);
+
+    console.log(`🎂 Felicitaciones completadas: ${enviados} leads felicitados`);
+
+  } catch (e) {
+    console.error('Error en enviarFelicitacionesCumple:', e);
+  }
+}
+
+// Felicitar a miembros del equipo que cumplen años
+async function felicitarEquipoCumple(supabase: SupabaseService, meta: MetaWhatsAppService, fechaHoy: string, añoActual: number): Promise<void> {
+  try {
+    const { data: equipo } = await supabase.client
+      .from('team_members')
+      .select('id, name, phone, birthday, notes')
+      .or(`birthday.ilike.%-${fechaHoy},birthday.ilike.${fechaHoy}%`)
+      .eq('active', true)
+      .not('phone', 'is', null);
+
+    if (!equipo || equipo.length === 0) {
+      console.log('🎂 No hay miembros del equipo cumpliendo años hoy');
+      return;
+    }
+
+    console.log(`🎂 ${equipo.length} miembro(s) del equipo cumplen años hoy`);
+
+    for (const miembro of equipo) {
+      if (!miembro.phone) continue;
+
+      const notesStr = typeof miembro.notes === 'string' ? miembro.notes : JSON.stringify(miembro.notes || '');
+      if (notesStr.includes(`cumple_felicitado_${añoActual}`)) {
+        console.log(`⏭️ Ya felicitamos a ${miembro.name} (equipo) este año`);
+        continue;
+      }
+
+      const nombreCorto = miembro.name?.split(' ')[0] || 'colega';
+
+      try {
+        const templateComponents = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: nombreCorto }
+            ]
+          }
+        ];
+
+        await meta.sendTemplate(miembro.phone, 'feliz_cumple', 'es_MX', templateComponents);
+        console.log(`🎂 Felicitación (template) enviada a ${miembro.name} (equipo)`);
+
+        // Marcar como felicitado
+        const notasActuales = miembro.notes || {};
+        const nuevasNotas = typeof notasActuales === 'object'
+          ? { ...notasActuales, [`cumple_felicitado_${añoActual}`]: true }
+          : { [`cumple_felicitado_${añoActual}`]: true };
+
+        await supabase.client
+          .from('team_members')
+          .update({ notes: nuevasNotas })
+          .eq('id', miembro.id);
+
+      } catch (err) {
+        console.log(`⚠️ Error felicitando a ${miembro.name} (equipo):`, err);
+      }
+    }
+
+  } catch (e) {
+    console.error('Error felicitando equipo:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SEGUIMIENTO DE CRÉDITO HIPOTECARIO - USA TEMPLATE info_credito
+// Para leads que necesitan crédito pero no han avanzado
+// ═══════════════════════════════════════════════════════════════
+async function seguimientoCredito(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('🏦 Verificando leads con crédito pendiente...');
+
+    const ahora = new Date();
+    const hace5dias = new Date(ahora.getTime() - 5 * 24 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar leads que:
+    // 1. Necesitan crédito (needs_mortgage = true)
+    // 2. No tienen solicitud de hipoteca activa (o está estancada)
+    // 3. No han tenido actividad en 5+ días
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, property_interest, updated_at, needs_mortgage')
+      .eq('needs_mortgage', true)
+      .not('status', 'in', '("lost","fallen","cold","closed")')
+      .lt('updated_at', hace5dias.toISOString())
+      .not('phone', 'is', null)
+      .limit(20);
+
+    if (!leads || leads.length === 0) {
+      console.log('🏦 No hay leads con crédito pendiente para seguimiento');
+      return;
+    }
+
+    console.log(`🏦 Leads con crédito pendiente encontrados: ${leads.length}`);
+
+    let enviados = 0;
+
+    for (const lead of leads) {
+      if (!lead.phone) continue;
+
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+
+      // No enviar si ya enviamos seguimiento de crédito hoy
+      if (notas?.credito_seguimiento_sent === hoyStr) {
+        continue;
+      }
+
+      // No enviar si ya enviamos en los últimos 7 días
+      const ultimoEnvioCredito = notas?.ultimo_seguimiento_credito;
+      if (ultimoEnvioCredito) {
+        const ultimaFecha = new Date(ultimoEnvioCredito);
+        const diasDesdeUltimo = Math.floor((ahora.getTime() - ultimaFecha.getTime()) / (1000 * 60 * 60 * 24));
+        if (diasDesdeUltimo < 7) {
+          continue;
+        }
+      }
+
+      // Verificar si ya tiene solicitud de hipoteca activa
+      const { data: solicitud } = await supabase.client
+        .from('mortgage_applications')
+        .select('id, status')
+        .eq('lead_id', lead.id)
+        .neq('status', 'cancelled')
+        .single();
+
+      // Si ya tiene solicitud activa, no enviar
+      if (solicitud) {
+        continue;
+      }
+
+      const nombreCorto = lead.name?.split(' ')[0] || 'amigo';
+      const desarrollo = lead.property_interest || 'tu casa ideal';
+
+      try {
+        // Usar template info_credito
+        const templateComponents = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: nombreCorto },
+              { type: 'text', text: desarrollo }
+            ]
+          }
+        ];
+
+        await meta.sendTemplate(lead.phone, 'info_credito', 'es_MX', templateComponents);
+        console.log(`🏦 Seguimiento crédito (template) enviado a ${lead.name}`);
+
+        // Marcar como enviado
+        await supabase.client
+          .from('leads')
+          .update({
+            notes: {
+              ...notas,
+              credito_seguimiento_sent: hoyStr,
+              ultimo_seguimiento_credito: ahora.toISOString()
+            }
+          })
+          .eq('id', lead.id);
+
+        // Registrar actividad
+        await supabase.client.from('activities').insert([{
+          type: 'system',
+          lead_id: lead.id,
+          activity_type: 'seguimiento_credito',
+          notes: 'Template info_credito enviado automáticamente',
+          created_at: ahora.toISOString()
+        }]);
+
+        enviados++;
+
+      } catch (templateErr) {
+        console.log(`⚠️ Template info_credito no disponible para ${lead.name}, usando fallback...`);
+
+        // Fallback: mensaje regular (solo funcionará si hay ventana de 24hrs abierta)
+        try {
+          const mensajeFallback = `🏦 ¡Hola ${nombreCorto}!\n\n` +
+            `Te comparto información sobre crédito hipotecario para *${desarrollo}*:\n\n` +
+            `✅ Hasta 20 años de plazo\n` +
+            `✅ Tasa competitiva\n` +
+            `✅ Varios bancos disponibles\n\n` +
+            `¿Te gustaría que un asesor te contacte? Responde *Sí*.`;
+
+          await meta.sendWhatsAppMessage(lead.phone, mensajeFallback);
+          console.log(`🏦 Seguimiento crédito (fallback) enviado a ${lead.name}`);
+
+          await supabase.client
+            .from('leads')
+            .update({
+              notes: {
+                ...notas,
+                credito_seguimiento_sent: hoyStr,
+                ultimo_seguimiento_credito: ahora.toISOString()
+              }
+            })
+            .eq('id', lead.id);
+
+          enviados++;
+        } catch (fallbackErr) {
+          console.log(`❌ No se pudo enviar seguimiento crédito a ${lead.name}:`, fallbackErr);
+        }
+      }
+    }
+
+    console.log(`🏦 Seguimiento crédito completado: ${enviados} mensajes enviados`);
+
+  } catch (e) {
+    console.error('Error en seguimientoCredito:', e);
   }
 }
