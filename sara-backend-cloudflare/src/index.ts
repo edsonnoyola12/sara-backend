@@ -1432,16 +1432,24 @@ ${gpsLink ? '🗺️ *Maps:* ' + gpsLink : ''}`;
     if ((url.pathname.match(/^\/api\/mortgages\/[^\/]+$/) || url.pathname.match(/^\/api\/mortgage_applications\/[^\/]+$/)) && request.method === 'PUT') {
       const id = url.pathname.split('/').pop();
       const body = await request.json() as any;
-      
+
       console.log('🏦 Actualizando hipoteca:', id, body);
-      
+
+      // Extraer campos que NO van a la DB (solo para notificaciones)
+      const changed_by_id = body.changed_by_id;
+      const changed_by_name = body.changed_by_name;
+      const previous_status = body.previous_status;
+      delete body.changed_by_id;
+      delete body.changed_by_name;
+      delete body.previous_status;
+
       // Obtener datos anteriores para comparar
       const { data: oldMortgage } = await supabase.client
         .from('mortgage_applications')
         .select('*, lead_id')
         .eq('id', id)
         .single();
-      
+
       // Actualizar registro
       body.updated_at = new Date().toISOString();
       const { data, error } = await supabase.client
@@ -1508,9 +1516,9 @@ ${gpsLink ? '🗺️ *Maps:* ' + gpsLink : ''}`;
               
               const emoji = statusEmoji[body.status] || '📋';
               const texto = statusText[body.status] || body.status;
-              
+
               // Usar changed_by_name si viene del CRM, si no usar assigned_advisor_name
-              const quienMovio = body.changed_by_name || data.assigned_advisor_name || 'Sistema';
+              const quienMovio = changed_by_name || data.assigned_advisor_name || 'Sistema';
 
               const mensaje = `${emoji} *ACTUALIZACIÓN CRÉDITO*
 ━━━━━━━━━━━━━━━━━━━━━
@@ -1518,7 +1526,7 @@ ${gpsLink ? '🗺️ *Maps:* ' + gpsLink : ''}`;
 👤 *Cliente:* ${data.lead_name || lead.name}
 🏦 *Banco:* ${data.bank || 'No especificado'}
 📊 *Nuevo status:* ${texto}
-${body.previous_status ? `📋 *Anterior:* ${statusText[body.previous_status] || body.previous_status}` : ''}
+${previous_status ? `📋 *Anterior:* ${statusText[previous_status] || previous_status}` : ''}
 ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
 ━━━━━━━━━━━━━━━━━━━━━
 👤 *Movido por:* ${quienMovio}`;
