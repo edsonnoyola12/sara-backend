@@ -506,15 +506,11 @@ export class LeadMessageService {
       }
     }
 
-    // Si muestra interés, Sara responde y notifica
+    // Si muestra interés, pasar a IA con contexto para que responda con info real de la promo
     if (esInteres) {
-      const nombreCorto = lead.name?.split(' ')[0] || '';
+      console.log('📢 Interés en broadcast detectado, pasando a IA con contexto');
       return {
-        action: 'handled',
-        response: `¡Qué bueno ${nombreCorto}! 🎉\n\n` +
-                  `Tu asesor te contactará en breve con toda la información.\n\n` +
-                  `¿Hay algo específico que te gustaría saber?`,
-        sendVia: 'meta',
+        action: 'continue_to_ai',
         notifyVendor,
         broadcastContext: {
           message: broadcastInfo.message || '',
