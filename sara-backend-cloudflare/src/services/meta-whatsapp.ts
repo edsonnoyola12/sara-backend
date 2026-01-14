@@ -1,5 +1,37 @@
 // Meta WhatsApp Cloud API Service
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚨 RATE LIMITING Y CIRCUIT BREAKER - Protección contra spam
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface RateLimitEntry {
+  count: number;
+  firstMessageAt: number;
+  lastMessageAt: number;
+  blocked: boolean;
+  blockReason?: string;
+}
+
+// Almacenamiento en memoria para rate limiting (se reinicia con deploy)
+const messageRateLimit: Map<string, RateLimitEntry> = new Map();
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hora
+const MAX_MESSAGES_PER_HOUR = 15; // Máximo 15 mensajes por hora por teléfono
+const MAX_MESSAGES_PER_MINUTE = 5; // Máximo 5 mensajes por minuto
+const CIRCUIT_BREAKER_THRESHOLD = 50; // Si hay 50+ envíos en 5 min, parar todo
+let globalMessageCount = 0;
+let globalMessageWindowStart = Date.now();
+
+// Frases que indican que NO quieren ser contactados
+const DNC_PHRASES = [
+  'no me molest', 'deja de molestar', 'ya basta', 'stop', 'basta ya',
+  'no quiero', 'dejen de', 'ya no me', 'no me escribas', 'no me mandes',
+  'no contactar', 'unsubscribe', 'cancelar', 'eliminar mi número',
+  'bloquear', 'reportar', 'acoso', 'spam'
+];
+
+// Admin para alertas críticas
+const ADMIN_PHONE = '5212224558475'; // Tu número
+
 // Función para corregir double-encoding UTF-8 (acentos Y emojis)
 function sanitizeUTF8(text: string): string {
   if (!text) return text;
@@ -18,6 +50,22 @@ function sanitizeUTF8(text: string): string {
   } catch (e) {
     console.log("⚠️ sanitizeUTF8 fallback");
     return text;
+  }
+}
+
+// Verificar si el mensaje indica que no quieren ser contactados
+export function detectDNCPhrase(message: string): boolean {
+  const msgLower = message.toLowerCase();
+  return DNC_PHRASES.some(phrase => msgLower.includes(phrase));
+}
+
+// Limpiar entradas viejas del rate limit
+function cleanupRateLimits(): void {
+  const now = Date.now();
+  for (const [phone, entry] of messageRateLimit.entries()) {
+    if (now - entry.lastMessageAt > RATE_LIMIT_WINDOW_MS) {
+      messageRateLimit.delete(phone);
+    }
   }
 }
 
@@ -42,13 +90,88 @@ export class MetaWhatsAppService {
     return clean;
   }
 
-  async sendWhatsAppMessage(to: string, body: string): Promise<any> {
+  async sendWhatsAppMessage(to: string, body: string, bypassRateLimit = false): Promise<any> {
     const phone = this.normalizePhone(to);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🚨 CIRCUIT BREAKER GLOBAL - Detener si hay demasiados envíos
+    // ═══════════════════════════════════════════════════════════════════════
+    const now = Date.now();
+    if (now - globalMessageWindowStart > 5 * 60 * 1000) {
+      // Resetear ventana cada 5 minutos
+      globalMessageCount = 0;
+      globalMessageWindowStart = now;
+    }
+    globalMessageCount++;
+
+    if (globalMessageCount > CIRCUIT_BREAKER_THRESHOLD && !bypassRateLimit) {
+      console.error(`🚨 CIRCUIT BREAKER ACTIVADO: ${globalMessageCount} mensajes en 5 min - DETENIENDO ENVÍOS`);
+      // Alertar admin (solo una vez)
+      if (globalMessageCount === CIRCUIT_BREAKER_THRESHOLD + 1) {
+        await this.sendAlertToAdmin(`🚨 ALERTA CRÍTICA: Circuit breaker activado. ${globalMessageCount} mensajes en 5 min. Revisa el sistema.`);
+      }
+      throw new Error('CIRCUIT_BREAKER: Demasiados mensajes enviados. Sistema pausado.');
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🚦 RATE LIMITING POR TELÉFONO
+    // ═══════════════════════════════════════════════════════════════════════
+    if (!bypassRateLimit) {
+      cleanupRateLimits();
+
+      const entry = messageRateLimit.get(phone) || {
+        count: 0,
+        firstMessageAt: now,
+        lastMessageAt: now,
+        blocked: false
+      };
+
+      // Verificar si está bloqueado
+      if (entry.blocked) {
+        console.error(`🚫 RATE LIMIT: ${phone} está bloqueado - ${entry.blockReason}`);
+        throw new Error(`RATE_LIMIT: Número bloqueado - ${entry.blockReason}`);
+      }
+
+      // Verificar límite por hora
+      const hourAgo = now - RATE_LIMIT_WINDOW_MS;
+      if (entry.firstMessageAt > hourAgo && entry.count >= MAX_MESSAGES_PER_HOUR) {
+        console.error(`🚫 RATE LIMIT: ${phone} excedió ${MAX_MESSAGES_PER_HOUR} msgs/hora`);
+        entry.blocked = true;
+        entry.blockReason = 'Excedió límite de mensajes por hora';
+        messageRateLimit.set(phone, entry);
+        await this.sendAlertToAdmin(`⚠️ Rate limit: ${phone} bloqueado por exceder ${MAX_MESSAGES_PER_HOUR} msgs/hora`);
+        throw new Error('RATE_LIMIT: Demasiados mensajes a este número');
+      }
+
+      // Verificar límite por minuto (anti-spam rápido)
+      const minuteAgo = now - 60 * 1000;
+      if (entry.lastMessageAt > minuteAgo && entry.count >= MAX_MESSAGES_PER_MINUTE) {
+        console.warn(`⚠️ RATE LIMIT: ${phone} - ${MAX_MESSAGES_PER_MINUTE} msgs en 1 min, esperando...`);
+        throw new Error('RATE_LIMIT: Demasiados mensajes en poco tiempo');
+      }
+
+      // Actualizar contador
+      if (entry.firstMessageAt < hourAgo) {
+        // Reiniciar conteo si pasó la hora
+        entry.count = 1;
+        entry.firstMessageAt = now;
+      } else {
+        entry.count++;
+      }
+      entry.lastMessageAt = now;
+      messageRateLimit.set(phone, entry);
+
+      console.log(`📊 Rate limit ${phone}: ${entry.count}/${MAX_MESSAGES_PER_HOUR} msgs/hora`);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 📤 ENVIAR MENSAJE
+    // ═══════════════════════════════════════════════════════════════════════
     const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
-    
+
     // Sanitizar UTF-8 antes de enviar
     const cleanBody = sanitizeUTF8(body);
-    
+
     const payload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -75,6 +198,59 @@ export class MetaWhatsAppService {
     }
     console.log(`✅ Meta WA enviado: ${data.messages?.[0]?.id}`);
     return data;
+  }
+
+  // Enviar alerta crítica al admin
+  private async sendAlertToAdmin(message: string): Promise<void> {
+    try {
+      const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
+      const payload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: ADMIN_PHONE,
+        type: 'text',
+        text: { body: message }
+      };
+      await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      console.log(`🚨 Alerta enviada a admin: ${message.substring(0, 50)}...`);
+    } catch (e) {
+      console.error('❌ Error enviando alerta a admin:', e);
+    }
+  }
+
+  // Marcar un teléfono como bloqueado (DNC)
+  markAsBlocked(phone: string, reason: string): void {
+    const normalizedPhone = this.normalizePhone(phone);
+    const entry = messageRateLimit.get(normalizedPhone) || {
+      count: 0,
+      firstMessageAt: Date.now(),
+      lastMessageAt: Date.now(),
+      blocked: false
+    };
+    entry.blocked = true;
+    entry.blockReason = reason;
+    messageRateLimit.set(normalizedPhone, entry);
+    console.log(`🚫 Teléfono ${normalizedPhone} bloqueado: ${reason}`);
+  }
+
+  // Obtener estadísticas de rate limiting
+  getRateLimitStats(): { totalTracked: number; blocked: number; globalCount: number } {
+    let blocked = 0;
+    for (const entry of messageRateLimit.values()) {
+      if (entry.blocked) blocked++;
+    }
+    return {
+      totalTracked: messageRateLimit.size,
+      blocked,
+      globalCount: globalMessageCount
+    };
   }
 
   async sendWhatsAppImage(to: string, imageUrl: string, caption?: string): Promise<any> {

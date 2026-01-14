@@ -380,6 +380,34 @@ export class WhatsAppHandler {
         }
       }
 
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // COMANDO REACTIVAR - Para leads que quieren volver a recibir mensajes
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      if (body.toUpperCase().trim() === 'REACTIVAR') {
+        const { data: leadDNC } = await this.supabase.client
+          .from('leads')
+          .select('id, name, do_not_contact')
+          .like('phone', '%' + digits)
+          .single();
+
+        if (leadDNC?.do_not_contact) {
+          await this.supabase.client.from('leads')
+            .update({
+              do_not_contact: false,
+              dnc_reason: null,
+              dnc_at: null
+            })
+            .eq('id', leadDNC.id);
+
+          await this.twilio.sendWhatsAppMessage(from,
+            '✅ ¡Bienvenido de vuelta! Tu cuenta ha sido reactivada.\n\n' +
+            '¿En qué te puedo ayudar hoy? 🏠'
+          );
+          console.log(`✅ Lead ${leadDNC.name} reactivado (era DNC)`);
+          return;
+        }
+      }
+
       // Obtener datos
       const [lead, properties, teamMembers] = await Promise.all([
         this.getOrCreateLead(cleanPhone),
@@ -388,12 +416,66 @@ export class WhatsAppHandler {
       ]);
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // 🚫 VERIFICAR SI LEAD ESTÁ MARCADO COMO DO NOT CONTACT
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      if (lead?.do_not_contact) {
+        console.log(`🚫 Lead ${cleanPhone} está marcado como DNC - ignorando mensaje`);
+        // Solo responder si pide reactivar
+        if (trimmedBody.toUpperCase() !== 'REACTIVAR') {
+          return; // No procesar
+        }
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // ACTUALIZAR ÚLTIMA ACTIVIDAD DEL LEAD
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       if (lead?.id) {
         await this.supabase.client.from('leads')
           .update({ last_activity_at: new Date().toISOString() })
           .eq('id', lead.id);
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // 🚨 DETECCIÓN DE "NO ME MOLESTES" (DNC - Do Not Contact)
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const { detectDNCPhrase } = await import('../services/meta-whatsapp');
+      if (detectDNCPhrase(trimmedBody) && lead?.id) {
+        console.log(`🚫 DNC DETECTADO de ${cleanPhone}: "${trimmedBody}"`);
+
+        // Marcar lead como do_not_contact
+        await this.supabase.client.from('leads')
+          .update({
+            do_not_contact: true,
+            dnc_reason: `Solicitó no ser contactado: "${trimmedBody.substring(0, 100)}"`,
+            dnc_at: new Date().toISOString()
+          })
+          .eq('id', lead.id);
+
+        // Bloquear en rate limiter
+        this.meta.markAsBlocked(cleanPhone, 'DNC - Solicitó no ser contactado');
+
+        // Responder confirmando que no se le molestará más
+        await this.twilio.sendWhatsAppMessage(from,
+          '✅ Entendido. Hemos registrado tu solicitud y no te enviaremos más mensajes.\n\n' +
+          'Si en el futuro deseas información sobre nuestros desarrollos, escríbenos "REACTIVAR".\n\n' +
+          'Disculpa las molestias. 🙏'
+        );
+
+        // Alertar al admin
+        try {
+          await this.meta.sendWhatsAppMessage('5212224558475',
+            `🚫 *DNC DETECTADO*\n\n` +
+            `📱 ${cleanPhone}\n` +
+            `👤 ${lead.name || 'Sin nombre'}\n` +
+            `💬 "${trimmedBody}"\n\n` +
+            `Lead marcado como DO NOT CONTACT`,
+            true // bypass rate limit para alertas
+          );
+        } catch (e) {
+          console.log('⚠️ No se pudo alertar admin sobre DNC');
+        }
+
+        return; // No procesar más este mensaje
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
