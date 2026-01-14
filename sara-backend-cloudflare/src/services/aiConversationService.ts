@@ -2731,9 +2731,33 @@ Tú dime, ¿por dónde empezamos?`;
       }
       
       // ✅ FIX 07-ENE-2026: No enviar respuesta de Claude si ya interceptamos con pregunta de nombre
-      if (!interceptoCita) {
+      // ✅ FIX 14-ENE-2026: Rate limit - no enviar si ya enviamos respuesta hace menos de 5s
+      const { data: leadFrescoRL } = await this.supabase.client
+        .from('leads')
+        .select('notes')
+        .eq('id', lead.id)
+        .single();
+
+      const lastResponseTime = leadFrescoRL?.notes?.last_response_time;
+      const ahora = Date.now();
+      const yaRespondioRecientemente = lastResponseTime && (ahora - lastResponseTime) < 5000;
+
+      if (yaRespondioRecientemente) {
+        console.log('⏭️ RATE LIMIT: Ya se envió respuesta hace <5s, saltando envío (contexto guardado)');
+      } else if (!interceptoCita) {
         await this.twilio.sendWhatsAppMessage(from, respuestaLimpia);
         console.log('✅ Respuesta de Claude enviada (sin pregunta de crédito)');
+
+        // Marcar tiempo de última respuesta
+        await this.supabase.client
+          .from('leads')
+          .update({
+            notes: {
+              ...(leadFrescoRL?.notes || {}),
+              last_response_time: ahora
+            }
+          })
+          .eq('id', lead.id);
       } else {
         console.log('⏸️ Respuesta de Claude NO enviada (ya se envió pregunta de nombre para cita)');
       }
