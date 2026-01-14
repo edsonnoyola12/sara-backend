@@ -22,15 +22,15 @@ export interface FunnelScoreResult {
   };
 }
 
-// Score base por etapa del funnel
+// Score base por etapa del funnel (alineado con umbrales HOT>=70, WARM>=40)
 const SCORE_FUNNEL: Record<LeadStatus, { min: number; max: number }> = {
-  'new': { min: 10, max: 20 },
-  'contacted': { min: 25, max: 40 },
-  'scheduled': { min: 50, max: 70 },
-  'visited': { min: 75, max: 85 },
-  'negotiating': { min: 85, max: 95 },
-  'closed': { min: 100, max: 100 },
-  'fallen': { min: 0, max: 0 }
+  'new': { min: 15, max: 25 },           // COLD
+  'contacted': { min: 30, max: 39 },     // COLD
+  'scheduled': { min: 50, max: 65 },     // WARM
+  'visited': { min: 75, max: 85 },       // HOT
+  'negotiating': { min: 85, max: 95 },   // HOT
+  'closed': { min: 100, max: 100 },      // HOT
+  'fallen': { min: 0, max: 0 }           // COLD
 };
 
 export class LeadScoringService {
@@ -119,10 +119,10 @@ export class LeadScoringService {
     // 4. Calcular score final (no exceder máximo del rango)
     const finalScore = Math.min(range.max, baseScore + bonuses);
 
-    // 5. Determinar temperatura
+    // 5. Determinar temperatura (umbrales unificados)
     let temperature: LeadTemperature = 'COLD';
-    if (finalScore >= 75) temperature = 'HOT';
-    else if (finalScore >= 50) temperature = 'WARM';
+    if (finalScore >= 70) temperature = 'HOT';
+    else if (finalScore >= 40) temperature = 'WARM';
 
     return {
       score: finalScore,
@@ -145,11 +145,11 @@ export class LeadScoringService {
   }
 
   /**
-   * Determina la temperatura basada en el score
+   * Determina la temperatura basada en el score (umbrales unificados)
    */
   getTemperature(score: number): LeadTemperature {
-    if (score >= 75) return 'HOT';
-    if (score >= 50) return 'WARM';
+    if (score >= 70) return 'HOT';
+    if (score >= 40) return 'WARM';
     return 'COLD';
   }
 

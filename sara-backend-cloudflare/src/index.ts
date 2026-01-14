@@ -8,6 +8,7 @@ import { handleTeamRoutes } from './routes/team-routes';
 import { handlePromotionRoutes } from './routes/promotions';
 import { FollowupService } from './services/followupService';
 import { FollowupApprovalService } from './services/followupApprovalService';
+import { NotificationService } from './services/notificationService';
 
 export interface Env {
   SUPABASE_URL: string;
@@ -144,7 +145,7 @@ export default {
     // ═══════════════════════════════════════════════════════════
     // API Routes - Team Members
     // ═══════════════════════════════════════════════════════════
-    if (url.pathname.startsWith('/api/team-members')) {
+    if (url.pathname.startsWith('/api/team-members') || url.pathname.startsWith('/api/admin/')) {
       const response = await handleTeamRoutes(request, env, supabase);
       if (response) return response;
     }
@@ -422,6 +423,96 @@ Responde *SI* para confirmar tu asistencia.`;
       return corsResponse(JSON.stringify(data || []));
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // API: Recalcular scores de todos los leads según su status
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/api/recalculate-scores' && request.method === 'POST') {
+      try {
+        // Score base por status del funnel
+        const SCORE_BY_STATUS: Record<string, number> = {
+          'new': 15,
+          'contacted': 35,
+          'scheduled': 55,
+          'visited': 80,
+          'negotiation': 90,
+          'negotiating': 90,
+          'reserved': 95,
+          'closed_won': 100,
+          'closed': 100,
+          'delivered': 100,
+          'fallen': 0
+        };
+
+        const { data: leads } = await supabase.client
+          .from('leads')
+          .select('id, status, name, property_interest, needs_mortgage, enganche_disponible');
+
+        if (!leads) {
+          return corsResponse(JSON.stringify({ error: 'No se pudieron obtener leads' }), 500);
+        }
+
+        let updated = 0;
+        const results: any[] = [];
+
+        for (const lead of leads) {
+          const status = lead.status || 'new';
+          let baseScore = SCORE_BY_STATUS[status] ?? 15;
+
+          // Bonificaciones menores
+          let bonus = 0;
+          if (lead.name && lead.name !== 'Sin nombre') bonus += 2;
+          if (lead.property_interest) bonus += 2;
+          if (lead.needs_mortgage) bonus += 3;
+          if (lead.enganche_disponible && lead.enganche_disponible > 0) bonus += 3;
+
+          const finalScore = Math.min(100, baseScore + bonus);
+
+          // Determinar temperatura
+          let temperature = 'COLD';
+          let lead_category = 'cold';
+          if (finalScore >= 70) {
+            temperature = 'HOT';
+            lead_category = 'hot';
+          } else if (finalScore >= 40) {
+            temperature = 'WARM';
+            lead_category = 'warm';
+          }
+
+          // Actualizar
+          const { error } = await supabase.client
+            .from('leads')
+            .update({
+              score: finalScore,
+              lead_score: finalScore,
+              temperature,
+              lead_category
+            })
+            .eq('id', lead.id);
+
+          if (!error) {
+            updated++;
+            results.push({
+              id: lead.id,
+              status,
+              oldScore: 'N/A',
+              newScore: finalScore,
+              temperature
+            });
+          }
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          total: leads.length,
+          updated,
+          results
+        }, null, 2));
+
+      } catch (error: any) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+    }
+
     if (url.pathname.match(/^\/api\/leads\/[^\/]+$/) && request.method === 'GET') {
       const id = url.pathname.split('/').pop();
       const { data } = await supabase.client
@@ -449,39 +540,35 @@ Responde *SI* para confirmar tu asistencia.`;
       
       // Si cambió el status, ajustar score basado en FUNNEL
       if (body.status && body.status !== oldLead?.status) {
+        // Scores alineados con umbrales: HOT >= 70, WARM >= 40, COLD < 40
         const statusScores: Record<string, number> = {
-          'new': 10,
-          'contacted': 20,
-          'scheduled': 35,
-          'visited': 50,
-          'negotiation': 70,
-          'reserved': 85,
-          'closed': 100,
-          'delivered': 100,
-          'fallen': 0
+          'new': 15,              // COLD
+          'contacted': 35,        // COLD
+          'scheduled': 55,        // WARM
+          'visited': 80,          // HOT
+          'negotiation': 90,      // HOT
+          'negotiating': 90,      // HOT
+          'reserved': 95,         // HOT
+          'closed_won': 100,      // HOT
+          'closed': 100,          // HOT
+          'delivered': 100,       // HOT
+          'fallen': 0             // COLD
         };
         newScore = statusScores[body.status] ?? newScore;
-        
-        // Temperatura basada en ETAPA, no score
-        // HOT = negotiation, reserved (los que pueden cerrar pronto)
-        // closed/delivered = CLIENTE (ya cerró)
-        const etapasHot = ['negotiation', 'reserved'];
-        const etapasCliente = ['closed', 'delivered'];
-        
-        if (etapasCliente.includes(body.status)) {
-          body.temperature = 'CLIENTE';
-        } else if (etapasHot.includes(body.status)) {
-          body.temperature = 'HOT';
-        } else if (newScore >= 35) {
-          body.temperature = 'WARM';
-        } else {
-          body.temperature = 'COLD';
+
+        // Temperatura basada en score (umbrales unificados)
+        let temperatura = 'COLD';
+        if (newScore >= 70) {
+          temperatura = 'HOT';
+        } else if (newScore >= 40) {
+          temperatura = 'WARM';
         }
-        
+
+        body.temperature = temperatura;
         body.score = newScore;
         body.lead_score = newScore;
-        body.lead_category = body.temperature;
-        console.log('📊 Score actualizado:', newScore, 'Temp:', body.temperature);
+        body.lead_category = temperatura.toLowerCase();
+        console.log('📊 Score actualizado por status:', body.status, '→', newScore, 'Temp:', temperatura);
       }
       
       // Si tiene desarrollo de interés y no tenía, +15
@@ -1092,6 +1179,185 @@ Cancelada por: ${body.cancelled_by || 'CRM'}`;
         return corsResponse(JSON.stringify(data));
       } catch (e: any) {
         console.log('❌ Error cancelando cita:', e);
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Notificar cambio/cancelación de cita (usado por coordinadores)
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/appointments/notify-change' && request.method === 'POST') {
+      const body = await request.json() as any;
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      console.log('📋 Notificación de cita:', body.action, body.lead_name);
+
+      try {
+        const esCambio = body.action === 'cambio';
+        const fechaVieja = body.old_date ? new Date(body.old_date + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'short' }) : '';
+        const fechaNueva = body.new_date ? new Date(body.new_date + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'short' }) : '';
+
+        if (esCambio) {
+          // ═══ NOTIFICAR CAMBIO DE CITA ═══
+
+          // Al vendedor
+          if (body.vendedor_phone) {
+            const msgVendedor = `📅 *CITA REPROGRAMADA*
+━━━━━━━━━━━━━━━━━━━━━
+
+👤 *Cliente:* ${body.lead_name}
+📱 *Tel:* ${body.lead_phone}
+🏠 *Lugar:* ${body.property}
+
+❌ *Antes:* ${fechaVieja} a las ${body.old_time?.slice(0, 5)}
+✅ *Ahora:* ${fechaNueva} a las ${body.new_time?.slice(0, 5)}
+
+📝 *Motivo:* ${body.nota || 'Sin especificar'}
+
+━━━━━━━━━━━━━━━━━━━━━
+👤 Coordinador: ${body.coordinador_name}`;
+
+            await meta.sendWhatsAppMessage(body.vendedor_phone, msgVendedor);
+            console.log('📤 Notificación de cambio enviada a vendedor:', body.vendedor_name);
+          }
+
+          // Al cliente
+          if (body.lead_phone) {
+            const msgCliente = `📅 *TU CITA HA SIDO REPROGRAMADA*
+
+Hola ${body.lead_name?.split(' ')[0] || ''} 👋
+
+Tu cita ha sido actualizada:
+
+✅ *Nueva fecha:* ${fechaNueva}
+🕐 *Nueva hora:* ${body.new_time?.slice(0, 5)}
+📍 *Lugar:* ${body.property}
+
+${body.nota ? `📝 *Nota:* ${body.nota}` : ''}
+
+¡Te esperamos! 🏠`;
+
+            await meta.sendWhatsAppMessage(body.lead_phone, msgCliente);
+            console.log('📤 Notificación de cambio enviada a cliente:', body.lead_name);
+          }
+
+        } else {
+          // ═══ NOTIFICAR CANCELACIÓN ═══
+
+          // Al vendedor
+          if (body.vendedor_phone) {
+            const msgVendedor = `❌ *CITA CANCELADA*
+━━━━━━━━━━━━━━━━━━━━━
+
+👤 *Cliente:* ${body.lead_name}
+📱 *Tel:* ${body.lead_phone}
+🏠 *Lugar:* ${body.property}
+
+📆 *Fecha:* ${fechaVieja} a las ${body.old_time?.slice(0, 5)}
+
+📝 *Motivo:* ${body.nota || 'Sin especificar'}
+
+━━━━━━━━━━━━━━━━━━━━━
+👤 Cancelada por: ${body.coordinador_name}`;
+
+            await meta.sendWhatsAppMessage(body.vendedor_phone, msgVendedor);
+            console.log('📤 Notificación de cancelación enviada a vendedor:', body.vendedor_name);
+          }
+
+          // Al cliente
+          if (body.lead_phone) {
+            const msgCliente = `❌ *TU CITA HA SIDO CANCELADA*
+
+Hola ${body.lead_name?.split(' ')[0] || ''} 👋
+
+Lamentamos informarte que tu cita ha sido cancelada:
+
+📆 *Fecha:* ${fechaVieja}
+🕐 *Hora:* ${body.old_time?.slice(0, 5)}
+📍 *Lugar:* ${body.property}
+
+${body.nota ? `📝 *Motivo:* ${body.nota}` : ''}
+
+Para reagendar, contáctanos. ¡Estamos para servirte! 🏠`;
+
+            await meta.sendWhatsAppMessage(body.lead_phone, msgCliente);
+            console.log('📤 Notificación de cancelación enviada a cliente:', body.lead_name);
+          }
+        }
+
+        return corsResponse(JSON.stringify({ success: true, action: body.action }));
+      } catch (e: any) {
+        console.log('❌ Error enviando notificación:', e);
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Notificar nota de coordinador al vendedor
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/leads/notify-note' && request.method === 'POST') {
+      const body = await request.json() as any;
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      console.log('📝 Nota de coordinador para:', body.lead_name);
+
+      try {
+        if (body.vendedor_phone) {
+          const msgVendedor = `📝 *NOTA DEL COORDINADOR*
+━━━━━━━━━━━━━━━━━━━━━
+
+👤 *Lead:* ${body.lead_name}
+📱 *Tel:* ${body.lead_phone}
+
+💬 *Nota:*
+${body.nota}
+
+━━━━━━━━━━━━━━━━━━━━━
+👤 De: ${body.coordinador_name}`;
+
+          await meta.sendWhatsAppMessage(body.vendedor_phone, msgVendedor);
+          console.log('📤 Nota enviada a vendedor:', body.vendedor_name);
+        }
+
+        return corsResponse(JSON.stringify({ success: true }));
+      } catch (e: any) {
+        console.log('❌ Error enviando nota:', e);
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Notificar reasignación de lead al nuevo vendedor
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/leads/notify-reassign' && request.method === 'POST') {
+      const body = await request.json() as any;
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      console.log('🔄 Lead reasignado a:', body.vendedor_name);
+
+      try {
+        if (body.vendedor_phone) {
+          const msgVendedor = `🔄 *LEAD REASIGNADO*
+━━━━━━━━━━━━━━━━━━━━━
+
+👤 *Cliente:* ${body.lead_name}
+📱 *Tel:* ${body.lead_phone}
+🏠 *Interés:* ${body.property_interest || 'No especificado'}
+
+💬 *Nota:*
+${body.nota || 'Sin nota'}
+
+━━━━━━━━━━━━━━━━━━━━━
+⚡ *¡Contactar pronto!*
+👤 Reasignado por: ${body.coordinador_name}`;
+
+          await meta.sendWhatsAppMessage(body.vendedor_phone, msgVendedor);
+          console.log('📤 Notificación de reasignación enviada a:', body.vendedor_name);
+        }
+
+        return corsResponse(JSON.stringify({ success: true }));
+      } catch (e: any) {
+        console.log('❌ Error notificando reasignación:', e);
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
     }
@@ -2001,28 +2267,26 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
     // Endpoint para ver templates aprobados de Meta
     if (url.pathname === '/api/templates' && request.method === 'GET') {
       try {
-        // Obtener WABA ID desde el phone number
-        const wabaUrl = `https://graph.facebook.com/v22.0/${env.META_PHONE_NUMBER_ID}?fields=whatsapp_business_account{id,name,message_template_namespace}`;
-        const wabaResp = await fetch(wabaUrl, {
+        const WABA_ID = '1227849769248437';
+
+        // Obtener templates del WABA directamente
+        const templatesUrl = `https://graph.facebook.com/v22.0/${WABA_ID}/message_templates?fields=name,status,language&limit=50`;
+        const templatesResp = await fetch(templatesUrl, {
           headers: { 'Authorization': `Bearer ${env.META_ACCESS_TOKEN}` }
         });
-        const wabaData = await wabaResp.json() as any;
-        const wabaId = wabaData?.whatsapp_business_account?.id;
+        const templatesData = await templatesResp.json() as any;
 
-        let templatesData = null;
-        if (wabaId) {
-          // Obtener templates del WABA
-          const templatesUrl = `https://graph.facebook.com/v22.0/${wabaId}/message_templates?fields=name,status,language,components`;
-          const templatesResp = await fetch(templatesUrl, {
-            headers: { 'Authorization': `Bearer ${env.META_ACCESS_TOKEN}` }
-          });
-          templatesData = await templatesResp.json();
-        }
+        // Formatear respuesta
+        const templates = templatesData?.data?.map((t: any) => ({
+          name: t.name,
+          status: t.status,
+          language: t.language
+        })) || [];
 
         return corsResponse(JSON.stringify({
-          waba_info: wabaData,
-          waba_id: wabaId,
-          templates: templatesData
+          waba_id: WABA_ID,
+          total: templates.length,
+          templates: templates
         }, null, 2));
       } catch (error: any) {
         return corsResponse(JSON.stringify({ error: error.message }), 500);
@@ -2077,6 +2341,30 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
             category: 'MARKETING',
             text: '🎂 ¡Feliz cumpleaños {{1}}! 🎉\n\nTodo el equipo te desea un día increíble.\n\nGracias por ser parte de nuestra familia. 🏠💙',
             example: [['María']]
+          },
+          {
+            name: 'reactivacion_lead',
+            category: 'MARKETING',
+            text: '👋 ¡Hola {{1}}!\n\nHace tiempo no platicamos. ¿Sigues buscando casa en Zacatecas? 🏠\n\nTenemos nuevas opciones que podrían interesarte.\n\nResponde *Sí* y te cuento las novedades. 😊',
+            example: [['María']]
+          },
+          {
+            name: 'promo_desarrollo',
+            category: 'MARKETING',
+            text: '🎉 ¡Hola {{1}}!\n\n*PROMOCIÓN ESPECIAL* en {{2}}:\n\n{{3}}\n\n⏰ Válido por tiempo limitado.\n\n¿Te interesa? Responde *Sí* para más información.',
+            example: [['María', 'Monte Verde', '10% de descuento en enganche']]
+          },
+          {
+            name: 'invitacion_evento',
+            category: 'MARKETING',
+            text: '🏠 ¡Hola {{1}}!\n\nTe invitamos a *{{2}}*\n\n📅 {{3}}\n📍 {{4}}\n\n¡No te lo pierdas! Responde *Confirmo* para apartar tu lugar. 🎉',
+            example: [['María', 'Feria de la Vivienda', 'Sábado 25 de enero, 10am', 'Monte Verde']]
+          },
+          {
+            name: 'reactivar_equipo',
+            category: 'UTILITY',
+            text: '👋 ¡Hola {{1}}!\n\nSoy SARA, tu asistente de Grupo Santa Rita. 🏠\n\nResponde cualquier mensaje para activar nuestra conversación y poder enviarte reportes, alertas y notificaciones.\n\nEscribe *ayuda* para ver comandos disponibles. 💪',
+            example: [['Oscar']]
           }
         ];
 
@@ -2155,6 +2443,67 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
           success: response.ok,
           status: response.status,
           template_name: 'seguimiento_lead',
+          result
+        }, null, 2));
+
+      } catch (error: any) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+    }
+
+    // Endpoint genérico para enviar cualquier template
+    if (url.pathname === '/api/send-template' && request.method === 'POST') {
+      try {
+        const body = await request.json() as any;
+        const { phone, template, params } = body;
+
+        if (!phone || !template) {
+          return corsResponse(JSON.stringify({ error: 'phone y template son requeridos' }), 400);
+        }
+
+        // Normalizar teléfono
+        const digits = phone.replace(/\D/g, '');
+        const phoneNormalized = digits.length === 10 ? '521' + digits :
+                               digits.startsWith('52') && digits.length === 12 ? '521' + digits.slice(2) : digits;
+
+        // Construir componentes del template
+        const components: any[] = [];
+        if (params && params.length > 0) {
+          components.push({
+            type: 'body',
+            parameters: params.map((p: string) => ({ type: 'text', text: p }))
+          });
+        }
+
+        const payload = {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: phoneNormalized,
+          type: 'template',
+          template: {
+            name: template,
+            language: { code: 'es_MX' },
+            components
+          }
+        };
+
+        console.log('📤 Enviando template:', template, 'a', phoneNormalized);
+
+        const response = await fetch(`https://graph.facebook.com/v22.0/${env.META_PHONE_NUMBER_ID}/messages`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${env.META_ACCESS_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        return corsResponse(JSON.stringify({
+          success: response.ok,
+          template,
+          phone: phoneNormalized,
           result
         }, null, 2));
 
@@ -6725,6 +7074,49 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       await aplicarPreciosProgramados(supabase, meta);
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // 9am L-V: REACTIVAR EQUIPO - Enviar template a quienes no han interactuado en 24h
+    // ═══════════════════════════════════════════════════════════════
+    if (mexicoHour === 9 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5 && vendedores) {
+      console.log('🔄 Verificando equipo para reactivación...');
+      const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      let reactivados = 0;
+
+      for (const v of vendedores) {
+        if (!v.phone || !v.active) continue;
+
+        // Verificar si no ha interactuado en 24h
+        const ultimaInteraccion = v.last_sara_interaction;
+        const necesitaReactivar = !ultimaInteraccion || ultimaInteraccion < hace24h;
+
+        if (necesitaReactivar) {
+          console.log(`   📤 Reactivando a ${v.name} (última: ${ultimaInteraccion || 'nunca'})`);
+          try {
+            // Enviar template de reactivación
+            await meta.sendTemplate(v.phone, 'reactivar_equipo', 'es_MX', [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: v.name?.split(' ')[0] || 'Equipo' }
+                ]
+              }
+            ]);
+            reactivados++;
+
+            // Marcar que se envió template (para no repetir)
+            await supabase.client
+              .from('team_members')
+              .update({ last_sara_interaction: new Date().toISOString() })
+              .eq('id', v.id);
+
+          } catch (err) {
+            console.log(`   ⚠️ Error reactivando ${v.name}:`, err);
+          }
+        }
+      }
+      console.log(`🔄 REACTIVACIÓN: ${reactivados} miembros reactivados`);
+    }
+
     // 7pm L-V: Recap del dia (solo primer ejecucion de la hora)
     if (mexicoHour === 19 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5 && vendedores) {
       console.log('Enviando recap del dia...');
@@ -6773,9 +7165,31 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       }
     }
 
-    // RECORDATORIOS DE CITAS - cada ejecución del cron
+    // ═══════════════════════════════════════════════════════════
+    // SISTEMA CENTRALIZADO DE NOTIFICACIONES
+    // ═══════════════════════════════════════════════════════════
+    const notificationService = new NotificationService(supabase, meta);
+
+    // RECORDATORIOS DE CITAS - cada ejecución del cron (24h y 2h antes)
     console.log('🔔 Verificando recordatorios de citas...');
-    await enviarRecordatoriosCitas(supabase, meta);
+    const recordatoriosResult = await notificationService.enviarRecordatoriosCitas();
+    if (recordatoriosResult.enviados > 0) {
+      console.log(`✅ ${recordatoriosResult.enviados} recordatorios enviados`);
+    }
+
+    // ENCUESTAS POST-CITA - cada ejecución (2-24h después de cita completada)
+    console.log('📋 Verificando encuestas post-cita...');
+    const encuestasResult = await notificationService.enviarEncuestasPostCita();
+    if (encuestasResult.enviados > 0) {
+      console.log(`✅ ${encuestasResult.enviados} encuestas enviadas`);
+    }
+
+    // FOLLOW-UP POST-CITA - día siguiente de cita completada
+    console.log('📧 Verificando follow-ups post-cita...');
+    const followupPostCitaResult = await notificationService.enviarFollowupPostCita();
+    if (followupPostCitaResult.enviados > 0) {
+      console.log(`✅ ${followupPostCitaResult.enviados} follow-ups post-cita enviados`);
+    }
 
     // NO-SHOWS - detectar citas donde no se presentó el lead (cada 2 min)
     console.log('👻 Verificando no-shows...');
