@@ -644,6 +644,12 @@ export class WhatsAppHandler {
         return;
       }
 
+      // Si hay notificación de vendedor pendiente (ej: respuesta a broadcast), enviarla
+      if (leadResult.notifyVendor) {
+        await this.meta.sendWhatsAppMessage(leadResult.notifyVendor.phone, leadResult.notifyVendor.message);
+        console.log('📢 Notificación de broadcast enviada a vendedor');
+      }
+
       // Si llegamos aquí, continuar a análisis con IA (delegado a aiConversationService)
       const aiService = new AIConversationService(this.supabase, this.twilio, this.meta, this.calendar, this.claude, env);
       aiService.setHandler(this);

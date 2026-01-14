@@ -8,6 +8,7 @@
 import { SupabaseService } from './supabase';
 
 const BATCH_SIZE = 15; // Leads por lote (dentro del límite de Cloudflare)
+const BROADCAST_RESPONSE_WINDOW_HOURS = 48; // Ventana para detectar respuestas
 
 export interface BroadcastJob {
   id: string;
@@ -76,7 +77,8 @@ export class BroadcastQueueService {
    * Procesa broadcasts pendientes (llamado por cron)
    */
   async processPendingBroadcasts(
-    sendTemplate: (phone: string, templateName: string, lang: string, components: any[]) => Promise<any>
+    sendTemplate: (phone: string, templateName: string, lang: string, components: any[]) => Promise<any>,
+    sendMessage?: (phone: string, message: string) => Promise<any>
   ): Promise<{ processed: number; sent: number; errors: number }> {
     let totalProcessed = 0;
     let totalSent = 0;
@@ -97,7 +99,7 @@ export class BroadcastQueueService {
     console.log(`📤 QUEUE: Procesando ${jobs.length} broadcasts pendientes`);
 
     for (const job of jobs) {
-      const result = await this.processJob(job, sendTemplate);
+      const result = await this.processJob(job, sendTemplate, sendMessage);
       totalProcessed++;
       totalSent += result.sent;
       totalErrors += result.errors;
@@ -111,7 +113,8 @@ export class BroadcastQueueService {
    */
   private async processJob(
     job: BroadcastJob,
-    sendTemplate: (phone: string, templateName: string, lang: string, components: any[]) => Promise<any>
+    sendTemplate: (phone: string, templateName: string, lang: string, components: any[]) => Promise<any>,
+    sendMessage?: (phone: string, message: string) => Promise<any>
   ): Promise<{ sent: number; errors: number; completed: boolean }> {
     let sent = 0;
     let errors = 0;
@@ -129,14 +132,14 @@ export class BroadcastQueueService {
 
     if (pendingIds.length === 0) {
       // No hay más leads, marcar como completado
-      await this.markAsCompleted(job);
+      await this.markAsCompleted(job, sendMessage);
       return { sent: 0, errors: 0, completed: true };
     }
 
-    // Obtener datos de los leads
+    // Obtener datos de los leads (incluir assigned_to para notificar vendedores)
     const { data: leads } = await this.supabase.client
       .from('leads')
-      .select('id, phone, name, property_interest')
+      .select('id, phone, name, property_interest, assigned_to, notes')
       .in('id', pendingIds);
 
     if (!leads || leads.length === 0) {
@@ -147,6 +150,7 @@ export class BroadcastQueueService {
 
     const sentIds: string[] = [];
     const failedIds: string[] = [];
+    const sentLeadsByVendor: Map<string, { name: string; phone: string }[]> = new Map();
 
     // Enviar a cada lead
     for (const lead of leads) {
@@ -182,11 +186,30 @@ export class BroadcastQueueService {
         sentIds.push(lead.id);
         sent++;
         console.log(`✅ QUEUE: Template enviado a ${lead.phone}`);
+
+        // Marcar en notes del lead que recibió broadcast
+        await this.markLeadWithBroadcast(lead.id, lead.notes, job);
+
+        // Agrupar por vendedor para notificar
+        if (lead.assigned_to) {
+          if (!sentLeadsByVendor.has(lead.assigned_to)) {
+            sentLeadsByVendor.set(lead.assigned_to, []);
+          }
+          sentLeadsByVendor.get(lead.assigned_to)!.push({
+            name: lead.name || 'Sin nombre',
+            phone: lead.phone
+          });
+        }
       } catch (e) {
         console.error(`❌ QUEUE: Error enviando a ${lead.phone}:`, e);
         failedIds.push(lead.id);
         errors++;
       }
+    }
+
+    // Notificar a vendedores sobre sus leads que recibieron broadcast
+    if (sendMessage && sentLeadsByVendor.size > 0) {
+      await this.notifyVendors(sentLeadsByVendor, job, sendMessage);
     }
 
     // Actualizar el job
@@ -207,7 +230,7 @@ export class BroadcastQueueService {
 
     // Verificar si completó
     if (newPendingIds.length === 0) {
-      await this.markAsCompleted(job);
+      await this.markAsCompleted(job, sendMessage);
       return { sent, errors, completed: true };
     }
 
@@ -215,9 +238,95 @@ export class BroadcastQueueService {
   }
 
   /**
+   * Marca un lead con info del broadcast recibido
+   */
+  private async markLeadWithBroadcast(leadId: string, currentNotes: any, job: BroadcastJob): Promise<void> {
+    try {
+      const notes = typeof currentNotes === 'object' ? currentNotes : {};
+      const broadcastInfo = {
+        job_id: job.id,
+        segment: job.segment,
+        message: job.message_template.substring(0, 100),
+        sent_at: new Date().toISOString()
+      };
+
+      await this.supabase.client
+        .from('leads')
+        .update({
+          notes: {
+            ...notes,
+            last_broadcast: broadcastInfo
+          }
+        })
+        .eq('id', leadId);
+    } catch (e) {
+      console.error(`Error marcando lead ${leadId} con broadcast:`, e);
+    }
+  }
+
+  /**
+   * Notifica a vendedores sobre leads que recibieron broadcast
+   */
+  private async notifyVendors(
+    leadsByVendor: Map<string, { name: string; phone: string }[]>,
+    job: BroadcastJob,
+    sendMessage: (phone: string, message: string) => Promise<any>
+  ): Promise<void> {
+    // Obtener datos de vendedores
+    const vendorIds = Array.from(leadsByVendor.keys());
+    const { data: vendors } = await this.supabase.client
+      .from('team_members')
+      .select('id, name, phone')
+      .in('id', vendorIds);
+
+    if (!vendors) return;
+
+    const mensajeCorto = job.message_template
+      .replace(/{nombre}/gi, '[nombre]')
+      .replace(/{desarrollo}/gi, '[desarrollo]')
+      .substring(0, 80);
+
+    for (const vendor of vendors) {
+      if (!vendor.phone) continue;
+
+      const leads = leadsByVendor.get(vendor.id);
+      if (!leads || leads.length === 0) continue;
+
+      const nombresLeads = leads.slice(0, 5).map(l => l.name).join(', ');
+      const extra = leads.length > 5 ? ` y ${leads.length - 5} más` : '';
+
+      const mensaje = `📢 *Broadcast enviado a tus leads*\n\n` +
+        `Se envió mensaje promocional a ${leads.length} de tus leads:\n` +
+        `👥 ${nombresLeads}${extra}\n\n` +
+        `📝 Mensaje: "${mensajeCorto}..."\n\n` +
+        `⚡ Si responden, te notificaré con el contexto.`;
+
+      try {
+        await sendMessage(vendor.phone, mensaje);
+        console.log(`📢 QUEUE: Notificación enviada a vendedor ${vendor.name}`);
+      } catch (e) {
+        console.error(`Error notificando a vendedor ${vendor.name}:`, e);
+      }
+    }
+  }
+
+  /**
    * Marca un job como completado y notifica al usuario
    */
-  private async markAsCompleted(job: BroadcastJob): Promise<void> {
+  private async markAsCompleted(
+    job: BroadcastJob,
+    sendMessage?: (phone: string, message: string) => Promise<any>
+  ): Promise<void> {
+    // Obtener conteos actualizados
+    const { data: updatedJob } = await this.supabase.client
+      .from('broadcast_queue')
+      .select('sent_count, error_count')
+      .eq('id', job.id)
+      .single();
+
+    const sentCount = updatedJob?.sent_count || job.sent_count;
+    const errorCount = updatedJob?.error_count || job.error_count;
+
     await this.supabase.client
       .from('broadcast_queue')
       .update({
@@ -226,7 +335,49 @@ export class BroadcastQueueService {
       })
       .eq('id', job.id);
 
-    console.log(`✅ QUEUE: Broadcast ${job.id} completado - ${job.sent_count} enviados, ${job.error_count} errores`);
+    console.log(`✅ QUEUE: Broadcast ${job.id} completado - ${sentCount} enviados, ${errorCount} errores`);
+  }
+
+  /**
+   * Verifica si un lead tiene un broadcast reciente (para contextualizar respuestas)
+   */
+  async getRecentBroadcast(leadId: string): Promise<{
+    hasBroadcast: boolean;
+    message?: string;
+    sentAt?: string;
+    segment?: string;
+  }> {
+    try {
+      const { data: lead } = await this.supabase.client
+        .from('leads')
+        .select('notes')
+        .eq('id', leadId)
+        .single();
+
+      if (!lead?.notes?.last_broadcast) {
+        return { hasBroadcast: false };
+      }
+
+      const broadcast = lead.notes.last_broadcast;
+      const sentAt = new Date(broadcast.sent_at);
+      const now = new Date();
+      const hoursDiff = (now.getTime() - sentAt.getTime()) / (1000 * 60 * 60);
+
+      // Solo considerar broadcasts dentro de la ventana de tiempo
+      if (hoursDiff > BROADCAST_RESPONSE_WINDOW_HOURS) {
+        return { hasBroadcast: false };
+      }
+
+      return {
+        hasBroadcast: true,
+        message: broadcast.message,
+        sentAt: broadcast.sent_at,
+        segment: broadcast.segment
+      };
+    } catch (e) {
+      console.error('Error verificando broadcast reciente:', e);
+      return { hasBroadcast: false };
+    }
   }
 
   /**

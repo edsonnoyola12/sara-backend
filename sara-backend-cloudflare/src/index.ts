@@ -14185,6 +14185,9 @@ async function procesarBroadcastQueue(supabase: SupabaseService, meta: MetaWhats
     const result = await queueService.processPendingBroadcasts(
       async (phone: string, templateName: string, lang: string, components: any[]) => {
         return meta.sendTemplate(phone, templateName, lang, components);
+      },
+      async (phone: string, message: string) => {
+        return meta.sendWhatsAppMessage(phone, message);
       }
     );
 
