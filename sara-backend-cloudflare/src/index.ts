@@ -3122,11 +3122,12 @@ Mensaje: ${mensaje}`;
           const yesterdayStr = yesterday.toISOString().split('T')[0];
           const nextMonthStr = nextMonth.toISOString().split('T')[0];
 
+          // ✅ FIX 14-ENE-2026: También detectar citas completadas que fueron borradas del calendario
           const { data: citasConGoogle } = await supabase.client
             .from('appointments')
             .select('*')
             .not('google_event_vendedor_id', 'is', null)
-            .eq('status', 'scheduled')
+            .in('status', ['scheduled', 'completed']) // Incluir completadas también
             .gte('scheduled_date', yesterdayStr)  // Solo citas desde ayer
             .lte('scheduled_date', nextMonthStr); // Hasta próximo mes
           
@@ -3134,18 +3135,20 @@ Mensaje: ${mensaje}`;
             for (const cita of citasConGoogle) {
               if (cita.google_event_vendedor_id && !googleEventIds.includes(cita.google_event_vendedor_id)) {
                 // El evento fue eliminado de Google Calendar
-                console.log('📅 Evento eliminado de Google, cancelando cita:', cita.id);
-                
+                const eraCompletada = cita.status === 'completed';
+                console.log(`📅 Evento eliminado de Google, cancelando cita: ${cita.id} (era: ${cita.status})`);
+
                 await supabase.client
                   .from('appointments')
-                  .update({ 
-                    status: 'cancelled', 
-                    cancelled_by: 'Google Calendar (eliminado)',
+                  .update({
+                    status: 'cancelled',
+                    cancelled_by: eraCompletada ? 'Google Calendar (eliminado post-visita)' : 'Google Calendar (eliminado)',
                   })
                   .eq('id', cita.id);
-                
-                // Notificar al LEAD
-                if (cita.lead_phone) {
+
+                // ✅ FIX 14-ENE-2026: NO notificar si la cita ya fue completada (el cliente ya visitó)
+                // Solo notificar si era una cita pendiente
+                if (cita.lead_phone && !eraCompletada) {
                   try {
                     const fechaStr = new Date(cita.scheduled_date + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
                     const msgLead = `❌ *CITA CANCELADA*\n\nHola ${cita.lead_name?.split(' ')[0] || ''} 👋\n\nTu cita del ${fechaStr} a las ${(cita.scheduled_time || '').substring(0,5)} ha sido cancelada.\n\nSi deseas reagendar, contáctanos. ¡Estamos para servirte! 🏠`;
@@ -3157,15 +3160,15 @@ Mensaje: ${mensaje}`;
                   }
                 }
                 
-                // Notificar al VENDEDOR
-                if (cita.vendedor_id) {
+                // Notificar al VENDEDOR (solo si la cita NO estaba completada)
+                if (cita.vendedor_id && !eraCompletada) {
                   try {
                     const { data: vendedor } = await supabase.client
                       .from('team_members')
                       .select('phone, name')
                       .eq('id', cita.vendedor_id)
                       .single();
-                    
+
                     if (vendedor?.phone) {
                       const fechaStr = new Date(cita.scheduled_date + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
                       const msgVendedor = `❌ *CITA CANCELADA (Google Calendar)*\n\n👤 ${cita.lead_name}\n📱 ${cita.lead_phone}\n📆 Era: ${fechaStr}\n🕐 Hora: ${(cita.scheduled_time || '').substring(0,5)}`;
@@ -3176,6 +3179,8 @@ Mensaje: ${mensaje}`;
                   } catch (e) {
                     console.log('⚠️ Error notificando vendedor:', e);
                   }
+                } else if (eraCompletada) {
+                  console.log(`📅 Cita ${cita.id} era completada - marcada como cancelada sin notificaciones (ya ocurrió)`);
                 }
               }
             }
@@ -8443,10 +8448,12 @@ async function enviarEncuestasPostCita(supabase: SupabaseService, meta: MetaWhat
     const hace3Horas = new Date(ahora.getTime() - 3 * 60 * 60 * 1000);
 
     // Buscar citas completadas hace 2-3 horas que no tengan encuesta enviada
+    // ✅ FIX 14-ENE-2026: Agregar verificación survey_sent para evitar duplicados
     const { data: citasCompletadas } = await supabase.client
       .from('appointments')
       .select('*, leads(id, name, phone), team_members:vendedor_id(id, name)')
       .eq('status', 'completed')
+      .neq('survey_sent', true) // No enviar si ya se envió encuesta
       .gte('updated_at', hace3Horas.toISOString())
       .lte('updated_at', hace2Horas.toISOString());
 
@@ -8498,6 +8505,12 @@ Tu opinión nos ayuda a mejorar 🙏`;
           status: 'sent',
           expires_at: new Date(ahora.getTime() + 24 * 60 * 60 * 1000).toISOString() // Expira en 24h
         });
+
+        // ✅ FIX 14-ENE-2026: Marcar encuesta como enviada en la cita para evitar duplicados
+        await supabase.client
+          .from('appointments')
+          .update({ survey_sent: true })
+          .eq('id', cita.id);
 
         console.log(`📋 Encuesta post-cita enviada a ${lead.name}`);
       } catch (e) {
