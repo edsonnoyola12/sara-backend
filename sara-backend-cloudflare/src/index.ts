@@ -178,6 +178,89 @@ export default {
       return corsResponse(JSON.stringify({ ok: false, message: "Usuario no encontrado" }));
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🚨 EMERGENCY STOP - Detener TODOS los broadcasts inmediatamente
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/api/emergency-stop" && request.method === "POST") {
+      console.log('🚨 EMERGENCY STOP ACTIVADO');
+
+      // 1. Desactivar broadcasts en system_config
+      await supabase.client
+        .from('system_config')
+        .upsert({ key: 'broadcasts_enabled', value: 'false', updated_at: new Date().toISOString() });
+
+      // 2. Cancelar TODOS los jobs pendientes en la cola
+      const { data: cancelled } = await supabase.client
+        .from('broadcast_jobs')
+        .update({ status: 'cancelled', error_message: 'EMERGENCY STOP activado' })
+        .in('status', ['pending', 'processing'])
+        .select('id');
+
+      // 3. Cancelar follow-ups pendientes
+      const { data: followupsCancelled } = await supabase.client
+        .from('scheduled_followups')
+        .update({ cancelled: true, cancel_reason: 'EMERGENCY STOP' })
+        .eq('sent', false)
+        .eq('cancelled', false)
+        .select('id');
+
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await meta.sendWhatsAppMessage('5212224558475',
+        `🚨 *EMERGENCY STOP ACTIVADO*\n\n` +
+        `✅ Broadcasts deshabilitados\n` +
+        `✅ ${cancelled?.length || 0} jobs cancelados\n` +
+        `✅ ${followupsCancelled?.length || 0} follow-ups cancelados\n\n` +
+        `Para reactivar: POST /api/broadcasts-enable`,
+        true
+      );
+
+      return corsResponse(JSON.stringify({
+        success: true,
+        message: 'EMERGENCY STOP activado',
+        cancelled_jobs: cancelled?.length || 0,
+        cancelled_followups: followupsCancelled?.length || 0
+      }));
+    }
+
+    // Reactivar broadcasts después de emergency stop
+    if (url.pathname === "/api/broadcasts-enable" && request.method === "POST") {
+      await supabase.client
+        .from('system_config')
+        .upsert({ key: 'broadcasts_enabled', value: 'true', updated_at: new Date().toISOString() });
+
+      return corsResponse(JSON.stringify({ success: true, message: 'Broadcasts reactivados' }));
+    }
+
+    // Ver estado del sistema
+    if (url.pathname === "/api/system-status" && request.method === "GET") {
+      const { data: config } = await supabase.client
+        .from('system_config')
+        .select('*')
+        .eq('key', 'broadcasts_enabled')
+        .single();
+
+      const { data: pendingJobs } = await supabase.client
+        .from('broadcast_jobs')
+        .select('id, status')
+        .in('status', ['pending', 'processing']);
+
+      const { data: pendingFollowups } = await supabase.client
+        .from('scheduled_followups')
+        .select('id')
+        .eq('sent', false)
+        .eq('cancelled', false);
+
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      const rateLimitStats = meta.getRateLimitStats();
+
+      return corsResponse(JSON.stringify({
+        broadcasts_enabled: config?.value !== 'false',
+        pending_broadcast_jobs: pendingJobs?.length || 0,
+        pending_followups: pendingFollowups?.length || 0,
+        rate_limit_stats: rateLimitStats
+      }));
+    }
+
     // Test briefing de supervisión (coordinadores)
     if (url.pathname === "/test-supervision" && request.method === "GET") {
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
@@ -14331,6 +14414,25 @@ async function seguimientoCredito(supabase: SupabaseService, meta: MetaWhatsAppS
 // ═══════════════════════════════════════════════════════════════
 async function procesarBroadcastQueue(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
   try {
+    // 🚨 KILL SWITCH - Verificar si broadcasts están habilitados
+    // Por seguridad, si no existe el config o hay error, NO procesar
+    try {
+      const { data: config, error } = await supabase.client
+        .from('system_config')
+        .select('value')
+        .eq('key', 'broadcasts_enabled')
+        .single();
+
+      // SEGURO POR DEFECTO: Si no hay config, error, o está en false -> NO procesar
+      if (error || !config || config.value === 'false' || config.value === false) {
+        console.log('🛑 BROADCASTS DESHABILITADOS - Kill switch activo (config:', config?.value, 'error:', !!error, ')');
+        return;
+      }
+    } catch (e) {
+      console.log('🛑 BROADCASTS DESHABILITADOS - Error verificando config');
+      return;
+    }
+
     const queueService = new BroadcastQueueService(supabase);
 
     // Procesar broadcasts pendientes
