@@ -7217,6 +7217,10 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     const notificationService = new NotificationService(supabase, meta);
 
     // RECORDATORIOS DE CITAS - cada ejecución del cron (24h y 2h antes)
+    // ✅ FIX 14-ENE-2026: Verificar consistencia ANTES de enviar mensajes
+    console.log('🔄 Verificando consistencia calendario...');
+    await verificarConsistenciaCalendario(supabase, env);
+
     console.log('🔔 Verificando recordatorios de citas...');
     const recordatoriosResult = await notificationService.enviarRecordatoriosCitas();
     if (recordatoriosResult.enviados > 0) {
@@ -10482,6 +10486,87 @@ async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: MetaWhat
   } catch (error) {
     console.error('❌ Error en alertas de leads fríos:', error);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ✅ FIX 14-ENE-2026: VERIFICACIÓN DE CONSISTENCIA GOOGLE CALENDAR
+// Verifica que las citas en BD tengan su evento correspondiente en Google
+// Si el evento fue borrado de Google, marca la cita como cancelled
+// ═══════════════════════════════════════════════════════════════
+async function verificarConsistenciaCalendario(
+  supabase: SupabaseService,
+  env: any
+): Promise<{ canceladas: number; verificadas: number }> {
+  const resultado = { canceladas: 0, verificadas: 0 };
+
+  try {
+    console.log('🔄 Verificando consistencia Google Calendar <-> Supabase...');
+
+    // Obtener citas activas (scheduled o completed) con google_event_vendedor_id
+    const ahora = new Date();
+    const hace7Dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const en30Dias = new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const { data: citasConGoogle } = await supabase.client
+      .from('appointments')
+      .select('id, lead_name, lead_phone, scheduled_date, scheduled_time, property_name, status, google_event_vendedor_id, vendedor_id')
+      .not('google_event_vendedor_id', 'is', null)
+      .in('status', ['scheduled', 'completed'])
+      .gte('scheduled_date', hace7Dias.toISOString().split('T')[0])
+      .lte('scheduled_date', en30Dias.toISOString().split('T')[0]);
+
+    if (!citasConGoogle || citasConGoogle.length === 0) {
+      console.log('✅ No hay citas con Google Calendar para verificar');
+      return resultado;
+    }
+
+    // Obtener eventos de Google Calendar
+    const calendar = new CalendarService(
+      env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      env.GOOGLE_PRIVATE_KEY,
+      env.GOOGLE_CALENDAR_ID
+    );
+
+    const events = await calendar.getEvents(
+      hace7Dias.toISOString(),
+      en30Dias.toISOString()
+    );
+    const googleEventIds = new Set(events.map((e: any) => e.id));
+
+    // Verificar cada cita
+    for (const cita of citasConGoogle) {
+      resultado.verificadas++;
+
+      // Si el evento NO existe en Google Calendar
+      if (!googleEventIds.has(cita.google_event_vendedor_id)) {
+        console.log(`⚠️ Cita ${cita.id} (${cita.lead_name}) - evento NO existe en Google Calendar`);
+
+        // Marcar como cancelled
+        await supabase.client
+          .from('appointments')
+          .update({
+            status: 'cancelled',
+            cancelled_by: 'Sistema (evento eliminado de Google Calendar)',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', cita.id);
+
+        resultado.canceladas++;
+        console.log(`❌ Cita ${cita.id} marcada como cancelled (evento borrado de Google)`);
+      }
+    }
+
+    if (resultado.canceladas > 0) {
+      console.log(`🔄 Consistencia: ${resultado.verificadas} verificadas, ${resultado.canceladas} canceladas por inconsistencia`);
+    } else {
+      console.log(`✅ Consistencia OK: ${resultado.verificadas} citas verificadas`);
+    }
+
+  } catch (error) {
+    console.error('Error verificando consistencia calendario:', error);
+  }
+
+  return resultado;
 }
 
 // ═══════════════════════════════════════════════════════════════
