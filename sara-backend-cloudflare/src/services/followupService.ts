@@ -232,16 +232,41 @@ export class FollowupService {
 
       if (!actualLeadId) return 0;
 
-      // Cancelar follow-ups pendientes que requieren no respuesta
-      const { data: cancelled } = await this.supabase.client
+      // ✅ FIX Bug #9: Solo cancelar follow-ups que requieren no respuesta
+      // Primero obtener los IDs de follow-ups que deben cancelarse
+      const { data: followupsToCancel } = await this.supabase.client
         .from('scheduled_followups')
-        .update({ 
-          cancelled: true, 
-          cancel_reason: 'lead_respondio' 
-        })
+        .select('id, rule_id, followup_rules!inner(requires_no_response)')
         .eq('lead_id', actualLeadId)
         .eq('sent', false)
-        .eq('cancelled', false)
+        .eq('cancelled', false);
+
+      // Filtrar solo los que requieren no respuesta
+      const idsToCancel = (followupsToCancel || [])
+        .filter((f: any) => f.followup_rules?.requires_no_response === true)
+        .map((f: any) => f.id);
+
+      if (idsToCancel.length === 0) {
+        console.log('ℹ️ No hay follow-ups con requires_no_response para cancelar');
+        // Aún así actualizar last_response
+        await this.supabase.client
+          .from('leads')
+          .update({
+            last_response: new Date().toISOString(),
+            last_interaction: new Date().toISOString()
+          })
+          .eq('id', actualLeadId);
+        return 0;
+      }
+
+      // Cancelar solo los follow-ups que requieren no respuesta
+      const { data: cancelled } = await this.supabase.client
+        .from('scheduled_followups')
+        .update({
+          cancelled: true,
+          cancel_reason: 'lead_respondio'
+        })
+        .in('id', idsToCancel)
         .select('id');
 
       // Actualizar last_response del lead
