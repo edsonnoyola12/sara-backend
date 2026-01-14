@@ -973,18 +973,30 @@ export class WhatsAppHandler {
 
   private async enviarASegmento(from: string, body: string, usuario: any): Promise<void> {
     try {
+      console.log('📤 BROADCAST: Iniciando enviarASegmento');
+      console.log('📤 BROADCAST: body =', body);
+      console.log('📤 BROADCAST: supabase client =', this.supabase ? 'OK' : 'NULL');
+
       const agenciaService = new AgenciaReportingService(this.supabase);
 
       // Parsear el comando
       const parsed = agenciaService.parseEnvioSegmento(body);
+      console.log('📤 BROADCAST: parsed =', JSON.stringify(parsed));
 
       // Si no hay mensaje, mostrar ayuda
       if (!parsed.mensajeTemplate) {
+        console.log('📤 BROADCAST: No hay mensaje template, mostrando ayuda');
         await this.twilio.sendWhatsAppMessage(from, agenciaService.getMensajeFormatosEnvio());
         return;
       }
 
       // Obtener leads filtrados
+      console.log('📤 BROADCAST: Llamando getLeadsParaEnvio con filtros:', JSON.stringify({
+        segmento: parsed.segmento,
+        desarrollo: parsed.desarrollo,
+        vendedorNombre: parsed.vendedorNombre
+      }));
+
       const resultado = await agenciaService.getLeadsParaEnvio({
         segmento: parsed.segmento,
         desarrollo: parsed.desarrollo,
@@ -992,6 +1004,8 @@ export class WhatsAppHandler {
         fechaDesde: parsed.fechaDesde,
         fechaHasta: parsed.fechaHasta
       });
+
+      console.log('📤 BROADCAST: Resultado getLeadsParaEnvio - error:', resultado.error, 'leads:', resultado.leads?.length);
 
       // Si hay error, mostrarlo
       if (resultado.error) {

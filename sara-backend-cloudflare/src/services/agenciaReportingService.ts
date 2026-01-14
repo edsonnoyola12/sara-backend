@@ -721,17 +721,25 @@ export class AgenciaReportingService {
     vendedorEncontrado: string | null;
     filtroDescripcion: string;
   }> {
-    const { data: leads } = await this.supabase.client
+    const { data: leads, error: leadsError } = await this.supabase.client
       .from('leads')
-      .select('id, name, phone, status, lead_score, score, property_interest, assigned_to, created_at, last_message_at');
+      .select('id, name, phone, status, lead_score, score, property_interest, assigned_to, created_at, last_interaction');
+
+    if (leadsError) {
+      console.error('❌ Error al obtener leads:', leadsError);
+      return { leads: [], error: `Error al obtener leads: ${leadsError.message}`, vendedorEncontrado: null, filtroDescripcion: '' };
+    }
 
     const { data: teamMembers } = await this.supabase.client
       .from('team_members')
       .select('id, name');
 
     if (!leads) {
-      return { leads: [], error: 'Error al obtener leads.', vendedorEncontrado: null, filtroDescripcion: '' };
+      console.error('❌ Query de leads retornó null sin error');
+      return { leads: [], error: 'Error al obtener leads (null).', vendedorEncontrado: null, filtroDescripcion: '' };
     }
+
+    console.log(`📋 getLeadsParaEnvio: ${leads.length} leads obtenidos`);
 
     let leadsSegmento = leads.filter(l => l.phone);
     let vendedorEncontrado: string | null = null;
