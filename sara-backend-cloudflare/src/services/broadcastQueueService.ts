@@ -80,6 +80,24 @@ export class BroadcastQueueService {
     sendTemplate: (phone: string, templateName: string, lang: string, components: any[]) => Promise<any>,
     sendMessage?: (phone: string, message: string) => Promise<any>
   ): Promise<{ processed: number; sent: number; errors: number }> {
+
+    // 🚨 KILL SWITCH - Si no hay config o está en false, NO PROCESAR
+    try {
+      const { data: config } = await this.supabase.client
+        .from('system_config')
+        .select('value')
+        .eq('key', 'broadcasts_enabled')
+        .single();
+
+      if (!config || config.value === 'false' || config.value === false) {
+        console.log('🛑 BROADCASTS KILL SWITCH ACTIVO - No procesando');
+        return { processed: 0, sent: 0, errors: 0 };
+      }
+    } catch (e) {
+      console.log('🛑 BROADCASTS DETENIDOS - Error/tabla no existe');
+      return { processed: 0, sent: 0, errors: 0 };
+    }
+
     let totalProcessed = 0;
     let totalSent = 0;
     let totalErrors = 0;
