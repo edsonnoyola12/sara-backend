@@ -2724,6 +2724,7 @@ Tú dime, ¿por dónde empezamos?`;
               .from('leads')
               .update({ needs_mortgage: true })
               .eq('id', lead.id);
+            lead.needs_mortgage = true; // ✅ FIX: Actualizar en memoria
           }
         } catch (e) {
           console.log('⚠️ Error creando mortgage en flujo banco:', e);
@@ -3287,6 +3288,7 @@ Tú dime, ¿por dónde empezamos?`;
           .from('leads')
           .update({ needs_mortgage: true })
           .eq('id', lead.id);
+        lead.needs_mortgage = true; // ✅ FIX: Actualizar en memoria
         console.log('✅ needs_mortgage = true');
       }
 
@@ -3600,6 +3602,7 @@ Tú dime, ¿por dónde empezamos?`;
 
         // Siempre marcar needs_mortgage
         await this.supabase.client.from('leads').update({ needs_mortgage: true }).eq('id', lead.id);
+        lead.needs_mortgage = true; // ✅ FIX: Actualizar en memoria
 
         if (!existeMortgage || existeMortgage.length === 0) {
           if (!esNombreRealModalidad) {
@@ -4469,6 +4472,7 @@ ${modalidad === 'presencial' ? '→ Quiere CITA EN OFICINA' : ''}
 
             // Siempre marcar needs_mortgage
             await this.supabase.client.from('leads').update({ needs_mortgage: true }).eq('id', lead.id);
+            lead.needs_mortgage = true; // ✅ FIX: Actualizar en memoria
 
             if (!esNombreRealFunnel) {
               console.log('⏸️ NO se crea mortgage_application (funnel) - Sin nombre real:', lead.name);
@@ -4886,6 +4890,7 @@ Mientras tanto, si tienes dudas estoy aquí para ayudarte 📌`;
 
             // Siempre marcar needs_mortgage
             await this.supabase.client.from('leads').update({ needs_mortgage: true }).eq('id', lead.id);
+            lead.needs_mortgage = true; // ✅ FIX: Actualizar en memoria
 
             if (!esNombreRealCRM) {
               console.log('⏸️ NO se crea mortgage_application (CRM) - Sin nombre real:', nombreCliente);
