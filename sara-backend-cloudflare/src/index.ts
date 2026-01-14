@@ -3110,9 +3110,10 @@ Mensaje: ${mensaje}`;
         const resourceState = request.headers.get('X-Goog-Resource-State');
         
         console.log('📅 Google Calendar Webhook:', resourceState, channelId);
-        
+
         // Solo procesar si hay cambios (no sync inicial)
         if (resourceState === 'exists' || resourceState === 'update') {
+          console.log('📅 Procesando cambios de Google Calendar...');
           const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
           const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
           
@@ -3123,7 +3124,8 @@ Mensaje: ${mensaje}`;
           
           const events = await calendar.getEvents(yesterday.toISOString(), nextMonth.toISOString());
           const googleEventIds = events.map((e: any) => e.id);
-          
+          console.log(`📅 Eventos en Google Calendar: ${events.length}, IDs: ${googleEventIds.slice(0, 5).join(', ')}...`);
+
           // 1. DETECTAR EVENTOS ELIMINADOS: Buscar citas que tienen google_event_id pero ya no existen en Google
           // IMPORTANTE: Solo verificar citas dentro del rango de fechas que consultamos a Google
           const yesterdayStr = yesterday.toISOString().split('T')[0];
@@ -3138,6 +3140,11 @@ Mensaje: ${mensaje}`;
             .gte('scheduled_date', yesterdayStr)  // Solo citas desde ayer
             .lte('scheduled_date', nextMonthStr); // Hasta próximo mes
           
+          console.log(`📅 Citas con google_event_vendedor_id en BD: ${citasConGoogle?.length || 0}`);
+          if (citasConGoogle && citasConGoogle.length > 0) {
+            console.log(`📅 IDs de eventos en citas: ${citasConGoogle.map(c => c.google_event_vendedor_id?.substring(0,15)).join(', ')}`);
+          }
+
           if (citasConGoogle) {
             for (const cita of citasConGoogle) {
               if (cita.google_event_vendedor_id && !googleEventIds.includes(cita.google_event_vendedor_id)) {
