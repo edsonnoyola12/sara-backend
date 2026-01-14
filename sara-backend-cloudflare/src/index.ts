@@ -2846,8 +2846,48 @@ Mensaje: ${mensaje}`;
           const message = messages[0];
           const from = message.from;
           const text = message.text?.body || '';
+          const messageId = message.id; // WhatsApp message ID para dedup
 
           console.log(`📥 Procesando mensaje de ${from}: "${text.substring(0, 50)}..."`);
+
+          // ═══ DEDUPLICACIÓN: Evitar procesar mensajes rápidos duplicados ═══
+          const cleanPhone = from.replace(/\D/g, '');
+          const { data: recentMsg } = await supabase.client
+            .from('leads')
+            .select('notes')
+            .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`)
+            .single();
+
+          const lastMsgId = recentMsg?.notes?.last_processed_msg_id;
+          const lastMsgTime = recentMsg?.notes?.last_processed_msg_time;
+          const now = Date.now();
+
+          // Si el mismo mensaje ID ya fue procesado, saltar
+          if (lastMsgId === messageId) {
+            console.log('⏭️ Mensaje ya procesado (mismo ID), saltando');
+            return new Response('OK', { status: 200 });
+          }
+
+          // Si hubo un mensaje procesado hace menos de 3 segundos, esperar y combinar
+          if (lastMsgTime && (now - lastMsgTime) < 3000) {
+            console.log('⏳ Mensaje muy rápido, esperando 2s para combinar...');
+            await new Promise(r => setTimeout(r, 2000));
+          }
+
+          // Marcar este mensaje como en proceso
+          if (recentMsg) {
+            await supabase.client
+              .from('leads')
+              .update({
+                notes: {
+                  ...(recentMsg.notes || {}),
+                  last_processed_msg_id: messageId,
+                  last_processed_msg_time: now
+                }
+              })
+              .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`);
+          }
+          // ═══ FIN DEDUPLICACIÓN ═══
 
           const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
           const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
