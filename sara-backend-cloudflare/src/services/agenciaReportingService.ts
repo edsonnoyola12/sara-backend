@@ -715,11 +715,13 @@ export class AgenciaReportingService {
     vendedorNombre: string | null;
     fechaDesde: Date | null;
     fechaHasta: Date | null;
+    noLimit?: boolean; // Si true, no aplica límite de 15 leads
   }): Promise<{
     leads: any[];
     error: string | null;
     vendedorEncontrado: string | null;
     filtroDescripcion: string;
+    totalCount?: number;
   }> {
     const { data: leads, error: leadsError } = await this.supabase.client
       .from('leads')
@@ -869,11 +871,42 @@ export class AgenciaReportingService {
         leads: [],
         error: `No hay leads con filtro: ${filtroDesc}`,
         vendedorEncontrado,
-        filtroDescripcion: filtroDesc
+        filtroDescripcion: filtroDesc,
+        totalCount: 0
       };
     }
 
-    return { leads: leadsSegmento, error: null, vendedorEncontrado, filtroDescripcion: filtroDesc };
+    const totalLeads = leadsSegmento.length;
+
+    // Si noLimit es true, retornar todos los leads (para encolar)
+    if (filtros.noLimit) {
+      console.log(`📋 BROADCAST: Retornando ${totalLeads} leads sin límite (para cola)`);
+      return {
+        leads: leadsSegmento,
+        error: null,
+        vendedorEncontrado,
+        filtroDescripcion: filtroDesc,
+        totalCount: totalLeads
+      };
+    }
+
+    // Limitar a 15 leads por broadcast para evitar "Too many subrequests" de Cloudflare
+    const MAX_LEADS_PER_BROADCAST = 15;
+    const leadsLimitados = leadsSegmento.slice(0, MAX_LEADS_PER_BROADCAST);
+
+    if (totalLeads > MAX_LEADS_PER_BROADCAST) {
+      console.log(`⚠️ BROADCAST: Limitando de ${totalLeads} a ${MAX_LEADS_PER_BROADCAST} leads`);
+    }
+
+    return {
+      leads: leadsLimitados,
+      error: null,
+      vendedorEncontrado,
+      filtroDescripcion: totalLeads > MAX_LEADS_PER_BROADCAST
+        ? `${filtroDesc} (${MAX_LEADS_PER_BROADCAST} de ${totalLeads} leads)`
+        : filtroDesc,
+      totalCount: totalLeads
+    };
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -9,6 +9,7 @@ import { handlePromotionRoutes } from './routes/promotions';
 import { FollowupService } from './services/followupService';
 import { FollowupApprovalService } from './services/followupApprovalService';
 import { NotificationService } from './services/notificationService';
+import { BroadcastQueueService } from './services/broadcastQueueService';
 
 export interface Env {
   SUPABASE_URL: string;
@@ -7367,6 +7368,12 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       console.log('🏦 Verificando seguimiento de crédito...');
       await seguimientoCredito(supabase, meta);
     }
+
+    // ═══════════════════════════════════════════════════════════
+    // BROADCAST QUEUE - Procesar broadcasts encolados (cada 2 min)
+    // ═══════════════════════════════════════════════════════════
+    console.log('📤 Procesando broadcasts encolados...');
+    await procesarBroadcastQueue(supabase, meta);
   },
 };
 
@@ -14164,5 +14171,49 @@ async function seguimientoCredito(supabase: SupabaseService, meta: MetaWhatsAppS
 
   } catch (e) {
     console.error('Error en seguimientoCredito:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BROADCAST QUEUE - Procesa broadcasts encolados
+// ═══════════════════════════════════════════════════════════════
+async function procesarBroadcastQueue(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const queueService = new BroadcastQueueService(supabase);
+
+    // Procesar broadcasts pendientes
+    const result = await queueService.processPendingBroadcasts(
+      async (phone: string, templateName: string, lang: string, components: any[]) => {
+        return meta.sendTemplate(phone, templateName, lang, components);
+      }
+    );
+
+    if (result.processed > 0) {
+      console.log(`📤 QUEUE: Procesados ${result.processed} jobs, ${result.sent} enviados, ${result.errors} errores`);
+    }
+
+    // Notificar broadcasts completados
+    const completedJobs = await queueService.getCompletedJobsToNotify();
+
+    for (const job of completedJobs) {
+      if (job.created_by_phone) {
+        try {
+          const mensaje = `✅ *Broadcast completado*\n\n` +
+            `📊 Segmento: ${job.segment}\n` +
+            `📤 Enviados: ${job.sent_count}/${job.total_leads}\n` +
+            `❌ Errores: ${job.error_count}\n\n` +
+            `El envío masivo ha finalizado.`;
+
+          await meta.sendWhatsAppMessage(job.created_by_phone, mensaje);
+          await queueService.markAsNotified(job.id);
+          console.log(`📤 QUEUE: Notificación enviada a ${job.created_by_phone}`);
+        } catch (notifyErr) {
+          console.error(`Error notificando broadcast completado:`, notifyErr);
+        }
+      }
+    }
+
+  } catch (e) {
+    console.error('Error en procesarBroadcastQueue:', e);
   }
 }

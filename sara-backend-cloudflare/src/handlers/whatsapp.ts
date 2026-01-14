@@ -29,6 +29,7 @@ import { ConversationContextService } from '../services/conversationContextServi
 import { CEOCommandsService } from '../services/ceoCommandsService';
 import { AgenciaCommandsService } from '../services/agenciaCommandsService';
 import { LeadMessageService, LeadMessageResult } from '../services/leadMessageService';
+import { BroadcastQueueService } from '../services/broadcastQueueService';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MÓDULOS REFACTORIZADOS
@@ -974,54 +975,77 @@ export class WhatsAppHandler {
   private async enviarASegmento(from: string, body: string, usuario: any): Promise<void> {
     try {
       console.log('📤 BROADCAST: Iniciando enviarASegmento');
-      console.log('📤 BROADCAST: body =', body);
-      console.log('📤 BROADCAST: supabase client =', this.supabase ? 'OK' : 'NULL');
 
       const agenciaService = new AgenciaReportingService(this.supabase);
+      const queueService = new BroadcastQueueService(this.supabase);
 
       // Parsear el comando
       const parsed = agenciaService.parseEnvioSegmento(body);
-      console.log('📤 BROADCAST: parsed =', JSON.stringify(parsed));
 
       // Si no hay mensaje, mostrar ayuda
       if (!parsed.mensajeTemplate) {
-        console.log('📤 BROADCAST: No hay mensaje template, mostrando ayuda');
         await this.twilio.sendWhatsAppMessage(from, agenciaService.getMensajeFormatosEnvio());
         return;
       }
 
-      // Obtener leads filtrados
-      console.log('📤 BROADCAST: Llamando getLeadsParaEnvio con filtros:', JSON.stringify({
-        segmento: parsed.segmento,
-        desarrollo: parsed.desarrollo,
-        vendedorNombre: parsed.vendedorNombre
-      }));
-
+      // Obtener TODOS los leads (sin límite) para decidir si encolar
       const resultado = await agenciaService.getLeadsParaEnvio({
         segmento: parsed.segmento,
         desarrollo: parsed.desarrollo,
         vendedorNombre: parsed.vendedorNombre,
         fechaDesde: parsed.fechaDesde,
-        fechaHasta: parsed.fechaHasta
+        fechaHasta: parsed.fechaHasta,
+        noLimit: true // Obtener todos para contar
       });
 
-      console.log('📤 BROADCAST: Resultado getLeadsParaEnvio - error:', resultado.error, 'leads:', resultado.leads?.length);
-
-      // Si hay error, mostrarlo
       if (resultado.error) {
         await this.twilio.sendWhatsAppMessage(from, resultado.error);
         return;
       }
 
-      // Notificar inicio
+      const totalLeads = resultado.leads.length;
+      const MAX_IMMEDIATE = 15;
+
+      // Si hay más de 15 leads, usar cola
+      if (totalLeads > MAX_IMMEDIATE) {
+        console.log(`📤 BROADCAST: ${totalLeads} leads > ${MAX_IMMEDIATE}, usando cola`);
+
+        const leadIds = resultado.leads.map((l: any) => l.id);
+        const queueResult = await queueService.queueBroadcast({
+          segment: parsed.segmento || 'todos',
+          desarrollo: parsed.desarrollo || undefined,
+          messageTemplate: parsed.mensajeTemplate,
+          leadIds,
+          createdBy: usuario.id,
+          createdByPhone: from.replace('whatsapp:', '').replace('+', '')
+        });
+
+        if (queueResult.success) {
+          await this.twilio.sendWhatsAppMessage(from,
+            `📤 *Broadcast encolado*\n\n` +
+            `Filtro: ${resultado.filtroDescripcion}\n` +
+            `Total leads: ${totalLeads}\n\n` +
+            `⏳ Se procesará automáticamente en lotes de ${MAX_IMMEDIATE}.\n` +
+            `📬 Recibirás notificación cuando termine.\n\n` +
+            `_Tiempo estimado: ~${Math.ceil(totalLeads / MAX_IMMEDIATE) * 2} minutos_`
+          );
+        } else {
+          await this.twilio.sendWhatsAppMessage(from, `❌ Error al encolar: ${queueResult.error}`);
+        }
+        return;
+      }
+
+      // Si hay 15 o menos leads, enviar inmediatamente
+      console.log(`📤 BROADCAST: ${totalLeads} leads <= ${MAX_IMMEDIATE}, enviando inmediatamente`);
+
       await this.twilio.sendWhatsAppMessage(from,
         `📤 *Iniciando envío...*\n\n` +
         `Filtro: ${resultado.filtroDescripcion}\n` +
-        `Destinatarios: ${resultado.leads.length}\n\n` +
-        `⏳ Esto puede tomar unos minutos...`
+        `Destinatarios: ${totalLeads}\n\n` +
+        `⏳ Esto puede tomar unos segundos...`
       );
 
-      // Ejecutar envío
+      // Ejecutar envío inmediato
       const { enviados, errores, templateUsados } = await agenciaService.ejecutarEnvioBroadcast(
         resultado.leads,
         parsed.mensajeTemplate,
@@ -1035,14 +1059,13 @@ export class WhatsAppHandler {
         }
       );
 
-      // Notificar resultado
       await this.twilio.sendWhatsAppMessage(from,
         `✅ *Envío completado*\n\n` +
         `📊 Resultados:\n` +
         `• Enviados: ${enviados}\n` +
         `• Templates usados: ${templateUsados}\n` +
         `• Errores: ${errores}\n` +
-        `• Total: ${resultado.leads.length}`
+        `• Total: ${totalLeads}`
       );
 
     } catch (e) {
