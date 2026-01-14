@@ -462,7 +462,22 @@ export class LeadMessageService {
       return { action: 'continue_to_ai' };
     }
 
-    // Detectar respuestas de interés
+    // Si ya hay historial de conversación DESPUÉS del broadcast, dejar que la IA maneje
+    // Esto evita interceptar "Sí" cuando ya se está en una conversación activa
+    const historial = lead.conversation_history || [];
+    if (historial.length >= 2) {
+      // Ya hay conversación, solo pasar contexto a la IA sin interceptar
+      console.log('📢 Broadcast detectado pero ya hay conversación activa, pasando a IA');
+      return {
+        action: 'continue_to_ai',
+        broadcastContext: {
+          message: broadcastInfo.message || '',
+          sentAt: broadcastInfo.sentAt || ''
+        }
+      };
+    }
+
+    // Detectar respuestas de interés (solo para primera respuesta)
     const respuestasInteres = ['si', 'sí', 'me interesa', 'quiero', 'informacion', 'información', 'info', 'cuanto', 'cuánto', 'precio', 'detalles', 'más info', 'mas info', 'ok', 'va', 'dale'];
     const esInteres = respuestasInteres.some(r => mensajeLower.includes(r) || mensajeLower === r);
 

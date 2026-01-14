@@ -650,6 +650,12 @@ export class WhatsAppHandler {
         console.log('📢 Notificación de broadcast enviada a vendedor');
       }
 
+      // Si hay contexto de broadcast, pasarlo a la IA
+      if (leadResult.broadcastContext) {
+        lead.broadcast_context = leadResult.broadcastContext;
+        console.log('📢 Contexto de broadcast pasado a IA:', leadResult.broadcastContext.message?.substring(0, 50));
+      }
+
       // Si llegamos aquí, continuar a análisis con IA (delegado a aiConversationService)
       const aiService = new AIConversationService(this.supabase, this.twilio, this.meta, this.calendar, this.claude, env);
       aiService.setHandler(this);

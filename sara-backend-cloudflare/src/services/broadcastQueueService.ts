@@ -348,32 +348,55 @@ export class BroadcastQueueService {
     segment?: string;
   }> {
     try {
+      // Primero verificar en notes del lead (método nuevo)
       const { data: lead } = await this.supabase.client
         .from('leads')
         .select('notes')
         .eq('id', leadId)
         .single();
 
-      if (!lead?.notes?.last_broadcast) {
-        return { hasBroadcast: false };
+      if (lead?.notes?.last_broadcast) {
+        const broadcast = lead.notes.last_broadcast;
+        const sentAt = new Date(broadcast.sent_at);
+        const now = new Date();
+        const hoursDiff = (now.getTime() - sentAt.getTime()) / (1000 * 60 * 60);
+
+        if (hoursDiff <= BROADCAST_RESPONSE_WINDOW_HOURS) {
+          console.log(`📢 Broadcast detectado en notes para lead ${leadId}`);
+          return {
+            hasBroadcast: true,
+            message: broadcast.message,
+            sentAt: broadcast.sent_at,
+            segment: broadcast.segment
+          };
+        }
       }
 
-      const broadcast = lead.notes.last_broadcast;
-      const sentAt = new Date(broadcast.sent_at);
-      const now = new Date();
-      const hoursDiff = (now.getTime() - sentAt.getTime()) / (1000 * 60 * 60);
+      // Fallback: buscar en broadcast_queue si el lead fue enviado recientemente
+      const cutoffDate = new Date();
+      cutoffDate.setHours(cutoffDate.getHours() - BROADCAST_RESPONSE_WINDOW_HOURS);
 
-      // Solo considerar broadcasts dentro de la ventana de tiempo
-      if (hoursDiff > BROADCAST_RESPONSE_WINDOW_HOURS) {
-        return { hasBroadcast: false };
+      const { data: recentBroadcasts } = await this.supabase.client
+        .from('broadcast_queue')
+        .select('id, segment, message_template, completed_at, sent_lead_ids')
+        .gte('completed_at', cutoffDate.toISOString())
+        .eq('status', 'completed');
+
+      if (recentBroadcasts && recentBroadcasts.length > 0) {
+        for (const broadcast of recentBroadcasts) {
+          if (broadcast.sent_lead_ids && broadcast.sent_lead_ids.includes(leadId)) {
+            console.log(`📢 Broadcast detectado en queue para lead ${leadId}`);
+            return {
+              hasBroadcast: true,
+              message: broadcast.message_template?.substring(0, 100),
+              sentAt: broadcast.completed_at,
+              segment: broadcast.segment
+            };
+          }
+        }
       }
 
-      return {
-        hasBroadcast: true,
-        message: broadcast.message,
-        sentAt: broadcast.sent_at,
-        segment: broadcast.segment
-      };
+      return { hasBroadcast: false };
     } catch (e) {
       console.error('Error verificando broadcast reciente:', e);
       return { hasBroadcast: false };
