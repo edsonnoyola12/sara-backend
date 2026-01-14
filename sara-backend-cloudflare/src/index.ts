@@ -1561,26 +1561,33 @@ Creada desde CRM`;
           throw error;
         }
         
-        // Si hay google_event_id, intentar actualizar en Google Calendar
-        if (body.google_event_id && body.scheduled_date && body.scheduled_time) {
+        // ✅ FIX 14-ENE-2026: SIEMPRE sincronizar con Google Calendar si existe evento
+        // Usar google_event_vendedor_id de la BD si no viene en el request
+        const googleEventId = body.google_event_id || data.google_event_vendedor_id;
+        const fechaActualizar = body.scheduled_date || data.scheduled_date;
+        const horaActualizar = body.scheduled_time || data.scheduled_time;
+
+        if (googleEventId && fechaActualizar && horaActualizar) {
           try {
             const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
-            
+
             // Parsear hora - quitar segundos si vienen (18:26:00 -> 18:26)
-            let citaHora = body.scheduled_time.substring(0, 5);
-            
+            let citaHora = horaActualizar.substring(0, 5);
+
             // Crear fecha en formato ISO para México
-            const dateTimeStr = `${body.scheduled_date}T${citaHora}:00`;
-            
-            await calendar.updateEvent(body.google_event_id, {
+            const dateTimeStr = `${fechaActualizar}T${citaHora}:00`;
+
+            await calendar.updateEvent(googleEventId, {
               start: { dateTime: dateTimeStr, timeZone: 'America/Mexico_City' },
-              end: { dateTime: `${body.scheduled_date}T${String(parseInt(citaHora.split(':')[0]) + 1).padStart(2, '0')}:${citaHora.split(':')[1]}:00`, timeZone: 'America/Mexico_City' },
-              location: body.property_name || ''
+              end: { dateTime: `${fechaActualizar}T${String(parseInt(citaHora.split(':')[0]) + 1).padStart(2, '0')}:${citaHora.split(':')[1]}:00`, timeZone: 'America/Mexico_City' },
+              location: body.property_name || data.property_name || ''
             });
-            console.log('📅 Google Calendar actualizado:', body.google_event_id, dateTimeStr);
+            console.log('📅 Google Calendar actualizado:', googleEventId, dateTimeStr);
           } catch (calError) {
             console.log('⚠️ Error Google Calendar (ignorado):', calError);
           }
+        } else {
+          console.log('⚠️ Cita sin google_event_vendedor_id, no se puede sincronizar con Google Calendar');
         }
         
         // Enviar notificaciones por WhatsApp si se solicitó
