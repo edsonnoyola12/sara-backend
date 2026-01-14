@@ -14,6 +14,7 @@ import { MetaWhatsAppService } from './meta-whatsapp';
 import { CalendarService } from './calendar';
 import { ClaudeService } from './claude';
 import { scoringService } from './leadScoring';
+import { PromocionesService } from './promocionesService';
 
 // Interfaces
 interface AIAnalysis {
@@ -97,6 +98,30 @@ export class AIConversationService {
     const catalogoDB = this.crearCatalogoDB(properties);
     console.log('📋 Catálogo generado:', catalogoDB.substring(0, 500) + '...');
 
+    // Consultar promociones activas
+    let promocionesContext = '';
+    try {
+      const promoService = new PromocionesService(this.supabase);
+      const promosActivas = await promoService.getPromocionesActivas(5);
+      if (promosActivas && promosActivas.length > 0) {
+        promocionesContext = `
+━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 PROMOCIONES ACTIVAS (USA ESTA INFO CUANDO PREGUNTEN)
+━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+        for (const promo of promosActivas) {
+          const fechaFin = new Date(promo.end_date).toLocaleDateString('es-MX', { day: 'numeric', month: 'long' });
+          promocionesContext += `• *${promo.name}* (hasta ${fechaFin})\n`;
+          promocionesContext += `  ${promo.message || 'Promoción especial'}\n`;
+          promocionesContext += `  Segmento: ${promo.target_segment || 'todos'}\n\n`;
+        }
+        promocionesContext += `Cuando el cliente pregunte por promociones, usa ESTA información real.\n`;
+        console.log('🎯 Promociones activas incluidas en prompt:', promosActivas.length);
+      }
+    } catch (e) {
+      console.log('⚠️ Error consultando promociones:', e);
+    }
+
     // Contexto de broadcast si existe
     let broadcastContext = '';
     if (lead.broadcast_context) {
@@ -121,7 +146,7 @@ El cliente está RESPONDIENDO a ese mensaje. Debes:
     const prompt = `
 ⚠️ INSTRUCCIÓN CRÍTICA: Debes responder ÚNICAMENTE con un objeto JSON válido.
 NO escribas texto antes ni después del JSON. Tu respuesta debe empezar con { y terminar con }.
-${broadcastContext}
+${promocionesContext}${broadcastContext}
 Eres SARA, una **agente inmobiliaria HUMANA y conversacional** de Grupo Santa Rita en Zacatecas, México.
 
 Tu objetivo:

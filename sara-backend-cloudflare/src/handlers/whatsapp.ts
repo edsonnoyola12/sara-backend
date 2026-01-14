@@ -1274,8 +1274,44 @@ export class WhatsAppHandler {
         return;
       }
 
+      // Obtener leads del segmento para broadcast automático
+      const agenciaService = new AgenciaReportingService(this.supabase);
+      const queueService = new BroadcastQueueService(this.supabase);
+
+      const cleanPhone = from.replace('whatsapp:', '').replace('+', '').replace(/\D/g, '');
+
+      const { leads, totalCount } = await agenciaService.getLeadsParaEnvio({
+        segmento: datos.segmento,
+        desarrollo: null,
+        vendedorNombre: null,
+        fechaDesde: null,
+        fechaHasta: null,
+        noLimit: true
+      });
+
+      let broadcastInfo = '';
+
+      if (leads && leads.length > 0) {
+        const leadIds = leads.map((l: any) => l.id);
+
+        // Encolar broadcast automáticamente
+        const queueResult = await queueService.queueBroadcast({
+          segment: datos.segmento,
+          messageTemplate: datos.mensaje,
+          leadIds,
+          createdBy: usuario.id,
+          createdByPhone: cleanPhone
+        });
+
+        if (queueResult.success) {
+          broadcastInfo = `\n\n📤 *Broadcast encolado automáticamente*\n` +
+            `👥 ${totalCount || leads.length} leads del segmento "${datos.segmento}"\n` +
+            `⏱️ Se enviará en los próximos minutos`;
+        }
+      }
+
       const leadsCount = await promosService.contarLeadsSegmento(datos.segmento);
-      const mensaje = promosService.formatPromocionCreada(datos, leadsCount);
+      const mensaje = promosService.formatPromocionCreada(datos, leadsCount) + broadcastInfo;
       await this.twilio.sendWhatsAppMessage(from, mensaje);
 
     } catch (e) {
