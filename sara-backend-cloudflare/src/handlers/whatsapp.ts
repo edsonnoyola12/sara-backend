@@ -24,7 +24,7 @@ import { LeadManagementService, DetectarReferidoResult, ActualizarLeadResult, Re
 import { AIConversationService } from '../services/aiConversationService';
 import { AppointmentService, CrearCitaParams, CrearCitaResult } from '../services/appointmentService';
 import { PropertyService } from '../services/propertyService';
-import { parseFechaEspanol, ParsedFecha } from '../utils/dateParser';
+// Nota: parseFechaEspanol y ParsedFecha se importan desde ./dateParser abajo
 import { ConversationContextService } from '../services/conversationContextService';
 import { CEOCommandsService } from '../services/ceoCommandsService';
 import { AgenciaCommandsService } from '../services/agenciaCommandsService';

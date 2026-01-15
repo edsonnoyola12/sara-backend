@@ -21,8 +21,9 @@ export class SalespersonScheduler {
     
     // 1. Obtener vendedores que trabajan ese día
     const { data: availabilities } = await this.supabase.client
-      .from('salesperson_availability')
+      .from('availability_schedules')
       .select('*, team_members(*)')
+      .eq('user_type', 'salesperson')
       .eq('day_of_week', dayOfWeek)
       .eq('is_available', true)
       .lte('start_time', requestedTime)
@@ -40,7 +41,7 @@ export class SalespersonScheduler {
       const { count } = await this.supabase.client
         .from('appointments')
         .select('*', { count: 'exact', head: true })
-        .eq('salesperson_id', avail.salesperson_id)
+        .eq('salesperson_id', avail.user_id)
         .eq('scheduled_date', requestedDate)
         .eq('scheduled_time', requestedTime)
         .in('status', ['scheduled', 'confirmed']);
@@ -91,37 +92,17 @@ Responde SOLO con el número del vendedor (1, 2, 3, etc).`;
     return salespeople[0];
   }
 
-  async createAppointment(lead: any, salesperson: any, date: string, time: string, propertyId?: string): Promise<any> {
-    const { data, error } = await this.supabase.client
-      .from('appointments')
-      .insert({
-        lead_id: lead.id,
-        salesperson_id: salesperson.id,
-        property_id: propertyId,
-        scheduled_date: date,
-        scheduled_time: time,
-        status: 'scheduled'
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('❌ Error creating appointment:', error);
-      return null;
-    }
-
-    console.log('✅ Appointment created:', data.id);
-    return data;
-  }
+  // NOTA: createAppointment() eliminado - usar AppointmentService.crearCitaCompleta()
 
   async getSuggestedTimes(date: string, salesperson: any): Promise<string[]> {
     const dayOfWeek = new Date(date).getDay();
     
     // Obtener horario de trabajo
     const { data: availability } = await this.supabase.client
-      .from('salesperson_availability')
+      .from('availability_schedules')
       .select('*')
-      .eq('salesperson_id', salesperson.id)
+      .eq('user_id', salesperson.id)
+      .eq('user_type', 'salesperson')
       .eq('day_of_week', dayOfWeek)
       .single();
 

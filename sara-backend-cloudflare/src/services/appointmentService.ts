@@ -2,6 +2,7 @@ import { SupabaseService } from './supabase';
 import { CalendarService } from './calendar';
 import { TwilioService } from './twilio';
 import { HORARIOS } from '../handlers/constants';
+import { parseFecha as parseFechaCentral, parseFechaISO as parseFechaISOCentral, parseHoraISO as parseHoraISOCentral } from '../utils/dateParser';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // INTERFACES
@@ -50,65 +51,8 @@ export class AppointmentService {
     this.twilio = twilio;
   }
 
-  async createAppointment(
-    lead: any,
-    assignedTo: any,
-    date: string,
-    time: string,
-    appointmentType: string = 'property_viewing'
-  ): Promise<any> {
-    
-    console.log('📅 Creando cita...');
-
-    const [hours, minutes] = time.split(':');
-    const startTime = `${date}T${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:00-06:00`;
-    const endHour = String(parseInt(hours) + 1).padStart(2, '0');
-    const endTime = `${date}T${endHour}:${minutes.padStart(2, '0')}:00-06:00`;
-
-    const property = lead.property_interest || 'Propiedad';
-    const clientName = lead.name || `Cliente ${lead.phone.slice(-4)}`;
-    
-    const calendarEvent = await this.calendar.createEvent(
-      `${property} - ${clientName}`,
-      `Cliente: ${clientName}\nVendedor: ${assignedTo.name}\nTelefono: ${lead.phone}\nPropiedad: ${property}\nPresupuesto: ${lead.budget || 'No definido'}`,
-      startTime,
-      endTime,
-      lead.email
-    );
-
-    if (!calendarEvent) {
-      console.error('❌ Error creando evento en calendario');
-      return null;
-    }
-
-    const { data: appointment, error } = await this.supabase.client
-      .from('appointments')
-      .insert({
-        lead_id: lead.id,
-        assigned_to_id: assignedTo.id,
-        assigned_to_type: 'salesperson',
-        scheduled_date: date,
-        scheduled_time: time,
-        status: 'scheduled',
-        appointment_type: appointmentType,
-        google_calendar_event_id: calendarEvent.id,
-        google_calendar_event_url: calendarEvent.htmlLink
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('❌ Error guardando cita:', error);
-      return null;
-    }
-
-    console.log('✅ Cita creada:', appointment.id);
-
-    await this.supabase.updateLead(lead.id, { status: 'appointment_scheduled' });
-    await this.notifyVendedor(appointment, lead, assignedTo);
-
-    return appointment;
-  }
+  // NOTA: El método principal para crear citas es crearCitaCompleta()
+  // createAppointment() fue eliminado por ser código muerto con signature incorrecta
 
   async cancelAppointment(appointmentId: string, reason?: string): Promise<boolean> {
     try {
@@ -621,62 +565,19 @@ ${infoContactos}
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // HELPERS
+  // HELPERS - Delegados a utils/dateParser centralizado
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   private parseFecha(fecha: string, hora: string): Date {
-    const ahora = new Date();
-    let fechaObj = new Date(ahora);
-    const textoLower = fecha.toLowerCase();
-
-    if (textoLower.includes('hoy')) {
-      // mantener fecha actual
-    } else if (textoLower.includes('mañana') || textoLower.includes('manana')) {
-      fechaObj.setDate(fechaObj.getDate() + 1);
-    } else if (textoLower.includes('pasado')) {
-      fechaObj.setDate(fechaObj.getDate() + 2);
-    } else {
-      const dias = ['domingo', 'lunes', 'martes', 'miércoles', 'miercoles', 'jueves', 'viernes', 'sábado', 'sabado'];
-      for (let i = 0; i < dias.length; i++) {
-        if (textoLower.includes(dias[i])) {
-          const diaActual = fechaObj.getDay();
-          const diaObjetivo = i > 6 ? i - 1 : i;
-          let diasHasta = diaObjetivo - diaActual;
-          if (diasHasta <= 0) diasHasta += 7;
-          fechaObj.setDate(fechaObj.getDate() + diasHasta);
-          break;
-        }
-      }
-    }
-
-    // Parsear hora
-    const horaMatch = hora.match(/(\d{1,2})(?::(\d{2}))?(?:\s*(am|pm))?/i);
-    if (horaMatch) {
-      let h = parseInt(horaMatch[1]);
-      const m = horaMatch[2] ? parseInt(horaMatch[2]) : 0;
-      if (horaMatch[3]?.toLowerCase() === 'pm' && h < 12) h += 12;
-      if (horaMatch[3]?.toLowerCase() === 'am' && h === 12) h = 0;
-      fechaObj.setHours(h, m, 0, 0);
-    }
-
-    return fechaObj;
+    return parseFechaCentral(fecha, hora);
   }
 
   private parseFechaISO(fecha: string): string {
-    const fechaObj = this.parseFecha(fecha, '12:00');
-    return fechaObj.toISOString().split('T')[0];
+    return parseFechaISOCentral(fecha);
   }
 
   private parseHoraISO(hora: string): string {
-    const horaMatch = hora.match(/(\d{1,2})(?::(\d{2}))?(?:\s*(am|pm))?/i);
-    if (horaMatch) {
-      let h = parseInt(horaMatch[1]);
-      const m = horaMatch[2] ? parseInt(horaMatch[2]) : 0;
-      if (horaMatch[3]?.toLowerCase() === 'pm' && h < 12) h += 12;
-      if (horaMatch[3]?.toLowerCase() === 'am' && h === 12) h = 0;
-      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-    }
-    return hora;
+    return parseHoraISOCentral(hora).substring(0, 5); // Quitar segundos para compatibilidad
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
