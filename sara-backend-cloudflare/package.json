@@ -2,7 +2,9 @@
   "name": "sara-backend",
   "version": "1.0.0",
   "scripts": {
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@google/genai": "^1.30.0",
@@ -11,6 +13,8 @@
     "itty-router": "^5.0.22"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.5.0",
+    "vitest": "^2.0.0",
     "wrangler": "^4.49.0"
   }
 }
