@@ -9,8 +9,39 @@ export class ClaudeService {
     this.apiKey = apiKey;
   }
 
-  async chat(messages: any[], options: any = {}): Promise<string> {
+  /**
+   * Chat con Claude API
+   * @param historial - Mensajes previos del historial
+   * @param userMessage - Mensaje actual del usuario
+   * @param systemPrompt - Prompt del sistema (opcional)
+   */
+  async chat(historial: any[], userMessage?: string, systemPrompt?: string): Promise<string> {
     try {
+      // Construir mensajes: historial + mensaje actual del usuario
+      const messages = [...historial];
+
+      // Agregar mensaje del usuario si se proporciona
+      if (userMessage) {
+        messages.push({ role: 'user', content: userMessage });
+      }
+
+      // Si no hay mensajes, retornar vacío
+      if (messages.length === 0) {
+        console.log('⚠️ Claude: No hay mensajes para procesar');
+        return '';
+      }
+
+      const requestBody: any = {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2048,
+        messages: messages
+      };
+
+      // Agregar system prompt si se proporciona
+      if (systemPrompt) {
+        requestBody.system = systemPrompt;
+      }
+
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -18,17 +49,26 @@ export class ClaudeService {
           'x-api-key': this.apiKey,
           'anthropic-version': '2023-06-01'
         },
-        body: JSON.stringify({
-          model: options.model || 'claude-sonnet-4-20250514',
-          max_tokens: options.max_tokens || 1024,
-          messages: messages
-        })
+        body: JSON.stringify(requestBody)
       });
 
       const data: any = await response.json();
-      return data.content?.[0]?.text || '';
+
+      // Log de error si hay
+      if (data.error) {
+        console.error('❌ Claude API error:', data.error);
+        return '';
+      }
+
+      const text = data.content?.[0]?.text || '';
+
+      if (!text) {
+        console.log('⚠️ Claude: Respuesta vacía', JSON.stringify(data).substring(0, 200));
+      }
+
+      return text;
     } catch (e) {
-      console.error('Error en Claude API:', e);
+      console.error('❌ Error en Claude API:', e);
       return '';
     }
   }

@@ -79,7 +79,7 @@ export class AIConversationService {
         .from('appointments')
         .select('scheduled_date, scheduled_time, property_name')
         .eq('lead_id', lead.id)
-        .eq('status', 'scheduled')
+        .in('status', ['scheduled', 'confirmed'])
         .order('created_at', { ascending: false })
         .limit(1);
       
@@ -1209,6 +1209,7 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
     "banco_preferido": null,
     "ingreso_mensual": null,
     "enganche_disponible": null,
+    "deuda_actual": null,
     "modalidad_contacto": null,
     "quiere_asesor": null,
     "how_found_us": null,
@@ -1246,8 +1247,9 @@ La fecha de hoy es: ${new Date().toLocaleDateString('es-MX', { weekday: 'long', 
 - Si menciona banco (aunque tenga typos): "soctia", "escotia", "scotibank" ➜ banco_preferido: "Scotiabank"
 - "bvba", "vbba" ➜ "BBVA" | "santaner", "santnader" ➜ "Santander" | "vanorte", "baorte" ➜ "Banorte"
 - "infonavi", "imfonavit" ➜ "Infonavit" | "fovisste", "fobissste" ➜ "Fovissste"
-- Si menciona ingreso: "67 mil", "67000", "sesenta y siete mil" ➜ ingreso_mensual: 67000
-- Si menciona enganche: "234m1l", "234 mil", "doscientos" ➜ enganche_disponible: 234000
+- Si menciona ingreso (gano, ingreso, sueldo): "gano 67 mil", "mi ingreso es 67000" ➜ ingreso_mensual: 67000
+- Si menciona enganche (enganche, ahorrado, para dar): "tengo 234 mil de enganche" ➜ enganche_disponible: 234000
+- Si menciona deudas (debo, deuda, adeudo): "tengo 50 mil de deudas", "debo 80 mil" ➜ deuda_actual: 50000
 - Si dice "sí" a asesor: "si", "va", "sale", "ok", "claro" ➜ quiere_asesor: true
 - Si elige modalidad: "1", "llamada", "telefono" ➜ modalidad_contacto: "telefonica"
 - "2", "zoom", "video" ➜ modalidad_contacto: "videollamada"
@@ -1591,15 +1593,36 @@ RECUERDA:
         } else if (msgLower.includes('llamar') || msgLower.includes('llamen') || msgLower.includes('persona real') || msgLower.includes('hablar con alguien')) {
           fallbackIntent = 'hablar_humano';
           fallbackContactarVendedor = true;
+        } else if (msgLower.includes('video') || msgLower.includes('monte verde') || msgLower.includes('encinos') ||
+                   msgLower.includes('miravalle') || msgLower.includes('andes') || msgLower.includes('falco') ||
+                   msgLower.includes('mándame') || msgLower.includes('mandame') || msgLower.includes('envíame') || msgLower.includes('enviame')) {
+          fallbackIntent = 'interes_desarrollo';
+          // Detectar desarrollo mencionado
+          let desarrollo = '';
+          if (msgLower.includes('monte verde')) desarrollo = 'Monte Verde';
+          else if (msgLower.includes('encinos')) desarrollo = 'Los Encinos';
+          else if (msgLower.includes('miravalle')) desarrollo = 'Miravalle';
+          else if (msgLower.includes('andes')) desarrollo = 'Andes';
+          else if (msgLower.includes('falco')) desarrollo = 'Distrito Falco';
+
+          return {
+            intent: fallbackIntent,
+            extracted_data: { ...fallbackData, desarrollo },
+            response: respuestaLimpia,
+            send_gps: false,
+            send_video_desarrollo: true,  // ← ACTIVAR VIDEO
+            send_contactos: false,
+            contactar_vendedor: false
+          };
         } else if (msgLower.includes('opcion') || msgLower.includes('casa') || msgLower.includes('tienen') || msgLower.includes('millon')) {
           fallbackIntent = 'interes_desarrollo';
         } else if (msgLower.includes('cita') || msgLower.includes('visita')) {
           fallbackIntent = 'solicitar_cita';
         }
-        
+
         return {
           intent: fallbackIntent,
-          extracted_data: fallbackData,  // Usar datos extraídos
+          extracted_data: fallbackData,
           response: respuestaLimpia,
           send_gps: false,
           send_video_desarrollo: false,
@@ -1651,7 +1674,35 @@ En Guadalupe: *Andes* es excelente por ubicación y precio, modelos como Aconcag
           fallbackIntent = 'interes_desarrollo';
         }
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // PRIORIDAD 2: Pide opciones pero SIN presupuesto
+        // PRIORIDAD 2: Pide VIDEO o menciona DESARROLLO específico
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        else if (msgLower.includes('video') || msgLower.includes('mándame') || msgLower.includes('envíame') ||
+                 msgLower.includes('mandame') || msgLower.includes('enviame') ||
+                 msgLower.includes('monte verde') || msgLower.includes('los encinos') || msgLower.includes('encinos') ||
+                 msgLower.includes('miravalle') || msgLower.includes('andes') || msgLower.includes('distrito falco') || msgLower.includes('falco')) {
+          // Detectar qué desarrollo mencionó
+          let desarrollo = 'nuestros desarrollos';
+          if (msgLower.includes('monte verde')) desarrollo = 'Monte Verde';
+          else if (msgLower.includes('encinos')) desarrollo = 'Los Encinos';
+          else if (msgLower.includes('miravalle')) desarrollo = 'Miravalle';
+          else if (msgLower.includes('andes')) desarrollo = 'Andes';
+          else if (msgLower.includes('falco')) desarrollo = 'Distrito Falco';
+
+          fallbackResponse = `¡Claro ${lead.name}! Te envío el video de ${desarrollo} 🎬`;
+          fallbackIntent = 'interes_desarrollo';
+          // IMPORTANTE: Retornar con send_video_desarrollo: true
+          return {
+            intent: fallbackIntent,
+            extracted_data: { ...fallbackData, desarrollo },
+            response: fallbackResponse,
+            send_gps: false,
+            send_video_desarrollo: true,
+            send_contactos: false,
+            contactar_vendedor: false
+          };
+        }
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // PRIORIDAD 3: Pide opciones pero SIN presupuesto
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         else if (msgLower.includes('opcion') || msgLower.includes('casa') || msgLower.includes('tienen') || msgLower.includes('dame')) {
           fallbackResponse = `¡Claro ${lead.name}! 😊 Te cuento rápido:
@@ -1679,7 +1730,30 @@ O si prefieres, te conecto con un asesor.`;
           fallbackIntent = 'otro';
         }
       } else {
-        // Sin nombre - saludo con opciones claras
+        // Sin nombre - pero primero verificar si pide video/desarrollo
+        if (msgLower.includes('video') || msgLower.includes('mándame') || msgLower.includes('mandame') ||
+            msgLower.includes('envíame') || msgLower.includes('enviame') ||
+            msgLower.includes('monte verde') || msgLower.includes('encinos') ||
+            msgLower.includes('miravalle') || msgLower.includes('andes') || msgLower.includes('falco')) {
+          // Detectar desarrollo
+          let desarrollo = 'nuestros desarrollos';
+          if (msgLower.includes('monte verde')) desarrollo = 'Monte Verde';
+          else if (msgLower.includes('encinos')) desarrollo = 'Los Encinos';
+          else if (msgLower.includes('miravalle')) desarrollo = 'Miravalle';
+          else if (msgLower.includes('andes')) desarrollo = 'Andes';
+          else if (msgLower.includes('falco')) desarrollo = 'Distrito Falco';
+
+          return {
+            intent: 'interes_desarrollo',
+            extracted_data: { ...fallbackData, desarrollo },
+            response: `¡Hola! Con gusto te envío el video de ${desarrollo} 🎬`,
+            send_gps: false,
+            send_video_desarrollo: true,
+            send_contactos: false,
+            contactar_vendedor: false
+          };
+        }
+        // Sin interés específico - saludo con opciones claras
         fallbackResponse = `¡Hola! Soy SARA, tu asistente personal en Grupo Santa Rita.
 
 ¿Qué te trae por aquí hoy? Puedo ayudarte a:
@@ -1797,7 +1871,14 @@ Tú dime, ¿por dónde empezamos?`;
     }
     if (datosExtraidos.banco_preferido) updateData.banco_preferido = datosExtraidos.banco_preferido;
     if (datosExtraidos.desarrollo) updateData.preferred_development = datosExtraidos.desarrollo;
-    
+    // Guardar deuda_actual en mortgage_data (JSON)
+    if (datosExtraidos.deuda_actual) {
+      updateData.mortgage_data = {
+        ...(lead.mortgage_data || {}),
+        deuda_actual: datosExtraidos.deuda_actual
+      };
+    }
+
     if (Object.keys(updateData).length > 0) {
       try {
         await this.supabase.client.from('leads').update(updateData).eq('id', lead.id);
@@ -1840,12 +1921,12 @@ Tú dime, ¿por dónde empezamos?`;
       if (esDejarAsi && preguntabaCambioCita) {
         console.log('✅ Cliente quiere MANTENER su cita existente');
 
-        // Buscar cita existente para confirmar
+        // Buscar cita existente para confirmar (scheduled o confirmed)
         const { data: citaExistente } = await this.supabase.client
           .from('appointments')
           .select('scheduled_date, scheduled_time, property_name')
           .eq('lead_id', lead.id)
-          .eq('status', 'scheduled')
+          .in('status', ['scheduled', 'confirmed'])
           .order('scheduled_date', { ascending: true })
           .limit(1)
           .single();
@@ -1874,12 +1955,12 @@ Tú dime, ¿por dónde empezamos?`;
       if (intentCita === 'cancelar_cita' || intentCita === 'reagendar_cita' || intentCita === 'info_cita') {
         console.log('🎯 INTENT DE CITA DETECTADO:', intentCita);
 
-        // Buscar cita activa del lead
+        // Buscar cita activa del lead (scheduled o confirmed)
         const { data: citaActiva } = await this.supabase.client
           .from('appointments')
           .select('*, team_members!appointments_assigned_to_fkey(id, name, phone)')
           .eq('lead_id', lead.id)
-          .eq('status', 'scheduled')
+          .in('status', ['scheduled', 'confirmed'])
           .order('scheduled_date', { ascending: true })
           .limit(1)
           .single();
@@ -1971,7 +2052,10 @@ Tú dime, ¿por dónde empezamos?`;
         }
 
         // ═══ INFO CITA ═══
-        if (intentCita === 'info_cita') {
+        // Excluir preguntas sobre horarios disponibles (para agendar nueva cita)
+        const preguntaHorariosDisponibles = originalMessage.toLowerCase().includes('horario') ||
+                                            originalMessage.toLowerCase().includes('disponible');
+        if (intentCita === 'info_cita' && !preguntaHorariosDisponibles) {
           if (citaActiva) {
             // Usar respuesta de la IA o predeterminada
             let respuestaInfo = claudeResponse;
@@ -2020,12 +2104,12 @@ Tú dime, ¿por dónde empezamos?`;
       // otra lógica. Elimina conflictos entre flujos.
       // ═══════════════════════════════════════════════════════════════════════════
 
-      // Obtener cita activa para contexto (si no se obtuvo antes)
+      // Obtener cita activa para contexto (scheduled o confirmed)
       const { data: citaActivaContexto } = await this.supabase.client
         .from('appointments')
         .select('*, team_members!appointments_assigned_to_fkey(id, name, phone)')
         .eq('lead_id', lead.id)
-        .eq('status', 'scheduled')
+        .in('status', ['scheduled', 'confirmed'])
         .order('scheduled_date', { ascending: true })
         .limit(1)
         .single();
@@ -3079,10 +3163,18 @@ Tú dime, ¿por dónde empezamos?`;
             const tieneCita = citaExiste && citaExiste.length > 0;
             
             if (!tieneCita) {
-              // ═══ FIX 07-ENE-2026: BROCHURE de TODOS los desarrollos ═══
+              // ═══ FIX 07-ENE-2026: BROCHURE de TODOS los desarrollos (desde DB) ═══
               const brochuresEnviados: string[] = [];
               for (const dev of desarrollosLista) {
-                const brochureUrl = this.handler.getBrochureUrl(dev);
+                // Buscar brochure en propiedades
+                const propConBrochure = properties.find(p =>
+                  p.development?.toLowerCase().includes(dev.toLowerCase()) &&
+                  p.brochure_urls
+                );
+                // brochure_urls puede ser string o array
+                const brochureRaw = propConBrochure?.brochure_urls;
+                const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
+
                 if (brochureUrl && !brochuresEnviados.includes(brochureUrl)) {
                   brochuresEnviados.push(brochureUrl);
                   await new Promise(r => setTimeout(r, 400));
@@ -3093,7 +3185,7 @@ Tú dime, ¿por dónde empezamos?`;
                 }
               }
               if (brochuresEnviados.length === 0) {
-                console.log('⚠️ No se encontraron brochures para los desarrollos');
+                console.log('⚠️ No se encontraron brochures en DB para los desarrollos');
               }
 
               // ═══ PUSH A CITA - IMPORTANTE PARA CERRAR VENTA ═══
@@ -3357,29 +3449,76 @@ Tú dime, ¿por dónde empezamos?`;
       m.codigos.some(codigo => mensajeLower.includes(codigo))
     );
     
-    // Detectar ingreso en el mensaje
+    // ═══════════════════════════════════════════════════════════════════════
+    // PARSING FINANCIERO CONTEXT-AWARE - Detecta SOLO con contexto correcto
+    // ═══════════════════════════════════════════════════════════════════════
     let ingresoDetectado = 0;
-    const matchMil = originalMessage.match(/(\d+)\s*mil/i);
-    const matchPesos = originalMessage.match(/\$?\s*([\d,]+)\s*(?:pesos|mensual|al mes)?/i);
-    const matchNumero = originalMessage.match(/(?:gano|ingreso|sueldo|cobro)?\s*(\d{2,})/i);
-    
-    if (matchMil) {
-      ingresoDetectado = parseInt(matchMil[1]) * 1000;
-    } else if (matchPesos && parseInt(matchPesos[1].replace(/,/g, '')) > 5000) {
-      ingresoDetectado = parseInt(matchPesos[1].replace(/,/g, ''));
-    } else if (matchNumero && parseInt(matchNumero[1]) >= 10) {
-      const num = parseInt(matchNumero[1]);
-      ingresoDetectado = num > 1000 ? num : num * 1000;
-    }
-    
-    // Detectar enganche en el mensaje
     let engancheDetectado = 0;
-    const matchEngancheMil = originalMessage.match(/(\d+)\s*mil/i);
-    const matchEnganchePesos = originalMessage.match(/\$?\s*([\d,]+)/);
-    if (matchEngancheMil) {
-      engancheDetectado = parseInt(matchEngancheMil[1]) * 1000;
-    } else if (matchEnganchePesos && parseInt(matchEnganchePesos[1].replace(/,/g, '')) >= 10000) {
-      engancheDetectado = parseInt(matchEnganchePesos[1].replace(/,/g, ''));
+    let deudaDetectado = 0;
+
+    // Helper para extraer monto de un match
+    const extraerMonto = (match: RegExpMatchArray | null): number => {
+      if (!match || !match[1]) return 0;
+      let num = parseFloat(match[1].replace(/,/g, ''));
+      const fullMatch = match[0].toLowerCase();
+
+      // IMPORTANTE: millones tiene PRIORIDAD sobre mil
+      if (/mill[oó]n|millones|mdp/i.test(fullMatch)) {
+        num *= 1000000;
+      } else if (fullMatch.includes('mil') || fullMatch.includes(' k')) {
+        // Solo multiplicar por 1000 si NO tiene millones
+        num *= 1000;
+      }
+      return num;
+    };
+
+    // INGRESO: keyword ANTES del número O número con "de ingreso/sueldo"
+    const matchIngreso = originalMessage.match(
+      /(?:gano|mi ingreso|mi sueldo|ingreso de|sueldo de|cobro|salario)\s*(?:es\s+de|es|son|de|:)?\s*\$?\s*([\d.,]+)\s*(?:mil|k|pesos|mensual)?|(?:\$?\s*([\d.,]+)\s*(?:mil|k|millones?)?\s*(?:de\s+)?(?:ingreso|sueldo)\s*(?:mensual)?)/i
+    );
+    if (matchIngreso) {
+      ingresoDetectado = extraerMonto([matchIngreso[0], matchIngreso[1] || matchIngreso[2]] as any);
+      console.log('💰 Ingreso detectado por regex con contexto:', ingresoDetectado);
+    }
+
+    // ENGANCHE: keyword ANTES del número O número con "de enganche"
+    const matchEnganche = originalMessage.match(
+      /(?:enganche|ahorrado|ahorro|para dar|puedo dar)\s*(?:de|es|son|:)?\s*\$?\s*([\d.,]+)\s*(?:mil|k|millones?|mdp)?|\$?\s*([\d.,]+)\s*(?:mil|k|millones?|mdp)?\s*(?:de\s+)?enganche/i
+    );
+    if (matchEnganche) {
+      engancheDetectado = extraerMonto([matchEnganche[0], matchEnganche[1] || matchEnganche[2]] as any);
+      console.log('💵 Enganche detectado por regex con contexto:', engancheDetectado);
+    }
+
+    // DEUDA: keyword ANTES del número O número con "de deuda(s)"
+    const matchDeuda = originalMessage.match(
+      /(?:debo|deuda|adeudo)\s*(?:de|es|son|:)?\s*(?:como\s*)?\$?\s*([\d.,]+)\s*(?:mil|k|pesos)?|\$?\s*([\d.,]+)\s*(?:mil|k)?\s*(?:de\s+)?deudas?/i
+    );
+    if (matchDeuda) {
+      deudaDetectado = extraerMonto([matchDeuda[0], matchDeuda[1] || matchDeuda[2]] as any);
+      console.log('💳 Deuda detectada por regex con contexto:', deudaDetectado);
+    }
+
+    // FALLBACK: Si SARA preguntó específicamente por ingreso/enganche, cualquier número es respuesta
+    const preguntabaIngresoDirecto = ultimoMsgSara?.content?.includes('cuánto ganas') ||
+                                     ultimoMsgSara?.content?.includes('ingreso mensual');
+    const preguntabaEngancheDirecto = ultimoMsgSara?.content?.includes('enganche') &&
+                                      ultimoMsgSara?.content?.includes('ahorrado');
+
+    if (preguntabaIngresoDirecto && ingresoDetectado === 0) {
+      const matchNumero = originalMessage.match(/\$?\s*([\d,]+)\s*(?:mil|k)?/i);
+      if (matchNumero) {
+        ingresoDetectado = extraerMonto(matchNumero);
+        console.log('💰 Ingreso detectado (respuesta directa a pregunta):', ingresoDetectado);
+      }
+    }
+
+    if (preguntabaEngancheDirecto && engancheDetectado === 0) {
+      const matchNumero = originalMessage.match(/\$?\s*([\d,]+)\s*(?:mil|k|m(?:ill[oó]n)?|mdp)?/i);
+      if (matchNumero) {
+        engancheDetectado = extraerMonto(matchNumero);
+        console.log('💵 Enganche detectado (respuesta directa a pregunta):', engancheDetectado);
+      }
     }
     
     // Detectar contextos del último mensaje de SARA
@@ -3465,9 +3604,15 @@ Tú dime, ¿por dónde empezamos?`;
     // Enganche: si regex no detectó pero OpenAI sí
     if (engancheDetectado === 0 && analysis.extracted_data?.enganche_disponible) {
       engancheDetectado = analysis.extracted_data?.enganche_disponible;
-      console.log('📌 ¤“ Enganche detectado por OpenAI:', engancheDetectado);
+      console.log('📌 ¤" Enganche detectado por OpenAI:', engancheDetectado);
     }
-    
+
+    // Deuda: si regex no detectó pero OpenAI sí
+    if (deudaDetectado === 0 && analysis.extracted_data?.deuda_actual) {
+      deudaDetectado = analysis.extracted_data?.deuda_actual;
+      console.log('📌 ¤" Deuda detectada por OpenAI:', deudaDetectado);
+    }
+
     // Modalidad: si regex no detectó pero OpenAI sí
     if (!modalidadDetectada && analysis.extracted_data?.modalidad_contacto) {
       const modAI = (analysis.extracted_data?.modalidad_contacto || '').toLowerCase();
@@ -3493,6 +3638,7 @@ Tú dime, ¿por dónde empezamos?`;
     console.log('👍 DEBUG - bancoDetectado:', bancoDetectado?.nombre || 'NINGUNO');
     console.log('👍 DEBUG - ingresoDetectado:', ingresoDetectado);
     console.log('👍 DEBUG - engancheDetectado:', engancheDetectado);
+    console.log('👍 DEBUG - deudaDetectado:', deudaDetectado);
     console.log('👍 DEBUG - modalidadDetectada:', modalidadDetectada?.nombre || 'NINGUNA');
     console.log('👍 DEBUG - respuestaAfirmativa:', respuestaAfirmativa);
     
@@ -3572,8 +3718,14 @@ Tú dime, ¿por dónde empezamos?`;
         modalidadElegida = 'presencial';
       }
 
-      // Detectar hora si la mencionó
-      const horaMatch = originalMessage.match(/(\d{1,2})\s*(?::|hrs?|pm|am)?/i);
+      // Detectar hora si la mencionó (REQUIERE indicador de hora para evitar falsos positivos)
+      // Ej: "a las 3", "3pm", "3:00", "15 hrs", "de 2 a 4" → OK
+      // Ej: "tengo 3 hijos" → NO captura (no tiene indicador de hora)
+      const horaMatch = originalMessage.match(
+        /(?:a las\s*)?(\d{1,2})\s*(?::|hrs?|pm|am|de la (?:mañana|tarde|noche))/i
+      ) || originalMessage.match(
+        /(?:a las|tipo|como a las|entre las|después de las)\s*(\d{1,2})/i
+      );
       const horaPreferida = horaMatch ? horaMatch[0] : 'a convenir';
 
       try {
@@ -4480,6 +4632,7 @@ ${modalidad === 'presencial' ? '→ Quiere CITA EN OFICINA' : ''}
               const ingresoNumerico = typeof lead.ingreso_mensual === 'number' ? lead.ingreso_mensual :
                                       (lead.mortgage_data?.ingreso_mensual || 0);
               const engancheNumerico = lead.enganche_disponible || 0;
+              const deudaNumerico = lead.mortgage_data?.deuda_actual || 0;
               const creditoEstimado = ingresoNumerico * 80;
 
               await this.supabase.client
@@ -4492,7 +4645,7 @@ ${modalidad === 'presencial' ? '→ Quiere CITA EN OFICINA' : ''}
                   property_name: lead.property_interest || null,
                   monthly_income: ingresoNumerico,
                   additional_income: 0,
-                  current_debt: 0,
+                  current_debt: deudaNumerico,
                   down_payment: engancheNumerico,
                   requested_amount: engancheNumerico + creditoEstimado,
                   credit_term_years: 20,
@@ -5272,7 +5425,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
     const tieneNombre = lead.name || analysis.extracted_data?.nombre;
     const preguntamosCredito = lead.needs_mortgage !== null || analysis.extracted_data?.necesita_credito !== null;
     
-    // Verificar si ya tiene cita para el MISMO desarrollo
+    // Verificar si ya tiene cita para el MISMO desarrollo (scheduled o confirmed)
     let yaExisteCita = false;
     let citaPreviaDesarrollo = '';
     try {
@@ -5280,7 +5433,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
         .from('appointments')
         .select('id, property_name')
         .eq('lead_id', lead.id)
-        .eq('status', 'scheduled')
+        .in('status', ['scheduled', 'confirmed'])
         .limit(1);
       if (citaPrevia && citaPrevia.length > 0) {
         citaPreviaDesarrollo = citaPrevia[0].property_name || '';
@@ -5368,15 +5521,14 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
     // Verificar si ya se enviaron recursos para estos desarrollos (evitar duplicados)
     // Nota: historial ya está declarado arriba
     
-    // Verificar en historial si hay mensajes con emojis de recursos
-    const recursosEnHistorial = historial.some((msg: any) => 
-      msg.role === 'assistant' && 
-      (msg.content?.includes('🎬') || 
-       msg.content?.includes('video') ||
-       msg.content?.includes('Matterport') ||
-       msg.content?.includes('matterport') ||
-       msg.content?.includes('tour virtual') ||
-       msg.content?.includes('youtu'))
+    // Verificar en historial si hay URLs REALES de recursos (no solo menciones)
+    // IMPORTANTE: "Te lo envío 🎬" NO cuenta - solo URLs reales como youtube.com o matterport.com
+    const recursosEnHistorial = historial.some((msg: any) =>
+      msg.role === 'assistant' &&
+      (msg.content?.includes('youtube.com/') ||
+       msg.content?.includes('youtu.be/') ||
+       msg.content?.includes('matterport.com/') ||
+       msg.content?.includes('my.matterport.com/'))
     );
     
     // También verificar si el último mensaje de SARA preguntó sobre visitar
@@ -5534,17 +5686,27 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
         
         await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5 segundos
         
-        // Enviar brochure del desarrollo PRIMERO
+        // Enviar brochure del desarrollo desde la DB
         const desarrolloParaBrochure = todosDesarrollos[0] || '';
         if (desarrolloParaBrochure) {
-          const brochureUrl = this.handler.getBrochureUrl(desarrolloParaBrochure);
+          // Buscar brochure en las propiedades del desarrollo
+          const propConBrochure = properties.find(p =>
+            p.development?.toLowerCase().includes(desarrolloParaBrochure.toLowerCase()) &&
+            p.brochure_urls
+          );
+          // brochure_urls puede ser string o array
+          const brochureRaw = propConBrochure?.brochure_urls;
+          const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
+
           if (brochureUrl) {
             const msgBrochure = `📄 *Brochure completo de ${desarrolloParaBrochure}:*
 ${brochureUrl}
 
 Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
             await this.twilio.sendWhatsAppMessage(from, msgBrochure);
-            console.log(`✅ Brochure enviado: ${desarrolloParaBrochure}`);
+            console.log(`✅ Brochure enviado: ${desarrolloParaBrochure} - ${brochureUrl}`);
+          } else {
+            console.log(`⚠️ ${desarrolloParaBrochure} NO tiene brochure_urls en DB`);
           }
         }
         
@@ -5684,14 +5846,14 @@ Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
       
       console.log('💰 Ingreso final a enviar:', ingresoMensual);
       
-      // Obtener cita existente del lead (de la DB, no solo del análisis)
+      // Obtener cita existente del lead (scheduled o confirmed)
       let citaExistente = '';
       try {
         const { data: citaDB } = await this.supabase.client
           .from('appointments')
           .select('scheduled_date, scheduled_time, property_name')
           .eq('lead_id', lead.id)
-          .eq('status', 'scheduled')
+          .in('status', ['scheduled', 'confirmed'])
           .order('created_at', { ascending: false })
           .limit(1);
         

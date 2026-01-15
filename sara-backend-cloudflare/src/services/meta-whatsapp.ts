@@ -22,11 +22,12 @@ let globalMessageCount = 0;
 let globalMessageWindowStart = Date.now();
 
 // Frases que indican que NO quieren ser contactados
+// NOTA: 'cancelar' removido porque causa falsos positivos con "cancelar mi cita"
 const DNC_PHRASES = [
   'no me molest', 'deja de molestar', 'ya basta', 'stop', 'basta ya',
-  'no quiero', 'dejen de', 'ya no me', 'no me escribas', 'no me mandes',
-  'no contactar', 'unsubscribe', 'cancelar', 'eliminar mi número',
-  'bloquear', 'reportar', 'acoso', 'spam'
+  'no quiero saber nada', 'dejen de escribirme', 'ya no me escriban', 'no me escribas más', 'no me mandes más',
+  'no contactar', 'unsubscribe', 'eliminar mi número', 'elimina mi número',
+  'bloquear', 'reportar spam', 'acoso', 'esto es spam', 'dejen de molestar'
 ];
 
 // Admin para alertas críticas

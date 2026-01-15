@@ -431,6 +431,66 @@ export default {
       return corsResponse(JSON.stringify({ ok: true, message: `Lead ${lead_id} actualizado a ${status}` }));
     }
 
+    // TEST: Actualizar nombre de lead por teléfono
+    if (url.pathname === "/test-update-name" && request.method === "POST") {
+      const body = await request.json() as any;
+      const { phone, name } = body;
+      if (!phone || !name) {
+        return corsResponse(JSON.stringify({ error: "Falta phone o name" }), 400);
+      }
+      const phoneSuffix = phone.replace(/\D/g, '').slice(-10);
+      const { data, error } = await supabase.client
+        .from('leads')
+        .update({ name })
+        .ilike('phone', `%${phoneSuffix}`)
+        .select('id, name, phone');
+      if (error) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+      return corsResponse(JSON.stringify({ ok: true, updated: data }));
+    }
+
+    // TEST: Enviar video directamente a un teléfono
+    if (url.pathname === "/test-force-video" && request.method === "POST") {
+      const body = await request.json() as any;
+      const { phone, desarrollo } = body;
+
+      if (!phone) {
+        return corsResponse(JSON.stringify({ error: "Falta phone" }), 400);
+      }
+
+      // Formatear teléfono (últimos 10 dígitos + 521)
+      const phoneDigits = phone.replace(/\D/g, '').slice(-10);
+      const phoneFormatted = '521' + phoneDigits;
+
+      // Buscar video del desarrollo
+      const dev = desarrollo || 'monte verde';
+      const { data: props } = await supabase.client
+        .from('properties')
+        .select('youtube_link, development')
+        .ilike('development', `%${dev}%`)
+        .not('youtube_link', 'is', null)
+        .limit(1);
+
+      if (!props || props.length === 0 || !props[0].youtube_link) {
+        return corsResponse(JSON.stringify({ error: "Video no encontrado para " + dev }), 404);
+      }
+
+      const videoUrl = props[0].youtube_link;
+      const devName = props[0].development;
+
+      // Enviar video directamente
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await meta.sendWhatsAppMessage(phoneFormatted, `🎬 Mira cómo es *${devName}* por dentro:\n${videoUrl}`);
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        phone: phoneFormatted,
+        video_enviado: videoUrl,
+        desarrollo: devName
+      }));
+    }
+
     // ═══════════════════════════════════════════════════════════
     // DIAGNÓSTICO CRM - Ver datos para verificar comandos
     // ═══════════════════════════════════════════════════════════
@@ -7217,8 +7277,8 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     const dayMap: Record<string, number> = { 'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6 };
     const dayOfWeek = dayMap[mexicoWeekday] ?? now.getUTCDay();
 
-    // Solo ejecutar tareas horarias en los primeros 2 minutos de la hora
-    const isFirstRunOfHour = mexicoMinute < 2;
+    // Solo ejecutar tareas horarias en el minuto exacto (evita duplicados)
+    const isFirstRunOfHour = mexicoMinute === 0;
 
     console.log(`═══════════════════════════════════════════════════════════`);
     console.log(`🕐 CRON EJECUTADO`);

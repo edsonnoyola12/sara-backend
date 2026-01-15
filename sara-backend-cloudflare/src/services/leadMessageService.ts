@@ -185,15 +185,21 @@ export class LeadMessageService {
     body: string,
     mensajeLower: string
   ): Promise<LeadMessageResult> {
-    // Buscar cita activa
+    // Buscar cita activa (scheduled o confirmed)
     const { data: citaActiva } = await this.supabase.client
       .from('appointments')
-      .select('*, team_members!appointments_assigned_to_fkey(id, name, phone)')
+      .select('id, scheduled_date, scheduled_time, property_name, vendedor_id, vendedor_name')
       .eq('lead_id', lead.id)
-      .eq('status', 'scheduled')
+      .in('status', ['scheduled', 'confirmed'])
       .order('scheduled_date', { ascending: true })
       .limit(1)
       .single();
+
+    // REAGENDAR/CAMBIAR CITA - Pasar a IA para manejar con contexto
+    if (this.detectaReagendarCita(mensajeLower)) {
+      console.log('🔄 Detectado intento de reagendar cita - pasando a IA');
+      return { action: 'continue_to_ai' };
+    }
 
     // CANCELAR CITA
     if (this.detectaCancelarCita(mensajeLower)) {
@@ -205,12 +211,19 @@ export class LeadMessageService {
       return this.procesarConfirmarCita(lead, citaActiva);
     }
 
-    // PREGUNTAR POR CITA
+    // PREGUNTAR POR CITA (solo si no es reagendar)
     if (this.detectaPreguntaCita(mensajeLower)) {
       return this.procesarPreguntaCita(lead, citaActiva);
     }
 
     return { action: 'continue_to_ai' };
+  }
+
+  private detectaReagendarCita(msg: string): boolean {
+    return msg.includes('cambiar') || msg.includes('mover') ||
+           msg.includes('reagendar') || msg.includes('re-agendar') ||
+           msg.includes('otra fecha') || msg.includes('otro día') ||
+           msg.includes('otro dia') || msg.includes('otra hora');
   }
 
   private detectaCancelarCita(msg: string): boolean {
@@ -225,10 +238,15 @@ export class LeadMessageService {
   }
 
   private detectaPreguntaCita(msg: string): boolean {
-    return (msg.includes('hora') && !msg.includes('ahora')) ||
-           msg.includes('a que hora') || msg.includes('a qué hora') ||
+    // Excluir preguntas sobre horarios disponibles (para agendar)
+    if (msg.includes('horario') || msg.includes('disponible')) {
+      return false;
+    }
+    return msg.includes('a que hora es') || msg.includes('a qué hora es') ||
+           msg.includes('a que hora tengo') || msg.includes('a qué hora tengo') ||
            msg.includes('cuando es mi cita') || msg.includes('cuándo es mi cita') ||
-           msg.includes('mi cita') || msg.includes('fecha de mi cita');
+           msg.includes('fecha de mi cita') ||
+           (msg.includes('mi cita') && !msg.includes('agendar') && !msg.includes('nueva'));
   }
 
   private async procesarCancelarCita(lead: any, cita: CitaActiva | null): Promise<LeadMessageResult> {

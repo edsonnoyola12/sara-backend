@@ -5,11 +5,17 @@ export class PropertyService {
 
   async getAllProperties(): Promise<any[]> {
     try {
-      const { data } = await this.supabase.client
+      // No filtrar por active - obtener todas las propiedades
+      const { data, error } = await this.supabase.client
         .from('properties')
         .select('*')
-        .eq('active', true)
         .order('name');
+
+      if (error) {
+        console.error('Error getting properties:', error);
+      }
+
+      console.log(`📦 Properties cargadas: ${data?.length || 0}`);
       return data || [];
     } catch (e) {
       console.error('Error getting properties:', e);
