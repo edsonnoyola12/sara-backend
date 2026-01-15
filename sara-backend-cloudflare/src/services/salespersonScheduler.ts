@@ -43,7 +43,7 @@ export class SalespersonScheduler {
         .eq('salesperson_id', avail.salesperson_id)
         .eq('scheduled_date', requestedDate)
         .eq('scheduled_time', requestedTime)
-        .eq('status', 'scheduled');
+        .in('status', ['scheduled', 'confirmed']);
 
       if (count === 0) {
         availableSalespeople.push(avail.team_members);
@@ -133,7 +133,7 @@ Responde SOLO con el número del vendedor (1, 2, 3, etc).`;
       .select('scheduled_time')
       .eq('salesperson_id', salesperson.id)
       .eq('scheduled_date', date)
-      .eq('status', 'scheduled');
+      .in('status', ['scheduled', 'confirmed']);
 
     const bookedTimes = new Set(appointments?.map(a => a.scheduled_time) || []);
 

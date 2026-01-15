@@ -43,13 +43,13 @@ export class AppointmentConfirmation {
       const endHour = String(parseInt(hours) + 1).padStart(2, '0');
       const endTime = `${date}T${endHour}:${minutes.padStart(2, '0')}:00-06:00`;
 
-      const event = await this.calendar.createEvent(
-        `🏠 ${property} - ${lead.data.name || 'Cliente'}`,
-        `👤 Cliente: ${lead.data.name || 'Sin nombre'}\n📱 ${lead.data.phone}\n🏠 Propiedad: ${property}\n${salesperson ? '👨‍💼 Asesor: ' + salesperson.name : ''}`,
-        startTime,
-        endTime,
-        lead.data.email
-      );
+      const event = await this.calendar.createEvent({
+        summary: `🏠 ${property} - ${lead.data.name || 'Cliente'}`,
+        description: `👤 Cliente: ${lead.data.name || 'Sin nombre'}\n📱 ${lead.data.phone}\n🏠 Propiedad: ${property}\n${salesperson ? '👨‍💼 Asesor: ' + salesperson.name : ''}`,
+        start: { dateTime: startTime, timeZone: 'America/Mexico_City' },
+        end: { dateTime: endTime, timeZone: 'America/Mexico_City' },
+        attendees: lead.data.email ? [{ email: lead.data.email }] : undefined
+      });
 
       if (!event) {
         return { success: false, message: 'Error al crear evento en calendario' };

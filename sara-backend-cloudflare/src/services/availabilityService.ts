@@ -55,7 +55,7 @@ export class AvailabilityService {
         .eq('assigned_to_id', schedule.user_id)
         .eq('scheduled_date', date)
         .eq('scheduled_time', time)
-        .eq('status', 'scheduled');
+        .in('status', ['scheduled', 'confirmed']);
 
       if (count === 0) {
         availableUsers.push(schedule.team_members);
@@ -106,7 +106,7 @@ export class AvailabilityService {
       .select('scheduled_time')
       .eq('assigned_to_id', userId)
       .eq('scheduled_date', date)
-      .eq('status', 'scheduled');
+      .in('status', ['scheduled', 'confirmed']);
 
     const bookedTimes = new Set(appointments?.map(a => a.scheduled_time) || []);
 
