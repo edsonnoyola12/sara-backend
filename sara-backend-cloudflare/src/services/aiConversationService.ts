@@ -1956,16 +1956,33 @@ Tú dime, ¿por dónde empezamos?`;
         console.log('🎯 INTENT DE CITA DETECTADO:', intentCita);
 
         // Buscar cita activa del lead (scheduled o confirmed)
-        const { data: citaActiva } = await this.supabase.client
+        // NOTA: No usar .single() porque devuelve error si no hay resultados
+        // NOTA: No usar JOIN porque falla con "relationship not found"
+        const { data: citasActivas, error: errorCita } = await this.supabase.client
           .from('appointments')
-          .select('*, team_members!appointments_assigned_to_fkey(id, name, phone)')
+          .select('*')
           .eq('lead_id', lead.id)
           .in('status', ['scheduled', 'confirmed'])
           .order('scheduled_date', { ascending: true })
-          .limit(1)
-          .single();
+          .limit(1);
 
-        const vendedorCita = citaActiva?.team_members;
+        if (errorCita) {
+          console.log('⚠️ Error buscando cita activa:', errorCita.message);
+        }
+
+        const citaActiva = citasActivas && citasActivas.length > 0 ? citasActivas[0] : null;
+        console.log('📋 Cita activa encontrada:', citaActiva ? `${citaActiva.scheduled_date} ${citaActiva.scheduled_time}` : 'NO');
+
+        // Buscar vendedor asignado si hay cita
+        let vendedorCita: any = null;
+        if (citaActiva?.assigned_to) {
+          const { data: vendedor } = await this.supabase.client
+            .from('team_members')
+            .select('id, name, phone')
+            .eq('id', citaActiva.assigned_to)
+            .limit(1);
+          vendedorCita = vendedor && vendedor.length > 0 ? vendedor[0] : null;
+        }
         const fechaCita = citaActiva?.scheduled_date || '';
         const horaCita = citaActiva?.scheduled_time || '';
         const lugarCita = citaActiva?.property_name || 'Santa Rita';
