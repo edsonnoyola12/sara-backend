@@ -90,33 +90,38 @@ export class MetaWhatsAppService {
     return clean;
   }
 
-  async sendWhatsAppMessage(to: string, body: string, bypassRateLimit = false): Promise<any> {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 📤 ENVIAR MENSAJE DE WHATSAPP
+  // ═══════════════════════════════════════════════════════════════════════════
+  // IMPORTANTE: bypassRateLimit = true por DEFAULT para conversaciones normales
+  // Solo broadcasts/mensajes automatizados deben usar bypassRateLimit = false
+  // ═══════════════════════════════════════════════════════════════════════════
+  async sendWhatsAppMessage(to: string, body: string, bypassRateLimit = true): Promise<any> {
     const phone = this.normalizePhone(to);
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // 🚨 CIRCUIT BREAKER GLOBAL - Detener si hay demasiados envíos
-    // ═══════════════════════════════════════════════════════════════════════
     const now = Date.now();
-    if (now - globalMessageWindowStart > 5 * 60 * 1000) {
-      // Resetear ventana cada 5 minutos
-      globalMessageCount = 0;
-      globalMessageWindowStart = now;
-    }
-    globalMessageCount++;
-
-    if (globalMessageCount > CIRCUIT_BREAKER_THRESHOLD && !bypassRateLimit) {
-      console.error(`🚨 CIRCUIT BREAKER ACTIVADO: ${globalMessageCount} mensajes en 5 min - DETENIENDO ENVÍOS`);
-      // Alertar admin (solo una vez)
-      if (globalMessageCount === CIRCUIT_BREAKER_THRESHOLD + 1) {
-        await this.sendAlertToAdmin(`🚨 ALERTA CRÍTICA: Circuit breaker activado. ${globalMessageCount} mensajes en 5 min. Revisa el sistema.`);
-      }
-      throw new Error('CIRCUIT_BREAKER: Demasiados mensajes enviados. Sistema pausado.');
-    }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // 🚦 RATE LIMITING POR TELÉFONO
+    // 🚨 CIRCUIT BREAKER - Solo para mensajes NO bypass (broadcasts)
+    // Las conversaciones normales NUNCA se bloquean
     // ═══════════════════════════════════════════════════════════════════════
     if (!bypassRateLimit) {
+      if (now - globalMessageWindowStart > 5 * 60 * 1000) {
+        globalMessageCount = 0;
+        globalMessageWindowStart = now;
+      }
+      globalMessageCount++;
+
+      if (globalMessageCount > CIRCUIT_BREAKER_THRESHOLD) {
+        console.error(`🚨 CIRCUIT BREAKER (BROADCAST): ${globalMessageCount} mensajes en 5 min`);
+        if (globalMessageCount === CIRCUIT_BREAKER_THRESHOLD + 1) {
+          await this.sendAlertToAdmin(`🚨 ALERTA: Circuit breaker broadcasts. ${globalMessageCount} msgs en 5 min.`);
+        }
+        throw new Error('CIRCUIT_BREAKER: Demasiados broadcasts. Sistema pausado.');
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // 🚦 RATE LIMITING - Solo para broadcasts
+      // ═══════════════════════════════════════════════════════════════════════
       cleanupRateLimits();
 
       const entry = messageRateLimit.get(phone) || {
@@ -126,33 +131,27 @@ export class MetaWhatsAppService {
         blocked: false
       };
 
-      // Verificar si está bloqueado
       if (entry.blocked) {
-        console.error(`🚫 RATE LIMIT: ${phone} está bloqueado - ${entry.blockReason}`);
+        console.error(`🚫 BROADCAST bloqueado para ${phone}: ${entry.blockReason}`);
         throw new Error(`RATE_LIMIT: Número bloqueado - ${entry.blockReason}`);
       }
 
-      // Verificar límite por hora
       const hourAgo = now - RATE_LIMIT_WINDOW_MS;
       if (entry.firstMessageAt > hourAgo && entry.count >= MAX_MESSAGES_PER_HOUR) {
-        console.error(`🚫 RATE LIMIT: ${phone} excedió ${MAX_MESSAGES_PER_HOUR} msgs/hora`);
+        console.error(`🚫 BROADCAST: ${phone} excedió ${MAX_MESSAGES_PER_HOUR} msgs/hora`);
         entry.blocked = true;
-        entry.blockReason = 'Excedió límite de mensajes por hora';
+        entry.blockReason = 'Excedió límite de broadcasts por hora';
         messageRateLimit.set(phone, entry);
-        await this.sendAlertToAdmin(`⚠️ Rate limit: ${phone} bloqueado por exceder ${MAX_MESSAGES_PER_HOUR} msgs/hora`);
-        throw new Error('RATE_LIMIT: Demasiados mensajes a este número');
+        throw new Error('RATE_LIMIT: Demasiados broadcasts a este número');
       }
 
-      // Verificar límite por minuto (anti-spam rápido)
       const minuteAgo = now - 60 * 1000;
       if (entry.lastMessageAt > minuteAgo && entry.count >= MAX_MESSAGES_PER_MINUTE) {
-        console.warn(`⚠️ RATE LIMIT: ${phone} - ${MAX_MESSAGES_PER_MINUTE} msgs en 1 min, esperando...`);
-        throw new Error('RATE_LIMIT: Demasiados mensajes en poco tiempo');
+        console.warn(`⚠️ BROADCAST: ${phone} - ${MAX_MESSAGES_PER_MINUTE} en 1 min, bloqueando`);
+        throw new Error('RATE_LIMIT: Demasiados broadcasts en poco tiempo');
       }
 
-      // Actualizar contador
       if (entry.firstMessageAt < hourAgo) {
-        // Reiniciar conteo si pasó la hora
         entry.count = 1;
         entry.firstMessageAt = now;
       } else {
@@ -161,7 +160,7 @@ export class MetaWhatsAppService {
       entry.lastMessageAt = now;
       messageRateLimit.set(phone, entry);
 
-      console.log(`📊 Rate limit ${phone}: ${entry.count}/${MAX_MESSAGES_PER_HOUR} msgs/hora`);
+      console.log(`📊 Broadcast rate: ${phone}: ${entry.count}/${MAX_MESSAGES_PER_HOUR}/hora`);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -427,9 +426,59 @@ export class MetaWhatsAppService {
     return response.json();
   }
 
-  // Enviar template de WhatsApp (para iniciar conversaciones fuera de la ventana de 24h)
-  async sendTemplate(to: string, templateName: string, languageCode: string = 'es', components?: any[]): Promise<any> {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 📋 ENVIAR TEMPLATE DE WHATSAPP
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Templates son para broadcasts/mensajes automáticos fuera de ventana 24h
+  // Por default aplican rate limiting (bypassRateLimit = false)
+  // ═══════════════════════════════════════════════════════════════════════════
+  async sendTemplate(to: string, templateName: string, languageCode: string = 'es', components?: any[], bypassRateLimit: boolean = false): Promise<any> {
     const phone = this.normalizePhone(to);
+    const now = Date.now();
+
+    // 🚦 RATE LIMITING PARA TEMPLATES (broadcasts automáticos)
+    if (!bypassRateLimit) {
+      if (now - globalMessageWindowStart > 5 * 60 * 1000) {
+        globalMessageCount = 0;
+        globalMessageWindowStart = now;
+      }
+      globalMessageCount++;
+
+      if (globalMessageCount > CIRCUIT_BREAKER_THRESHOLD) {
+        console.error(`🚨 CIRCUIT BREAKER (TEMPLATE): ${globalMessageCount} templates en 5 min`);
+        throw new Error('CIRCUIT_BREAKER: Demasiados templates. Sistema pausado.');
+      }
+
+      cleanupRateLimits();
+      const entry = messageRateLimit.get(phone) || {
+        count: 0,
+        firstMessageAt: now,
+        lastMessageAt: now,
+        blocked: false
+      };
+
+      if (entry.blocked) {
+        console.error(`🚫 TEMPLATE bloqueado para ${phone}: ${entry.blockReason}`);
+        throw new Error(`RATE_LIMIT: Número bloqueado para templates`);
+      }
+
+      const hourAgo = now - RATE_LIMIT_WINDOW_MS;
+      if (entry.firstMessageAt > hourAgo && entry.count >= MAX_MESSAGES_PER_HOUR) {
+        console.error(`🚫 TEMPLATE: ${phone} excedió ${MAX_MESSAGES_PER_HOUR} msgs/hora`);
+        throw new Error('RATE_LIMIT: Demasiados templates a este número');
+      }
+
+      if (entry.firstMessageAt < hourAgo) {
+        entry.count = 1;
+        entry.firstMessageAt = now;
+      } else {
+        entry.count++;
+      }
+      entry.lastMessageAt = now;
+      messageRateLimit.set(phone, entry);
+      console.log(`📊 Template rate: ${phone}: ${entry.count}/${MAX_MESSAGES_PER_HOUR}/hora`);
+    }
+
     const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
 
     const payload: any = {
@@ -443,7 +492,6 @@ export class MetaWhatsAppService {
       }
     };
 
-    // Agregar components si existen (para variables del template)
     if (components && components.length > 0) {
       payload.template.components = components;
     }

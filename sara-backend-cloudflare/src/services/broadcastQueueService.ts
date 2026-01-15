@@ -178,6 +178,22 @@ export class BroadcastQueueService {
         continue;
       }
 
+      // ═══════════════════════════════════════════════════════════════════════
+      // 🚫 VERIFICACIÓN DE DUPLICADOS - NO enviar si ya recibió broadcast reciente
+      // ═══════════════════════════════════════════════════════════════════════
+      const notes = typeof lead.notes === 'object' ? lead.notes : {};
+      if (notes.last_broadcast?.sent_at) {
+        const lastSentAt = new Date(notes.last_broadcast.sent_at);
+        const hoursSinceLastBroadcast = (Date.now() - lastSentAt.getTime()) / (1000 * 60 * 60);
+
+        // Si recibió broadcast en las últimas 24 horas, SKIP
+        if (hoursSinceLastBroadcast < 24) {
+          console.log(`⏭️ SKIP ${lead.phone}: Ya recibió broadcast hace ${hoursSinceLastBroadcast.toFixed(1)}h`);
+          sentIds.push(lead.id); // Marcarlo como "enviado" para no reintentarlo
+          continue;
+        }
+      }
+
       try {
         // Preparar mensaje personalizado
         const nombre = lead.name || 'Cliente';

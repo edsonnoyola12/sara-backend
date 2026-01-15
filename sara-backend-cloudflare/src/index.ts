@@ -261,6 +261,132 @@ export default {
       }));
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🧪 RESET BROADCAST MARKER - Para poder re-probar
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/api/test-reset-broadcast" && request.method === "POST") {
+      // Solo resetear los 2 teléfonos de prueba
+      const { data: testLeads } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, notes')
+        .or(`phone.ilike.%2224558475,phone.ilike.%610016226`);
+
+      if (!testLeads) return corsResponse(JSON.stringify({ error: 'No leads found' }), 404);
+
+      for (const lead of testLeads) {
+        const notes = typeof lead.notes === 'object' ? lead.notes : {};
+        delete notes.last_broadcast;
+        await supabase.client
+          .from('leads')
+          .update({ notes })
+          .eq('id', lead.id);
+      }
+
+      return corsResponse(JSON.stringify({
+        message: 'Broadcast markers cleared',
+        leads_reset: testLeads.map(l => ({ name: l.name, phone: l.phone }))
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🧪 TEST BROADCAST - Solo para los 2 teléfonos de prueba
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/api/test-broadcast-safe" && request.method === "POST") {
+      const ALLOWED_PHONES = ['5212224558475', '5215610016226', '521561001622'];
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      // Buscar leads con esos teléfonos
+      const { data: testLeads } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, notes')
+        .or(`phone.ilike.%2224558475,phone.ilike.%610016226`);
+
+      if (!testLeads || testLeads.length === 0) {
+        return corsResponse(JSON.stringify({
+          error: 'No se encontraron leads con esos teléfonos',
+          searched: ALLOWED_PHONES
+        }), 404);
+      }
+
+      const results: any[] = [];
+
+      for (const lead of testLeads) {
+        // Verificar que el teléfono sea uno de los permitidos
+        const phoneClean = lead.phone?.replace(/\D/g, '') || '';
+        const isAllowed = ALLOWED_PHONES.some(p => phoneClean.includes(p.slice(-10)));
+
+        if (!isAllowed) {
+          results.push({ phone: lead.phone, status: 'BLOCKED - not in allowed list' });
+          continue;
+        }
+
+        // Verificar si ya recibió broadcast reciente (la nueva verificación)
+        const notes = typeof lead.notes === 'object' ? lead.notes : {};
+        if (notes.last_broadcast?.sent_at) {
+          const lastSentAt = new Date(notes.last_broadcast.sent_at);
+          const hoursSince = (Date.now() - lastSentAt.getTime()) / (1000 * 60 * 60);
+          if (hoursSince < 24) {
+            results.push({
+              phone: lead.phone,
+              name: lead.name,
+              status: `SKIP - Ya recibió broadcast hace ${hoursSince.toFixed(1)}h`,
+              last_broadcast: notes.last_broadcast
+            });
+            continue;
+          }
+        }
+
+        // Enviar template de prueba
+        try {
+          await meta.sendTemplate(lead.phone, 'promo_desarrollo', 'es_MX', [
+            {
+              type: 'body',
+              parameters: [
+                { type: 'text', text: lead.name || 'Cliente' },
+                { type: 'text', text: 'TEST' },
+                { type: 'text', text: '🧪 Esto es una prueba del sistema de broadcasts' }
+              ]
+            }
+          ]);
+
+          // Marcar como enviado
+          await supabase.client
+            .from('leads')
+            .update({
+              notes: {
+                ...notes,
+                last_broadcast: {
+                  job_id: 'TEST',
+                  segment: 'test',
+                  message: 'Prueba del sistema',
+                  sent_at: new Date().toISOString()
+                }
+              }
+            })
+            .eq('id', lead.id);
+
+          results.push({
+            phone: lead.phone,
+            name: lead.name,
+            status: 'SENT ✅',
+            timestamp: new Date().toISOString()
+          });
+        } catch (e: any) {
+          results.push({
+            phone: lead.phone,
+            name: lead.name,
+            status: `ERROR: ${e.message}`
+          });
+        }
+      }
+
+      return corsResponse(JSON.stringify({
+        message: 'Test broadcast ejecutado',
+        leads_found: testLeads.length,
+        results
+      }));
+    }
+
     // Test briefing de supervisión (coordinadores)
     if (url.pathname === "/test-supervision" && request.method === "GET") {
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
@@ -14441,7 +14567,8 @@ async function procesarBroadcastQueue(supabase: SupabaseService, meta: MetaWhats
         return meta.sendTemplate(phone, templateName, lang, components);
       },
       async (phone: string, message: string) => {
-        return meta.sendWhatsAppMessage(phone, message);
+        // ⚠️ BROADCASTS usan rate limiting (bypassRateLimit = false)
+        return meta.sendWhatsAppMessage(phone, message, false);
       }
     );
 
