@@ -528,6 +528,70 @@ export class WhatsAppHandler {
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // VERIFICAR SI LEAD ESTÁ EN FLUJO DE CRÉDITO
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      try {
+        const { CreditFlowService } = await import('../services/creditFlowService');
+        const creditService = new CreditFlowService(this.supabase, this.env?.OPENAI_API_KEY);
+
+        // Verificar si está en flujo de crédito activo
+        const enFlujoCredito = lead?.id ? await creditService.estaEnFlujoCredito(lead.id) : false;
+
+        if (enFlujoCredito) {
+          console.log(`🏦 Lead ${lead.id} en flujo de crédito - procesando respuesta`);
+          const resultado = await creditService.procesarRespuesta(lead.id, trimmedBody);
+          console.log(`🏦 Resultado:`, JSON.stringify(resultado, null, 2));
+
+          if (resultado) {
+            await this.meta.sendWhatsAppMessage(cleanPhone, resultado.respuesta);
+
+            // Si hay acción de conectar asesor
+            console.log(`🏦 Accion: ${resultado.accion}, Asesor: ${resultado.datos?.asesor?.name || 'NULL'}`);
+
+            if (resultado.accion === 'conectar_asesor') {
+              const asesor = resultado.datos?.asesor;
+
+              if (asesor && resultado.context) {
+                // Enviar mensaje al cliente con datos del asesor
+                const msgCliente = creditService.generarMensajeAsesor(asesor, resultado.context);
+                console.log(`🏦 Enviando datos asesor al lead: ${msgCliente.substring(0, 50)}...`);
+                await this.meta.sendWhatsAppMessage(cleanPhone, msgCliente);
+
+                // Notificar al asesor
+                if (asesor.phone) {
+                  const msgAsesor = creditService.generarNotificacionAsesor(lead, resultado.context);
+                  console.log(`🏦 Notificando asesor ${asesor.name} en ${asesor.phone}`);
+                  await this.meta.sendWhatsAppMessage(asesor.phone, msgAsesor);
+                  console.log(`📤 Asesor ${asesor.name} notificado exitosamente`);
+                } else {
+                  console.log(`⚠️ Asesor sin teléfono`);
+                }
+              } else {
+                console.log(`⚠️ No se encontró asesor o contexto - enviando mensaje genérico`);
+                await this.meta.sendWhatsAppMessage(cleanPhone,
+                  `Te contactaremos pronto con un asesor especializado.\n\n¡Gracias por tu interés! 🏠`);
+              }
+            }
+            console.log(`🏦 Flujo crédito completado - return`);
+            return;
+          }
+        }
+
+        // Detectar si quiere iniciar flujo de crédito
+        if (lead?.id && creditService.detectarIntencionCredito(trimmedBody)) {
+          // Verificar que no esté ya en un flujo
+          if (!enFlujoCredito) {
+            console.log(`🏦 Iniciando flujo de crédito para lead ${lead.id}`);
+            const { mensaje } = await creditService.iniciarFlujoCredito(lead);
+            await this.meta.sendWhatsAppMessage(cleanPhone, mensaje);
+            return;
+          }
+        }
+      } catch (creditErr) {
+        console.log('⚠️ Error en flujo de crédito:', creditErr);
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // DETECTAR RESPUESTA A TEMPLATE (activar SARA)
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       console.log('🔍 DEBUG Lead:', lead.name, '| template_sent:', lead.template_sent);

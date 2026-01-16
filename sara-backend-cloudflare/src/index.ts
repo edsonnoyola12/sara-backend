@@ -3275,8 +3275,9 @@ Mensaje: ${mensaje}`;
           const from = message.from;
           const text = message.text?.body || '';
           const messageId = message.id; // WhatsApp message ID para dedup
+          const messageType = message.type; // text, image, document, etc.
 
-          console.log(`📥 Procesando mensaje de ${from}: "${text.substring(0, 50)}..."`);
+          console.log(`📥 Procesando mensaje de ${from}: tipo=${messageType}, texto="${text.substring(0, 50)}..."`);
 
           // ═══ DEDUPLICACIÓN: Evitar procesar mensajes rápidos duplicados ═══
           const cleanPhone = from.replace(/\D/g, '');
@@ -3321,6 +3322,83 @@ Mensaje: ${mensaje}`;
           const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
           const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
           const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
+
+          // ═══ MANEJO DE IMÁGENES PARA FLUJO DE CRÉDITO ═══
+          if (messageType === 'image' || messageType === 'document') {
+            console.log(`📸 Mensaje de tipo ${messageType} recibido`);
+
+            // Obtener el media_id
+            const mediaId = message.image?.id || message.document?.id;
+            const caption = message.image?.caption || message.document?.caption || '';
+
+            if (mediaId) {
+              try {
+                // Obtener URL del media
+                const mediaUrl = await meta.getMediaUrl(mediaId);
+                console.log(`📸 Media URL obtenida: ${mediaUrl ? 'OK' : 'ERROR'}`);
+
+                if (mediaUrl) {
+                  // Verificar si el lead está en flujo de crédito
+                  const { CreditFlowService } = await import('./services/creditFlowService');
+                  const creditService = new CreditFlowService(supabase, env.OPENAI_API_KEY);
+
+                  // Buscar lead
+                  const { data: lead } = await supabase.client
+                    .from('leads')
+                    .select('*')
+                    .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`)
+                    .single();
+
+                  if (lead) {
+                    const enFlujoCredito = await creditService.estaEnFlujoCredito(lead.id);
+
+                    if (enFlujoCredito) {
+                      console.log(`🏦 Lead ${lead.id} en flujo de crédito - procesando documento`);
+
+                      const resultado = await creditService.procesarRespuesta(lead.id, caption, mediaUrl);
+
+                      if (resultado) {
+                        await meta.sendWhatsAppMessage(from, resultado.respuesta);
+
+                        // Si hay acción de conectar asesor
+                        if (resultado.accion === 'conectar_asesor' && resultado.datos?.asesor) {
+                          const asesor = resultado.datos.asesor;
+
+                          // Enviar mensaje al cliente con datos del asesor
+                          const msgCliente = creditService.generarMensajeAsesor(
+                            asesor,
+                            resultado.context.lead_name.split(' ')[0],
+                            resultado.context.modalidad
+                          );
+                          await meta.sendWhatsAppMessage(from, msgCliente);
+
+                          // Notificar al asesor
+                          if (asesor.phone) {
+                            const msgAsesor = creditService.generarNotificacionAsesor(lead, resultado.context);
+                            await meta.sendWhatsAppMessage(asesor.phone, msgAsesor);
+                            console.log(`📤 Asesor ${asesor.name} notificado`);
+                          }
+                        }
+                      }
+
+                      console.log('✅ Documento de crédito procesado');
+                      return new Response('OK', { status: 200 });
+                    }
+                  }
+                }
+              } catch (imgErr) {
+                console.error('❌ Error procesando imagen:', imgErr);
+              }
+            }
+
+            // Si no está en flujo de crédito, ignorar imagen o responder genérico
+            if (!text && !message.image?.caption) {
+              await meta.sendWhatsAppMessage(from,
+                '📷 Recibí tu imagen. Si necesitas ayuda con un crédito hipotecario, escríbeme "quiero crédito" y te guío paso a paso.');
+              return new Response('OK', { status: 200 });
+            }
+          }
+          // ═══ FIN MANEJO DE IMÁGENES ═══
 
           await handler.handleIncomingMessage(`whatsapp:+${from}`, text, env);
 
@@ -4583,6 +4661,124 @@ Mensaje: ${mensaje}`;
         post_visit_context: vendedorData?.notes?.post_visit_context || null,
         error: error?.message
       }, null, 2));
+    }
+
+    // Test: Establecer teléfono de un asesor para pruebas
+    if (url.pathname === '/test-set-asesor-phone') {
+      const phone = url.searchParams.get('phone') || '5215610016226';
+      const asesorId = url.searchParams.get('id') || '48e64bac-0750-4822-882e-94f475ccfe5b'; // Alejandro Palmas
+
+      await supabase.client
+        .from('team_members')
+        .update({ phone: phone })
+        .eq('id', asesorId);
+
+      return corsResponse(JSON.stringify({
+        success: true,
+        message: `Asesor ${asesorId} actualizado con phone ${phone}`
+      }));
+    }
+
+    // Test: Quitar teléfono de un team_member para pruebas
+    if (url.pathname === '/test-clear-team-phone') {
+      const teamId = url.searchParams.get('id');
+      if (!teamId) {
+        return corsResponse(JSON.stringify({ error: 'Falta id' }));
+      }
+      await supabase.client
+        .from('team_members')
+        .update({ phone: '', active: false })
+        .eq('id', teamId);
+      return corsResponse(JSON.stringify({ success: true, message: 'Phone cleared' }));
+    }
+
+    // Test: Limpiar contexto de crédito de un lead
+    if (url.pathname === '/test-clear-credit-context') {
+      const phone = url.searchParams.get('phone') || '5212224558475';
+      const cleanPhone = phone.replace(/\D/g, '').slice(-10);
+
+      // Buscar lead
+      const { data: lead } = await supabase.client
+        .from('leads')
+        .select('id, name, notes')
+        .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone}`)
+        .single();
+
+      if (!lead) {
+        return corsResponse(JSON.stringify({ error: 'Lead no encontrado' }));
+      }
+
+      // Limpiar contexto de crédito
+      let notas: any = {};
+      if (lead.notes) {
+        if (typeof lead.notes === 'string') {
+          try { notas = JSON.parse(lead.notes); } catch (e) { notas = {}; }
+        } else {
+          notas = lead.notes;
+        }
+      }
+      delete notas.credit_flow_context;
+
+      await supabase.client
+        .from('leads')
+        .update({ notes: notas, status: 'new' })
+        .eq('id', lead.id);
+
+      return corsResponse(JSON.stringify({
+        success: true,
+        lead_id: lead.id,
+        lead_name: lead.name,
+        message: 'Contexto de crédito limpiado'
+      }, null, 2));
+    }
+
+    // Test: Probar flujo de crédito directamente
+    if (url.pathname === '/test-credit-flow') {
+      const phone = url.searchParams.get('phone') || '5212224558475';
+      const mensaje = url.searchParams.get('msg') || 'quiero crédito';
+      const cleanPhone = phone.replace(/\D/g, '').slice(-10);
+
+      // Buscar lead
+      const { data: lead } = await supabase.client
+        .from('leads')
+        .select('id, name, notes')
+        .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone}`)
+        .single();
+
+      if (!lead) {
+        return corsResponse(JSON.stringify({ error: 'Lead no encontrado' }));
+      }
+
+      const { CreditFlowService } = await import('./services/creditFlowService');
+      const creditService = new CreditFlowService(supabase, env.OPENAI_API_KEY);
+
+      // Verificar estado actual
+      const enFlujo = await creditService.estaEnFlujoCredito(lead.id);
+      const detectaIntencion = creditService.detectarIntencionCredito(mensaje);
+
+      const resultado: any = {
+        lead_id: lead.id,
+        lead_name: lead.name,
+        mensaje,
+        en_flujo_actual: enFlujo,
+        detecta_intencion: detectaIntencion,
+        accion: null,
+        respuesta: null
+      };
+
+      // Si está en flujo, procesar respuesta
+      if (enFlujo) {
+        const resp = await creditService.procesarRespuesta(lead.id, mensaje);
+        resultado.accion = 'procesar_respuesta';
+        resultado.respuesta = resp;
+      } else if (detectaIntencion) {
+        // Iniciar flujo
+        const { mensaje: msg } = await creditService.iniciarFlujoCredito(lead);
+        resultado.accion = 'iniciar_flujo';
+        resultado.respuesta = msg;
+      }
+
+      return corsResponse(JSON.stringify(resultado, null, 2));
     }
 
     // Test: Limpiar notas de vendedor (preservando citas_preguntadas)

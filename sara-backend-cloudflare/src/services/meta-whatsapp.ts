@@ -428,6 +428,61 @@ export class MetaWhatsAppService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // 📥 OBTENER URL DE MEDIA (para descargar imágenes/documentos recibidos)
+  // ═══════════════════════════════════════════════════════════════════════════
+  async getMediaUrl(mediaId: string): Promise<string | null> {
+    try {
+      const url = `https://graph.facebook.com/${this.apiVersion}/${mediaId}`;
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`
+        }
+      });
+
+      if (!response.ok) {
+        console.error('❌ Error obteniendo media URL:', response.status);
+        return null;
+      }
+
+      const data = await response.json() as { url?: string };
+      return data.url || null;
+    } catch (e) {
+      console.error('❌ Error en getMediaUrl:', e);
+      return null;
+    }
+  }
+
+  // Descargar contenido de media y retornar como base64
+  async downloadMediaAsBase64(mediaUrl: string): Promise<string | null> {
+    try {
+      const response = await fetch(mediaUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`
+        }
+      });
+
+      if (!response.ok) {
+        console.error('❌ Error descargando media:', response.status);
+        return null;
+      }
+
+      const buffer = await response.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    } catch (e) {
+      console.error('❌ Error en downloadMediaAsBase64:', e);
+      return null;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // 📋 ENVIAR TEMPLATE DE WHATSAPP
   // ═══════════════════════════════════════════════════════════════════════════
   // Templates son para broadcasts/mensajes automáticos fuera de ventana 24h
