@@ -39,29 +39,50 @@ export class EncuestasService {
     respuestaCliente: string;
     notificarVendedor: string;
   } {
-    const msgLower = mensaje.toLowerCase();
+    const msgLower = mensaje.toLowerCase().trim();
+    const nombreCorto = nombreLead.split(' ')[0];
 
-    // Detectar sentimiento
-    const positivas = ['bien', 'excelente', 'genial', 'perfecto', 'gracias', 'muy bien', 'contento', 'feliz', 'me gustó', 'encantó'];
-    const negativas = ['mal', 'pésimo', 'horrible', 'no me gustó', 'molesto', 'decepcionado', 'terrible'];
-
+    // PRIMERO: Detectar respuestas numéricas (1, 2, 3)
+    // 1️⃣ Me encantó, quiero avanzar → positivo
+    // 2️⃣ Quiero ver más opciones → neutral
+    // 3️⃣ Tengo dudas → neutral (requiere seguimiento)
     let tipo: 'positivo' | 'negativo' | 'neutral' = 'neutral';
-    if (positivas.some(p => msgLower.includes(p))) {
+    let respuestaEspecifica = '';
+
+    if (msgLower === '1' || msgLower.includes('me encantó') || msgLower.includes('quiero avanzar')) {
       tipo = 'positivo';
-    } else if (negativas.some(n => msgLower.includes(n))) {
-      tipo = 'negativo';
+      respuestaEspecifica = `¡Excelente ${nombreCorto}! 🎉 Me da mucho gusto que te haya encantado. Tu asesor te contactará pronto para continuar con el proceso. ¡Estamos muy emocionados de ayudarte a conseguir tu casa!`;
+    } else if (msgLower === '2' || msgLower.includes('más opciones') || msgLower.includes('ver otras')) {
+      tipo = 'neutral';
+      respuestaEspecifica = `Perfecto ${nombreCorto} 👍 Con gusto te mostramos más opciones. Tu asesor te contactará para coordinar otra visita. ¿Hay algún desarrollo en particular que te interese conocer?`;
+    } else if (msgLower === '3' || msgLower.includes('dudas') || msgLower.includes('preguntas')) {
+      tipo = 'neutral';
+      respuestaEspecifica = `Entendido ${nombreCorto} 🤝 Tu asesor se pondrá en contacto contigo para resolver todas tus dudas. ¿Hay algo específico que te gustaría aclarar?`;
     }
 
+    // SEGUNDO: Si no es número, detectar por palabras clave
+    if (!respuestaEspecifica) {
+      const positivas = ['bien', 'excelente', 'genial', 'perfecto', 'gracias', 'muy bien', 'contento', 'feliz', 'me gustó', 'encantó', 'increíble', 'padre'];
+      const negativas = ['mal', 'pésimo', 'horrible', 'no me gustó', 'molesto', 'decepcionado', 'terrible', 'feo', 'caro'];
+
+      if (positivas.some(p => msgLower.includes(p))) {
+        tipo = 'positivo';
+      } else if (negativas.some(n => msgLower.includes(n))) {
+        tipo = 'negativo';
+      }
+    }
+
+    // Respuestas por defecto si no hay específica
     const respuestas = {
-      positivo: `¡Qué gusto que te haya ido bien, ${nombreLead}! 🎉 Cualquier duda que tengas, aquí estamos para ayudarte.`,
-      negativo: `Lamento escuchar eso, ${nombreLead}. Tu feedback es muy importante para nosotros. Voy a notificar a tu asesor para que te contacte.`,
-      neutral: `Gracias por tu respuesta, ${nombreLead}. ¿Hay algo más en lo que pueda ayudarte?`
+      positivo: respuestaEspecifica || `¡Qué gusto ${nombreCorto}! 🎉 Tu asesor te contactará para continuar con el proceso.`,
+      negativo: `Lamento escuchar eso ${nombreCorto}. Tu feedback es muy importante. Tu asesor te contactará para resolver cualquier inquietud.`,
+      neutral: respuestaEspecifica || `Gracias por tu respuesta ${nombreCorto}. Tu asesor se pondrá en contacto contigo pronto.`
     };
 
     const notificaciones = {
-      positivo: `✅ *Feedback positivo de ${nombreLead}*\n\nRespuesta: "${mensaje.substring(0, 200)}"`,
-      negativo: `⚠️ *Feedback negativo de ${nombreLead}*\n\nRespuesta: "${mensaje.substring(0, 200)}"\n\n*Se recomienda dar seguimiento*`,
-      neutral: `📋 *Feedback de ${nombreLead}*\n\nRespuesta: "${mensaje.substring(0, 200)}"`
+      positivo: `✅ *MUY INTERESADO - ${nombreLead}*\n\n🔥 Respondió: "${mensaje}"\n\n*¡Dar seguimiento prioritario!*`,
+      negativo: `⚠️ *Feedback negativo de ${nombreLead}*\n\nRespuesta: "${mensaje}"\n\n*Se recomienda llamar para entender qué pasó*`,
+      neutral: `📋 *Feedback de ${nombreLead}*\n\nRespuesta: "${mensaje}"`
     };
 
     return {

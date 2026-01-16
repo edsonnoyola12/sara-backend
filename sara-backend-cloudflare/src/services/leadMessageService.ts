@@ -30,6 +30,7 @@ export interface LeadMessageResult {
     message: string;
     sentAt: string;
   };
+  deleteCalendarEvent?: string; // ID del evento a borrar de Google Calendar
 }
 
 interface CitaActiva {
@@ -38,6 +39,7 @@ interface CitaActiva {
   scheduled_time: string;
   property_name?: string;
   team_members?: { id: string; name: string; phone: string };
+  google_event_vendedor_id?: string;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -186,14 +188,29 @@ export class LeadMessageService {
     mensajeLower: string
   ): Promise<LeadMessageResult> {
     // Buscar cita activa (scheduled o confirmed)
-    const { data: citaActiva } = await this.supabase.client
+    console.log('🔍 Buscando cita para lead_id:', lead.id, '- Lead:', lead.name);
+    const { data: citaActiva, error: citaError } = await this.supabase.client
       .from('appointments')
-      .select('id, scheduled_date, scheduled_time, property_name, vendedor_id, vendedor_name')
+      .select('id, scheduled_date, scheduled_time, property_name, vendedor_id, vendedor_name, google_event_vendedor_id')
       .eq('lead_id', lead.id)
       .in('status', ['scheduled', 'confirmed'])
       .order('scheduled_date', { ascending: true })
       .limit(1)
       .single();
+
+    // Si encontró cita, buscar datos del vendedor
+    let citaConVendedor = citaActiva as any;
+    if (citaActiva && citaActiva.vendedor_id) {
+      const { data: vendedor } = await this.supabase.client
+        .from('team_members')
+        .select('id, name, phone')
+        .eq('id', citaActiva.vendedor_id)
+        .single();
+      if (vendedor) {
+        citaConVendedor = { ...citaActiva, team_members: vendedor };
+      }
+    }
+    console.log('🔍 Cita encontrada:', citaConVendedor ? citaConVendedor.id : 'NINGUNA', '- Error:', citaError?.message || 'ninguno');
 
     // REAGENDAR/CAMBIAR CITA - Pasar a IA para manejar con contexto
     if (this.detectaReagendarCita(mensajeLower)) {
@@ -203,17 +220,17 @@ export class LeadMessageService {
 
     // CANCELAR CITA
     if (this.detectaCancelarCita(mensajeLower)) {
-      return this.procesarCancelarCita(lead, citaActiva);
+      return this.procesarCancelarCita(lead, citaConVendedor);
     }
 
     // CONFIRMAR CITA
-    if (this.detectaConfirmarCita(mensajeLower) && citaActiva) {
-      return this.procesarConfirmarCita(lead, citaActiva);
+    if (this.detectaConfirmarCita(mensajeLower) && citaConVendedor) {
+      return this.procesarConfirmarCita(lead, citaConVendedor);
     }
 
     // PREGUNTAR POR CITA (solo si no es reagendar)
     if (this.detectaPreguntaCita(mensajeLower)) {
-      return this.procesarPreguntaCita(lead, citaActiva);
+      return this.procesarPreguntaCita(lead, citaConVendedor);
     }
 
     return { action: 'continue_to_ai' };
@@ -283,6 +300,13 @@ export class LeadMessageService {
                  `📍 ${cita.property_name || 'Sin desarrollo'}\n\n` +
                  `_El cliente canceló por WhatsApp_`
       };
+    }
+
+    // Borrar evento de Google Calendar
+    const eventId = cita.google_event_vendedor_id;
+    if (eventId) {
+      result.deleteCalendarEvent = eventId;
+      console.log('📅 Marcando evento para borrar de Calendar:', eventId);
     }
 
     console.log('❌ Cita cancelada por lead:', lead.name);

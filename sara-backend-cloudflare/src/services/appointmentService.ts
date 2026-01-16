@@ -19,6 +19,7 @@ export interface CrearCitaParams {
   analysis: any;
   properties: any[];
   env: any;
+  isReschedule?: boolean;  // ← Para saltarse verificación de duplicados en reagendamientos
 }
 
 export interface CrearCitaResult {
@@ -157,7 +158,7 @@ Fecha: ${dateFormatted} ${appointment.scheduled_time}`;
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   async crearCitaCompleta(params: CrearCitaParams): Promise<CrearCitaResult> {
-    const { from, cleanPhone, lead, desarrollo, fecha, hora, teamMembers, analysis, properties, env } = params;
+    const { from, cleanPhone, lead, desarrollo, fecha, hora, teamMembers, analysis, properties, env, isReschedule } = params;
 
     // Validación defensiva
     const teamMembersArray = Array.isArray(teamMembers) ? teamMembers : [];
@@ -220,28 +221,34 @@ Fecha: ${dateFormatted} ${appointment.scheduled_time}`;
     const direccion = propDesarrollo?.address || propDesarrollo?.location || `Fraccionamiento ${desarrolloBusqueda}, Zacatecas`;
     const gpsLink = propDesarrollo?.gps_link || '';
 
-    // Verificar si ya existe una cita reciente (últimos 30 minutos)
-    try {
-      const { data: citaExistente } = await this.supabase.client
-        .from('appointments')
-        .select('id, created_at, lead_name')
-        .eq('lead_id', lead.id)
-        .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
-        .order('created_at', { ascending: false })
-        .limit(1);
+    // Verificar si ya existe una cita reciente (últimos 30 minutos) - EXCLUIR CANCELADAS y REAGENDADAS
+    // ═══ SKIP si es un RESCHEDULE - ya marcamos la cita anterior como rescheduled ═══
+    if (!isReschedule) {
+      try {
+        const { data: citaExistente } = await this.supabase.client
+          .from('appointments')
+          .select('id, created_at, lead_name, status')
+          .eq('lead_id', lead.id)
+          .not('status', 'in', '("cancelled","rescheduled")')  // ← FIX: No contar citas canceladas ni reagendadas
+          .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
+          .order('created_at', { ascending: false })
+          .limit(1);
 
-      if (citaExistente && citaExistente.length > 0) {
-        console.log('⚠️ Ya existe cita reciente para este lead');
-        if (analysis.extracted_data?.nombre && !citaExistente[0].lead_name) {
-          await this.supabase.client
-            .from('appointments')
-            .update({ lead_name: analysis.extracted_data?.nombre })
-            .eq('id', citaExistente[0].id);
+        if (citaExistente && citaExistente.length > 0) {
+          console.log('⚠️ Ya existe cita reciente para este lead (status:', citaExistente[0].status, ')');
+          if (analysis.extracted_data?.nombre && !citaExistente[0].lead_name) {
+            await this.supabase.client
+              .from('appointments')
+              .update({ lead_name: analysis.extracted_data?.nombre })
+              .eq('id', citaExistente[0].id);
+          }
+          return { success: false, errorType: 'duplicate' };
         }
-        return { success: false, errorType: 'duplicate' };
+      } catch (e) {
+        console.log('⚠️ Error verificando cita existente:', e);
       }
-    } catch (e) {
-      console.log('⚠️ Error verificando cita existente:', e);
+    } else {
+      console.log('🔄 RESCHEDULE: Saltando verificación de duplicados');
     }
 
     // Validar horario del vendedor
@@ -502,6 +509,47 @@ https://calendar.google.com/calendar/u/1/r
 
 ━━━━━━━━━━━━━━━━━━━━
 ⚠️ *PREPÁRATE PARA RECIBIRLO* ⚠️`;
+  }
+
+  // ═══ MENSAJE PARA REAGENDAMIENTO ═══
+  formatMensajeVendedorReagendamiento(
+    result: CrearCitaResult,
+    desarrollo: string,
+    nuevaFecha: string,
+    nuevaHora: string,
+    fechaAnterior?: string,
+    horaAnterior?: string
+  ): string {
+    const { clientName, cleanPhone, score, temp, necesitaCredito, direccion, gpsLink } = result as any;
+
+    const cambioTexto = fechaAnterior && horaAnterior
+      ? `\n❌ *Antes:* ${fechaAnterior} a las ${horaAnterior}\n✅ *Ahora:* ${nuevaFecha} a las ${nuevaHora}`
+      : `\n📅 *Nueva fecha:* ${nuevaFecha} a las ${nuevaHora}`;
+
+    return `🔄🔄🔄 *CITA REAGENDADA* 🔄🔄🔄
+━━━━━━━━━━━━━━━━━━━━
+
+🏠 *${desarrollo}*
+${cambioTexto}
+
+━━━━━━━━━━━━━━━━━━━━
+
+👤 *Cliente:* ${clientName}
+📱 *Tel:* ${cleanPhone || ''}
+📊 *Score:* ${score}/100 ${temp}
+💳 *Crédito:* ${necesitaCredito ? '⚠️ SÍ NECESITA' : 'No especificado'}
+
+━━━━━━━━━━━━━━━━━━━━
+
+📍 ${direccion}
+🗺️ ${gpsLink}
+
+━━━━━━━━━━━━━━━━━━━━
+📅 *Ver en Calendar:*
+https://calendar.google.com/calendar/u/1/r
+
+━━━━━━━━━━━━━━━━━━━━
+⚠️ *TOMA NOTA DEL CAMBIO* ⚠️`;
   }
 
   formatMensajeAsesorNuevaCita(result: CrearCitaResult, desarrollo: string, fecha: string, hora: string): string {

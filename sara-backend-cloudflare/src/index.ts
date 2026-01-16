@@ -694,6 +694,73 @@ Responde *SI* para confirmar tu asistencia.`;
     }
 
     // ═══════════════════════════════════════════════════════════
+    // API: Borrar lead y datos asociados (para testing)
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname.match(/^\/api\/leads\/[^/]+$/) && request.method === 'DELETE') {
+      const leadId = url.pathname.split('/').pop();
+      console.log('🗑️ Borrando lead:', leadId);
+
+      try {
+        // 1. Buscar citas asociadas para borrar eventos de Calendar
+        const { data: appointments } = await supabase.client
+          .from('appointments')
+          .select('id, google_event_vendedor_id')
+          .eq('lead_id', leadId);
+
+        // 2. Borrar eventos de Calendar
+        if (appointments && appointments.length > 0) {
+          const calendar = new CalendarService(
+            env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+            env.GOOGLE_PRIVATE_KEY,
+            env.GOOGLE_CALENDAR_ID
+          );
+
+          for (const apt of appointments) {
+            if (apt.google_event_vendedor_id) {
+              try {
+                await calendar.deleteEvent(apt.google_event_vendedor_id);
+                console.log('🗑️ Evento de Calendar borrado:', apt.google_event_vendedor_id);
+              } catch (e) {
+                console.log('⚠️ No se pudo borrar evento:', apt.google_event_vendedor_id);
+              }
+            }
+          }
+        }
+
+        // 3. Borrar citas de la BD
+        await supabase.client
+          .from('appointments')
+          .delete()
+          .eq('lead_id', leadId);
+        console.log('🗑️ Citas borradas');
+
+        // 4. Borrar mensajes del lead
+        await supabase.client
+          .from('messages')
+          .delete()
+          .eq('lead_id', leadId);
+        console.log('🗑️ Mensajes borrados');
+
+        // 5. Borrar el lead
+        const { error } = await supabase.client
+          .from('leads')
+          .delete()
+          .eq('id', leadId);
+
+        if (error) {
+          console.error('❌ Error borrando lead:', error);
+          return corsResponse(JSON.stringify({ error: error.message }), 500);
+        }
+
+        console.log('✅ Lead y datos asociados borrados:', leadId);
+        return corsResponse(JSON.stringify({ success: true, deleted: leadId }));
+      } catch (err: any) {
+        console.error('❌ Error en delete lead:', err);
+        return corsResponse(JSON.stringify({ error: err.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // API: Recalcular scores de todos los leads según su status
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/api/recalculate-scores' && request.method === 'POST') {
@@ -2909,6 +2976,91 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
     }
 
     // ═══════════════════════════════════════════════════════════
+    // CLEANUP TEST LEAD - Borrar lead y citas para simulación
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/api/test-cleanup' && request.method === 'POST') {
+      try {
+        const body = await request.json() as { telefono: string };
+        const telefono = body.telefono;
+        if (!telefono) {
+          return corsResponse(JSON.stringify({ error: 'telefono requerido' }), 400);
+        }
+
+        const supabase = new SupabaseService(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
+        const phoneClean = telefono.replace(/\D/g, '').slice(-10);
+
+        // Buscar TODOS los leads con ese número (puede haber duplicados)
+        const { data: leads, error: searchError } = await supabase.client
+          .from('leads')
+          .select('id, name, phone')
+          .ilike('phone', `%${phoneClean}%`);
+
+        if (searchError) {
+          return corsResponse(JSON.stringify({ error: 'Error buscando leads: ' + searchError.message }), 500);
+        }
+
+        if (!leads || leads.length === 0) {
+          return corsResponse(JSON.stringify({ message: 'No se encontraron leads', telefono }));
+        }
+
+        console.log(`🧹 CLEANUP: Encontrados ${leads.length} leads con ${phoneClean}`);
+        leads.forEach(l => console.log(`   - ${l.id}: ${l.name} (${l.phone})`));
+
+        let totalCitasBorradas = 0;
+        const leadsBorrados: string[] = [];
+
+        // Borrar cada lead y sus citas
+        for (const lead of leads) {
+          // Borrar citas del lead
+          const { data: citasBorradas, error: citasError } = await supabase.client
+            .from('appointments')
+            .delete()
+            .eq('lead_id', lead.id)
+            .select('id');
+
+          if (citasError) {
+            console.log(`⚠️ Error borrando citas de ${lead.name}: ${citasError.message}`);
+          }
+          totalCitasBorradas += citasBorradas?.length || 0;
+
+          // Borrar aplicaciones de hipoteca
+          const { error: mortgageError } = await supabase.client
+            .from('mortgage_applications')
+            .delete()
+            .eq('lead_id', lead.id);
+
+          if (mortgageError) {
+            console.log(`⚠️ Error borrando mortgage_applications de ${lead.name}: ${mortgageError.message}`);
+          } else {
+            console.log(`✅ Mortgage applications borradas para ${lead.name}`);
+          }
+
+          // Borrar lead
+          const { error: deleteError } = await supabase.client
+            .from('leads')
+            .delete()
+            .eq('id', lead.id);
+
+          if (deleteError) {
+            console.log(`❌ Error borrando lead ${lead.name}: ${deleteError.message}`);
+          } else {
+            console.log(`✅ Lead ${lead.name} borrado exitosamente`);
+            leadsBorrados.push(lead.name || lead.id);
+          }
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          leads_encontrados: leads.length,
+          leads_borrados: leadsBorrados,
+          citas_borradas: totalCitasBorradas
+        }));
+      } catch (error: any) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // TEST SARA - Probar respuestas sin enviar WhatsApp
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/api/test-sara' && request.method === 'POST') {
@@ -3401,11 +3553,12 @@ Mensaje: ${mensaje}`;
           const nextMonthStr = nextMonth.toISOString().split('T')[0];
 
           // ✅ FIX 14-ENE-2026: También detectar citas completadas que fueron borradas del calendario
+          // ✅ FIX 15-ENE-2026: Incluir canceladas para poder verificar si Sara ya canceló
           const { data: citasConGoogle } = await supabase.client
             .from('appointments')
             .select('*')
             .not('google_event_vendedor_id', 'is', null)
-            .in('status', ['scheduled', 'completed']) // Incluir completadas también
+            .in('status', ['scheduled', 'completed', 'cancelled']) // Incluir canceladas para verificar
             .gte('scheduled_date', yesterdayStr)  // Solo citas desde ayer
             .lte('scheduled_date', nextMonthStr); // Hasta próximo mes
           
@@ -3418,8 +3571,20 @@ Mensaje: ${mensaje}`;
             for (const cita of citasConGoogle) {
               if (cita.google_event_vendedor_id && !googleEventIds.includes(cita.google_event_vendedor_id)) {
                 // El evento fue eliminado de Google Calendar
+
+                // ═══ FIX: Ignorar citas ya procesadas por Sara ═══
+                if (cita.status === 'rescheduled') {
+                  console.log(`📅 Evento eliminado pero cita ya reagendada, ignorando: ${cita.id}`);
+                  continue;
+                }
+                if (cita.status === 'cancelled') {
+                  console.log(`📅 Evento eliminado pero cita ya cancelada por Sara, ignorando: ${cita.id}`);
+                  continue;
+                }
+
+                // Solo actualizar BD - NO enviar notificaciones (Sara se encarga de eso)
                 const eraCompletada = cita.status === 'completed';
-                console.log(`📅 Evento eliminado de Google, cancelando cita: ${cita.id} (era: ${cita.status})`);
+                console.log(`📅 Evento eliminado de Google, actualizando BD: ${cita.id} (era: ${cita.status})`);
 
                 await supabase.client
                   .from('appointments')
@@ -3429,42 +3594,7 @@ Mensaje: ${mensaje}`;
                   })
                   .eq('id', cita.id);
 
-                // ✅ FIX 14-ENE-2026: NO notificar si la cita ya fue completada (el cliente ya visitó)
-                // Solo notificar si era una cita pendiente
-                if (cita.lead_phone && !eraCompletada) {
-                  try {
-                    const fechaStr = new Date(cita.scheduled_date + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
-                    const msgLead = `❌ *CITA CANCELADA*\n\nHola ${cita.lead_name?.split(' ')[0] || ''} 👋\n\nTu cita del ${fechaStr} a las ${(cita.scheduled_time || '').substring(0,5)} ha sido cancelada.\n\nSi deseas reagendar, contáctanos. ¡Estamos para servirte! 🏠`;
-                    const phoneLead = cita.lead_phone.replace(/[^0-9]/g, '');
-                    await meta.sendWhatsAppMessage(phoneLead, msgLead);
-                    console.log('📤 Notificación cancelación (Google eliminado→WhatsApp) a lead:', cita.lead_name);
-                  } catch (e) {
-                    console.log('⚠️ Error notificando lead:', e);
-                  }
-                }
-                
-                // Notificar al VENDEDOR (solo si la cita NO estaba completada)
-                if (cita.vendedor_id && !eraCompletada) {
-                  try {
-                    const { data: vendedor } = await supabase.client
-                      .from('team_members')
-                      .select('phone, name')
-                      .eq('id', cita.vendedor_id)
-                      .single();
-
-                    if (vendedor?.phone) {
-                      const fechaStr = new Date(cita.scheduled_date + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
-                      const msgVendedor = `❌ *CITA CANCELADA (Google Calendar)*\n\n👤 ${cita.lead_name}\n📱 ${cita.lead_phone}\n📆 Era: ${fechaStr}\n🕐 Hora: ${(cita.scheduled_time || '').substring(0,5)}`;
-                      const phoneVendedor = vendedor.phone.replace(/[^0-9]/g, '');
-                      await meta.sendWhatsAppMessage(phoneVendedor, msgVendedor);
-                      console.log('📤 Notificación cancelación (Google eliminado→WhatsApp) a vendedor:', vendedor.name);
-                    }
-                  } catch (e) {
-                    console.log('⚠️ Error notificando vendedor:', e);
-                  }
-                } else if (eraCompletada) {
-                  console.log(`📅 Cita ${cita.id} era completada - marcada como cancelada sin notificaciones (ya ocurrió)`);
-                }
+                console.log(`📅 Cita ${cita.id} marcada como cancelada (sin notificaciones - Sara se encarga)`);
               }
             }
           }
@@ -3514,7 +3644,23 @@ Mensaje: ${mensaje}`;
                 if (newDate && newTime && (appointment.scheduled_date !== newDate || (appointment.scheduled_time || '').substring(0,5) !== newTime)) {
                   const oldDate = appointment.scheduled_date;
                   const oldTime = (appointment.scheduled_time || '').substring(0,5);
-                  
+
+                  // ═══ VERIFICAR SI SARA YA REAGENDÓ (evitar duplicados) ═══
+                  // Verificar si las notas indican que Sara ya reagendó a esta fecha/hora
+                  const notes = appointment.notes || '';
+                  if (notes.includes('Reagendada') && notes.includes('→')) {
+                    // Formato: "Reagendada de 2026-01-16 10:00 → 2026-01-16 11:15"
+                    const partes = notes.split('→');
+                    if (partes.length >= 2) {
+                      const destino = partes[1].trim(); // "2026-01-16 11:15"
+                      if (destino.includes(newDate) && destino.includes(newTime)) {
+                        console.log('📅 Webhook Calendar: Ignorando - Sara ya reagendó a', destino);
+                        continue; // Saltar notificaciones, Sara ya las envió
+                      }
+                    }
+                  }
+
+                  // Solo actualizar BD - NO enviar notificaciones (Sara ya las envía)
                   await supabase.client
                     .from('appointments')
                     .update({
@@ -3523,54 +3669,8 @@ Mensaje: ${mensaje}`;
                       property_name: event.location || appointment.property_name,
                     })
                     .eq('id', appointment.id);
-                  console.log('📅 Cita reagendada desde Google:', appointment.id, newDate, newTime);
-                  
-                  // Buscar GPS del desarrollo
-                  let gpsLink = '';
-                  const lugar = event.location || appointment.property_name || '';
-                  if (lugar && lugar !== 'Oficinas Centrales') {
-                    const { data: prop } = await supabase.client
-                      .from('properties')
-                      .select('gps_link')
-                      .or(`development.ilike.%${lugar}%,name.ilike.%${lugar}%`)
-                      .limit(1)
-                      .single();
-                    if (prop?.gps_link) gpsLink = prop.gps_link;
-                  }
-                  
-                  // Notificar al LEAD por WhatsApp
-                  if (appointment.lead_phone) {
-                    try {
-                      const fechaNuevaStr = new Date(newDate + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
-                      const msgLead = `📅 *CITA REAGENDADA*\n\nHola ${appointment.lead_name?.split(' ')[0] || ''} 👋\n\nTu cita ha sido reprogramada:\n\n📆 *Nueva fecha:* ${fechaNuevaStr}\n🕐 *Nueva hora:* ${newTime}\n📍 *Lugar:* ${lugar || 'Por confirmar'}${gpsLink ? '\n🗺️ *Ubicación:* ' + gpsLink : ''}\n\n¡Te esperamos! 🏠`;
-                      const phoneLead = appointment.lead_phone.replace(/[^0-9]/g, '');
-                      await meta.sendWhatsAppMessage(phoneLead, msgLead);
-                      console.log('📤 Notificación reagendado (Google→WhatsApp) a lead:', appointment.lead_name);
-                    } catch (e) {
-                      console.log('⚠️ Error notificando lead:', e);
-                    }
-                  }
-                  
-                  // Notificar al VENDEDOR si existe
-                  if (appointment.vendedor_id) {
-                    try {
-                      const { data: vendedor } = await supabase.client
-                        .from('team_members')
-                        .select('phone, name')
-                        .eq('id', appointment.vendedor_id)
-                        .single();
-                      
-                      if (vendedor?.phone) {
-                        const fechaNuevaStr = new Date(newDate + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
-                        const msgVendedor = `📅 *CITA MOVIDA (Google Calendar)*\n\n👤 ${appointment.lead_name}\n📱 ${appointment.lead_phone}\n📆 Nueva fecha: ${fechaNuevaStr}\n🕐 Nueva hora: ${newTime}\n📍 Lugar: ${lugar || 'Por confirmar'}${gpsLink ? '\n🗺️ Maps: ' + gpsLink : ''}`;
-                        const phoneVendedor = vendedor.phone.replace(/[^0-9]/g, '');
-                        await meta.sendWhatsAppMessage(phoneVendedor, msgVendedor);
-                        console.log('📤 Notificación reagendado (Google→WhatsApp) a vendedor:', vendedor.name);
-                      }
-                    } catch (e) {
-                      console.log('⚠️ Error notificando vendedor:', e);
-                    }
-                  }
+                  console.log('📅 Cita sincronizada desde Google Calendar:', appointment.id, newDate, newTime);
+                  console.log('📅 (Sin notificaciones - Sara ya las envió)');
                 }
               }
             }
@@ -3581,6 +3681,71 @@ Mensaje: ${mensaje}`;
       } catch (error) {
         console.error('Google Calendar Webhook Error:', error);
         return new Response('OK', { status: 200 });
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ENDPOINT: Limpiar eventos huérfanos de Google Calendar
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/calendar/cleanup' && request.method === 'POST') {
+      try {
+        const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+
+        // 1. Obtener eventos de Calendar
+        const now = new Date();
+        const nextMonth = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+        const events = await calendar.getEvents(now.toISOString(), nextMonth.toISOString());
+
+        // 2. Obtener IDs de eventos válidos de la BD
+        const { data: citasValidas } = await supabase.client
+          .from('appointments')
+          .select('google_event_vendedor_id, google_event_id, lead_name, scheduled_date, scheduled_time, status')
+          .not('status', 'eq', 'cancelled'); // Todas las citas excepto canceladas
+
+        const idsValidos = new Set<string>();
+        citasValidas?.forEach(c => {
+          if (c.google_event_vendedor_id) idsValidos.add(c.google_event_vendedor_id);
+          if (c.google_event_id) idsValidos.add(c.google_event_id);
+        });
+
+        console.log('📅 Eventos en Calendar:', events.length);
+        console.log('📅 IDs válidos en BD:', idsValidos.size);
+
+        // 3. Identificar eventos huérfanos (no están en BD)
+        const huerfanos: any[] = [];
+        const validos: any[] = [];
+
+        for (const event of events) {
+          if (idsValidos.has(event.id)) {
+            validos.push({ id: event.id, summary: event.summary, start: event.start?.dateTime });
+          } else {
+            huerfanos.push({ id: event.id, summary: event.summary, start: event.start?.dateTime });
+          }
+        }
+
+        // 4. Borrar eventos huérfanos
+        const borrados: string[] = [];
+        for (const huerfano of huerfanos) {
+          try {
+            await calendar.deleteEvent(huerfano.id);
+            borrados.push(huerfano.summary || huerfano.id);
+            console.log('🗑️ Evento huérfano borrado:', huerfano.summary);
+          } catch (e) {
+            console.log('⚠️ Error borrando evento:', huerfano.id, e);
+          }
+        }
+
+        return corsResponse(JSON.stringify({
+          eventos_en_calendar: events.length,
+          citas_validas_bd: citasValidas?.length || 0,
+          huerfanos_encontrados: huerfanos.length,
+          huerfanos_borrados: borrados,
+          eventos_validos: validos
+        }, null, 2));
+
+      } catch (error: any) {
+        console.error('Error en cleanup:', error);
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
       }
     }
 
@@ -4399,6 +4564,27 @@ Mensaje: ${mensaje}`;
       }));
     }
 
+    // Debug: Ver notas actuales del vendedor
+    if (url.pathname === '/debug-vendor-notes') {
+      const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6';
+
+      const { data: vendedorData, error } = await supabase.client
+        .from('team_members')
+        .select('id, name, notes')
+        .eq('id', vendedorId)
+        .single();
+
+      return corsResponse(JSON.stringify({
+        vendedor_id: vendedorId,
+        vendedor_name: vendedorData?.name,
+        notes: vendedorData?.notes,
+        notes_type: typeof vendedorData?.notes,
+        has_post_visit_context: !!vendedorData?.notes?.post_visit_context,
+        post_visit_context: vendedorData?.notes?.post_visit_context || null,
+        error: error?.message
+      }, null, 2));
+    }
+
     // Test: Limpiar notas de vendedor (preservando citas_preguntadas)
     if (url.pathname === '/test-clear-vendor-notes') {
       const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6';
@@ -4609,12 +4795,18 @@ Estoy aquí para ayudarte. 😊`;
     // ═══════════════════════════════════════════════════════════
     // TEST: Simular flujo completo de confirmación de cita
     // ═══════════════════════════════════════════════════════════
-    if (url.pathname === '/test-full-confirmation-flow') {
-      const leadId = url.searchParams.get('lead_id') || 'dd3c007d-1c93-432d-bd3d-d56474b1bbf7'; // Ana Portales
-      const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6'; // Edson
-      const respuesta = url.searchParams.get('respuesta') || '1'; // 1=sí llegó, 2=no llegó
+    // ═══════════════════════════════════════════════════════════
+    // TEST: Iniciar flujo post-visita completo
+    // Envía pregunta al vendedor: "¿Llegó el lead?"
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/test-post-visita' || url.pathname === '/test-full-confirmation-flow') {
+      const leadId = url.searchParams.get('lead_id') || '5c2d12bf-d1d1-4e09-ab9e-d93f5f38f701';
+      const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6';
+      const vendedorPhoneOverride = url.searchParams.get('vendedor_phone');
 
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      const { PostVisitService } = await import('./services/postVisitService');
+      const postVisitService = new PostVisitService(supabase);
 
       // 1. Obtener lead
       const { data: lead, error: leadError } = await supabase.client
@@ -4638,166 +4830,80 @@ Estoy aquí para ayudarte. 😊`;
         return corsResponse(JSON.stringify({ error: 'Vendedor no encontrado', details: vendedorError }), 400);
       }
 
-      const results: any = {
-        lead_before: { id: lead.id, name: lead.name, status: lead.status },
-        vendedor: vendedor.name,
-        respuesta_simulada: respuesta
+      // Override phone si se proporciona
+      const vendedorConPhone = {
+        ...vendedor,
+        phone: vendedorPhoneOverride || vendedor.phone
       };
 
-      // 3. Simular que el vendedor confirma
-      if (respuesta === '1') {
-        // Actualizar cita a completed (buscar una cita del lead)
-        const { data: cita } = await supabase.client
-          .from('appointments')
-          .select('id')
-          .eq('lead_id', leadId)
-          .eq('status', 'scheduled')
-          .order('scheduled_date', { ascending: false })
-          .limit(1)
-          .single();
-
-        if (cita) {
-          await supabase.client
-            .from('appointments')
-            .update({ status: 'completed', notes: 'TEST: Asistencia confirmada' })
-            .eq('id', cita.id);
-          results.cita_actualizada = cita.id;
-        }
-
-        // Actualizar lead a visited
-        await supabase.client
-          .from('leads')
-          .update({ status: 'visited', updated_at: new Date().toISOString() })
-          .eq('id', leadId);
-        results.lead_status_updated = 'visited';
-
-        // Registrar actividad
-        const { data: actividadCreada, error: actError } = await supabase.client
-          .from('lead_activities')
-          .insert({
-            lead_id: leadId,
-            team_member_id: vendedorId,
-            activity_type: 'visit',
-            notes: `TEST: Visita completada en propiedad`,
-            created_at: new Date().toISOString()
-          })
-          .select()
-          .single();
-
-        results.actividad_creada = actividadCreada ? 'OK' : actError?.message;
-
-        // Enviar mensaje al vendedor
-        await meta.sendWhatsAppMessage(vendedor.phone,
-          `✅ *TEST: CITA COMPLETADA - ${lead.name?.toUpperCase()}*\n\n¿Cómo fue la visita?\n\n1️⃣ Muy interesado\n2️⃣ Quiere ver más opciones\n3️⃣ No le convenció\n4️⃣ Solo vino a conocer`
-        );
-        results.mensaje_vendedor = 'enviado';
-
-        // Enviar encuesta al cliente
-        if (lead.phone) {
-          const nombreCorto = lead.name?.split(' ')[0] || 'Cliente';
-          await meta.sendWhatsAppMessage(lead.phone,
-            `¡Hola ${nombreCorto}! 👋\n\nGracias por visitarnos hoy. 🏠\n\n¿Qué te pareció? Responde:\n\n1️⃣ Me encantó, quiero avanzar\n2️⃣ Quiero ver más opciones\n3️⃣ Tengo dudas\n\nEstoy aquí para ayudarte. 😊`
-          );
-          results.encuesta_cliente = 'enviada';
-
-          // Guardar pending_client_survey en lead
-          const notasLead = typeof lead.notes === 'object' ? lead.notes : {};
-          await supabase.client
-            .from('leads')
-            .update({
-              notes: {
-                ...notasLead,
-                pending_client_survey: {
-                  sent_at: new Date().toISOString(),
-                  property: lead.property_interest || 'Propiedad',
-                  vendedor_id: vendedorId,
-                  vendedor_name: vendedor.name
-                }
-              }
-            })
-            .eq('id', leadId);
-          results.survey_guardada_en_lead = 'OK';
-        }
-
-      } else if (respuesta === '2') {
-        // No-show
-        const { data: cita } = await supabase.client
-          .from('appointments')
-          .select('id')
-          .eq('lead_id', leadId)
-          .eq('status', 'scheduled')
-          .order('scheduled_date', { ascending: false })
-          .limit(1)
-          .single();
-
-        if (cita) {
-          await supabase.client
-            .from('appointments')
-            .update({ status: 'no_show', notes: 'TEST: No-show confirmado' })
-            .eq('id', cita.id);
-          results.cita_actualizada = cita.id;
-        }
-
-        // Regresar lead a contacted
-        await supabase.client
-          .from('leads')
-          .update({ status: 'contacted', updated_at: new Date().toISOString() })
-          .eq('id', leadId);
-        results.lead_status_updated = 'contacted';
-
-        // Registrar actividad no-show
-        const { data: actividadCreada, error: actError } = await supabase.client
-          .from('lead_activities')
-          .insert({
-            lead_id: leadId,
-            team_member_id: vendedorId,
-            activity_type: 'no_show',
-            notes: `TEST: No se presentó a la cita`,
-            created_at: new Date().toISOString()
-          })
-          .select()
-          .single();
-
-        results.actividad_creada = actividadCreada ? 'OK' : actError?.message;
-
-        // Mensajes
-        await meta.sendWhatsAppMessage(vendedor.phone,
-          `📝 *TEST: No-show registrado - ${lead.name}*\n\nSe envió mensaje ofreciendo reagendar.`
-        );
-        results.mensaje_vendedor = 'enviado';
-
-        if (lead.phone) {
-          await meta.sendWhatsAppMessage(lead.phone,
-            `👋 Hola ${lead.name},\n\nNotamos que no pudiste llegar a tu cita.\n\n¡No te preocupes! 😊 ¿Te gustaría reagendar?`
-          );
-          results.mensaje_cliente = 'enviado';
-        }
+      if (!vendedorConPhone.phone) {
+        return corsResponse(JSON.stringify({ error: 'Vendedor no tiene teléfono. Usa ?vendedor_phone=521...' }), 400);
       }
 
-      // 4. Verificar resultado
-      const { data: leadAfter } = await supabase.client
-        .from('leads')
-        .select('id, name, status, notes')
-        .eq('id', leadId)
-        .single();
-
-      results.lead_after = { id: leadAfter?.id, name: leadAfter?.name, status: leadAfter?.status, notes: leadAfter?.notes };
-
-      // Verificar actividades
-      const { data: actividades } = await supabase.client
-        .from('lead_activities')
+      // 3. Buscar o crear cita
+      let { data: cita } = await supabase.client
+        .from('appointments')
         .select('*')
         .eq('lead_id', leadId)
-        .order('created_at', { ascending: false })
-        .limit(5);
+        .in('status', ['scheduled', 'confirmed'])
+        .order('scheduled_date', { ascending: false })
+        .limit(1)
+        .single();
 
-      results.actividades_recientes = actividades?.map(a => ({
-        type: a.activity_type,
-        notes: a.notes,
-        created_at: a.created_at
-      }));
+      if (!cita) {
+        // Crear cita de prueba
+        const { data: nuevaCita, error: citaError } = await supabase.client
+          .from('appointments')
+          .insert({
+            lead_id: leadId,
+            vendedor_id: vendedorId,
+            lead_phone: lead.phone,
+            lead_name: lead.name,
+            scheduled_date: new Date().toISOString(),
+            status: 'scheduled',
+            property_name: lead.property_interest || 'Desarrollo Test',
+            created_at: new Date().toISOString()
+          })
+          .select()
+          .single();
 
-      return corsResponse(JSON.stringify(results, null, 2));
+        if (citaError || !nuevaCita) {
+          return corsResponse(JSON.stringify({
+            error: 'No se pudo crear cita de prueba',
+            details: citaError?.message || 'Insert returned null'
+          }), 400);
+        }
+        cita = nuevaCita;
+      }
+
+      // 4. Iniciar flujo post-visita
+      const { mensaje, context } = await postVisitService.iniciarFlujoPostVisita(
+        cita,
+        lead,
+        vendedorConPhone
+      );
+
+      // 5. Enviar mensaje al vendedor
+      await meta.sendWhatsAppMessage(vendedorConPhone.phone, mensaje);
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        flujo: 'post-visita iniciado',
+        instrucciones: [
+          `1. El vendedor (${vendedorConPhone.phone}) recibió: "¿Llegó ${lead.name}?"`,
+          `2. El vendedor responde "1" (sí llegó) o "2" (no llegó)`,
+          `3. Si llegó: Se pregunta "¿Qué te pareció?" → luego encuesta al lead`,
+          `4. Si no llegó: Se pregunta "¿Ya contactaste para reagendar?"`,
+          `5. Todo el flujo es conversacional via WhatsApp`
+        ],
+        datos: {
+          lead: { id: lead.id, name: lead.name, phone: lead.phone },
+          vendedor: { id: vendedor.id, name: vendedor.name, phone: vendedorConPhone.phone },
+          cita: { id: cita?.id, property: cita?.property },
+          context_guardado: context
+        },
+        mensaje_enviado: mensaje
+      }, null, 2));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -11990,7 +12096,7 @@ async function remarketingLeadsFrios(supabase: SupabaseService, meta: MetaWhatsA
 
       // Seleccionar mensaje aleatorio
       const mensaje = mensajes[Math.floor(Math.random() * mensajes.length)]
-        .replace('{nombre}', lead.name?.split(' ')[0] || 'amigo');
+        .replace('{nombre}', lead.name?.split(' ')[0] || '');
 
       try {
         await meta.sendWhatsAppMessage(lead.phone, mensaje);
@@ -12099,7 +12205,7 @@ async function followUpLeadsInactivos(supabase: SupabaseService, meta: MetaWhats
     for (const lead of leadsParaFollowup) {
       if (!lead.phone) continue;
 
-      const nombre = lead.name?.split(' ')[0] || 'amigo';
+      const nombre = lead.name?.split(' ')[0] || '';
       const mensaje = mensajesFollowup[Math.floor(Math.random() * mensajesFollowup.length)]
         .replace('{nombre}', nombre);
 
@@ -12372,7 +12478,7 @@ async function reactivarLeadsPerdidos(supabase: SupabaseService, meta: MetaWhats
       if (!lead.phone) continue;
 
       const mensajeBase = mensajesReactivacion[Math.floor(Math.random() * mensajesReactivacion.length)];
-      const nombre = lead.name?.split(' ')[0] || 'amigo';
+      const nombre = lead.name?.split(' ')[0] || '';
       const mensaje = mensajeBase.replace('{nombre}', nombre);
 
       try {
@@ -12514,7 +12620,7 @@ async function procesarCumpleañosLeads(
       continue;
     }
 
-    const nombre = lead.name?.split(' ')[0] || 'amigo';
+    const nombre = lead.name?.split(' ')[0] || '';
     const mensaje = mensajesCumple[Math.floor(Math.random() * mensajesCumple.length)]
       .replace('{nombre}', nombre);
 
@@ -13122,7 +13228,7 @@ async function enviarRecordatoriosPromociones(supabase: SupabaseService, meta: M
       for (const lead of leadsSegmento) {
         try {
           const mensaje = mensajeBase
-            .replace(/{nombre}/gi, lead.name || 'amigo')
+            .replace(/{nombre}/gi, lead.name || '')
             .replace(/{desarrollo}/gi, lead.property_interest || 'nuestros desarrollos');
 
           const phone = lead.phone.startsWith('52') ? lead.phone : '52' + lead.phone;
@@ -14042,7 +14148,7 @@ async function reengagementDirectoLeads(supabase: SupabaseService, meta: MetaWha
         continue;
       }
 
-      const nombreCorto = lead.name?.split(' ')[0] || 'amigo';
+      const nombreCorto = lead.name?.split(' ')[0] || '';
       const desarrollo = lead.property_interest || 'nuestros desarrollos';
       let pasoActual = '';
 
@@ -14316,7 +14422,7 @@ async function enviarFelicitacionesCumple(supabase: SupabaseService, meta: MetaW
         continue;
       }
 
-      const nombreCorto = lead.name?.split(' ')[0] || 'amigo';
+      const nombreCorto = lead.name?.split(' ')[0] || '';
 
       try {
         // Intentar usar template feliz_cumple
@@ -14514,7 +14620,7 @@ async function seguimientoCredito(supabase: SupabaseService, meta: MetaWhatsAppS
         continue;
       }
 
-      const nombreCorto = lead.name?.split(' ')[0] || 'amigo';
+      const nombreCorto = lead.name?.split(' ')[0] || '';
       const desarrollo = lead.property_interest || 'tu casa ideal';
 
       try {

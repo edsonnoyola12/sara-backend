@@ -94,9 +94,11 @@ export class AIConversationService {
       console.log('⚠️ Error verificando cita existente para prompt:', e);
     }
 
-    // Crear catálogo desde DB
-    const catalogoDB = this.crearCatalogoDB(properties);
-    console.log('📋 Catálogo generado:', catalogoDB.substring(0, 500) + '...');
+    // Crear catálogo desde DB (optimizado: solo detalle del desarrollo de interés)
+    const catalogoDB = this.crearCatalogoDB(properties, lead.property_interest);
+    console.log('📋 Catálogo generado (optimizado):', catalogoDB.length, 'chars');
+    console.log('📋 Interés del lead:', lead.property_interest || 'ninguno');
+    console.log('📋 Preview:', catalogoDB.substring(0, 300) + '...');
 
     // Consultar promociones activas
     let promocionesContext = '';
@@ -476,7 +478,7 @@ REGLAS:
 - NUNCA uses un nombre que el cliente NO te haya dicho EN ESTA CONVERSACIÓN
 - NUNCA adivines ni inventes nombres
 - Si en DATOS DEL CLIENTE dice "❌ NO TENGO", NO PUEDES usar ningún nombre
-- Si el cliente NO te ha dicho su nombre, llámalo "amigo" o no uses nombre
+- Si el cliente NO te ha dicho su nombre, NO uses ningún apodo - simplemente habla sin usar nombre
 
 ❌ INCORRECTO: Llamar "Juan" si el cliente nunca dijo "me llamo Juan"
 ✅ CORRECTO: "¡Hola! Soy SARA de Grupo Santa Rita. ¿Cómo te llamas?"
@@ -1146,6 +1148,9 @@ INTENTS
 - "saludo": primer contacto (hola, buen día) ➜ PIDE NOMBRE
 - "interes_desarrollo": pide info, opciones, resumen de casas o desarrollos
 - "solicitar_cita": quiere visitar SIN fecha/hora específica
+  ⚠️ IMPORTANTE: Si NO hay desarrollo de interés en DATOS_LEAD, pregunta PRIMERO:
+  "¿Qué desarrollo te gustaría visitar? Tenemos Monte Verde, Los Encinos, Miravalle, Andes y Distrito Falco"
+  SOLO después de que elija desarrollo, pregunta "¿Qué día y hora te funcionan?"
 - "confirmar_cita": da fecha Y hora específica
 - "cancelar_cita": quiere CANCELAR su cita (ej: "ya no voy", "cancela mi cita", "no puedo ir")
 - "reagendar_cita": quiere CAMBIAR fecha/hora de su cita (ej: "cambiar a otro día", "reagendar", "mover mi cita")
@@ -1500,8 +1505,8 @@ RECUERDA:
         }
       }
 
-      // CORRECCIÓN: Si tiene fecha Y hora, forzar confirmar_cita
-      if (parsed.extracted_data?.fecha && parsed.extracted_data?.hora) {
+      // CORRECCIÓN: Si tiene fecha Y hora, forzar confirmar_cita (excepto reagendar)
+      if (parsed.extracted_data?.fecha && parsed.extracted_data?.hora && parsed.intent !== 'reagendar_cita') {
         parsed.intent = 'confirmar_cita';
       }
       
@@ -1557,11 +1562,35 @@ RECUERDA:
       const recMatchFb = message.match(/(\d+)\s*(?:recamara|recámara)/i);
       if (recMatchFb) fallbackData.num_recamaras = parseInt(recMatchFb[1]);
 
-      // nombre (solo si dice "me llamo" explícitamente)
-      const nameMatchFb = message.match(/(?:me llamo|mi nombre es)\s+([A-Za-záéíóúñÁÉÍÓÚÑ]+(?:\s+[A-Za-záéíóúñÁÉÍÓÚÑ]+)?)/i);
+      // nombre - detectar múltiples formas: "soy X", "me llamo X", "mi nombre es X"
+      const nameMatchFb = message.match(/(?:soy|me llamo|mi nombre es)\s+([A-Za-záéíóúñÁÉÍÓÚÑ]+(?:\s+[A-Za-záéíóúñÁÉÍÓÚÑ]+)?)/i);
       if (nameMatchFb) fallbackData.nombre = nameMatchFb[1].trim();
 
+      // ═══ FIX: Detectar si Sara preguntó por nombre y el usuario está respondiendo ═══
+      const ultimoMsgSaraFb = (lead.conversation_history || [])
+        .filter((m: any) => m.role === 'assistant')
+        .slice(-1)[0]?.content?.toLowerCase() || '';
+      const saraPreguntabaNombre = ultimoMsgSaraFb.includes('me compartes tu nombre') ||
+                                    ultimoMsgSaraFb.includes('cuál es tu nombre') ||
+                                    ultimoMsgSaraFb.includes('cómo te llamas') ||
+                                    ultimoMsgSaraFb.includes('para agendarte');
+
+      // Si Sara preguntó nombre y el mensaje parece un nombre (corto, sin números)
+      const msgSinNumeros = message.replace(/[0-9]/g, '').trim();
+      const pareceNombre = msgSinNumeros.length > 2 && msgSinNumeros.length < 50 &&
+                           !msgSinNumeros.toLowerCase().includes('hola') &&
+                           !msgSinNumeros.toLowerCase().includes('precio');
+
+      if (saraPreguntabaNombre && pareceNombre && !fallbackData.nombre) {
+        // Extraer nombre del mensaje completo
+        const nombreExtraido = msgSinNumeros.replace(/^soy\s+/i, '').replace(/^me llamo\s+/i, '').trim();
+        if (nombreExtraido.length > 1) {
+          fallbackData.nombre = nombreExtraido.split(' ')[0]; // Solo primer nombre
+        }
+      }
+
       console.log('📊 Datos extraídos en fallback:', fallbackData);
+      console.log('📊 Contexto fallback: saraPreguntabaNombre=', saraPreguntabaNombre, ', nombre=', fallbackData.nombre);
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // FALLBACK INTELIGENTE: Si OpenAI respondió texto plano, ¡usarlo!
@@ -1730,6 +1759,139 @@ O si prefieres, te conecto con un asesor.`;
           fallbackIntent = 'otro';
         }
       } else {
+        // ═══ FIX CRÍTICO: Si Sara preguntó nombre y el usuario lo dio, NO reiniciar ═══
+        if (saraPreguntabaNombre && fallbackData.nombre) {
+          console.log('🎯 FALLBACK: Sara preguntó nombre y usuario respondió con:', fallbackData.nombre);
+          const desarrolloGuardado = lead.property_interest || '';
+
+          if (desarrolloGuardado) {
+            // Tiene desarrollo, preguntar fecha/hora
+            fallbackResponse = `¡Mucho gusto ${fallbackData.nombre}! 😊 ¿Qué día y hora te gustaría visitar ${desarrolloGuardado}?`;
+            fallbackIntent = 'solicitar_cita';
+          } else {
+            // No tiene desarrollo, preguntar cuál
+            fallbackResponse = `¡Mucho gusto ${fallbackData.nombre}! 😊 ¿Qué desarrollo te gustaría conocer?\n\n` +
+              `🏡 Monte Verde - Desde $1.5M\n` +
+              `🏡 Los Encinos - Desde $2.9M\n` +
+              `🏡 Miravalle - Desde $2.9M\n` +
+              `🏡 Andes - Desde $1.5M\n` +
+              `🏡 Distrito Falco - Desde $3.5M`;
+            fallbackIntent = 'interes_desarrollo';
+          }
+
+          return {
+            intent: fallbackIntent,
+            extracted_data: fallbackData,
+            response: fallbackResponse,
+            send_gps: false,
+            send_video_desarrollo: false,
+            send_contactos: false,
+            contactar_vendedor: false
+          };
+        }
+
+        // ═══ FIX: Detectar si Sara preguntaba fecha/hora y el usuario la dio ═══
+        const saraPreguntabaFechaHora = ultimoMsgSaraFb.includes('qué día') ||
+                                         ultimoMsgSaraFb.includes('que día') ||
+                                         ultimoMsgSaraFb.includes('qué hora') ||
+                                         ultimoMsgSaraFb.includes('que hora') ||
+                                         ultimoMsgSaraFb.includes('cuándo te gustaría') ||
+                                         ultimoMsgSaraFb.includes('cuando te gustaría');
+
+        // Detectar fecha en el mensaje
+        const tieneFecha = msgLower.includes('mañana') || msgLower.includes('hoy') ||
+                           msgLower.includes('lunes') || msgLower.includes('martes') ||
+                           msgLower.includes('miércoles') || msgLower.includes('miercoles') ||
+                           msgLower.includes('jueves') || msgLower.includes('viernes') ||
+                           msgLower.includes('sábado') || msgLower.includes('sabado') ||
+                           msgLower.includes('domingo') || msgLower.match(/\d{1,2}\/\d{1,2}/) ||
+                           msgLower.match(/\d{1,2}\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/i);
+
+        // Detectar hora en el mensaje
+        const tieneHora = msgLower.match(/(\d{1,2})\s*(am|pm|hrs?|:)/i) ||
+                          msgLower.includes('mañana') && msgLower.includes('las') ||
+                          msgLower.includes('medio día') || msgLower.includes('mediodía');
+
+        // ═══ FIX: Detectar REAGENDAMIENTO con fecha/hora ═══
+        const esReagendamiento = msgLower.includes('reagendar') ||
+                                  msgLower.includes('cambiar mi cita') ||
+                                  msgLower.includes('cambiar la cita') ||
+                                  msgLower.includes('mover mi cita') ||
+                                  msgLower.includes('modificar mi cita') ||
+                                  msgLower.includes('otra hora') ||
+                                  msgLower.includes('otro día') ||
+                                  msgLower.includes('otro dia');
+
+        console.log('📊 Contexto fallback fecha/hora:', { saraPreguntabaFechaHora, tieneFecha, tieneHora, esReagendamiento, msg: message });
+
+        if ((saraPreguntabaFechaHora || lead.property_interest || esReagendamiento) && tieneFecha && tieneHora) {
+          console.log('🎯 FALLBACK: Detectada fecha/hora para', esReagendamiento ? 'REAGENDAMIENTO' : 'cita');
+
+          // Extraer fecha
+          let fechaExtraida = '';
+          if (msgLower.includes('mañana')) {
+            const manana = new Date();
+            manana.setDate(manana.getDate() + 1);
+            fechaExtraida = manana.toISOString().split('T')[0];
+          } else if (msgLower.includes('hoy')) {
+            fechaExtraida = new Date().toISOString().split('T')[0];
+          }
+
+          // Extraer hora - mejorado para manejar "445pm" como 4:45pm
+          let horaExtraida = '';
+          // Primero intentar formato "4:45pm" o "445pm"
+          const horaMinMatch = message.match(/(\d{1,2}):?(\d{2})?\s*(am|pm|hrs?)?/i);
+          if (horaMinMatch) {
+            let hora = parseInt(horaMinMatch[1]);
+            const minutos = horaMinMatch[2] ? parseInt(horaMinMatch[2]) : 0;
+            const esPM = horaMinMatch[3]?.toLowerCase() === 'pm';
+            const esAM = horaMinMatch[3]?.toLowerCase() === 'am';
+            if (esPM && hora < 12) hora += 12;
+            if (esAM && hora === 12) hora = 0;
+            // Si no tiene am/pm, asumir horario laboral
+            if (!esPM && !esAM && hora >= 1 && hora <= 7) hora += 12;
+            horaExtraida = `${hora}:${minutos.toString().padStart(2, '0')}`;
+          }
+
+          const desarrolloGuardado = lead.property_interest || 'Los Encinos';
+
+          // ═══ Si es REAGENDAMIENTO, devolver intent especial ═══
+          if (esReagendamiento) {
+            const nombreLead = lead.name ? lead.name.split(' ')[0] : '';
+            return {
+              intent: 'reagendar_cita',
+              extracted_data: {
+                ...fallbackData,
+                fecha: fechaExtraida || 'mañana',
+                hora: horaExtraida,
+                desarrollo: desarrolloGuardado
+              },
+              response: nombreLead
+                ? `¡Claro ${nombreLead}! Cambio tu cita para ${msgLower.includes('mañana') ? 'mañana' : 'hoy'} a las ${horaExtraida} en *${desarrolloGuardado}*. ¿Todo bien con el cambio?`
+                : `¡Claro! Cambio tu cita para ${msgLower.includes('mañana') ? 'mañana' : 'hoy'} a las ${horaExtraida} en *${desarrolloGuardado}*. ¿Todo bien con el cambio?`,
+              send_gps: false,
+              send_video_desarrollo: false,
+              send_contactos: false,
+              contactar_vendedor: false
+            };
+          }
+
+          return {
+            intent: 'confirmar_cita',
+            extracted_data: {
+              ...fallbackData,
+              fecha: fechaExtraida,
+              hora: horaExtraida,
+              desarrollo: desarrolloGuardado
+            },
+            response: lead.name ? `¡Perfecto ${lead.name}! Te agendo para ${msgLower.includes('mañana') ? 'mañana' : 'hoy'} a las ${horaExtraida} en ${desarrolloGuardado}. ¡Te esperamos! 🏠` : `¡Perfecto! Te agendo para ${msgLower.includes('mañana') ? 'mañana' : 'hoy'} a las ${horaExtraida} en ${desarrolloGuardado}. ¡Te esperamos! 🏠`,
+            send_gps: true,
+            send_video_desarrollo: false,
+            send_contactos: false,
+            contactar_vendedor: false
+          };
+        }
+
         // Sin nombre - pero primero verificar si pide video/desarrollo
         if (msgLower.includes('video') || msgLower.includes('mándame') || msgLower.includes('mandame') ||
             msgLower.includes('envíame') || msgLower.includes('enviame') ||
@@ -1776,9 +1938,9 @@ Tú dime, ¿por dónde empezamos?`;
     }
   }
 
-  crearCatalogoDB(properties: any[]): string {
+  crearCatalogoDB(properties: any[], propertyInterest?: string): string {
     const porDesarrollo = new Map<string, any[]>();
-    
+
     for (const p of properties) {
       const dev = p.development || 'Otros';
       if (!porDesarrollo.has(dev)) porDesarrollo.set(dev, []);
@@ -1786,53 +1948,73 @@ Tú dime, ¿por dónde empezamos?`;
     }
 
     let catalogo = '';
-    
-    // Primero: Resumen de precios DESDE por desarrollo (para que OpenAI NO invente)
-    catalogo += '\n═══ PRECIOS OFICIALES POR DESARROLLO (USA ESTOS, NO INVENTES) ═══\n';
+
+    // Normalizar el interés para comparación
+    const interesNormalizado = propertyInterest?.toLowerCase().trim();
+
+    // SIEMPRE: Resumen de desarrollos con precios (compacto)
+    catalogo += '\n═══ DESARROLLOS DISPONIBLES ═══\n';
     porDesarrollo.forEach((props, dev) => {
       const precios = props
         .filter((p: any) => p.price && Number(p.price) > 0)
         .map((p: any) => Number(p.price));
-      
+
       if (precios.length > 0) {
         const minPrecio = Math.min(...precios);
         const maxPrecio = Math.max(...precios);
-        catalogo += `• ${dev}: Desde $${(minPrecio/1000000).toFixed(1)}M hasta $${(maxPrecio/1000000).toFixed(1)}M\n`;
+        const esInteresado = dev.toLowerCase().includes(interesNormalizado || '###NONE###') ||
+                            (interesNormalizado && interesNormalizado.includes(dev.toLowerCase()));
+        const marker = esInteresado ? ' ⭐' : '';
+        catalogo += `• ${dev}: $${(minPrecio/1000000).toFixed(1)}M - $${(maxPrecio/1000000).toFixed(1)}M${marker}\n`;
       }
     });
-    catalogo += '═══════════════════════════════════════════════════════════════\n';
-    
-    // Detalle por desarrollo
-    porDesarrollo.forEach((props, dev) => {
-      catalogo += `\nDESARROLLO: ${dev}\n`;
-      props.forEach(p => {
-        const precio = p.price ? `$${(Number(p.price)/1000000).toFixed(1)}M` : '';
-        const plantas = p.floors === 1 ? '1 planta' : `${p.floors} plantas`;
-        const extras = [];
-        if (p.has_study) extras.push('estudio');
-        if (p.has_terrace) extras.push('terraza');
-        if (p.has_roof_garden) extras.push('roof garden');
-        if (p.has_garden) extras.push('jardín');
-        if (p.is_equipped) extras.push('equipada');
-        
-        catalogo += `• ${p.name}: ${precio} | ${p.bedrooms} rec, ${p.bathrooms || '?'} baños | ${p.area_m2}m² | ${plantas}`;
-        if (extras.length > 0) catalogo += ` | ${extras.join(', ')}`;
-        catalogo += '\n';
-        if (p.description) {
-          catalogo += `  📝 ${p.description}\n`;
-        }
-        if (p.neighborhood || p.city) {
-          catalogo += `  📍 Zona: ${[p.neighborhood, p.city].filter(Boolean).join(', ')}\n`;
-        }
-        if (p.sales_phrase) {
-          catalogo += `  ➜ "${p.sales_phrase}"\n`;
-        }
-        if (p.ideal_client) {
-          catalogo += `  👤 Ideal: ${p.ideal_client}\n`;
+
+    // SOLO si hay interés específico: Mostrar detalle de ESE desarrollo
+    if (interesNormalizado) {
+      let desarrolloEncontrado = false;
+
+      porDesarrollo.forEach((props, dev) => {
+        const devLower = dev.toLowerCase();
+        // Buscar coincidencia flexible
+        if (devLower.includes(interesNormalizado) || interesNormalizado.includes(devLower)) {
+          desarrolloEncontrado = true;
+          catalogo += `\n═══ DETALLE: ${dev.toUpperCase()} (interés del cliente) ═══\n`;
+
+          props.forEach(p => {
+            const precio = p.price ? `$${(Number(p.price)/1000000).toFixed(1)}M` : '';
+            const plantas = p.floors === 1 ? '1 planta' : `${p.floors} plantas`;
+            const extras = [];
+            if (p.has_study) extras.push('estudio');
+            if (p.has_terrace) extras.push('terraza');
+            if (p.has_roof_garden) extras.push('roof garden');
+            if (p.has_garden) extras.push('jardín');
+            if (p.is_equipped) extras.push('equipada');
+
+            catalogo += `• ${p.name}: ${precio} | ${p.bedrooms} rec, ${p.bathrooms || '?'} baños | ${p.area_m2}m²`;
+            if (extras.length > 0) catalogo += ` | ${extras.join(', ')}`;
+            catalogo += '\n';
+
+            // Solo incluir descripción si es corta
+            if (p.description && p.description.length < 100) {
+              catalogo += `  ${p.description}\n`;
+            }
+          });
+
+          // Agregar info de ubicación del desarrollo (de la primera propiedad)
+          const firstProp = props[0];
+          if (firstProp?.neighborhood || firstProp?.city) {
+            catalogo += `📍 Ubicación: ${[firstProp.neighborhood, firstProp.city].filter(Boolean).join(', ')}\n`;
+          }
         }
       });
-    });
-    
+
+      if (!desarrolloEncontrado) {
+        console.log(`⚠️ Interés "${propertyInterest}" no coincide con ningún desarrollo`);
+      }
+    }
+
+    catalogo += '\n(Si preguntan por otro desarrollo, puedo dar más detalles)\n';
+
     return catalogo;
   }
 
@@ -1893,7 +2075,7 @@ Tú dime, ¿por dónde empezamos?`;
       console.log('🧠 CLAUDE ES EL CEREBRO - Ejecutando sus decisiones');
       
       const nombreCompletoTemp = lead.name || datosExtraidos.nombre || '';
-      const nombreCliente = nombreCompletoTemp ? nombreCompletoTemp.split(' ')[0] : 'amigo';
+      const nombreCliente = nombreCompletoTemp ? nombreCompletoTemp.split(' ')[0] : '';
       const ingresoCliente = datosExtraidos.ingreso_mensual || lead.ingreso_mensual || 0;
       const engancheCliente = datosExtraidos.enganche_disponible ?? lead.enganche_disponible ?? null;
       const bancoCliente = datosExtraidos.banco_preferido || lead.banco_preferido || '';
@@ -1986,7 +2168,7 @@ Tú dime, ¿por dónde empezamos?`;
         const fechaCita = citaActiva?.scheduled_date || '';
         const horaCita = citaActiva?.scheduled_time || '';
         const lugarCita = citaActiva?.property_name || 'Santa Rita';
-        const nombreLeadCorto = nombreCliente?.split(' ')[0] || 'amigo';
+        const nombreLeadCorto = nombreCliente?.split(' ')[0] || '';
 
         // ═══ CANCELAR CITA ═══
         if (intentCita === 'cancelar_cita') {
@@ -2040,27 +2222,237 @@ Tú dime, ¿por dónde empezamos?`;
         // ═══ REAGENDAR CITA ═══
         if (intentCita === 'reagendar_cita') {
           if (citaActiva) {
-            // Usar respuesta de la IA o predeterminada
-            let respuestaReagendar = claudeResponse;
-            if (!respuestaReagendar || respuestaReagendar.length < 20) {
-              respuestaReagendar = `¡Claro ${nombreLeadCorto}! 😊\n\n` +
-                `Tu cita actual es:\n` +
-                `📅 ${fechaCita}\n` +
-                `🕐 ${horaCita}\n` +
-                `📍 ${lugarCita}\n\n` +
-                `¿Para qué día y hora te gustaría moverla?`;
+            // ═══ FIX: Verificar si ya viene nueva fecha/hora ═══
+            // Si solo viene hora, usar la fecha de la cita actual
+            let nuevaFecha = datosExtraidos.fecha;
+            const nuevaHora = datosExtraidos.hora;
+
+            console.log('📅 REAGENDAR DEBUG:');
+            console.log('   datosExtraidos.fecha:', datosExtraidos.fecha);
+            console.log('   datosExtraidos.hora:', datosExtraidos.hora);
+            console.log('   fechaCita (actual):', fechaCita);
+
+            // Si no hay fecha pero sí hay hora, usar la fecha de la cita actual
+            if (!nuevaFecha && nuevaHora && fechaCita) {
+              nuevaFecha = fechaCita; // Usar la misma fecha, solo cambiar hora
+              console.log('📅 Solo cambio de hora - usando fecha actual:', fechaCita);
             }
 
-            await this.meta.sendWhatsAppMessage(from, respuestaReagendar);
-            console.log('✅ Pregunta de reagendar enviada');
+            console.log('   nuevaFecha final:', nuevaFecha);
+            console.log('   nuevaHora final:', nuevaHora);
 
-            // Guardar en historial
-            const historialActual = lead.conversation_history || [];
-            historialActual.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
-            historialActual.push({ role: 'assistant', content: respuestaReagendar, timestamp: new Date().toISOString() });
-            await this.supabase.client.from('leads').update({ conversation_history: historialActual.slice(-30) }).eq('id', lead.id);
+            if (nuevaFecha && nuevaHora) {
+              // ═══ EJECUTAR REAGENDAMIENTO - ACTUALIZAR en vez de eliminar+crear ═══
+              console.log('📅 REAGENDANDO: Actualizando cita existente');
+              console.log(`   Vieja: ${fechaCita} ${horaCita}`);
+              console.log(`   Nueva: ${nuevaFecha} ${nuevaHora}`);
 
-            return;
+              try {
+                // Parsear nueva fecha - convertir texto a ISO
+                let nuevaFechaISO = nuevaFecha;
+                const fechaLower = nuevaFecha.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // quitar acentos
+
+                if (fechaLower === 'manana' || fechaLower === 'mañana') {
+                  const manana = new Date();
+                  manana.setDate(manana.getDate() + 1);
+                  nuevaFechaISO = manana.toISOString().split('T')[0];
+                } else if (fechaLower === 'hoy') {
+                  nuevaFechaISO = new Date().toISOString().split('T')[0];
+                } else if (fechaLower === 'pasado manana' || fechaLower === 'pasado mañana') {
+                  const pasado = new Date();
+                  pasado.setDate(pasado.getDate() + 2);
+                  nuevaFechaISO = pasado.toISOString().split('T')[0];
+                } else {
+                  // Convertir día de semana a fecha
+                  const diasSemana: { [key: string]: number } = {
+                    'domingo': 0, 'lunes': 1, 'martes': 2, 'miercoles': 3,
+                    'jueves': 4, 'viernes': 5, 'sabado': 6
+                  };
+
+                  if (diasSemana[fechaLower] !== undefined) {
+                    const hoy = new Date();
+                    const diaActual = hoy.getDay();
+                    const diaObjetivo = diasSemana[fechaLower];
+                    let diasHasta = diaObjetivo - diaActual;
+                    if (diasHasta <= 0) diasHasta += 7; // Si es hoy o pasó, ir a la próxima semana
+
+                    const fechaObjetivo = new Date(hoy);
+                    fechaObjetivo.setDate(hoy.getDate() + diasHasta);
+                    nuevaFechaISO = fechaObjetivo.toISOString().split('T')[0];
+                    console.log(`📅 Convertido "${nuevaFecha}" → ${nuevaFechaISO} (en ${diasHasta} días)`);
+                  }
+                }
+                console.log('📅 Fecha ISO final:', nuevaFechaISO);
+
+                // Formatear hora
+                let nuevaHoraFormateada = String(nuevaHora);
+                if (!nuevaHoraFormateada.includes(':')) {
+                  nuevaHoraFormateada = `${nuevaHoraFormateada}:00`;
+                }
+
+                // 1. ACTUALIZAR cita existente en BD (NO crear nueva)
+                // Marcar con timestamp para que webhook de Calendar NO envíe duplicado
+                await this.supabase.client
+                  .from('appointments')
+                  .update({
+                    scheduled_date: nuevaFechaISO,
+                    scheduled_time: nuevaHoraFormateada,
+                    notes: `Reagendada de ${fechaCita} ${horaCita} → ${nuevaFechaISO} ${nuevaHoraFormateada}`,
+                    rescheduled_by_sara_at: new Date().toISOString()
+                  })
+                  .eq('id', citaActiva.id);
+                console.log('✅ Cita actualizada en BD (con marca para evitar duplicado)');
+
+                // 2. ACTUALIZAR evento de Google Calendar (NO eliminar)
+                const eventIdCalendar = citaActiva.google_event_vendedor_id || citaActiva.google_event_id;
+                if (eventIdCalendar && env) {
+                  try {
+                    const { CalendarService } = await import('./calendar');
+                    const calendar = new CalendarService(
+                      env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+                      env.GOOGLE_PRIVATE_KEY,
+                      env.GOOGLE_CALENDAR_ID
+                    );
+
+                    // Calcular nuevas fechas para Calendar
+                    // Asegurar formato correcto de hora (HH:MM)
+                    let horaCalendar = nuevaHoraFormateada;
+                    if (horaCalendar.length === 4) horaCalendar = '0' + horaCalendar; // 9:00 → 09:00
+
+                    const startDateTime = `${nuevaFechaISO}T${horaCalendar}:00`;
+                    const endHour = parseInt(horaCalendar.split(':')[0]) + 1;
+                    const endDateTime = `${nuevaFechaISO}T${endHour.toString().padStart(2, '0')}:${horaCalendar.split(':')[1]}:00`;
+
+                    console.log('📆 Calendar UPDATE:');
+                    console.log('   startDateTime:', startDateTime);
+                    console.log('   endDateTime:', endDateTime);
+                    console.log('   timeZone: America/Mexico_City');
+
+                    await calendar.updateEvent(eventIdCalendar, {
+                      start: { dateTime: startDateTime, timeZone: 'America/Mexico_City' },
+                      end: { dateTime: endDateTime, timeZone: 'America/Mexico_City' }
+                    });
+                    console.log('✅ Evento de Calendar ACTUALIZADO (no eliminado)');
+                  } catch (calErr) {
+                    console.log('⚠️ Error actualizando evento de Calendar:', calErr);
+                  }
+                }
+
+                // 3. Enviar confirmación al LEAD con ubicación
+                const desarrolloReagendar = citaActiva.property_name || lead.property_interest || 'Los Encinos';
+                console.log('🔍 BUSCANDO GPS para desarrollo:', desarrolloReagendar);
+
+                // Buscar GPS y dirección de la propiedad - BÚSQUEDA MEJORADA
+                const propertiesArray = Array.isArray(properties) ? properties : [];
+                console.log('📋 Propiedades disponibles:', propertiesArray.length);
+
+                // Buscar de múltiples formas
+                let propDesarrollo = propertiesArray.find(p => {
+                  const devName = (p.development || '').toLowerCase();
+                  const propName = (p.name || '').toLowerCase();
+                  const searchTerm = desarrolloReagendar.toLowerCase();
+
+                  // Buscar en ambas direcciones
+                  return devName.includes(searchTerm) ||
+                         searchTerm.includes(devName) ||
+                         propName.includes(searchTerm) ||
+                         searchTerm.includes(propName);
+                });
+
+                // Si no encontró, buscar por palabras clave (Los Encinos, Alamos, etc.)
+                if (!propDesarrollo) {
+                  const keywords = ['encinos', 'alamos', 'colinas', 'residencial'];
+                  for (const keyword of keywords) {
+                    if (desarrolloReagendar.toLowerCase().includes(keyword)) {
+                      propDesarrollo = propertiesArray.find(p =>
+                        (p.development || '').toLowerCase().includes(keyword) ||
+                        (p.name || '').toLowerCase().includes(keyword)
+                      );
+                      if (propDesarrollo) break;
+                    }
+                  }
+                }
+
+                console.log('🏠 Propiedad encontrada:', propDesarrollo ? propDesarrollo.name : 'NO ENCONTRADA');
+                console.log('🗺️ GPS Link:', propDesarrollo?.gps_link || 'NO HAY');
+
+                const direccion = propDesarrollo?.address || propDesarrollo?.location || `Fraccionamiento ${desarrolloReagendar}, Zacatecas`;
+                const gpsLink = propDesarrollo?.gps_link || '';
+
+                const msgLead = nombreLeadCorto
+                  ? `✅ *¡Cita reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n🏠 *Desarrollo:* ${desarrolloReagendar}\n\n📍 *Dirección:* ${direccion}${gpsLink ? `\n🗺️ *Google Maps:* ${gpsLink}` : ''}\n\n¡Te esperamos ${nombreLeadCorto}! 🎉`
+                  : `✅ *¡Cita reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n🏠 *Desarrollo:* ${desarrolloReagendar}\n\n📍 *Dirección:* ${direccion}${gpsLink ? `\n🗺️ *Google Maps:* ${gpsLink}` : ''}\n\n¡Te esperamos! 🎉`;
+                await this.meta.sendWhatsAppMessage(from, msgLead);
+                console.log('✅ Confirmación de reagendamiento enviada al lead');
+
+                // 4. Notificar al VENDEDOR con mensaje de REAGENDAMIENTO
+                const vendedorCita = teamMembers.find(t => t.id === citaActiva.vendedor_id || t.id === lead.assigned_to);
+                if (vendedorCita?.phone) {
+                  const msgVendedor = `🔄🔄🔄 *CITA REAGENDADA* 🔄🔄🔄
+━━━━━━━━━━━━━━━━━━━━
+
+🏠 *${desarrolloReagendar}*
+❌ *Antes:* ${fechaCita} a las ${horaCita}
+✅ *Ahora:* ${nuevaFecha} a las ${nuevaHoraFormateada}
+
+━━━━━━━━━━━━━━━━━━━━
+
+👤 *Cliente:* ${lead.name || 'Cliente'}
+📱 *Tel:* ${lead.phone || ''}
+
+━━━━━━━━━━━━━━━━━━━━
+
+📍 ${direccion}
+🗺️ ${gpsLink || 'Sin GPS'}
+
+━━━━━━━━━━━━━━━━━━━━
+⚠️ *TOMA NOTA DEL CAMBIO* ⚠️`;
+                  await this.meta.sendWhatsAppMessage(vendedorCita.phone, msgVendedor);
+                  console.log('✅ Notificación de REAGENDAMIENTO enviada al vendedor');
+                }
+
+                // Guardar en historial
+                const historialActual = lead.conversation_history || [];
+                historialActual.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
+                historialActual.push({ role: 'assistant', content: msgLead, timestamp: new Date().toISOString() });
+                await this.supabase.client.from('leads').update({ conversation_history: historialActual.slice(-30) }).eq('id', lead.id);
+
+                console.log('✅ REAGENDAMIENTO COMPLETADO');
+                return;
+              } catch (reagendarError) {
+                console.log('❌ Error en reagendamiento:', reagendarError);
+                await this.meta.sendWhatsAppMessage(from, nombreLeadCorto ? `${nombreLeadCorto}, hubo un problema al reagendar. ¿Puedes intentar de nuevo? 🙏` : `Hubo un problema al reagendar. ¿Puedes intentar de nuevo? 🙏`);
+                return;
+              }
+            } else {
+              // ═══ NO tiene fecha/hora - PREGUNTAR ═══
+              let respuestaReagendar = claudeResponse;
+              if (!respuestaReagendar || respuestaReagendar.length < 20) {
+                respuestaReagendar = `¡Claro ${nombreLeadCorto}! 😊\n\n` +
+                  `Tu cita actual es:\n` +
+                  `📅 ${fechaCita}\n` +
+                  `🕐 ${horaCita}\n` +
+                  `📍 ${lugarCita}\n\n` +
+                  `¿Para qué día y hora te gustaría moverla?`;
+              }
+
+              await this.meta.sendWhatsAppMessage(from, respuestaReagendar);
+              console.log('✅ Pregunta de reagendar enviada (sin fecha/hora)');
+
+              // Marcar lead como esperando nueva fecha para reagendar
+              await this.supabase.client
+                .from('leads')
+                .update({ pending_reschedule: true, pending_reschedule_appointment_id: citaActiva.id })
+                .eq('id', lead.id);
+
+              // Guardar en historial
+              const historialActual = lead.conversation_history || [];
+              historialActual.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
+              historialActual.push({ role: 'assistant', content: respuestaReagendar, timestamp: new Date().toISOString() });
+              await this.supabase.client.from('leads').update({ conversation_history: historialActual.slice(-30) }).eq('id', lead.id);
+
+              return;
+            }
           } else {
             const respuesta = `${nombreLeadCorto}, no tienes cita pendiente para reagendar. 🤔\n\n¿Te gustaría agendar una visita?`;
             await this.meta.sendWhatsAppMessage(from, respuesta);
@@ -2635,8 +3027,19 @@ Tú dime, ¿por dónde empezamos?`;
       // Si Claude quiere confirmar cita/agendar PERO no tenemos nombre → FORZAR pregunta de nombre
       // ✅ FIX 07-ENE-2026: NO hacer return - continuar para enviar recursos si los pidió
       let interceptoCita = false;
-      if (!tieneNombreReal && (analysis.intent === 'confirmar_cita' || claudeResponse.toLowerCase().includes('te agendo') || claudeResponse.toLowerCase().includes('agendarte'))) {
-        console.log('🛑 INTERCEPTANDO: Claude quiere agendar pero no hay nombre');
+
+      // ═══ FIX: Verificar si ya preguntamos nombre en mensaje anterior ═══
+      const ultimoMsgSaraHist = (lead.conversation_history || [])
+        .filter((m: any) => m.role === 'assistant')
+        .slice(-1)[0]?.content?.toLowerCase() || '';
+      const yaPreguntoNombre = ultimoMsgSaraHist.includes('me compartes tu nombre') ||
+                               ultimoMsgSaraHist.includes('cuál es tu nombre');
+
+      // ═══ FIX: Si se van a enviar recursos, NO preguntar nombre aquí (se pregunta al final del push) ═══
+      const seEnviaranRecursos = analysis.send_video_desarrollo || desarrolloInteres;
+
+      if (!tieneNombreReal && !yaPreguntoNombre && !seEnviaranRecursos && (analysis.intent === 'confirmar_cita' || claudeResponse.toLowerCase().includes('te agendo') || claudeResponse.toLowerCase().includes('agendarte'))) {
+        console.log('🛑 INTERCEPTANDO: Claude quiere agendar pero no hay nombre (sin recursos)');
         const respuestaForzada = `¡Qué bien que te interesa *${desarrolloInteres || 'visitarnos'}*! 😊 Para agendarte, ¿me compartes tu nombre?`;
         await this.twilio.sendWhatsAppMessage(from, respuestaForzada);
         console.log('✅ Pregunta de nombre FORZADA enviada');
@@ -2665,6 +3068,16 @@ Tú dime, ¿por dónde empezamos?`;
         .replace(/\n*¿Te gustaría que te ayudemos con el crédito.*$/gi, '')
         .replace(/Responde \*?SÍ\*? para orientarte.*$/gi, '')
         .trim();
+
+      // ═══ FIX: Si se enviarán recursos después, quitar pregunta de nombre (irá al final) ═══
+      if (seEnviaranRecursos && !tieneNombreReal) {
+        respuestaLimpia = respuestaLimpia
+          .replace(/\n*Para agendarte.*¿me compartes tu nombre\??.*/gi, '')
+          .replace(/\n*¿me compartes tu nombre\??.*/gi, '')
+          .replace(/\n*¿cuál es tu nombre\??.*/gi, '')
+          .trim();
+        console.log('ℹ️ Pregunta de nombre removida de respuesta (irá al final con recursos)');
+      }
 
       // ═══════════════════════════════════════════════════════════════
       // FIX: Corregir nombres hallucinated por Claude
@@ -2735,12 +3148,12 @@ Tú dime, ¿por dónde empezamos?`;
       // ═══════════════════════════════════════════════════════════════
       if (false && (preguntabaAsesorVIPTemp || openAIQuiereAsesor) && respuestaAfirmativaTemp) {
         console.log('🏦 [DESACTIVADO] FLUJO BANCO - Ahora se usa modalidad+hora');
-        const nombreClienteTemp = lead.name || 'amigo';
+        const nombreClienteTemp = lead.name || '';
         const bancoYaElegido = lead.banco_preferido;
 
         if (bancoYaElegido) {
           console.log('🏦 FLUJO BANCO ACTIVADO ANTES: Ya tiene banco:', bancoYaElegido);
-          respuestaLimpia = `¡Perfecto ${nombreClienteTemp}! 😊 ¿Cómo prefieres que te contacte el asesor de ${bancoYaElegido}?
+          respuestaLimpia = nombreClienteTemp ? `¡Perfecto ${nombreClienteTemp}! 😊 ¿Cómo prefieres que te contacte el asesor de ${bancoYaElegido}?` : `¡Perfecto! 😊 ¿Cómo prefieres que te contacte el asesor de ${bancoYaElegido}?
 
 1️⃣ *Llamada telefónica*
 2️⃣ *Videollamada* (Zoom/Meet)
@@ -3213,9 +3626,10 @@ Tú dime, ¿por dónde empezamos?`;
               if (!yaQuiereCita) {
                 await new Promise(r => setTimeout(r, 400));
                 const desarrollosMencionados = desarrollosLista.join(' y ');
+                // ═══ FIX: Mensaje final claro - sin "amigo", pregunta directa ═══
                 const msgPush = tieneNombre
-                  ? `${primerNombre}, ¿te gustaría visitar *${desarrollosMencionados}* en persona? 🏠 Te agendo una cita sin compromiso 😊`
-                  : `¿Te gustaría visitarlos en persona? 🏠 Te agendo una cita sin compromiso 😊`;
+                  ? `${primerNombre}, ¿te gustaría agendar una cita para visitar *${desarrollosMencionados}*? 🏠`
+                  : `¿Te gustaría agendar una cita para visitar *${desarrollosMencionados}*? 🏠\n\nPara agendarte, ¿me compartes tu nombre? 😊`;
 
                 await this.twilio.sendWhatsAppMessage(from, msgPush);
                 console.log('✅ Push a cita enviado después de recursos');
@@ -3661,7 +4075,7 @@ Tú dime, ¿por dónde empezamos?`;
     
     // SOLO PRIMER NOMBRE - siempre
     const nombreCompleto = lead.name || analysis.extracted_data?.nombre || '';
-    const nombreCliente = nombreCompleto ? nombreCompleto.split(' ')[0] : 'amigo';
+    const nombreCliente = nombreCompleto ? nombreCompleto.split(' ')[0] : '';
     
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3859,12 +4273,24 @@ Tú dime, ¿por dónde empezamos?`;
                                 !['test', 'prueba', 'cliente'].some(inv => lead.name.toLowerCase().includes(inv));
       // NOTA: Siempre tiene celular porque está hablando por WhatsApp
 
+      // ═══ FIX: Verificar si tiene desarrollo de interés ═══
+      const tieneDesarrollo = lead.property_interest || analysis.extracted_data?.desarrollo;
+
       if (!tieneNombreValido) {
         console.log('📝 Pidiendo NOMBRE para cita');
         analysis.response = `¡Perfecto! 😊 Para agendarte, ¿me compartes tu nombre completo?`;
+      } else if (!tieneDesarrollo) {
+        console.log('🏘️ Pidiendo DESARROLLO para cita');
+        analysis.response = `¡Perfecto ${nombreCliente}! 😊 ¿Qué desarrollo te gustaría visitar?\n\n` +
+          `Tenemos:\n` +
+          `🏡 *Monte Verde* - Desde $1.5M (Zacatecas)\n` +
+          `🏡 *Los Encinos* - Desde $2.9M (Zacatecas)\n` +
+          `🏡 *Miravalle* - Desde $2.9M (Zacatecas)\n` +
+          `🏡 *Andes* - Desde $1.5M (Guadalupe)\n` +
+          `🏡 *Distrito Falco* - Desde $3.5M (Zona Dorada)`;
       } else {
-        console.log('📅 Tiene nombre, pidiendo FECHA');
-        analysis.response = `¡Perfecto ${nombreCliente}! 😊 ¿Qué día y hora te gustaría visitarnos?`;
+        console.log('📅 Tiene nombre y desarrollo, pidiendo FECHA');
+        analysis.response = `¡Perfecto ${nombreCliente}! 😊 ¿Qué día y hora te gustaría visitarnos en ${tieneDesarrollo}?`;
       }
     } else if (yaManejamosCredito && preguntabaVisita) {
       console.log('ℹ️ Flujo de crédito tiene prioridad sobre visita (ya tiene cita probablemente)');
@@ -4742,7 +5168,7 @@ Mientras tanto, si tienes dudas estoy aquí para ayudarte 📌`;
       console.log('🏦 FLUJO CRÉDITO PASO 1.5: Quiere asesor');
 
       const nombreCompletoTemp2 = lead.name || '';
-      const nombreCliente = nombreCompletoTemp2 ? nombreCompletoTemp2.split(' ')[0] : 'amigo';
+      const nombreClienteCredito = nombreCompletoTemp2 ? nombreCompletoTemp2.split(' ')[0] : '';
       
       // Verificar si YA tiene banco elegido
       let bancoYaElegido = lead.banco_preferido;
@@ -4845,9 +5271,9 @@ Mientras tanto, si tienes dudas estoy aquí para ayudarte 📌`;
         }
       }
 
-      const nombreSaludo = lead.name || textoSinNumeros || 'amigo';
-      
-      analysis.response = `¡Gracias ${nombreSaludo}! 😊 ¿Cómo prefieres que te contacte el asesor?
+      const nombreSaludo = lead.name || textoSinNumeros || '';
+
+      analysis.response = nombreSaludo ? `¡Gracias ${nombreSaludo}!` : `¡Gracias! 😊 ¿Cómo prefieres que te contacte el asesor?
 
 1️⃣ *Llamada telefónica*
 2️⃣ *Videollamada* (Zoom/Meet)
@@ -5488,7 +5914,15 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       // Verificación de seguridad: NO crear cita sin nombre
       else if (!tieneNombre) {
         console.log('⚠️ Intento de cita SIN NOMBRE - no se creará');
-        await this.twilio.sendWhatsAppMessage(from, '¡Me encanta que quieras visitarnos! 😊 Solo para darte mejor atención, ¿me compartes tu nombre?');
+        // ═══ FIX: Solo preguntar si no lo hicimos ya ═══
+        const ultMsgSara = (lead.conversation_history || [])
+          .filter((m: any) => m.role === 'assistant')
+          .slice(-1)[0]?.content?.toLowerCase() || '';
+        if (!ultMsgSara.includes('me compartes tu nombre')) {
+          await this.twilio.sendWhatsAppMessage(from, '¡Me encanta que quieras visitarnos! 😊 Solo para darte mejor atención, ¿me compartes tu nombre?');
+        } else {
+          console.log('ℹ️ Ya preguntamos nombre, esperando respuesta');
+        }
       }
       // Si tenemos nombre, desarrollo válido y NO tiene cita previa, crear cita
       else {

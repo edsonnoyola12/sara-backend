@@ -506,6 +506,28 @@ export class WhatsAppHandler {
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // VERIFICAR SI ES RESPUESTA DE VENDEDOR A POST-VISITA
+      // (Busca por vendedor_phone en el contexto, no solo por team_member)
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      console.log(`📋 POST-VISITA CHECK: Buscando contexto para phone ${cleanPhone}`);
+      try {
+        const postVisitResult = await this.buscarYProcesarPostVisitaPorPhone(cleanPhone, trimmedBody);
+        console.log(`📋 POST-VISITA CHECK: Resultado = ${postVisitResult ? 'ENCONTRADO' : 'NO ENCONTRADO'}`);
+        if (postVisitResult) {
+          console.log(`📋 POST-VISITA: Respuesta procesada de vendedor ${cleanPhone}`);
+          await this.meta.sendWhatsAppMessage(cleanPhone, postVisitResult.respuesta);
+
+          // Ejecutar acciones adicionales (enviar encuesta a lead, etc.)
+          if (postVisitResult.accion) {
+            await this.ejecutarAccionPostVisita(postVisitResult);
+          }
+          return;
+        }
+      } catch (e) {
+        console.log('⚠️ Error procesando post-visita:', e);
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // DETECTAR RESPUESTA A TEMPLATE (activar SARA)
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       console.log('🔍 DEBUG Lead:', lead.name, '| template_sent:', lead.template_sent);
@@ -721,6 +743,16 @@ export class WhatsAppHandler {
         // Notificar al vendedor si es necesario
         if (leadResult.notifyVendor) {
           await this.meta.sendWhatsAppMessage(leadResult.notifyVendor.phone, leadResult.notifyVendor.message);
+        }
+
+        // Borrar evento de Google Calendar si es necesario (cancelación)
+        if (leadResult.deleteCalendarEvent) {
+          try {
+            await this.calendar.deleteEvent(leadResult.deleteCalendarEvent);
+            console.log('🗑️ Evento de Calendar borrado:', leadResult.deleteCalendarEvent);
+          } catch (calErr) {
+            console.log('⚠️ Error borrando evento de Calendar:', calErr);
+          }
         }
 
         return;
@@ -1458,6 +1490,21 @@ export class WhatsAppHandler {
     console.log('🔍 VENDEDOR HANDLER - mensaje:', mensaje);
 
     // ═══════════════════════════════════════════════════════════
+    // 0. VERIFICAR SI HAY FLUJO POST-VISITA EN CURSO
+    // ═══════════════════════════════════════════════════════════
+    const postVisitResult = await this.procesarPostVisitaVendedor(vendedor.id, body);
+    if (postVisitResult) {
+      console.log('📋 POST-VISITA: Procesando respuesta de vendedor');
+      await this.meta.sendWhatsAppMessage(from, postVisitResult.respuesta);
+
+      // Ejecutar acciones adicionales si hay
+      if (postVisitResult.accion) {
+        await this.ejecutarAccionPostVisita(postVisitResult);
+      }
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // 1. OBTENER NOTAS Y PROCESAR ESTADOS PENDIENTES
     // ═══════════════════════════════════════════════════════════
     const { notes, notasVendedor } = await vendorService.getVendedorNotes(vendedor.id);
@@ -1688,7 +1735,7 @@ export class WhatsAppHandler {
     await this.meta.sendWhatsAppMessage(from, showResult.mensajeVendedor);
 
     if (showResult.tipo === 'si_llego' && showResult.needsClientSurvey && showResult.leadPhone && showResult.leadId) {
-      const nombreCliente = showResult.leadName?.split(' ')[0] || 'amigo';
+      const nombreCliente = showResult.leadName?.split(' ')[0] || '';
       const propiedad = showResult.property || 'la propiedad';
       const vendorService = new VendorCommandsService(this.supabase);
       try {
@@ -4461,7 +4508,10 @@ Responde con fecha y hora:
     teamMembers: any[],
     analysis: AIAnalysis,
     properties: any[],
-    env: any
+    env: any,
+    isReschedule: boolean = false,  // ← Para reagendamientos
+    fechaAnterior?: string,  // ← Fecha anterior (para mensaje de reagendamiento)
+    horaAnterior?: string    // ← Hora anterior (para mensaje de reagendamiento)
   ): Promise<void> {
     try {
       // Crear servicio con dependencias
@@ -4475,7 +4525,7 @@ Responde con fecha y hora:
       // Llamar al servicio
       const params: CrearCitaParams = {
         from, cleanPhone, lead, desarrollo, fecha, hora,
-        teamMembers, analysis, properties, env
+        teamMembers, analysis, properties, env, isReschedule
       };
       const result = await appointmentService.crearCitaCompleta(params);
 
@@ -4505,9 +4555,12 @@ Responde con fecha y hora:
 
       // 1. Notificar al VENDEDOR
       if (vendedor?.phone) {
-        const msgVendedor = appointmentService.formatMensajeVendedorNuevaCita(result, desarrollo, fecha, hora);
+        // ═══ FIX: Usar mensaje correcto según si es reagendamiento o nueva ═══
+        const msgVendedor = isReschedule
+          ? appointmentService.formatMensajeVendedorReagendamiento(result, desarrollo, fecha, hora, fechaAnterior, horaAnterior)
+          : appointmentService.formatMensajeVendedorNuevaCita(result, desarrollo, fecha, hora);
         await this.twilio.sendWhatsAppMessage(vendedor.phone, msgVendedor);
-        console.log('📤 Notificación enviada a vendedor');
+        console.log(isReschedule ? '📤 Notificación de REAGENDAMIENTO enviada a vendedor' : '📤 Notificación enviada a vendedor');
       }
 
       // 2. Notificar al ASESOR HIPOTECARIO (si necesita crédito)
@@ -5088,20 +5141,41 @@ Responde con fecha y hora:
 
         const respuesta = encuestasService.procesarRespuestaPostVisita(mensaje, leadConEncuesta.name || '', survey);
 
-        // Guardar feedback en el lead
-        await encuestasService.guardarRespuestaPostVisita(leadConEncuesta.id, notas, respuesta.tipo, mensaje);
+        console.log(`✅ Encuesta post-visita procesada: ${respuesta.tipo}`);
+        console.log(`📤 Respuesta para lead: ${respuesta.respuestaCliente.substring(0, 100)}...`);
 
-        // Notificar al vendedor
-        if (survey.vendedor_id) {
-          const vendedorPhone = await encuestasService.obtenerTelefonoVendedor(survey.vendedor_id);
-          if (vendedorPhone) {
-            await this.twilio.sendWhatsAppMessage(vendedorPhone, respuesta.notificarVendedor);
-            console.log(`📤 Notificación enviada a vendedor ${survey.vendedor_name}`);
+        // PRIMERO: Preparar la respuesta al lead (no puede fallar)
+        const respuestaParaLead = respuesta.respuestaCliente;
+
+        // SEGUNDO: Intentar notificar al vendedor (no debe bloquear respuesta al lead)
+        try {
+          // Usar vendedor_phone de la survey si existe, sino buscar en DB
+          let vendedorPhone = survey.vendedor_phone;
+          if (!vendedorPhone && survey.vendedor_id) {
+            console.log(`📋 Buscando teléfono de vendedor ${survey.vendedor_name} (${survey.vendedor_id})`);
+            vendedorPhone = await encuestasService.obtenerTelefonoVendedor(survey.vendedor_id);
           }
+
+          if (vendedorPhone) {
+            await this.meta.sendWhatsAppMessage(vendedorPhone, respuesta.notificarVendedor);
+            console.log(`📤 Notificación enviada a vendedor ${survey.vendedor_name} (${vendedorPhone})`);
+          } else {
+            console.log(`⚠️ Vendedor ${survey.vendedor_name} no tiene teléfono - no se puede notificar`);
+          }
+        } catch (vendorError) {
+          console.log(`⚠️ Error notificando a vendedor (no afecta respuesta al lead):`, vendorError);
         }
 
-        console.log(`✅ Encuesta post-visita procesada: ${respuesta.tipo}`);
-        return respuesta.feedbackCliente;
+        // TERCERO: Guardar feedback en el lead (después de preparar respuesta)
+        try {
+          await encuestasService.guardarRespuestaPostVisita(leadConEncuesta.id, notas, respuesta.tipo, mensaje);
+          console.log(`💾 Feedback guardado en lead ${leadConEncuesta.id}`);
+        } catch (saveError) {
+          console.log(`⚠️ Error guardando feedback (respuesta igual se envía):`, saveError);
+        }
+
+        // SIEMPRE retornar la respuesta al lead
+        return respuestaParaLead;
       }
 
       // ═══════════════════════════════════════════════════════════
@@ -5261,5 +5335,210 @@ Responde con fecha y hora:
     }
 
     return false;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FLUJO POST-VISITA - Procesar respuestas del vendedor
+  // ═══════════════════════════════════════════════════════════════════════════
+  private async procesarPostVisitaVendedor(vendedorId: string, mensaje: string): Promise<any | null> {
+    try {
+      const postVisitService = new (await import('../services/postVisitService')).PostVisitService(this.supabase);
+      const result = await postVisitService.procesarRespuestaVendedor(vendedorId, mensaje);
+      return result;
+    } catch (e) {
+      console.log('⚠️ Error procesando post-visita:', e);
+      return null;
+    }
+  }
+
+  // Buscar por teléfono (para cuando el vendedor usa un teléfono override)
+  private async buscarYProcesarPostVisitaPorPhone(phone: string, mensaje: string): Promise<any | null> {
+    try {
+      const phoneSuffix = phone.replace(/\D/g, '').slice(-10);
+      console.log(`📋 POST-VISITA SEARCH: Buscando phoneSuffix=${phoneSuffix}`);
+
+      const postVisitService = new (await import('../services/postVisitService')).PostVisitService(this.supabase);
+
+      // Buscar todos los team_members y ver si alguno tiene post_visit_context con este teléfono
+      const { data: teamMembers, error } = await this.supabase.client
+        .from('team_members')
+        .select('id, name, notes');
+
+      console.log(`📋 POST-VISITA SEARCH: team_members encontrados=${teamMembers?.length || 0}, error=${error?.message || 'ninguno'}`);
+
+      if (!teamMembers) return null;
+
+      let foundAnyContext = false;
+      for (const tm of teamMembers) {
+        // IMPORTANTE: notes puede ser string (JSON) u objeto
+        let notas: any = {};
+        if (tm.notes) {
+          if (typeof tm.notes === 'string') {
+            try {
+              notas = JSON.parse(tm.notes);
+            } catch (e) {
+              notas = {};
+            }
+          } else if (typeof tm.notes === 'object') {
+            notas = tm.notes;
+          }
+        }
+        const context = notas.post_visit_context;
+
+        // Log si tiene ALGÚN contenido en notas
+        const notasKeys = Object.keys(notas);
+        if (notasKeys.length > 0) {
+          console.log(`📋 POST-VISITA SEARCH: ${tm.name} tiene notas con keys=[${notasKeys.join(',')}]`);
+        }
+
+        if (context) {
+          foundAnyContext = true;
+          // Verificar si el teléfono coincide con vendedor_phone del contexto
+          const contextPhone = context.vendedor_phone?.replace(/\D/g, '').slice(-10);
+          console.log(`📋 POST-VISITA SEARCH: ${tm.name} tiene post_visit_context con vendedor_phone=${contextPhone}`);
+          if (contextPhone === phoneSuffix) {
+            console.log(`📋 POST-VISITA: ¡MATCH! Encontrado contexto para ${tm.name}`);
+            const result = await postVisitService.procesarRespuestaVendedor(tm.id, mensaje);
+            return result;
+          }
+        }
+      }
+
+      if (!foundAnyContext) {
+        console.log(`📋 POST-VISITA SEARCH: NINGÚN team_member tiene post_visit_context`);
+      }
+
+      console.log(`📋 POST-VISITA SEARCH: No se encontró contexto con phone=${phoneSuffix}`);
+      return null;
+    } catch (e) {
+      console.log('⚠️ Error buscando post-visita por phone:', e);
+      return null;
+    }
+  }
+
+  private async ejecutarAccionPostVisita(result: any): Promise<void> {
+    const postVisitService = new (await import('../services/postVisitService')).PostVisitService(this.supabase);
+
+    try {
+      switch (result.accion) {
+        case 'enviar_encuesta_lead':
+          // Enviar encuesta al lead
+          if (result.datos?.lead_phone) {
+            const mensajeEncuesta = postVisitService.generarMensajeEncuestaLead(
+              result.datos.lead_name,
+              result.datos.property
+            );
+            await this.meta.sendWhatsAppMessage(result.datos.lead_phone, mensajeEncuesta);
+            console.log(`📋 Encuesta enviada a lead ${result.datos.lead_name}`);
+          }
+          break;
+
+        case 'crear_followup':
+          // Enviar follow-up al lead por no-show
+          if (result.datos?.lead_phone) {
+            const mensajeFollowup = postVisitService.generarMensajeNoShowFollowup(
+              result.datos.lead_name,
+              result.datos.property
+            );
+            await this.meta.sendWhatsAppMessage(result.datos.lead_phone, mensajeFollowup);
+            console.log(`📱 Follow-up no-show enviado a ${result.datos.lead_name}`);
+          }
+          break;
+
+        case 'reagendar':
+          // Crear nueva cita
+          if (result.datos) {
+            const { lead_id, lead_phone, lead_name, property, fecha, vendedor_id } = result.datos;
+
+            // Crear cita en la base de datos
+            await this.supabase.client.from('appointments').insert({
+              lead_id,
+              team_member_id: vendedor_id,
+              scheduled_date: fecha.toISOString(),
+              status: 'scheduled',
+              property,
+              notes: 'Reagendada desde post-visita',
+              created_at: new Date().toISOString()
+            });
+
+            // Notificar al lead
+            const fechaFormateada = fecha.toLocaleDateString('es-MX', {
+              weekday: 'long',
+              day: 'numeric',
+              month: 'long',
+              hour: '2-digit',
+              minute: '2-digit'
+            });
+            const nombreCorto = lead_name.split(' ')[0];
+
+            // Obtener link de Google Maps si existe para la ubicación
+            const mapsLink = this.getLocationMapsLink(property);
+            const ubicacionText = mapsLink
+              ? `🏠 ${property}\n📍 ${mapsLink}`
+              : `🏠 ${property}`;
+
+            await this.meta.sendWhatsAppMessage(
+              lead_phone,
+              `¡Hola ${nombreCorto}! 📅\n\n` +
+              `Tu cita ha sido reagendada para:\n\n` +
+              `📆 *${fechaFormateada}*\n` +
+              `${ubicacionText}\n\n` +
+              `¡Te esperamos! 😊`
+            );
+            console.log(`📅 Cita reagendada para ${lead_name}: ${fechaFormateada}`);
+          }
+          break;
+
+        case 'marcar_lost':
+          // Ya se marcó en el service, solo log
+          console.log(`❌ Lead ${result.datos?.lead_id} marcado como lost: ${result.datos?.razon}`);
+          break;
+      }
+    } catch (e) {
+      console.log('⚠️ Error ejecutando acción post-visita:', e);
+    }
+  }
+
+  // Mapeo de ubicaciones conocidas a sus links de Google Maps
+  private getLocationMapsLink(location: string): string | null {
+    const locationLower = location.toLowerCase();
+
+    // Mapeo de ubicaciones a Google Maps links
+    const locationMaps: { [key: string]: string } = {
+      // Oficinas
+      'oficinas de santarita': 'https://maps.app.goo.gl/xPvgfA686v4y6YJ47',
+      'oficinas santarita': 'https://maps.app.goo.gl/xPvgfA686v4y6YJ47',
+      'santarita': 'https://maps.app.goo.gl/xPvgfA686v4y6YJ47',
+      'santa rita': 'https://maps.app.goo.gl/xPvgfA686v4y6YJ47',
+      // Agregar más ubicaciones aquí según sea necesario
+    };
+
+    // Buscar coincidencia
+    for (const [key, link] of Object.entries(locationMaps)) {
+      if (locationLower.includes(key)) {
+        return link;
+      }
+    }
+
+    return null;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // INICIAR FLUJO POST-VISITA (llamado desde cron o endpoint)
+  // ═══════════════════════════════════════════════════════════════════════════
+  async iniciarPostVisita(appointment: any, lead: any, vendedor: any): Promise<string | null> {
+    try {
+      const postVisitService = new (await import('../services/postVisitService')).PostVisitService(this.supabase);
+      const { mensaje, context } = await postVisitService.iniciarFlujoPostVisita(appointment, lead, vendedor);
+
+      // Enviar mensaje al vendedor
+      await this.meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+      console.log(`📋 Post-visita iniciada para ${lead.name} → vendedor ${vendedor.name}`);
+
+      return mensaje;
+    } catch (e) {
+      console.log('⚠️ Error iniciando post-visita:', e);
+      return null;
+    }
   }
 }
