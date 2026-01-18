@@ -528,6 +528,64 @@ export class WhatsAppHandler {
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // VERIFICAR SI ES RESPUESTA A BROADCAST/PROMOCIÓN
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      try {
+        const notes = typeof lead?.notes === 'object' ? lead.notes : {};
+        const lastBroadcast = notes.last_broadcast;
+
+        if (lastBroadcast?.sent_at) {
+          const sentAt = new Date(lastBroadcast.sent_at);
+          const hoursAgo = (Date.now() - sentAt.getTime()) / (1000 * 60 * 60);
+
+          // Si el broadcast fue hace menos de 48 horas y responde afirmativamente
+          const respuestaAfirmativa = /^(si|sí|ok|dale|claro|me interesa|quiero|información|info)$/i.test(trimmedBody.toLowerCase());
+
+          if (hoursAgo < 48 && respuestaAfirmativa) {
+            console.log(`📡 BROADCAST RESPONSE: Lead ${lead.name} respondió "${trimmedBody}" a broadcast de hace ${hoursAgo.toFixed(1)}h`);
+
+            // Obtener información de propiedades para dar contexto
+            const { data: properties } = await this.supabase.client
+              .from('properties')
+              .select('name, location, price_from, price_to, amenities')
+              .eq('active', true)
+              .limit(5);
+
+            let respuestaBroadcast = `¡Excelente ${lead.name || ''}! 🎉\n\n`;
+            respuestaBroadcast += `Me da gusto que te interese. Te cuento sobre nuestras opciones:\n\n`;
+
+            if (properties && properties.length > 0) {
+              respuestaBroadcast += `🏠 *Desarrollos disponibles:*\n`;
+              for (const prop of properties.slice(0, 4)) {
+                const priceRange = prop.price_from && prop.price_to
+                  ? `$${(prop.price_from/1000000).toFixed(1)}M - $${(prop.price_to/1000000).toFixed(1)}M`
+                  : 'Consultar precio';
+                respuestaBroadcast += `• *${prop.name}*: ${priceRange}\n`;
+              }
+              respuestaBroadcast += `\n¿Cuál te llama más la atención? O si prefieres, puedo agendar una visita para que los conozcas en persona 🏡`;
+            } else {
+              respuestaBroadcast += `Tenemos casas increíbles en privadas con seguridad y amenidades.\n\n`;
+              respuestaBroadcast += `¿Te gustaría que te cuente más sobre algún desarrollo en particular, o prefieres agendar una visita? 🏡`;
+            }
+
+            await this.meta.sendWhatsAppMessage(cleanPhone, respuestaBroadcast);
+
+            // Limpiar el marcador de broadcast para que no se vuelva a activar
+            delete notes.last_broadcast;
+            await this.supabase.client
+              .from('leads')
+              .update({ notes })
+              .eq('id', lead.id);
+
+            console.log(`📡 BROADCAST RESPONSE: Información enviada y marcador limpiado`);
+            return; // No procesar más
+          }
+        }
+      } catch (e) {
+        console.log('⚠️ Error procesando respuesta a broadcast:', e);
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // VERIFICAR SI LEAD ESTÁ EN FLUJO DE CRÉDITO
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       try {
@@ -542,7 +600,11 @@ export class WhatsAppHandler {
           const resultado = await creditService.procesarRespuesta(lead.id, trimmedBody);
           console.log(`🏦 Resultado:`, JSON.stringify(resultado, null, 2));
 
-          if (resultado) {
+          // Si el flujo indica pasar a IA (pregunta no relacionada)
+          if (resultado?.passToAI) {
+            console.log(`🏦 Pregunta no relacionada con crédito - pasando a IA`);
+            // NO hacer return, continuar al flujo normal de IA
+          } else if (resultado && resultado.respuesta) {
             await this.meta.sendWhatsAppMessage(cleanPhone, resultado.respuesta);
 
             // Si hay acción de conectar asesor
@@ -667,16 +729,95 @@ export class WhatsAppHandler {
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // IMPORTANTE: Verificar si el LEAD tiene una encuesta pendiente ANTES de routing
+      // Esto evita que leads con teléfonos similares a team_members sean mal-ruteados
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const notasLead = typeof lead.notes === 'object' && lead.notes ? lead.notes : {};
+      if (notasLead.pending_satisfaction_survey) {
+        const respuesta = trimmedBody.trim();
+        const ratings: { [key: string]: { label: string; emoji: string } } = {
+          '1': { label: 'Excelente', emoji: '🌟' },
+          '2': { label: 'Buena', emoji: '👍' },
+          '3': { label: 'Regular', emoji: '😐' },
+          '4': { label: 'Mala', emoji: '😔' }
+        };
+
+        const rating = ratings[respuesta];
+        if (rating) {
+          console.log(`📋 Procesando respuesta a encuesta de satisfacción: ${respuesta}`);
+          const nombreCliente = lead.name?.split(' ')[0] || '';
+          const propiedad = notasLead.pending_satisfaction_survey.property || 'la propiedad';
+
+          // Guardar la respuesta en surveys
+          try {
+            await this.supabase.client.from('surveys').insert({
+              lead_id: lead.id,
+              survey_type: 'satisfaction',
+              rating: parseInt(respuesta),
+              rating_label: rating.label,
+              property: propiedad,
+              created_at: new Date().toISOString()
+            });
+          } catch (err) {
+            console.log('⚠️ Error guardando encuesta:', err);
+          }
+
+          // Limpiar pending_satisfaction_survey
+          delete notasLead.pending_satisfaction_survey;
+          await this.supabase.client
+            .from('leads')
+            .update({ notes: notasLead })
+            .eq('id', lead.id);
+
+          let respuestaCliente = '';
+          if (respuesta === '1' || respuesta === '2') {
+            respuestaCliente = `¡Gracias por tu feedback, ${nombreCliente}! ${rating.emoji}\n\n` +
+              `Nos alegra que hayas tenido una experiencia *${rating.label.toLowerCase()}*.\n\n` +
+              `Si tienes alguna pregunta sobre *${propiedad}*, ¡aquí estamos para ayudarte! 🏠`;
+          } else {
+            respuestaCliente = `Gracias por tu feedback, ${nombreCliente}. ${rating.emoji}\n\n` +
+              `Lamentamos que tu experiencia no haya sido la mejor.\n` +
+              `Tomaremos en cuenta tus comentarios para mejorar.\n\n` +
+              `¿Hay algo específico que podamos hacer para ayudarte? 🙏`;
+          }
+
+          await this.meta.sendWhatsAppMessage(cleanPhone, respuestaCliente);
+          console.log(`✅ Encuesta de satisfacción procesada para ${lead.name}`);
+          return;
+        }
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // DETECTAR SI ES VENDEDOR/ASESOR
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const msgPhoneClean = cleanPhone.replace(/\D/g, '').slice(-10);
+      console.log(`🔍 VENDEDOR CHECK: Buscando ${msgPhoneClean} en ${teamMembers.length} team_members`);
+
       const vendedor = teamMembers.find((tm: any) => {
         if (!tm.phone) return false;
         const tmPhone = tm.phone.replace(/\D/g, '').slice(-10);
-        const msgPhone = cleanPhone.replace(/\D/g, '').slice(-10);
-        return tmPhone === msgPhone;
+        const match = tmPhone === msgPhoneClean;
+        if (match) {
+          console.log(`✅ MATCH ENCONTRADO: ${tm.name} (${tm.phone}) rol=${tm.role}`);
+        }
+        return match;
       });
 
+      console.log(`🔍 VENDEDOR RESULT: ${vendedor ? vendedor.name + ' (' + vendedor.role + ')' : 'NO ENCONTRADO'}`);
+
       if (vendedor) {
+        // ═══ ACTUALIZAR última interacción PRIMERO (antes de cualquier return) ═══
+        try {
+          const now = new Date().toISOString();
+          await this.supabase.client
+            .from('team_members')
+            .update({ last_sara_interaction: now })
+            .eq('id', vendedor.id);
+          console.log(`✅ last_sara_interaction actualizado para ${vendedor.name}: ${now}`);
+        } catch (e) {
+          console.log('⚠️ Error actualizando last_sara_interaction:', e);
+        }
+
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // PRIMERO: DETECTAR RESPUESTAS A APROBACIÓN DE FOLLOW-UPS
         // Respuestas simples: ok, si, no, o mensaje directo
@@ -740,16 +881,6 @@ export class WhatsAppHandler {
         // Detectar rol específico
         const rol = vendedor.role?.toLowerCase() || 'vendedor';
 
-        // ═══ Actualizar última interacción con SARA (para templates de reactivación) ═══
-        try {
-          await this.supabase.client
-            .from('team_members')
-            .update({ last_sara_interaction: new Date().toISOString() })
-            .eq('id', vendedor.id);
-        } catch (e) {
-          console.log('⚠️ Error actualizando last_sara_interaction:', e);
-        }
-
         // CEO / Admin / Director / Gerente
         if (rol.includes('ceo') || rol.includes('admin') || rol.includes('director') || rol.includes('gerente') || rol.includes('dueño') || rol.includes('owner')) {
           console.log('📌 MODO CEO/ADMIN detectado:', vendedor.name);
@@ -772,6 +903,93 @@ export class WhatsAppHandler {
 
         console.log('👨 MODO VENDEDOR detectado:', vendedor.name);
         await this.handleVendedorMessage(from, body, vendedor, teamMembers);
+        return;
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // CHECK BRIDGE / CONTACTO / RESPUESTA PENDIENTE
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      let leadNotes: any = {};
+      try {
+        leadNotes = lead.notes ? (typeof lead.notes === 'string' ? JSON.parse(lead.notes) : lead.notes) : {};
+      } catch (e) {
+        console.log('⚠️ Error parseando notas del lead, continuando sin notas');
+      }
+
+      const msgLower = body.toLowerCase();
+
+      // ═══ PRIMERO: DETECTAR SI LEAD QUIERE CONTACTAR ASESOR/VENDEDOR ═══
+      const quiereContacto = msgLower.includes('hablar con') ||
+        msgLower.includes('contactar') ||
+        msgLower.includes('comunicarme con') ||
+        msgLower.includes('necesito hablar') ||
+        msgLower.includes('quiero hablar') ||
+        msgLower.includes('pasame con') ||
+        msgLower.includes('conectame con') ||
+        (msgLower.includes('asesor') && (msgLower.includes('donde') || msgLower.includes('quien') || msgLower.includes('como') || msgLower.includes('mi '))) ||
+        (msgLower.includes('vendedor') && (msgLower.includes('donde') || msgLower.includes('quien') || msgLower.includes('como') || msgLower.includes('mi ')));
+
+      if (quiereContacto && lead.assigned_to) {
+        console.log('📞 Lead quiere contactar a su vendedor/asesor');
+
+        // Buscar vendedor asignado
+        const { data: vendedorAsignado } = await this.supabase.client
+          .from('team_members')
+          .select('id, name, phone, role')
+          .eq('id', lead.assigned_to)
+          .single();
+
+        if (vendedorAsignado?.phone) {
+          const vendedorPhone = vendedorAsignado.phone.replace(/\D/g, '');
+          const vendedorNombre = vendedorAsignado.name || 'Tu asesor';
+          const rol = vendedorAsignado.role?.includes('asesor') ? 'asesor' : 'vendedor';
+
+          // Notificar al vendedor
+          await this.meta.sendWhatsAppMessage(vendedorPhone,
+            `📞 *${lead.name} quiere hablar contigo*\n\n` +
+            `Mensaje: "${body.substring(0, 100)}${body.length > 100 ? '...' : ''}"\n\n` +
+            `💡 Responde con:\n` +
+            `• *mensaje ${lead.name.split(' ')[0]}* - Enviar mensaje vía Sara\n` +
+            `• *bridge ${lead.name.split(' ')[0]}* - Chat directo 10 min`
+          );
+
+          // Dar al lead los links para contactar directo
+          await this.meta.sendWhatsAppMessage(cleanPhone,
+            `👤 *${vendedorNombre}* es tu ${rol}.\n\n` +
+            `📱 *WhatsApp:*\nwa.me/${vendedorPhone}\n\n` +
+            `📞 *Llamar:*\ntel:+${vendedorPhone}\n\n` +
+            `_También le avisé que quieres hablar._`
+          );
+
+          // Limpiar pending_response_to si existe (ya no aplica)
+          if (leadNotes.pending_response_to) {
+            delete leadNotes.pending_response_to;
+            await this.supabase.client.from('leads').update({ notes: leadNotes }).eq('id', lead.id);
+          }
+
+          console.log(`📞 Lead ${lead.name} recibió contacto de ${vendedorAsignado.name}`);
+          return;
+        }
+      }
+
+      // ═══ BRIDGE ACTIVO - Mensaje directo al vendedor/asesor ═══
+      const activeBridge = leadNotes?.active_bridge_to_vendedor;
+      if (activeBridge && activeBridge.expires_at && new Date(activeBridge.expires_at) > new Date()) {
+        console.log('🔗 BRIDGE activo detectado, reenviando mensaje directo a:', activeBridge.vendedor_name);
+        const msgDirecto = `💬 *${lead.name}:*\n${body}`;
+        await this.meta.sendWhatsAppMessage(activeBridge.vendedor_phone, msgDirecto);
+        return;
+      }
+
+      // ═══ RESPUESTA PENDIENTE (Sara intermediaria) ═══
+      const pendingResponse = leadNotes?.pending_response_to;
+      if (pendingResponse && pendingResponse.expires_at && new Date(pendingResponse.expires_at) > new Date()) {
+        console.log('📨 Lead respondiendo a mensaje intermediado de:', pendingResponse.team_member_name);
+        const msgForTeamMember = `💬 *Respuesta de ${lead.name}:*\n\n"${body}"\n\n_Usa "mensaje ${lead.name.split(' ')[0]}" para responder._`;
+        await this.meta.sendWhatsAppMessage(pendingResponse.team_member_phone, msgForTeamMember);
+
+        // Confirmar al lead
+        await this.meta.sendWhatsAppMessage(cleanPhone, `✅ Tu mensaje fue enviado a ${pendingResponse.team_member_name}.`);
         return;
       }
 
@@ -949,26 +1167,238 @@ export class WhatsAppHandler {
     const nombreCEO = ceo.name?.split(' ')[0] || 'Jefe';
     console.log('CEO Command:', mensaje);
 
+    // Obtener teléfono limpio para Meta WhatsApp
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+
+    // ═══════════════════════════════════════════════════════════
+    // RESPUESTA A FELICITACIÓN DE CUMPLEAÑOS (CEOs también reciben)
+    // ═══════════════════════════════════════════════════════════
+    let notasCEO: any = {};
+    if (ceo.notes) {
+      if (typeof ceo.notes === 'string') {
+        try { notasCEO = JSON.parse(ceo.notes); } catch { notasCEO = {}; }
+      } else if (typeof ceo.notes === 'object') {
+        notasCEO = ceo.notes;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // BRIDGE ACTIVO - Reenviar mensaje directo al lead
+    // Esto debe ir PRIMERO antes de cualquier otro procesamiento
+    // ═══════════════════════════════════════════════════════════
+    const activeBridge = notasCEO?.active_bridge;
+    if (activeBridge && activeBridge.expires_at && new Date(activeBridge.expires_at) > new Date()) {
+      // Si es comando cerrar, procesarlo (solo con #)
+      if (mensaje === '#cerrar' || mensaje === '#fin') {
+        // Continuar al handler de cerrar más abajo
+      } else {
+        // Reenviar mensaje al lead CON formato (simétrico)
+        console.log('🔗 BRIDGE CEO activo, reenviando mensaje a:', activeBridge.lead_name);
+
+        const leadPhone = activeBridge.lead_phone;
+        if (leadPhone) {
+          // Enviar mensaje con formato igual que cuando el lead responde
+          const msgFormateado = `💬 *${nombreCEO}:*\n${body}`;
+          await this.meta.sendWhatsAppMessage(leadPhone, msgFormateado);
+
+          // Actualizar last_activity (NO extender automáticamente)
+          notasCEO.active_bridge.last_activity = new Date().toISOString();
+          await this.supabase.client
+            .from('team_members')
+            .update({ notes: notasCEO })
+            .eq('id', ceo.id);
+
+          console.log(`✅ Mensaje bridge reenviado a ${activeBridge.lead_name}`);
+        }
+        return;
+      }
+    }
+
+    const pendingBirthdayResponse = notasCEO?.pending_birthday_response;
+    if (pendingBirthdayResponse && pendingBirthdayResponse.type === 'cumpleanos_equipo') {
+      const sentAt = pendingBirthdayResponse.sent_at ? new Date(pendingBirthdayResponse.sent_at) : null;
+      const horasTranscurridas = sentAt ? (Date.now() - sentAt.getTime()) / (1000 * 60 * 60) : 999;
+
+      if (horasTranscurridas <= 48) {
+        console.log(`🎂 CEO ${nombreCEO} respondiendo a felicitación de cumpleaños`);
+
+        const respuestaCumple = `¡Gracias ${nombreCEO}! 🎉\n\n` +
+          `Nos alegra mucho tu respuesta. ¡Esperamos que la pases increíble en tu día especial!\n\n` +
+          `Todo el equipo te manda un abrazo. 🤗`;
+
+        await this.meta.sendWhatsAppMessage(cleanPhone, respuestaCumple);
+
+        // Limpiar pending_birthday_response
+        const { pending_birthday_response, ...notasSinPending } = notasCEO;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPending,
+            birthday_response_received: {
+              at: new Date().toISOString(),
+              message: body.substring(0, 200)
+            }
+          }
+        }).eq('id', ceo.id);
+
+        return;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // PRIMERO: Verificar pending_show_confirmation (pregunta ¿LLEGÓ?)
+    // Los CEOs también pueden recibir estas preguntas si son vendedores
+    // ═══════════════════════════════════════════════════════════
+    const showConfirmResult = await this.procesarRespuestaShowConfirmation(ceo.id, mensaje);
+    if (showConfirmResult.handled) {
+      await this.meta.sendWhatsAppMessage(cleanPhone, showConfirmResult.mensajeVendedor!);
+
+      // Si el lead SÍ llegó, enviar encuesta de satisfacción
+      if (showConfirmResult.siLlego && showConfirmResult.leadPhone) {
+        await this.enviarEncuestaSatisfaccion(showConfirmResult.leadPhone, showConfirmResult.leadName, showConfirmResult.property);
+      }
+
+      // Si NO llegó, ofrecer reagendar
+      if (showConfirmResult.noLlego && showConfirmResult.leadPhone) {
+        const nombreCliente = showConfirmResult.leadName?.split(' ')[0] || 'Hola';
+        try {
+          await this.meta.sendWhatsAppMessage(showConfirmResult.leadPhone,
+            `Hola ${nombreCliente}, notamos que no pudiste asistir a tu cita. 😊\n\n` +
+            `¿Te gustaría reagendar para otro día?\n` +
+            `Escríbenos cuando gustes y con gusto te ayudamos.`
+          );
+          console.log(`📅 Mensaje de reagenda enviado a ${showConfirmResult.leadName}`);
+        } catch (err) {
+          console.error('Error enviando mensaje reagenda:', err);
+        }
+      }
+
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // SELECCIÓN DE LEAD PENDIENTE (cuando hay múltiples)
+    // ═══════════════════════════════════════════════════════════
+    const pendingSelection = notasCEO?.pending_lead_selection;
+    if (pendingSelection && pendingSelection.leads) {
+      const sentAt = pendingSelection.timestamp ? new Date(pendingSelection.timestamp) : null;
+      const minutosTranscurridos = sentAt ? (Date.now() - sentAt.getTime()) / (1000 * 60) : 999;
+
+      if (minutosTranscurridos <= 10) {
+        const num = parseInt(mensaje);
+        if (!isNaN(num) && num >= 1 && num <= pendingSelection.leads.length) {
+          const selectedLead = pendingSelection.leads[num - 1];
+          const actionType = pendingSelection.action_type || 'mensaje'; // mensaje o bridge
+          console.log(`✅ CEO seleccionó lead #${num}: ${selectedLead.name} para ${actionType}`);
+
+          // Limpiar selección
+          delete notasCEO.pending_lead_selection;
+
+          if (actionType === 'bridge') {
+            // ═══ ACTIVAR BRIDGE ═══
+            await this.supabase.client.from('team_members').update({ notes: notasCEO }).eq('id', ceo.id);
+            await this.ceoBridgeLeadDirect(cleanPhone, selectedLead, ceo, nombreCEO);
+          } else {
+            // ═══ MENSAJE INTERMEDIADO ═══
+            const leadPhone = selectedLead.phone?.replace(/\D/g, '');
+            notasCEO.pending_message_to_lead = {
+              lead_id: selectedLead.id,
+              lead_name: selectedLead.name,
+              lead_phone: leadPhone?.startsWith('521') ? leadPhone : '521' + leadPhone?.slice(-10),
+              timestamp: new Date().toISOString()
+            };
+            await this.supabase.client.from('team_members').update({ notes: notasCEO }).eq('id', ceo.id);
+
+            await this.meta.sendWhatsAppMessage(cleanPhone,
+              `💬 ¿Qué le quieres decir a *${selectedLead.name}*?\n\n_Escribe tu mensaje y se lo enviaré._`
+            );
+          }
+          return;
+        }
+      } else {
+        // Expirado, limpiar
+        delete notasCEO.pending_lead_selection;
+        await this.supabase.client.from('team_members').update({ notes: notasCEO }).eq('id', ceo.id);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // MENSAJE PENDIENTE A LEAD (Sara como intermediario)
+    // ═══════════════════════════════════════════════════════════
+    const pendingMsgToLead = notasCEO?.pending_message_to_lead;
+    if (pendingMsgToLead && pendingMsgToLead.lead_phone) {
+      const sentAt = pendingMsgToLead.timestamp ? new Date(pendingMsgToLead.timestamp) : null;
+      const minutosTranscurridos = sentAt ? (Date.now() - sentAt.getTime()) / (1000 * 60) : 999;
+
+      // Solo válido por 30 minutos
+      if (minutosTranscurridos <= 30) {
+        console.log(`💬 CEO ${nombreCEO} enviando mensaje (intermediario) a ${pendingMsgToLead.lead_name}`);
+
+        // Enviar mensaje al lead CON FORMATO DE INTERMEDIARIO
+        const mensajeParaLead = `💬 *Mensaje de ${ceo.name}:*\n\n"${body}"\n\n_Puedes responder aquí y le haré llegar tu mensaje._`;
+        await this.meta.sendWhatsAppMessage(pendingMsgToLead.lead_phone, mensajeParaLead);
+
+        // Guardar contexto para que cuando el lead responda, se reenvíe al CEO
+        const { data: leadData } = await this.supabase.client
+          .from('leads')
+          .select('notes')
+          .eq('id', pendingMsgToLead.lead_id)
+          .single();
+
+        let leadNotes: any = {};
+        if (leadData?.notes) {
+          leadNotes = typeof leadData.notes === 'string' ? JSON.parse(leadData.notes) : leadData.notes;
+        }
+        leadNotes.pending_response_to = {
+          team_member_id: ceo.id,
+          team_member_name: ceo.name,
+          team_member_phone: cleanPhone,
+          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 horas
+        };
+        await this.supabase.client.from('leads').update({ notes: leadNotes }).eq('id', pendingMsgToLead.lead_id);
+
+        // Limpiar pending y confirmar al CEO
+        delete notasCEO.pending_message_to_lead;
+        await this.supabase.client.from('team_members').update({ notes: notasCEO }).eq('id', ceo.id);
+
+        await this.meta.sendWhatsAppMessage(cleanPhone,
+          `✅ *Mensaje enviado a ${pendingMsgToLead.lead_name}*\n\n` +
+          `"${body.substring(0, 100)}${body.length > 100 ? '...' : ''}"\n\n` +
+          `_Cuando responda, te haré llegar su mensaje._`
+        );
+
+        return;
+      } else {
+        // Expirado, limpiar
+        delete notasCEO.pending_message_to_lead;
+        await this.supabase.client.from('team_members').update({ notes: notasCEO }).eq('id', ceo.id);
+      }
+    }
+
     const ceoService = new CEOCommandsService(this.supabase);
     const result = ceoService.detectCommand(mensaje, body, nombreCEO);
+    console.log(`📤 CEO Action: ${result.action}, Phone: ${cleanPhone}`);
 
     switch (result.action) {
       case 'send_message':
-        await this.twilio.sendWhatsAppMessage(from, result.message!);
+        console.log('📤 CEO: Enviando mensaje directo');
+        await this.meta.sendWhatsAppMessage(cleanPhone, result.message!);
         return;
 
       case 'call_handler':
+        console.log('📤 CEO: Ejecutando handler:', result.handlerName);
         await this.executeCEOHandler(from, body, ceo, nombreCEO, teamMembers, result.handlerName!, result.handlerParams);
         return;
 
       case 'not_recognized':
-        await this.twilio.sendWhatsAppMessage(from, result.message!);
+        console.log('📤 CEO: Comando no reconocido');
+        await this.meta.sendWhatsAppMessage(cleanPhone, result.message!);
         return;
     }
   }
 
   private async executeCEOHandler(from: string, body: string, ceo: any, nombreCEO: string, teamMembers: any[], handlerName: string, params?: any): Promise<void> {
     const ceoService = new CEOCommandsService(this.supabase);
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
 
     // ━━━ PRIMERO: Intentar ejecutar via servicio centralizado ━━━
     const handlerResult = await ceoService.executeHandler(
@@ -979,13 +1409,14 @@ export class WhatsAppHandler {
 
     // Si el servicio manejó el comando
     if (handlerResult.message) {
-      await this.twilio.sendWhatsAppMessage(from, handlerResult.message);
+      console.log(`📤 CEO Handler ${handlerName}: Enviando respuesta`);
+      await this.meta.sendWhatsAppMessage(cleanPhone, handlerResult.message);
       return;
     }
 
     // Error sin necesidad de handler externo
     if (handlerResult.error && !handlerResult.needsExternalHandler) {
-      await this.twilio.sendWhatsAppMessage(from, handlerResult.error);
+      await this.meta.sendWhatsAppMessage(cleanPhone, handlerResult.error);
       return;
     }
 
@@ -1044,8 +1475,456 @@ export class WhatsAppHandler {
         await this.activarPromocion(from, body);
         break;
 
+      // ━━━ MENSAJE A LEAD (Sara intermediario) ━━━
+      case 'mensajeLead':
+        await this.ceoMensajeLead(from, params?.nombreLead, ceo, nombreCEO);
+        break;
+
+      // ━━━ BRIDGE / CHAT DIRECTO ━━━
+      case 'bridgeLead':
+        await this.ceoBridgeLead(from, params?.nombreLead, ceo, nombreCEO);
+        break;
+
+      // ━━━ EXTENDER BRIDGE ━━━
+      case 'extenderBridge':
+        await this.ceoExtenderBridge(from, ceo, nombreCEO);
+        break;
+
+      // ━━━ CERRAR BRIDGE ━━━
+      case 'cerrarBridge':
+        await this.ceoCerrarBridge(from, ceo, nombreCEO);
+        break;
+
       default:
         console.log('Handler CEO no reconocido:', handlerName);
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // CEO MENSAJE A LEAD - Buscar lead y preparar bridge
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async ceoMensajeLead(from: string, nombreLead: string, ceo: any, nombreCEO: string): Promise<void> {
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+    console.log(`💬 CEO ${nombreCEO} quiere enviar mensaje a: ${nombreLead}`);
+
+    try {
+      // Buscar lead por nombre
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone, status')
+        .ilike('name', `%${nombreLead}%`)
+        .limit(5);
+
+      if (!leads || leads.length === 0) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ No encontré ningún lead con nombre "${nombreLead}"`);
+        return;
+      }
+
+      if (leads.length > 1) {
+        // Guardar selección pendiente
+        let notes: any = {};
+        if (ceo.notes) {
+          notes = typeof ceo.notes === 'string' ? JSON.parse(ceo.notes) : ceo.notes;
+        }
+        notes.pending_lead_selection = {
+          leads: leads.map((l: any) => ({ id: l.id, name: l.name, phone: l.phone })),
+          action: 'mensaje',
+          timestamp: new Date().toISOString()
+        };
+        await this.supabase.client.from('team_members').update({ notes }).eq('id', ceo.id);
+
+        let msg = `📋 Encontré ${leads.length} leads:\n\n`;
+        leads.forEach((l: any, i: number) => {
+          msg += `${i + 1}. *${l.name}* - ${l.phone?.slice(-10) || 'sin tel'}\n`;
+        });
+        msg += `\n💡 Responde con el número (1, 2, etc.)`;
+        await this.meta.sendWhatsAppMessage(cleanPhone, msg);
+        return;
+      }
+
+      const lead = leads[0];
+      const leadPhone = lead.phone?.replace(/\D/g, '');
+
+      if (!leadPhone) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ ${lead.name} no tiene teléfono registrado.`);
+        return;
+      }
+
+      // Guardar pending para esperar el mensaje
+      let notes: any = {};
+      if (ceo.notes) {
+        notes = typeof ceo.notes === 'string' ? JSON.parse(ceo.notes) : ceo.notes;
+      }
+      notes.pending_message_to_lead = {
+        lead_id: lead.id,
+        lead_name: lead.name,
+        lead_phone: leadPhone.startsWith('521') ? leadPhone : '521' + leadPhone.slice(-10),
+        timestamp: new Date().toISOString()
+      };
+
+      await this.supabase.client
+        .from('team_members')
+        .update({ notes })
+        .eq('id', ceo.id);
+
+      await this.meta.sendWhatsAppMessage(cleanPhone,
+        `💬 ¿Qué le quieres decir a *${lead.name}*?\n\n_Escribe tu mensaje y se lo enviaré._`
+      );
+      console.log(`💬 CEO esperando mensaje para ${lead.name}`);
+
+    } catch (e) {
+      console.log('❌ Error en ceoMensajeLead:', e);
+      await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error. Intenta de nuevo.`);
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // CEO BRIDGE - Activar chat directo con lead
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async ceoBridgeLead(from: string, nombreLead: string, ceo: any, nombreCEO: string): Promise<void> {
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+    console.log(`🔗 CEO ${nombreCEO} quiere bridge con: ${nombreLead}`);
+
+    try {
+      // Buscar lead por nombre
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone, status')
+        .ilike('name', `%${nombreLead}%`)
+        .limit(5);
+
+      if (!leads || leads.length === 0) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ No encontré ningún lead con nombre "${nombreLead}"`);
+        return;
+      }
+
+      if (leads.length > 1) {
+        // Guardar selección pendiente para bridge
+        const { data: ceoData } = await this.supabase.client
+          .from('team_members')
+          .select('notes')
+          .eq('id', ceo.id)
+          .single();
+
+        const notes = ceoData?.notes ?
+          (typeof ceoData.notes === 'string' ? JSON.parse(ceoData.notes) : ceoData.notes) : {};
+
+        notes.pending_lead_selection = {
+          leads: leads.map(l => ({ id: l.id, name: l.name, phone: l.phone })),
+          action_type: 'bridge',
+          timestamp: new Date().toISOString()
+        };
+
+        await this.supabase.client.from('team_members').update({ notes }).eq('id', ceo.id);
+
+        let msg = `📋 Encontré ${leads.length} leads:\n\n`;
+        leads.forEach((l: any, i: number) => {
+          msg += `${i + 1}. *${l.name}* - ${l.phone?.slice(-10) || 'sin tel'}\n`;
+        });
+        msg += `\n💡 Responde con el *número* para activar bridge.`;
+        await this.meta.sendWhatsAppMessage(cleanPhone, msg);
+        return;
+      }
+
+      const lead = leads[0];
+      const leadPhone = lead.phone?.replace(/\D/g, '');
+
+      if (!leadPhone) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ ${lead.name} no tiene teléfono registrado.`);
+        return;
+      }
+
+      const leadPhoneFormatted = leadPhone.startsWith('521') ? leadPhone : '521' + leadPhone.slice(-10);
+
+      // Activar bridge usando el servicio
+      const bridgeService = new BridgeService(this.supabase);
+      const bridgeResult = await bridgeService.activarBridge(
+        ceo.id,
+        ceo.name,
+        from,
+        lead.id,
+        lead.name,
+        leadPhoneFormatted
+      );
+
+      if (!bridgeResult.success) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error activando bridge: ${bridgeResult.error}`);
+        return;
+      }
+
+      // Notificar al lead
+      await this.meta.sendWhatsAppMessage(leadPhoneFormatted,
+        `🔗 *Chat directo activado*\n\n` +
+        `*${ceo.name}* quiere hablar contigo directamente.\n\n` +
+        `Los próximos mensajes irán directo a él por *6 minutos*.\n\n` +
+        `_Escribe tu mensaje:_`
+      );
+
+      // Notificar al CEO
+      await this.meta.sendWhatsAppMessage(cleanPhone,
+        `🔗 *Bridge activado con ${lead.name}*\n\n` +
+        `Tus mensajes irán directo a ${lead.name} por *6 minutos*.\n\n` +
+        `_Escribe tu mensaje:_`
+      );
+
+      console.log(`🔗 Bridge activado: ${ceo.name} ↔ ${lead.name}`);
+
+    } catch (e) {
+      console.log('❌ Error en ceoBridgeLead:', e);
+      await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error. Intenta de nuevo.`);
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // CEO BRIDGE DIRECTO - Activar bridge con lead ya seleccionado
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async ceoBridgeLeadDirect(cleanPhone: string, lead: any, ceo: any, nombreCEO: string): Promise<void> {
+    try {
+      const leadPhone = lead.phone?.replace(/\D/g, '');
+      if (!leadPhone) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ ${lead.name} no tiene teléfono registrado.`);
+        return;
+      }
+
+      const leadPhoneFormatted = leadPhone.startsWith('521') ? leadPhone : '521' + leadPhone.slice(-10);
+
+      // Activar bridge usando el servicio
+      const bridgeService = new BridgeService(this.supabase);
+      const bridgeResult = await bridgeService.activarBridge(
+        ceo.id,
+        ceo.name,
+        cleanPhone,
+        lead.id,
+        lead.name,
+        leadPhoneFormatted
+      );
+
+      if (!bridgeResult.success) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error activando bridge: ${bridgeResult.error}`);
+        return;
+      }
+
+      // Notificar al lead
+      await this.meta.sendWhatsAppMessage(leadPhoneFormatted,
+        `🔗 *Chat directo activado*\n\n` +
+        `*${ceo.name}* quiere hablar contigo directamente.\n\n` +
+        `Los próximos mensajes irán directo a él por *6 minutos*.\n\n` +
+        `_Escribe tu mensaje:_`
+      );
+
+      // Notificar al CEO
+      await this.meta.sendWhatsAppMessage(cleanPhone,
+        `🔗 *Bridge activado con ${lead.name}*\n\n` +
+        `Tus mensajes irán directo a ${lead.name} por *6 minutos*.\n\n` +
+        `_Escribe tu mensaje:_`
+      );
+
+      console.log(`🔗 Bridge activado (directo): ${ceo.name} ↔ ${lead.name}`);
+
+    } catch (e) {
+      console.log('❌ Error en ceoBridgeLeadDirect:', e);
+      await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error activando bridge.`);
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // CEO EXTENDER BRIDGE - Agregar 6 minutos más
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async ceoExtenderBridge(from: string, ceo: any, nombreCEO: string): Promise<void> {
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+    console.log(`⏰ CEO ${nombreCEO} quiere extender bridge`);
+
+    try {
+      const { data: ceoData } = await this.supabase.client
+        .from('team_members')
+        .select('notes')
+        .eq('id', ceo.id)
+        .single();
+
+      let notes: any = {};
+      try {
+        notes = ceoData?.notes ?
+          (typeof ceoData.notes === 'string' ? JSON.parse(ceoData.notes) : ceoData.notes) : {};
+      } catch { notes = {}; }
+
+      if (!notes.active_bridge) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ No tienes un bridge activo para extender.`);
+        return;
+      }
+
+      // Extender 6 minutos desde ahora
+      const nuevoExpira = new Date(Date.now() + 6 * 60 * 1000).toISOString();
+      notes.active_bridge.expires_at = nuevoExpira;
+      notes.active_bridge.warning_sent = false; // Resetear warning
+
+      await this.supabase.client
+        .from('team_members')
+        .update({ notes })
+        .eq('id', ceo.id);
+
+      // También extender del lado del lead
+      if (notes.active_bridge.lead_id) {
+        const { data: leadData } = await this.supabase.client
+          .from('leads')
+          .select('notes')
+          .eq('id', notes.active_bridge.lead_id)
+          .single();
+
+        if (leadData) {
+          let leadNotes: any = {};
+          try {
+            leadNotes = leadData.notes ?
+              (typeof leadData.notes === 'string' ? JSON.parse(leadData.notes) : leadData.notes) : {};
+          } catch { leadNotes = {}; }
+
+          if (leadNotes.active_bridge_to_vendedor) {
+            leadNotes.active_bridge_to_vendedor.expires_at = nuevoExpira;
+            await this.supabase.client
+              .from('leads')
+              .update({ notes: leadNotes })
+              .eq('id', notes.active_bridge.lead_id);
+          }
+        }
+      }
+
+      const leadName = notes.active_bridge.lead_name || 'el lead';
+      await this.meta.sendWhatsAppMessage(cleanPhone,
+        `✅ *Bridge extendido 6 minutos más*\n\nContinúa tu conversación con ${leadName}.`
+      );
+
+      // Notificar al lead
+      if (notes.active_bridge.lead_phone) {
+        await this.meta.sendWhatsAppMessage(notes.active_bridge.lead_phone,
+          `✅ *Chat directo extendido 6 min más*\n\nContinúa la conversación.`
+        );
+      }
+
+      console.log(`✅ Bridge extendido: ${nombreCEO} ↔ ${leadName}`);
+
+    } catch (e) {
+      console.log('❌ Error extendiendo bridge:', e);
+      await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error extendiendo bridge.`);
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // CEO CERRAR BRIDGE - Terminar chat directo
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async ceoCerrarBridge(from: string, ceo: any, nombreCEO: string): Promise<void> {
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+    console.log(`🔒 CEO ${nombreCEO} quiere cerrar conexiones`);
+
+    try {
+      // Obtener notas del CEO
+      const { data: ceoData } = await this.supabase.client
+        .from('team_members')
+        .select('notes')
+        .eq('id', ceo.id)
+        .single();
+
+      const notes = ceoData?.notes ?
+        (typeof ceoData.notes === 'string' ? JSON.parse(ceoData.notes) : ceoData.notes) : {};
+
+      let cerradoAlgo = false;
+      let leadsAfectados: string[] = [];
+
+      // ═══ 1. CERRAR BRIDGE ACTIVO ═══
+      if (notes.active_bridge) {
+        const bridgeInfo = notes.active_bridge;
+        delete notes.active_bridge;
+
+        // Limpiar bridge del lead
+        const { data: leadData } = await this.supabase.client
+          .from('leads')
+          .select('id, name, notes')
+          .eq('id', bridgeInfo.lead_id)
+          .single();
+
+        if (leadData) {
+          const leadNotes = leadData.notes ?
+            (typeof leadData.notes === 'string' ? JSON.parse(leadData.notes) : leadData.notes) : {};
+          delete leadNotes.active_bridge_to_vendedor;
+          await this.supabase.client
+            .from('leads')
+            .update({ notes: leadNotes })
+            .eq('id', leadData.id);
+
+          leadsAfectados.push(bridgeInfo.lead_name || 'lead');
+
+          // Notificar al lead (mensaje simple, sin tecnicismos)
+          const leadPhone = bridgeInfo.lead_phone?.replace(/\D/g, '');
+          if (leadPhone) {
+            await this.meta.sendWhatsAppMessage(leadPhone,
+              `Listo, si necesitas algo más aquí estoy para ayudarte. 🏠`
+            );
+          }
+        }
+        cerradoAlgo = true;
+        console.log(`🔒 Bridge cerrado: ${ceo.name} ↔ ${bridgeInfo.lead_name}`);
+      }
+
+      // ═══ 2. CERRAR MENSAJE PENDIENTE (pending_message_to_lead) ═══
+      if (notes.pending_message_to_lead) {
+        const pendingInfo = notes.pending_message_to_lead;
+        delete notes.pending_message_to_lead;
+        leadsAfectados.push(pendingInfo.lead_name || 'lead');
+        cerradoAlgo = true;
+        console.log(`🔒 Mensaje pendiente cancelado para: ${pendingInfo.lead_name}`);
+      }
+
+      // ═══ 3. LIMPIAR pending_response_to DE LEADS ═══
+      // Buscar leads que tienen pending_response_to apuntando a este CEO
+      const { data: leadsConPending } = await this.supabase.client
+        .from('leads')
+        .select('id, name, notes')
+        .not('notes', 'is', null);
+
+      for (const lead of leadsConPending || []) {
+        let leadNotes: any = {};
+        try {
+          leadNotes = lead.notes ?
+            (typeof lead.notes === 'string' ? JSON.parse(lead.notes) : lead.notes) : {};
+        } catch (e) {
+          console.log(`⚠️ Error parseando notas de ${lead.name}, saltando`);
+          continue;
+        }
+
+        if (leadNotes.pending_response_to?.team_member_id === ceo.id) {
+          delete leadNotes.pending_response_to;
+          await this.supabase.client
+            .from('leads')
+            .update({ notes: leadNotes })
+            .eq('id', lead.id);
+
+          if (!leadsAfectados.includes(lead.name)) {
+            leadsAfectados.push(lead.name);
+          }
+          cerradoAlgo = true;
+          console.log(`🔒 pending_response_to limpiado de: ${lead.name}`);
+        }
+      }
+
+      // Guardar notas actualizadas del CEO
+      await this.supabase.client
+        .from('team_members')
+        .update({ notes })
+        .eq('id', ceo.id);
+
+      // Confirmar al CEO
+      if (cerradoAlgo) {
+        await this.meta.sendWhatsAppMessage(cleanPhone,
+          `✅ Listo, cerrado.\n\n` +
+          `Para reconectar: *bridge ${leadsAfectados[0] || 'nombre'}*`
+        );
+      } else {
+        await this.meta.sendWhatsAppMessage(cleanPhone,
+          `ℹ️ No tienes conexiones activas.`
+        );
+      }
+
+    } catch (e) {
+      console.log('❌ Error en ceoCerrarBridge:', e);
+      await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al cerrar conexiones.`);
     }
   }
 
@@ -1572,7 +2451,42 @@ export class WhatsAppHandler {
     // 1. OBTENER NOTAS Y PROCESAR ESTADOS PENDIENTES
     // ═══════════════════════════════════════════════════════════
     const { notes, notasVendedor } = await vendorService.getVendedorNotes(vendedor.id);
-    
+
+    // ═══════════════════════════════════════════════════════════
+    // RESPUESTA A FELICITACIÓN DE CUMPLEAÑOS DEL EQUIPO (ANTES de comandos)
+    // ═══════════════════════════════════════════════════════════
+    const pendingBirthdayResponse = notasVendedor?.pending_birthday_response;
+    if (pendingBirthdayResponse && pendingBirthdayResponse.type === 'cumpleanos_equipo') {
+      const sentAt = pendingBirthdayResponse.sent_at ? new Date(pendingBirthdayResponse.sent_at) : null;
+      const horasTranscurridas = sentAt ? (Date.now() - sentAt.getTime()) / (1000 * 60 * 60) : 999;
+
+      // Solo si fue enviado en las últimas 48 horas
+      if (horasTranscurridas <= 48) {
+        console.log(`🎂 Respuesta a felicitación de cumpleaños de ${nombreVendedor}`);
+
+        // Responder con cariño
+        const respuestaCumple = `¡Gracias ${nombreVendedor}! 🎉\n\n` +
+          `Nos alegra mucho tu respuesta. ¡Esperamos que la pases increíble en tu día especial!\n\n` +
+          `Todo el equipo te manda un abrazo. 🤗`;
+
+        await this.meta.sendWhatsAppMessage(from, respuestaCumple);
+
+        // Limpiar pending_birthday_response
+        const { pending_birthday_response, ...notasSinPending } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPending,
+            birthday_response_received: {
+              at: new Date().toISOString(),
+              message: body.substring(0, 200)
+            }
+          }
+        }).eq('id', vendedor.id);
+
+        return;
+      }
+    }
+
     const ctx: import('../services/vendorCommandsService').VendorMessageContext = {
       from,
       body,
@@ -1586,7 +2500,7 @@ export class WhatsAppHandler {
 
     // Procesar estados pendientes (birthday, acknowledgment, bridge, pending selections)
     const initialResult = await vendorService.processVendorMessageInitial(ctx);
-    
+
     if (await this.executeVendorResult(from, initialResult, vendedor, nombreVendedor, teamMembers)) {
       return;
     }
@@ -1594,6 +2508,13 @@ export class WhatsAppHandler {
     // ═══════════════════════════════════════════════════════════
     // 2. INTERCEPCIÓN TEMPRANA DE COMANDOS CRÍTICOS
     // ═══════════════════════════════════════════════════════════
+
+    // CERRAR BRIDGE - Vendedor termina chat directo
+    if (mensaje === 'cerrar' || mensaje === 'fin' || mensaje === '#cerrar' || mensaje === '#fin' || mensaje === 'salir') {
+      await this.vendedorCerrarBridge(from, vendedor, nombreVendedor);
+      return;
+    }
+
     const earlyCmd = vendorService.detectEarlyCommand(mensaje, body);
     if (earlyCmd) {
       switch (earlyCmd.command) {
@@ -1765,6 +2686,39 @@ export class WhatsAppHandler {
    * Maneja confirmaciones pendientes (reagendar, citas)
    */
   private async handlePendingConfirmations(from: string, mensaje: string, vendedor: any, nombreVendedor: string): Promise<boolean> {
+    // ═══════════════════════════════════════════════════════════
+    // PRIMERO: Verificar pending_show_confirmation (pregunta ¿LLEGÓ?)
+    // ═══════════════════════════════════════════════════════════
+    const showConfirmResult = await this.procesarRespuestaShowConfirmation(vendedor.id, mensaje);
+    if (showConfirmResult.handled) {
+      await this.meta.sendWhatsAppMessage(from, showConfirmResult.mensajeVendedor!);
+
+      // Si el lead SÍ llegó, enviar encuesta de satisfacción
+      if (showConfirmResult.siLlego && showConfirmResult.leadPhone) {
+        await this.enviarEncuestaSatisfaccion(showConfirmResult.leadPhone, showConfirmResult.leadName, showConfirmResult.property);
+      }
+
+      // Si NO llegó, ofrecer reagendar
+      if (showConfirmResult.noLlego && showConfirmResult.leadPhone) {
+        const nombreCliente = showConfirmResult.leadName?.split(' ')[0] || 'Hola';
+        try {
+          await this.meta.sendWhatsAppMessage(showConfirmResult.leadPhone,
+            `Hola ${nombreCliente}, notamos que no pudiste asistir a tu cita. 😊\n\n` +
+            `¿Te gustaría reagendar para otro día?\n` +
+            `Escríbenos cuando gustes y con gusto te ayudamos.`
+          );
+          console.log(`📅 Mensaje de reagenda enviado a ${showConfirmResult.leadName}`);
+        } catch (err) {
+          console.error('Error enviando mensaje reagenda:', err);
+        }
+      }
+
+      return true;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // SEGUNDO: Otras confirmaciones pendientes
+    // ═══════════════════════════════════════════════════════════
     // Respuestas afirmativas
     if (mensaje === '1' || mensaje === 'si' || mensaje === 'sí' || mensaje.includes('si manda') || mensaje.includes('sí manda')) {
       if (await this.hayReagendarPendiente(vendedor.id)) {
@@ -1790,6 +2744,166 @@ export class WhatsAppHandler {
     }
 
     return false;
+  }
+
+  /**
+   * Procesa respuesta a la pregunta "¿LLEGÓ [LEAD]?"
+   */
+  private async procesarRespuestaShowConfirmation(vendedorId: string, mensaje: string): Promise<{
+    handled: boolean;
+    mensajeVendedor?: string;
+    siLlego?: boolean;
+    noLlego?: boolean;
+    leadPhone?: string;
+    leadName?: string;
+    property?: string;
+  }> {
+    // Obtener notas del vendedor
+    const { data: vendedor } = await this.supabase.client
+      .from('team_members')
+      .select('notes, name')
+      .eq('id', vendedorId)
+      .single();
+
+    if (!vendedor) return { handled: false };
+
+    let notes: any = {};
+    try {
+      if (vendedor.notes) {
+        notes = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes) : vendedor.notes;
+      }
+    } catch (e) {
+      return { handled: false };
+    }
+
+    const confirmacion = notes?.pending_show_confirmation;
+    if (!confirmacion) return { handled: false };
+
+    const msg = mensaje.toLowerCase().trim();
+
+    // Verificar si es respuesta "1" (sí llegó) o "2" (no llegó)
+    // Normalizar acentos para comparación
+    const msgNorm = msg.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // quitar acentos
+    const siLlego = msg === '1' || msg === 'si' || msg === 'sí' ||
+                    msg.startsWith('si ') || msg.startsWith('sí ') ||
+                    msgNorm.includes('si llego') || msg.includes('llegó') || msg.includes('llego');
+    const noLlego = msg === '2' || msg === 'no' ||
+                    msgNorm.includes('no llego') || msg.includes('no llegó') || msg.includes('no llego') ||
+                    msg.includes('no vino') || msg.includes('no asistio') || msg.includes('faltó');
+
+    if (!siLlego && !noLlego) return { handled: false };
+
+    const leadName = confirmacion.lead_name || 'el cliente';
+    const property = confirmacion.property || 'la propiedad';
+
+    if (siLlego) {
+      // Marcar cita como completada
+      if (confirmacion.appointment_id) {
+        await this.supabase.client
+          .from('appointments')
+          .update({ status: 'completed' })
+          .eq('id', confirmacion.appointment_id);
+      }
+
+      // Limpiar pending_show_confirmation
+      delete notes.pending_show_confirmation;
+      await this.supabase.client
+        .from('team_members')
+        .update({ notes: JSON.stringify(notes) })
+        .eq('id', vendedorId);
+
+      console.log(`✅ Cita ${confirmacion.appointment_id} marcada como completed por ${vendedor.name}`);
+
+      return {
+        handled: true,
+        mensajeVendedor: `✅ Perfecto, registré que *${leadName}* SÍ llegó a su cita.\n\nLe enviaré una encuesta de satisfacción. ¡Gracias!`,
+        siLlego: true,
+        leadPhone: confirmacion.lead_phone,
+        leadName: confirmacion.lead_name,
+        property
+      };
+    }
+
+    if (noLlego) {
+      // Marcar cita como no_show
+      if (confirmacion.appointment_id) {
+        await this.supabase.client
+          .from('appointments')
+          .update({ status: 'no_show' })
+          .eq('id', confirmacion.appointment_id);
+      }
+
+      // Limpiar pending_show_confirmation
+      delete notes.pending_show_confirmation;
+      await this.supabase.client
+        .from('team_members')
+        .update({ notes: JSON.stringify(notes) })
+        .eq('id', vendedorId);
+
+      console.log(`👻 Cita ${confirmacion.appointment_id} marcada como no_show por ${vendedor.name}`);
+
+      return {
+        handled: true,
+        mensajeVendedor: `👻 Registré que *${leadName}* NO llegó a su cita.\n\nLe enviaré un mensaje para ofrecerle reagendar.`,
+        noLlego: true,
+        leadPhone: confirmacion.lead_phone,
+        leadName: confirmacion.lead_name,
+        property
+      };
+    }
+
+    return { handled: false };
+  }
+
+  /**
+   * Envía encuesta de satisfacción al lead y guarda el estado pendiente
+   */
+  private async enviarEncuestaSatisfaccion(leadPhone: string, leadName?: string, property?: string): Promise<void> {
+    const nombreCliente = leadName?.split(' ')[0] || 'Cliente';
+    const propiedad = property || 'la propiedad';
+
+    try {
+      // Guardar en lead.notes que está esperando respuesta de encuesta
+      const cleanLeadPhone = leadPhone.replace(/\D/g, '');
+      const { data: leadData } = await this.supabase.client
+        .from('leads')
+        .select('id, notes')
+        .or(`phone.eq.${cleanLeadPhone},phone.like.%${cleanLeadPhone.slice(-10)}`)
+        .single();
+
+      if (leadData) {
+        let notasLead: any = {};
+        try {
+          notasLead = typeof leadData.notes === 'object' && leadData.notes ? leadData.notes : {};
+        } catch (e) { notasLead = {}; }
+
+        notasLead.pending_satisfaction_survey = {
+          property: propiedad,
+          asked_at: new Date().toISOString()
+        };
+
+        await this.supabase.client
+          .from('leads')
+          .update({ notes: notasLead })
+          .eq('id', leadData.id);
+
+        console.log(`📝 Guardado pending_satisfaction_survey para lead ${leadData.id}`);
+      }
+
+      await this.meta.sendWhatsAppMessage(leadPhone,
+        `¡Hola ${nombreCliente}! 👋\n\n` +
+        `Gracias por visitarnos en *${propiedad}*. 🏠\n\n` +
+        `¿Cómo fue tu experiencia?\n` +
+        `1️⃣ Excelente\n` +
+        `2️⃣ Buena\n` +
+        `3️⃣ Regular\n` +
+        `4️⃣ Mala\n\n` +
+        `_Responde con el número_ 🙏`
+      );
+      console.log(`📋 Encuesta post-visita enviada a ${leadName}`);
+    } catch (err) {
+      console.error('Error enviando encuesta post-visita:', err);
+    }
   }
 
   /**
@@ -2159,6 +3273,114 @@ export class WhatsAppHandler {
     }
 
     return true;
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // VENDEDOR CERRAR BRIDGE - Terminar chat directo y mensajes pendientes
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async vendedorCerrarBridge(from: string, vendedor: any, nombreVendedor: string): Promise<void> {
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+    console.log(`🔒 Vendedor ${nombreVendedor} quiere cerrar conexiones`);
+
+    try {
+      // Obtener notas del vendedor
+      const { data: vendedorData } = await this.supabase.client
+        .from('team_members')
+        .select('notes')
+        .eq('id', vendedor.id)
+        .single();
+
+      const notes = vendedorData?.notes ?
+        (typeof vendedorData.notes === 'string' ? JSON.parse(vendedorData.notes) : vendedorData.notes) : {};
+
+      let cerradoAlgo = false;
+      let leadsAfectados: string[] = [];
+
+      // ═══ 1. CERRAR BRIDGE ACTIVO ═══
+      if (notes.active_bridge) {
+        const bridgeInfo = notes.active_bridge;
+        delete notes.active_bridge;
+
+        const { data: leadData } = await this.supabase.client
+          .from('leads')
+          .select('id, name, notes')
+          .eq('id', bridgeInfo.lead_id)
+          .single();
+
+        if (leadData) {
+          const leadNotes = leadData.notes ?
+            (typeof leadData.notes === 'string' ? JSON.parse(leadData.notes) : leadData.notes) : {};
+          delete leadNotes.active_bridge_to_vendedor;
+          await this.supabase.client
+            .from('leads')
+            .update({ notes: leadNotes })
+            .eq('id', leadData.id);
+
+          leadsAfectados.push(bridgeInfo.lead_name || 'lead');
+
+          const leadPhone = bridgeInfo.lead_phone?.replace(/\D/g, '');
+          if (leadPhone) {
+            await this.meta.sendWhatsAppMessage(leadPhone,
+              `Listo, si necesitas algo más aquí estoy para ayudarte. 🏠`
+            );
+          }
+        }
+        cerradoAlgo = true;
+        console.log(`🔒 Bridge cerrado: ${vendedor.name} ↔ ${bridgeInfo.lead_name}`);
+      }
+
+      // ═══ 2. LIMPIAR pending_response_to DE LEADS ═══
+      const { data: leadsConPending } = await this.supabase.client
+        .from('leads')
+        .select('id, name, notes')
+        .not('notes', 'is', null);
+
+      for (const lead of leadsConPending || []) {
+        let leadNotes: any = {};
+        try {
+          leadNotes = lead.notes ?
+            (typeof lead.notes === 'string' ? JSON.parse(lead.notes) : lead.notes) : {};
+        } catch (e) {
+          console.log(`⚠️ Error parseando notas de ${lead.name}, saltando`);
+          continue;
+        }
+
+        if (leadNotes.pending_response_to?.team_member_id === vendedor.id) {
+          delete leadNotes.pending_response_to;
+          await this.supabase.client
+            .from('leads')
+            .update({ notes: leadNotes })
+            .eq('id', lead.id);
+
+          if (!leadsAfectados.includes(lead.name)) {
+            leadsAfectados.push(lead.name);
+          }
+          cerradoAlgo = true;
+          console.log(`🔒 pending_response_to limpiado de: ${lead.name}`);
+        }
+      }
+
+      // Guardar notas del vendedor
+      await this.supabase.client
+        .from('team_members')
+        .update({ notes })
+        .eq('id', vendedor.id);
+
+      if (cerradoAlgo) {
+        await this.meta.sendWhatsAppMessage(cleanPhone,
+          `✅ Listo, cerrado.\n\n` +
+          `Para reconectar: *bridge ${leadsAfectados[0] || 'nombre'}*`
+        );
+      } else {
+        await this.meta.sendWhatsAppMessage(cleanPhone,
+          `ℹ️ No tienes conexiones activas.`
+        );
+      }
+
+    } catch (e) {
+      console.log('❌ Error en vendedorCerrarBridge:', e);
+      await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al cerrar conexiones.`);
+    }
   }
 
   /**
@@ -2532,14 +3754,26 @@ export class WhatsAppHandler {
 
     // Si el servicio manejó el comando
     if (handlerResult.message) {
+      // Enviar mensaje al lead si es necesario (puente asesor → lead)
+      if (handlerResult.leadPhone && handlerResult.leadMessage) {
+        await this.meta.sendWhatsAppMessage(
+          handlerResult.leadPhone.replace(/\D/g, ''),
+          handlerResult.leadMessage
+        );
+        console.log(`📤 Mensaje enviado a lead ${handlerResult.leadPhone}`);
+      }
+
       // Notificar vendedor si es necesario
       if (handlerResult.vendedorPhone && handlerResult.vendedorMessage) {
-        await this.twilio.sendWhatsAppMessage(
-          this.formatPhoneMX(handlerResult.vendedorPhone),
+        await this.meta.sendWhatsAppMessage(
+          handlerResult.vendedorPhone.replace(/\D/g, ''),
           handlerResult.vendedorMessage
         );
+        console.log(`📤 Mensaje enviado a vendedor ${handlerResult.vendedorPhone}`);
       }
-      await this.twilio.sendWhatsAppMessage(from, handlerResult.message);
+
+      // Responder al asesor
+      await this.meta.sendWhatsAppMessage(from.replace('whatsapp:', '').replace('+', ''), handlerResult.message);
       return;
     }
 

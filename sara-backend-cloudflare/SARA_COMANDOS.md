@@ -1,0 +1,264 @@
+# SARA CRM - Documentación de Comandos y Flujos
+
+> **IMPORTANTE**: Lee este archivo al inicio de cada sesión para no repetir trabajo.
+
+---
+
+## ROLES Y DETECCIÓN
+
+| Rol | Detectado por | Handler |
+|-----|---------------|---------|
+| CEO/Admin/Director | `role` contiene: ceo, admin, director, gerente, dueño, owner | `handleCEOMessage` |
+| Asesor Hipotecario | `role` contiene: asesor, hipoteca, credito | `handleAsesorMessage` |
+| Agencia/Marketing | `role` contiene: agencia, marketing, mkt | `handleAgenciaMessage` |
+| Vendedor | Default si no es ninguno de los anteriores | `handleVendedorMessage` |
+| Lead | No está en `team_members` | Flujo de lead en `handleIncomingMessage` |
+
+---
+
+## COMANDOS CEO
+
+| Comando | Acción | Handler |
+|---------|--------|---------|
+| `ayuda` / `help` / `?` | Ver todos los comandos | Respuesta directa |
+| `reporte` | Resumen semanal de leads | `generarReporte` |
+| `equipo` | Ver equipo activo | `reporteEquipo` |
+| `leads` | Estado de leads | `reporteLeads` |
+| `ventas` | Métricas de ventas | `reporteVentas` |
+| `hoy` / `resumen` | Resumen del día | `resumenHoy` |
+| `citas` / `citas hoy` | Citas de hoy | `vendedorCitasHoy` |
+| `broadcast` | Enviar mensaje masivo | `iniciarBroadcast` |
+| `segmentos` | Ver segmentos disponibles | `verSegmentos` |
+| `eventos` | Ver eventos activos | `verEventos` |
+| `mensaje [nombre]` | Enviar mensaje a lead (Sara intermedia) | `ceoMensajeLead` |
+| `bridge [nombre]` | Chat directo 6 min | `ceoBridgeLead` |
+| `#mas` / `#continuar` | Extender bridge 6 min más | `ceoExtenderBridge` |
+| `#cerrar` / `#fin` | Terminar TODAS las conexiones | `ceoCerrarBridge` |
+
+---
+
+## COMANDOS ASESOR HIPOTECARIO
+
+| Comando | Acción |
+|---------|--------|
+| `ayuda` | Ver comandos |
+| `mis leads` / `leads` | Ver leads asignados |
+| `status [nombre]` | Ver detalle de un lead |
+| `docs [nombre]` | Pedir documentos al lead |
+| `preaprobado [nombre]` | Notificar pre-aprobación |
+| `rechazado [nombre] [motivo]` | Notificar rechazo |
+| `dile [nombre] que [msg]` | Enviar mensaje vía Sara |
+| `llamar [nombre]` | Ver teléfono del lead |
+| `adelante [nombre]` | Mover al siguiente paso del funnel |
+| `atras [nombre]` | Regresar al paso anterior |
+| `contactado [nombre]` | Marcar como contactado |
+| `hoy` | Citas de hoy |
+| `semana` | Citas de la semana |
+| `reporte` | Ver estadísticas |
+| `on` / `off` | Activar/pausar disponibilidad |
+
+---
+
+## COMANDOS VENDEDOR
+
+| Comando | Acción |
+|---------|--------|
+| `#mas` / `#continuar` | Extender bridge 6 min más |
+| `#cerrar` / `#fin` | Terminar conexiones activas |
+| `reagendar` | Reagendar cita |
+| `cancelar cita` | Cancelar cita |
+| Números `1`, `2`, `3`, `4` | Responder a opciones pendientes |
+
+---
+
+## FLUJOS DE COMUNICACIÓN
+
+### 1. MENSAJE (Sara como intermediario)
+
+```
+CEO/Vendedor: "mensaje Juan"
+    ↓
+Sara busca lead "Juan"
+    ↓
+Si hay varios: muestra opciones (1, 2, 3...)
+    ↓
+CEO/Vendedor escribe el mensaje
+    ↓
+Lead recibe: "💬 *Mensaje de [Nombre]:* [mensaje]"
+    ↓
+Lead responde
+    ↓
+CEO/Vendedor recibe: "💬 *Respuesta de [Lead]:* [mensaje]"
+Lead recibe: "✅ Tu mensaje fue enviado a [Nombre]"
+```
+
+**Notas guardadas:**
+- `team_member.notes.pending_message_to_lead` - Esperando que escriba el mensaje
+- `lead.notes.pending_response_to` - Lead puede responder (expira 24h)
+
+### 2. BRIDGE (Chat directo)
+
+```
+CEO/Vendedor: "bridge Juan"
+    ↓
+Si hay varios leads: muestra opciones (1, 2, 3...)
+    ↓
+Sara activa bridge (6 min)
+    ↓
+Lead recibe: "🔗 Chat directo activado con [Nombre]"
+CEO/Vendedor recibe: "🔗 Bridge activado con [Lead]"
+    ↓
+Mensajes van con formato simétrico: "💬 *Nombre:* mensaje"
+(Ambos lados ven quién escribió)
+    ↓
+A los ~5 min (via CRON cada 2 min):
+  - Vendedor recibe: "⏰ Por terminar con [nombre]\n#mas = 6 min más\n#cerrar = terminar"
+  - Lead recibe: "¿Algo más en lo que pueda ayudarte? 🏠"
+    ↓
+"#mas" → Extiende 6 min más
+"#cerrar" → Termina el bridge
+```
+
+**Mensajes al cerrar (user-friendly):**
+- Lead: `Listo, si necesitas algo más aquí estoy para ayudarte. 🏠`
+- Vendedor: `✅ Listo, cerrado.\n\nPara reconectar: bridge [nombre]`
+
+**Notas guardadas:**
+- `team_member.notes.active_bridge` - Bridge activo del lado vendedor
+- `team_member.notes.active_bridge.warning_sent` - Ya se envió aviso de expiración
+- `lead.notes.active_bridge_to_vendedor` - Bridge activo del lado lead
+
+### 3. LEAD PIDE CONTACTO
+
+```
+Lead: "Quiero hablar con mi asesor"
+    ↓
+Sara detecta intención (ANTES de otros flujos)
+    ↓
+Vendedor recibe: "📞 *[Lead] quiere hablar contigo*"
+    ↓
+Lead recibe:
+  "👤 *[Vendedor]* es tu vendedor.
+   📱 WhatsApp: wa.me/[tel]
+   📞 Llamar: tel:+[tel]"
+```
+
+**Frases detectadas:**
+- "hablar con", "contactar", "comunicarme con"
+- "necesito hablar", "quiero hablar"
+- "pasame con", "conectame con"
+- "mi asesor", "mi vendedor"
+
+---
+
+## COMANDO #CERRAR
+
+El comando `#cerrar` (con #) limpia TODO:
+1. `active_bridge` del team_member
+2. `pending_message_to_lead` del team_member
+3. `pending_response_to` de TODOS los leads que apuntan a ese team_member
+4. `active_bridge_to_vendedor` del lead
+
+**IMPORTANTE:** Usa `#cerrar` con # para evitar confusión con conversaciones normales (ej: "vamos a cerrar el trato").
+
+---
+
+## CRON - VERIFICACIÓN DE BRIDGES
+
+El CRON ejecuta cada 2 minutos `verificarBridgesPorExpirar()`:
+1. Busca team_members con `active_bridge` activo
+2. Si quedan 0.5-2 minutos para expirar Y no se ha enviado warning:
+   - Envía aviso al vendedor con comandos `#mas` / `#cerrar`
+   - Envía mensaje amigable al lead
+   - Marca `warning_sent = true`
+
+---
+
+## FLUJO DE CRÉDITO HIPOTECARIO
+
+```
+Lead menciona crédito/hipoteca
+    ↓
+Sara hace preguntas de calificación:
+  - ¿Trabajas actualmente?
+  - ¿Cuánto ganas al mes?
+  - ¿Cuánto tienes para enganche?
+  - ¿Banco preferido?
+    ↓
+Sara calcula capacidad de crédito
+    ↓
+Notifica al asesor asignado:
+  "🏦 *Nuevo lead calificado para crédito*
+   [datos del lead]
+   💡 Comandos: mensaje/bridge [nombre]"
+    ↓
+Lead recibe confirmación con datos del asesor
+```
+
+**Notas guardadas:**
+- `lead.notes.credit_flow_context` - Estado del flujo, datos financieros, asesor_id
+
+---
+
+## ARCHIVOS CLAVE
+
+| Archivo | Propósito |
+|---------|-----------|
+| `src/handlers/whatsapp.ts` | Handler principal de mensajes |
+| `src/services/ceoCommandsService.ts` | Comandos de CEO |
+| `src/services/asesorCommandsService.ts` | Comandos de asesor hipotecario |
+| `src/services/vendorCommandsService.ts` | Comandos de vendedor (básico) |
+| `src/services/bridgeService.ts` | Activar bridge (6 min) |
+| `src/services/creditFlowService.ts` | Flujo de crédito hipotecario |
+| `src/services/leadMessageService.ts` | Procesamiento de mensajes de leads |
+| `src/services/aiConversationService.ts` | Conversación con IA (Claude) |
+| `src/index.ts` | CRON jobs incluyendo `verificarBridgesPorExpirar` |
+
+---
+
+## TELÉFONOS DE PRUEBA
+
+| Teléfono | Rol | Nombre |
+|----------|-----|--------|
+| 5212224558475 | CEO | CEO Test |
+| 5215610016226 | Lead | Cumpleañero Prueba |
+
+---
+
+## BUGS CONOCIDOS / ARREGLADOS
+
+1. ✅ Error JSON parsing en `ceoCerrarBridge` - Arreglado con try/catch
+2. ✅ "Quiero hablar con asesor" no detectado si había pending_response_to - Reordenado para detectar PRIMERO
+3. ✅ Lead no recibía link de contacto - Ahora recibe wa.me/ y tel:+
+4. ✅ Bridge selection "1" no funcionaba para bridge (solo mensaje) - Agregado `action_type` en `pending_lead_selection`
+5. ✅ CEO no podía enviar mensajes en bridge (tratados como comandos) - Agregada verificación de `active_bridge` ANTES de procesar comandos
+6. ✅ Mensajes de bridge no simétricos - Ahora ambos ven "💬 *Nombre:*"
+7. ✅ Bridge duraba 10 min sin aviso - Ahora 6 min con aviso antes de expirar
+8. ✅ Comando `cerrar` podía confundirse con conversación - Cambiado a `#cerrar`
+
+---
+
+## CÓMO PROBAR
+
+1. **Mensaje intermediado:**
+   - CEO: `mensaje cumpleañero`
+   - CEO escribe mensaje
+   - Lead responde
+   - CEO recibe respuesta
+
+2. **Bridge (chat directo):**
+   - CEO: `bridge cumpleañero`
+   - Si hay varios: selecciona `1`
+   - CEO manda mensaje → Lead ve "💬 *CEO Test:* mensaje"
+   - Lead responde → CEO ve "💬 *Cumpleañero Prueba:* mensaje"
+   - Espera ~5 min para ver aviso de expiración
+   - `#mas` para extender o `#cerrar` para terminar
+
+3. **Lead pide contacto:**
+   - Lead: "quiero hablar con mi asesor"
+   - Lead recibe links (wa.me y tel:)
+   - Vendedor notificado
+
+---
+
+*Última actualización: 2026-01-17 19:30*
