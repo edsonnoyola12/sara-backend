@@ -978,6 +978,18 @@ export class WhatsAppHandler {
         console.log('🔗 BRIDGE activo detectado, reenviando mensaje directo a:', activeBridge.vendedor_name);
         const msgDirecto = `💬 *${lead.name}:*\n${body}`;
         await this.meta.sendWhatsAppMessage(activeBridge.vendedor_phone, msgDirecto);
+
+        // ═══ REGISTRAR ACTIVIDAD EN BITÁCORA (cuenta para el vendedor) ═══
+        if (activeBridge.vendedor_id) {
+          await this.supabase.client.from('lead_activities').insert({
+            lead_id: lead.id,
+            team_member_id: activeBridge.vendedor_id,
+            activity_type: 'bridge_message',
+            notes: `Mensaje recibido de ${lead.name}: "${body.substring(0, 50)}${body.length > 50 ? '...' : ''}"`,
+            created_at: new Date().toISOString()
+          });
+        }
+
         return;
       }
 
@@ -1207,6 +1219,17 @@ export class WhatsAppHandler {
             .from('team_members')
             .update({ notes: notasCEO })
             .eq('id', ceo.id);
+
+          // ═══ REGISTRAR ACTIVIDAD EN BITÁCORA ═══
+          if (activeBridge.lead_id) {
+            await this.supabase.client.from('lead_activities').insert({
+              lead_id: activeBridge.lead_id,
+              team_member_id: ceo.id,
+              activity_type: 'bridge_message',
+              notes: `Mensaje bridge a ${activeBridge.lead_name}: "${body.substring(0, 50)}${body.length > 50 ? '...' : ''}"`,
+              created_at: new Date().toISOString()
+            });
+          }
 
           console.log(`✅ Mensaje bridge reenviado a ${activeBridge.lead_name}`);
         }
@@ -1667,6 +1690,15 @@ export class WhatsAppHandler {
         `_Escribe tu mensaje:_`
       );
 
+      // ═══ REGISTRAR ACTIVIDAD EN BITÁCORA ═══
+      await this.supabase.client.from('lead_activities').insert({
+        lead_id: lead.id,
+        team_member_id: ceo.id,
+        activity_type: 'bridge_start',
+        notes: `Bridge iniciado con ${lead.name} (6 min)`,
+        created_at: new Date().toISOString()
+      });
+
       console.log(`🔗 Bridge activado: ${ceo.name} ↔ ${lead.name}`);
 
     } catch (e) {
@@ -1718,6 +1750,15 @@ export class WhatsAppHandler {
         `Tus mensajes irán directo a ${lead.name} por *6 minutos*.\n\n` +
         `_Escribe tu mensaje:_`
       );
+
+      // ═══ REGISTRAR ACTIVIDAD EN BITÁCORA ═══
+      await this.supabase.client.from('lead_activities').insert({
+        lead_id: lead.id,
+        team_member_id: ceo.id,
+        activity_type: 'bridge_start',
+        notes: `Bridge iniciado con ${lead.name} (6 min)`,
+        created_at: new Date().toISOString()
+      });
 
       console.log(`🔗 Bridge activado (directo): ${ceo.name} ↔ ${lead.name}`);
 
@@ -1859,6 +1900,18 @@ export class WhatsAppHandler {
             );
           }
         }
+
+        // ═══ REGISTRAR ACTIVIDAD EN BITÁCORA ═══
+        if (bridgeInfo.lead_id) {
+          await this.supabase.client.from('lead_activities').insert({
+            lead_id: bridgeInfo.lead_id,
+            team_member_id: ceo.id,
+            activity_type: 'bridge_end',
+            notes: `Bridge cerrado con ${bridgeInfo.lead_name}`,
+            created_at: new Date().toISOString()
+          });
+        }
+
         cerradoAlgo = true;
         console.log(`🔒 Bridge cerrado: ${ceo.name} ↔ ${bridgeInfo.lead_name}`);
       }
@@ -6220,7 +6273,10 @@ Responde con fecha y hora:
       'visit': [],
       'quote': [],
       'whatsapp': [],
-      'email': []
+      'email': [],
+      'bridge_start': [],
+      'bridge_message': [],
+      'bridge_end': []
     };
 
     let montoTotal = 0;
@@ -6252,6 +6308,18 @@ Responde con fecha y hora:
     }
     if (resumen.email.length > 0) {
       msg += 'Emails: ' + resumen.email.length + '\n';
+    }
+
+    // Bridge activities (chat directo)
+    const bridgeActivities = resumen.bridge_start.length + resumen.bridge_message.length + resumen.bridge_end.length;
+    if (bridgeActivities > 0) {
+      msg += '\n🔗 Chats directos:\n';
+      if (resumen.bridge_start.length > 0) {
+        msg += '  Iniciados: ' + resumen.bridge_start.length + ' (' + [...new Set(resumen.bridge_start)].join(', ') + ')\n';
+      }
+      if (resumen.bridge_message.length > 0) {
+        msg += '  Mensajes: ' + resumen.bridge_message.length + '\n';
+      }
     }
 
     msg += '\nTotal: ' + actividades.length + ' actividades';

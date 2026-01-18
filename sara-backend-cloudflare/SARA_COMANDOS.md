@@ -200,6 +200,51 @@ Lead recibe confirmación con datos del asesor
 
 ---
 
+## BITÁCORA DE ACTIVIDADES
+
+Las actividades de bridge se registran automáticamente en la tabla `lead_activities` para el reporte diario del vendedor.
+
+### Tipos de Actividad de Bridge
+
+| Tipo | Descripción |
+|------|-------------|
+| `bridge_start` | Se inició un chat directo |
+| `bridge_message` | Mensaje enviado/recibido durante bridge |
+| `bridge_end` | Se cerró el chat directo |
+
+### Cómo se registra
+
+```
+Vendedor: "bridge Juan"
+    ↓
+Se registra `bridge_start` en lead_activities
+    ↓
+Vendedor envía mensaje → Se registra `bridge_message`
+    ↓
+Lead responde → Se registra `bridge_message` (cuenta para vendedor)
+    ↓
+Vendedor: "#cerrar" → Se registra `bridge_end`
+```
+
+### Ver actividad del día
+
+El vendedor puede ver su actividad con el comando `actividad` o `mi actividad`:
+
+```
+Tu actividad hoy:
+
+Llamadas: 3
+  Juan, Maria, Pedro
+
+🔗 Chats directos:
+  Iniciados: 2 (Juan, Ana)
+  Mensajes: 8
+
+Total: 15 actividades
+```
+
+---
+
 ## ARCHIVOS CLAVE
 
 | Archivo | Propósito |
@@ -261,4 +306,4 @@ Lead recibe confirmación con datos del asesor
 
 ---
 
-*Última actualización: 2026-01-17 19:30*
+*Última actualización: 2026-01-17 20:00*
