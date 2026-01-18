@@ -120,6 +120,11 @@ export class CEOCommandsService {
       return { action: 'call_handler', handlerName: 'cerrarBridge' };
     }
 
+    // ═══ MI ACTIVIDAD / BITÁCORA ═══
+    if (msgLower === 'actividad' || msgLower === 'mi actividad' || msgLower === 'bitacora' || msgLower === 'bitácora') {
+      return { action: 'call_handler', handlerName: 'verActividad' };
+    }
+
     // ═══ NO RECONOCIDO ═══
     return {
       action: 'not_recognized',
@@ -357,6 +362,10 @@ export class CEOCommandsService {
 
         // ━━━ CERRAR BRIDGE ━━━
         case 'cerrarBridge':
+          return { needsExternalHandler: true };
+
+        // ━━━ VER ACTIVIDAD / BITÁCORA ━━━
+        case 'verActividad':
           return { needsExternalHandler: true };
 
         default:

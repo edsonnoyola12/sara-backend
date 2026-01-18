@@ -984,7 +984,7 @@ export class WhatsAppHandler {
           await this.supabase.client.from('lead_activities').insert({
             lead_id: lead.id,
             team_member_id: activeBridge.vendedor_id,
-            activity_type: 'bridge_message',
+            activity_type: 'whatsapp',
             notes: `Mensaje recibido de ${lead.name}: "${body.substring(0, 50)}${body.length > 50 ? '...' : ''}"`,
             created_at: new Date().toISOString()
           });
@@ -1225,7 +1225,7 @@ export class WhatsAppHandler {
             await this.supabase.client.from('lead_activities').insert({
               lead_id: activeBridge.lead_id,
               team_member_id: ceo.id,
-              activity_type: 'bridge_message',
+              activity_type: 'whatsapp',
               notes: `Mensaje bridge a ${activeBridge.lead_name}: "${body.substring(0, 50)}${body.length > 50 ? '...' : ''}"`,
               created_at: new Date().toISOString()
             });
@@ -1518,6 +1518,11 @@ export class WhatsAppHandler {
         await this.ceoCerrarBridge(from, ceo, nombreCEO);
         break;
 
+      // ━━━ VER ACTIVIDAD / BITÁCORA ━━━
+      case 'verActividad':
+        await this.mostrarActividadesHoy(from, ceo);
+        break;
+
       default:
         console.log('Handler CEO no reconocido:', handlerName);
     }
@@ -1691,13 +1696,18 @@ export class WhatsAppHandler {
       );
 
       // ═══ REGISTRAR ACTIVIDAD EN BITÁCORA ═══
-      await this.supabase.client.from('lead_activities').insert({
+      const { error: activityError } = await this.supabase.client.from('lead_activities').insert({
         lead_id: lead.id,
         team_member_id: ceo.id,
-        activity_type: 'bridge_start',
+        activity_type: 'whatsapp',
         notes: `Bridge iniciado con ${lead.name} (6 min)`,
         created_at: new Date().toISOString()
       });
+      if (activityError) {
+        console.log('❌ Error registrando actividad bridge_start:', activityError);
+      } else {
+        console.log('📝 Actividad bridge_start registrada para', ceo.name, 'lead:', lead.id);
+      }
 
       console.log(`🔗 Bridge activado: ${ceo.name} ↔ ${lead.name}`);
 
@@ -1752,13 +1762,19 @@ export class WhatsAppHandler {
       );
 
       // ═══ REGISTRAR ACTIVIDAD EN BITÁCORA ═══
-      await this.supabase.client.from('lead_activities').insert({
+      console.log('📝 Intentando registrar actividad bridge_start para lead:', lead.id, 'team_member:', ceo.id);
+      const { error: activityError2 } = await this.supabase.client.from('lead_activities').insert({
         lead_id: lead.id,
         team_member_id: ceo.id,
-        activity_type: 'bridge_start',
+        activity_type: 'whatsapp',
         notes: `Bridge iniciado con ${lead.name} (6 min)`,
         created_at: new Date().toISOString()
       });
+      if (activityError2) {
+        console.log('❌ Error registrando actividad bridge_start:', JSON.stringify(activityError2));
+      } else {
+        console.log('✅ Actividad bridge_start registrada OK');
+      }
 
       console.log(`🔗 Bridge activado (directo): ${ceo.name} ↔ ${lead.name}`);
 
@@ -1906,7 +1922,7 @@ export class WhatsAppHandler {
           await this.supabase.client.from('lead_activities').insert({
             lead_id: bridgeInfo.lead_id,
             team_member_id: ceo.id,
-            activity_type: 'bridge_end',
+            activity_type: 'whatsapp',
             notes: `Bridge cerrado con ${bridgeInfo.lead_name}`,
             created_at: new Date().toISOString()
           });
@@ -6250,9 +6266,13 @@ Responde con fecha y hora:
     }
   }
 
-  private async mostrarActividadesHoy(from: string, vendedor: any): Promise<void> {
+  private async mostrarActividadesHoy(from: string, vendedor: any, useMeta: boolean = false): Promise<void> {
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
+
+    // Determinar si usar Meta o Twilio basado en el formato del from
+    const useMetaService = useMeta || !from.includes('whatsapp:');
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
 
     const { data: actividades } = await this.supabase.client
       .from('lead_activities')
@@ -6262,8 +6282,12 @@ Responde con fecha y hora:
       .order('created_at', { ascending: false });
 
     if (!actividades || actividades.length === 0) {
-      await this.twilio.sendWhatsAppMessage(from, 
-        'No registraste actividad hoy.\n\nRegistra con:\n- "Llame a Juan"\n- "Visite a Maria"\n- "Cotizacion a Pedro 850k"');
+      const noActivityMsg = 'No registraste actividad hoy.\n\nRegistra con:\n- "Llame a Juan"\n- "Visite a Maria"\n- "Cotizacion a Pedro 850k"';
+      if (useMetaService) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, noActivityMsg);
+      } else {
+        await this.twilio.sendWhatsAppMessage(from, noActivityMsg);
+      }
       return;
     }
 
@@ -6324,7 +6348,11 @@ Responde con fecha y hora:
 
     msg += '\nTotal: ' + actividades.length + ' actividades';
 
-    await this.twilio.sendWhatsAppMessage(from, msg);
+    if (useMetaService) {
+      await this.meta.sendWhatsAppMessage(cleanPhone, msg);
+    } else {
+      await this.twilio.sendWhatsAppMessage(from, msg);
+    }
   }
 
   private async mostrarHistorialLead(from: string, nombreLead: string, vendedor: any): Promise<void> {
