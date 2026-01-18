@@ -34,6 +34,7 @@
 | `bridge [nombre]` | Chat directo 6 min | `ceoBridgeLead` |
 | `#mas` / `#continuar` | Extender bridge 6 min más | `ceoExtenderBridge` |
 | `#cerrar` / `#fin` | Terminar TODAS las conexiones | `ceoCerrarBridge` |
+| `actividad` / `bitácora` | Ver actividad del día | `verActividad` |
 
 ---
 
@@ -206,29 +207,31 @@ Las actividades de bridge se registran automáticamente en la tabla `lead_activi
 
 ### Tipos de Actividad de Bridge
 
-| Tipo | Descripción |
-|------|-------------|
-| `bridge_start` | Se inició un chat directo |
-| `bridge_message` | Mensaje enviado/recibido durante bridge |
-| `bridge_end` | Se cerró el chat directo |
+**NOTA:** La tabla `lead_activities` tiene un constraint que solo permite: `call`, `visit`, `quote`, `whatsapp`, `email`. Por eso los bridges se guardan como `whatsapp` con notas descriptivas.
+
+| Acción | Tipo en DB | Notas |
+|--------|------------|-------|
+| Iniciar bridge | `whatsapp` | "Bridge iniciado con [nombre] (6 min)" |
+| Mensaje en bridge | `whatsapp` | "Mensaje bridge a/de [nombre]: [texto]" |
+| Cerrar bridge | `whatsapp` | "Bridge cerrado con [nombre]" |
 
 ### Cómo se registra
 
 ```
 Vendedor: "bridge Juan"
     ↓
-Se registra `bridge_start` en lead_activities
+Se registra en lead_activities (type=whatsapp, notes="Bridge iniciado...")
     ↓
-Vendedor envía mensaje → Se registra `bridge_message`
+Vendedor envía mensaje → Se registra (type=whatsapp)
     ↓
-Lead responde → Se registra `bridge_message` (cuenta para vendedor)
+Lead responde → Se registra (cuenta para vendedor)
     ↓
-Vendedor: "#cerrar" → Se registra `bridge_end`
+Vendedor: "#cerrar" → Se registra (type=whatsapp, notes="Bridge cerrado...")
 ```
 
 ### Ver actividad del día
 
-El vendedor puede ver su actividad con el comando `actividad` o `mi actividad`:
+El CEO/vendedor puede ver su actividad con el comando `actividad` o `bitácora`:
 
 ```
 Tu actividad hoy:
@@ -236,12 +239,12 @@ Tu actividad hoy:
 Llamadas: 3
   Juan, Maria, Pedro
 
-🔗 Chats directos:
-  Iniciados: 2 (Juan, Ana)
-  Mensajes: 8
+WhatsApps: 5    ← Incluye bridges
 
-Total: 15 actividades
+Total: 8 actividades
 ```
+
+**Nota:** Los bridges aparecen en "WhatsApps" porque se guardan con ese tipo.
 
 ---
 
@@ -280,6 +283,28 @@ Total: 15 actividades
 6. ✅ Mensajes de bridge no simétricos - Ahora ambos ven "💬 *Nombre:*"
 7. ✅ Bridge duraba 10 min sin aviso - Ahora 6 min con aviso antes de expirar
 8. ✅ Comando `cerrar` podía confundirse con conversación - Cambiado a `#cerrar`
+9. ✅ Actividades de bridge no se guardaban - DB constraint solo permite `whatsapp`, cambiado tipo
+
+---
+
+## COMANDOS PROBADOS ✅
+
+| Comando | Rol | Estado |
+|---------|-----|--------|
+| `bridge [nombre]` | CEO | ✅ Probado |
+| `#cerrar` | CEO | ✅ Probado |
+| `#mas` | CEO | ✅ Probado |
+| `mensaje [nombre]` | CEO | ✅ Probado |
+| `actividad` | CEO | ✅ Probado |
+| `ayuda` | CEO | ✅ Probado |
+| `reporte` | CEO | ✅ Probado |
+| `hoy` | CEO | ✅ Probado |
+| Selección `1`, `2`, `3` | CEO | ✅ Probado |
+
+### Pendientes por probar:
+- Comandos de Asesor Hipotecario
+- `reagendar` (vendedor)
+- `cancelar cita` (vendedor)
 
 ---
 
@@ -306,4 +331,4 @@ Total: 15 actividades
 
 ---
 
-*Última actualización: 2026-01-17 20:00*
+*Última actualización: 2026-01-17 23:00*
