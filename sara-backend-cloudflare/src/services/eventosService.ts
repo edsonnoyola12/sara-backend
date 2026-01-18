@@ -460,7 +460,7 @@ export class EventosService {
     for (const lead of leads) {
       try {
         const phone = lead.phone.startsWith('52') ? lead.phone : '52' + lead.phone;
-        const nombre = lead.name?.split(' ')[0] || 'amigo';
+        const nombre = lead.name?.split(' ')[0] || '';
 
         // Verificar si el lead ha interactuado en las últimas 24h
         const dentroVentana24h = lead.last_message_at && lead.last_message_at > hace24h;

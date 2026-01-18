@@ -46,73 +46,100 @@ export class NotificationService {
     let errores = 0;
 
     try {
-      const now = new Date();
-      const mexicoOffset = -6 * 60 * 60 * 1000;
-      const mexicoNow = new Date(now.getTime() + mexicoOffset);
+      const ahora = new Date();
+      const en24h = new Date(ahora.getTime() + 24 * 60 * 60 * 1000);
+      const en2h = new Date(ahora.getTime() + 2 * 60 * 60 * 1000);
 
-      // Recordatorios 24h antes
-      const in24h = new Date(mexicoNow.getTime() + 24 * 60 * 60 * 1000);
-      const in24hStart = new Date(in24h);
-      in24hStart.setMinutes(in24hStart.getMinutes() - 30);
-      const in24hEnd = new Date(in24h);
-      in24hEnd.setMinutes(in24hEnd.getMinutes() + 30);
+      // Usar timezone México para las fechas
+      const mexicoFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Mexico_City',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
 
-      const { data: citas24h } = await this.supabase.client
+      const hoyStr = mexicoFormatter.format(ahora);
+      const en24hStr = mexicoFormatter.format(en24h);
+      const en2hStr = mexicoFormatter.format(en2h);
+
+      console.log(`📅 DEBUG Recordatorios: hoy=${hoyStr}, en24h=${en24hStr}, en2h=${en2hStr}`);
+
+      // Recordatorios 24h antes - buscar citas para mañana
+      // Traer todas y filtrar en JS (porque .or() con filtros previos no funciona bien)
+      const { data: allCitas24h, error: error24h } = await this.supabase.client
         .from('appointments')
-        .select('*, leads(name, phone)')
-        .gte('date', in24hStart.toISOString())
-        .lte('date', in24hEnd.toISOString())
-        .eq('status', 'scheduled')
-        .eq('reminder_24h_sent', false);
+        .select('id, lead_id, lead_name, lead_phone, scheduled_date, scheduled_time, property_name, reminder_24h_sent')
+        .gte('scheduled_date', hoyStr)
+        .lte('scheduled_date', en24hStr)
+        .eq('status', 'scheduled');
+
+      // Filtrar en JS: solo las que NO tienen reminder_24h_sent = true
+      const citas24h = allCitas24h?.filter(c => c.reminder_24h_sent !== true) || [];
+
+      console.log(`📅 DEBUG: Total citas en rango: ${allCitas24h?.length || 0}, sin recordatorio: ${citas24h.length}, error: ${error24h?.message || 'ninguno'}`);
+      if (citas24h.length) {
+        console.log(`📅 DEBUG citas24h:`, citas24h.map(c => ({ id: c.id?.slice(0,8), lead: c.lead_name, phone: c.lead_phone?.slice(-4), fecha: c.scheduled_date, hora: c.scheduled_time })));
+      }
 
       for (const cita of citas24h || []) {
-        if (cita.leads?.phone) {
+        if (cita.lead_phone) {
           try {
+            const nombreCorto = cita.lead_name?.split(' ')[0] || 'Hola';
+            const desarrollo = cita.property_name || 'nuestro desarrollo';
             await this.meta.sendWhatsAppMessage(
-              cita.leads.phone,
-              `📅 Hola ${cita.leads.name || ''}, te recordamos tu cita mañana. ¡Te esperamos!`
+              cita.lead_phone,
+              `📅 ¡Hola ${nombreCorto}! Te recordamos tu cita mañana a las ${cita.scheduled_time || ''}. 🏠 ${desarrollo}. ¡Te esperamos!`
             );
             await this.supabase.client
               .from('appointments')
               .update({ reminder_24h_sent: true })
               .eq('id', cita.id);
             enviados++;
+            console.log(`📅 Recordatorio 24h enviado a ${cita.lead_name}`);
           } catch (e) {
             errores++;
+            console.error(`❌ Error enviando recordatorio 24h:`, e);
           }
+        } else {
+          console.log(`⚠️ Cita ${cita.id?.slice(0,8)} sin teléfono de lead`);
         }
       }
 
-      // Recordatorios 2h antes
-      const in2h = new Date(mexicoNow.getTime() + 2 * 60 * 60 * 1000);
-      const in2hStart = new Date(in2h);
-      in2hStart.setMinutes(in2hStart.getMinutes() - 15);
-      const in2hEnd = new Date(in2h);
-      in2hEnd.setMinutes(in2hEnd.getMinutes() + 15);
-
-      const { data: citas2h } = await this.supabase.client
+      // Recordatorios 2h antes - buscar citas para hoy
+      // Traer todas y filtrar en JS
+      const { data: allCitas2h, error: error2h } = await this.supabase.client
         .from('appointments')
-        .select('*, leads(name, phone)')
-        .gte('date', in2hStart.toISOString())
-        .lte('date', in2hEnd.toISOString())
-        .eq('status', 'scheduled')
-        .eq('reminder_2h_sent', false);
+        .select('id, lead_id, lead_name, lead_phone, scheduled_date, scheduled_time, property_name, reminder_2h_sent')
+        .gte('scheduled_date', hoyStr)
+        .lte('scheduled_date', en2hStr)
+        .eq('status', 'scheduled');
+
+      // Filtrar en JS: solo las que NO tienen reminder_2h_sent = true
+      const citas2h = allCitas2h?.filter(c => c.reminder_2h_sent !== true) || [];
+
+      console.log(`📅 DEBUG: Total citas 2h en rango: ${allCitas2h?.length || 0}, sin recordatorio: ${citas2h.length}, error: ${error2h?.message || 'ninguno'}`);
 
       for (const cita of citas2h || []) {
-        if (cita.leads?.phone) {
+        if (cita.lead_phone) {
           try {
+            const nombreCorto = cita.lead_name?.split(' ')[0] || 'Hola';
+            const desarrollo = cita.property_name || 'nuestro desarrollo';
             await this.meta.sendWhatsAppMessage(
-              cita.leads.phone,
-              `⏰ ${cita.leads.name || ''}, tu cita es en 2 horas. ¡Te esperamos!`
+              cita.lead_phone,
+              `⏰ ¡${nombreCorto}, tu cita es en 2 horas! 🏠 ${desarrollo} a las ${cita.scheduled_time || ''}. ¡Te esperamos!`
             );
             await this.supabase.client
               .from('appointments')
               .update({ reminder_2h_sent: true })
               .eq('id', cita.id);
             enviados++;
+            console.log(`📅 Recordatorio 2h enviado a ${cita.lead_name}`);
           } catch (e) {
             errores++;
+            console.error(`❌ Error enviando recordatorio 2h:`, e);
           }
+        } else {
+          console.log(`⚠️ Cita ${cita.id?.slice(0,8)} sin teléfono de lead`);
         }
       }
 

@@ -33,6 +33,28 @@ const DNC_PHRASES = [
 // Admin para alertas críticas
 const ADMIN_PHONE = '5212224558475'; // Tu número
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 🧪 MODO PRUEBA - Solo envía a teléfonos autorizados
+// ═══════════════════════════════════════════════════════════════════════════
+const TEST_MODE = false; // ✅ PRODUCCIÓN - Envía a todos
+const TEST_PHONES = [
+  '5215610016226',  // Alejandro (asesor)
+  '5212224558475',  // CEO Test (vendedor)
+  '5610016226',     // Sin prefijo
+  '2224558475',     // Sin prefijo
+];
+
+function isTestPhoneAllowed(phone: string): boolean {
+  if (!TEST_MODE) return true; // Si no está en modo prueba, permitir todo
+  const cleanPhone = phone.replace(/\D/g, '');
+  const last10 = cleanPhone.slice(-10);
+  return TEST_PHONES.some(tp => {
+    const tpClean = tp.replace(/\D/g, '');
+    const tpLast10 = tpClean.slice(-10);
+    return tpLast10 === last10;
+  });
+}
+
 // Función para corregir double-encoding UTF-8 (acentos Y emojis)
 function sanitizeUTF8(text: string): string {
   if (!text) return text;
@@ -100,6 +122,12 @@ export class MetaWhatsAppService {
   async sendWhatsAppMessage(to: string, body: string, bypassRateLimit = true): Promise<any> {
     const phone = this.normalizePhone(to);
     const now = Date.now();
+
+    // 🧪 MODO PRUEBA - Bloquear envíos a teléfonos no autorizados
+    if (!isTestPhoneAllowed(phone)) {
+      console.log(`🧪 TEST_MODE: Bloqueado envío a ${phone} (no autorizado)`);
+      return { test_mode_blocked: true, phone };
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     // 🚨 CIRCUIT BREAKER - Solo para mensajes NO bypass (broadcasts)
@@ -491,6 +519,12 @@ export class MetaWhatsAppService {
   async sendTemplate(to: string, templateName: string, languageCode: string = 'es', components?: any[], bypassRateLimit: boolean = false): Promise<any> {
     const phone = this.normalizePhone(to);
     const now = Date.now();
+
+    // 🧪 MODO PRUEBA - Bloquear envíos a teléfonos no autorizados
+    if (!isTestPhoneAllowed(phone)) {
+      console.log(`🧪 TEST_MODE: Bloqueado template "${templateName}" a ${phone} (no autorizado)`);
+      return { test_mode_blocked: true, phone, template: templateName };
+    }
 
     // 🚦 RATE LIMITING PARA TEMPLATES (broadcasts automáticos)
     if (!bypassRateLimit) {

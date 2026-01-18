@@ -61,6 +61,14 @@ export class LeadMessageService {
     const mensajeLower = body.toLowerCase().trim();
     const notasLead = typeof lead.notes === 'object' ? lead.notes : {};
 
+    // 0. RESPUESTA A MENSAJE AUTOMÁTICO (lead frío, aniversario, cumpleaños, etc.)
+    const autoResponseResult = await this.checkAutoMessageResponse(lead, body, mensajeLower, notasLead);
+    if (autoResponseResult.action === 'handled') return autoResponseResult;
+
+    // 0.5. ENCUESTA DE SATISFACCIÓN POST-VISITA (respuestas 1-4)
+    const satisfactionResult = await this.checkSatisfactionSurvey(lead, body, mensajeLower, notasLead);
+    if (satisfactionResult.action === 'handled') return satisfactionResult;
+
     // 1. REGISTRO A EVENTOS
     const eventResult = await this.checkEventRegistration(lead, body, mensajeLower, notasLead);
     if (eventResult.action === 'handled') return eventResult;
@@ -96,6 +104,71 @@ export class LeadMessageService {
 
     // No se detectó ningún patrón especial, continuar a IA
     return { action: 'continue_to_ai' };
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // ENCUESTA DE SATISFACCIÓN POST-VISITA
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  private async checkSatisfactionSurvey(
+    lead: any,
+    body: string,
+    mensajeLower: string,
+    notasLead: any
+  ): Promise<LeadMessageResult> {
+    const pendingSurvey = notasLead?.pending_satisfaction_survey;
+    if (!pendingSurvey) return { action: 'continue_to_ai' };
+
+    // Verificar si es respuesta 1-4
+    const respuesta = mensajeLower.trim();
+    const ratings: { [key: string]: { label: string; emoji: string } } = {
+      '1': { label: 'Excelente', emoji: '🌟' },
+      '2': { label: 'Buena', emoji: '👍' },
+      '3': { label: 'Regular', emoji: '😐' },
+      '4': { label: 'Mala', emoji: '😔' }
+    };
+
+    const rating = ratings[respuesta];
+    if (!rating) return { action: 'continue_to_ai' };
+
+    const nombreCliente = lead.name?.split(' ')[0] || '';
+    const propiedad = pendingSurvey.property || 'la propiedad';
+
+    // Guardar la respuesta en surveys
+    try {
+      await this.supabase.client.from('surveys').insert({
+        lead_id: lead.id,
+        survey_type: 'satisfaction',
+        rating: parseInt(respuesta),
+        rating_label: rating.label,
+        property: propiedad,
+        created_at: new Date().toISOString()
+      });
+    } catch (err) {
+      console.log('⚠️ Error guardando encuesta (tabla puede no existir):', err);
+    }
+
+    // Limpiar pending_satisfaction_survey
+    delete notasLead.pending_satisfaction_survey;
+
+    let respuestaCliente = '';
+    if (respuesta === '1' || respuesta === '2') {
+      respuestaCliente = `¡Gracias por tu feedback, ${nombreCliente}! ${rating.emoji}\n\n` +
+        `Nos alegra que hayas tenido una experiencia *${rating.label.toLowerCase()}*.\n\n` +
+        `Si tienes alguna pregunta sobre *${propiedad}*, ¡aquí estamos para ayudarte! 🏠`;
+    } else {
+      respuestaCliente = `Gracias por tu feedback, ${nombreCliente}. ${rating.emoji}\n\n` +
+        `Lamentamos que tu experiencia no haya sido la mejor.\n` +
+        `Tomaremos en cuenta tus comentarios para mejorar.\n\n` +
+        `¿Hay algo específico que podamos hacer para ayudarte? 🙏`;
+    }
+
+    return {
+      action: 'handled',
+      response: respuestaCliente,
+      sendVia: 'meta',
+      updateLead: { notes: notasLead }
+    };
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -580,5 +653,242 @@ export class LeadMessageService {
         sentAt: broadcastInfo.sentAt || ''
       }
     };
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // RESPUESTA A MENSAJE AUTOMÁTICO
+  // Maneja respuestas a: lead frío, aniversario, cumpleaños, post-venta, etc.
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  private async checkAutoMessageResponse(
+    lead: any,
+    body: string,
+    mensajeLower: string,
+    notasLead: any
+  ): Promise<LeadMessageResult> {
+    const pendingResponse = notasLead?.pending_auto_response;
+    if (!pendingResponse) return { action: 'continue_to_ai' };
+
+    // Verificar que el mensaje automático fue enviado en las últimas 48 horas
+    const sentAt = pendingResponse.sent_at ? new Date(pendingResponse.sent_at) : null;
+    if (!sentAt) return { action: 'continue_to_ai' };
+
+    const horasTranscurridas = (Date.now() - sentAt.getTime()) / (1000 * 60 * 60);
+    if (horasTranscurridas > 48) {
+      console.log('⏰ Mensaje automático muy antiguo (>48h), ignorando contexto');
+      return { action: 'continue_to_ai' };
+    }
+
+    const tipoMensaje = pendingResponse.type;
+    const nombreLead = lead.name?.split(' ')[0] || 'Hola';
+    const propiedad = lead.property_interest || 'nuestros desarrollos';
+
+    console.log(`📩 Respuesta a mensaje automático tipo: ${tipoMensaje}`);
+
+    // Detectar tipo de respuesta
+    const respuestasPositivas = ['si', 'sí', 'me interesa', 'quiero', 'ok', 'va', 'dale', 'claro', 'por supuesto', 'adelante', 'bueno', 'bien', 'perfecto', 'de acuerdo'];
+    const respuestasNegativas = ['no', 'no gracias', 'no me interesa', 'paso', 'ya no', 'no por ahora', 'despues', 'después', 'luego'];
+    const respuestasNeutras = ['gracias', 'voy bien', 'todo bien', 'bien gracias', 'bien', 'excelente', 'muy bien', 'genial', '👍', '🙏', '😊'];
+
+    // Detectar si es una SOLICITUD ESPECÍFICA que debe pasar a la IA
+    // Palabras clave que indican una pregunta/solicitud concreta
+    const palabrasSolicitud = [
+      'ubicación', 'ubicacion', 'dirección', 'direccion', 'donde', 'dónde', 'mapa',
+      'video', 'videos', 'foto', 'fotos', 'imagen', 'imagenes', 'imágenes',
+      'precio', 'precios', 'costo', 'costos', 'cuánto', 'cuanto', 'enganche', 'mensualidad',
+      'información', 'informacion', 'info', 'detalles', 'más', 'mas',
+      'agendar', 'cita', 'visita', 'cuando', 'cuándo', 'horario', 'disponible',
+      'recorrido', 'recorridos', 'conocer', 'ver',
+      'credito', 'crédito', 'infonavit', 'fovissste', 'financiamiento',
+      'amenidades', 'metros', 'm2', 'tamaño', 'habitaciones', 'recámaras', 'recamaras',
+      'llamar', 'llamame', 'llámame', 'llama', 'contactar', 'contacta',
+      'enviar', 'mandar', 'manda', 'mandame', 'mándame', 'enviame', 'envíame', 'pasa',
+      'qué', 'que', 'cómo', 'como', 'cuál', 'cual' // Preguntas
+    ];
+
+    const esSolicitudEspecifica = palabrasSolicitud.some(palabra => mensajeLower.includes(palabra)) ||
+                                   mensajeLower.includes('?') ||
+                                   mensajeLower.length > 60; // Mensajes largos probablemente son solicitudes específicas
+
+    const esPositiva = respuestasPositivas.some(r => mensajeLower === r || mensajeLower.startsWith(r + ' '));
+    const esNegativa = respuestasNegativas.some(r => mensajeLower === r || mensajeLower.startsWith(r + ' '));
+    const esNeutra = respuestasNeutras.some(r => mensajeLower === r || mensajeLower.startsWith(r));
+
+    // Si es una SOLICITUD ESPECÍFICA, pasar a la IA para que responda apropiadamente
+    // Pero aún notificar al vendedor
+    if (esSolicitudEspecifica && !esNegativa) {
+      console.log(`📝 Solicitud específica detectada, pasando a IA: "${body.substring(0, 50)}..."`);
+
+      // Notificar al vendedor sobre la solicitud
+      const vendedorId = pendingResponse.vendedor_id || lead.assigned_to;
+      let notifyVendor: LeadMessageResult['notifyVendor'];
+
+      if (vendedorId) {
+        const { data: vendedorData } = await this.supabase.client
+          .from('team_members')
+          .select('phone, name')
+          .eq('id', vendedorId)
+          .single();
+
+        if (vendedorData?.phone) {
+          const tipoLabel = this.getTipoMensajeLabel(tipoMensaje);
+          notifyVendor = {
+            phone: vendedorData.phone,
+            message: `📬 *SOLICITUD DE LEAD*\n\n` +
+                     `👤 *${lead.name || 'Lead sin nombre'}*\n` +
+                     `📱 ${lead.phone}\n` +
+                     `📝 Contexto: ${tipoLabel}\n\n` +
+                     `💬 Pide: "${body.substring(0, 200)}"\n\n` +
+                     `⚡ *Atender pronto - Lead reactivado*`
+          };
+        }
+      }
+
+      // Limpiar pending_auto_response y marcar como reactivado
+      const newNotes = { ...notasLead };
+      delete newNotes.pending_auto_response;
+      newNotes.reactivado_solicitud = {
+        type: tipoMensaje,
+        solicitud: body.substring(0, 200),
+        at: new Date().toISOString()
+      };
+
+      // Pasar a la IA pero con contexto de que es un lead reactivado
+      return {
+        action: 'continue_to_ai',
+        notifyVendor,
+        updateLead: {
+          notes: newNotes,
+          status: lead.status === 'cold' ? 'contacted' : lead.status
+        }
+      };
+    }
+
+    // Obtener vendedor para notificar
+    let notifyVendor: LeadMessageResult['notifyVendor'];
+    const vendedorId = pendingResponse.vendedor_id || lead.assigned_to;
+
+    if (vendedorId) {
+      const { data: vendedorData } = await this.supabase.client
+        .from('team_members')
+        .select('phone, name')
+        .eq('id', vendedorId)
+        .single();
+
+      if (vendedorData?.phone) {
+        const tipoLabel = this.getTipoMensajeLabel(tipoMensaje);
+        const estadoRespuesta = esPositiva ? '✅ INTERESADO' : esNegativa ? '❌ No interesado' : '💬 Respuesta recibida';
+
+        notifyVendor = {
+          phone: vendedorData.phone,
+          message: `📬 *RESPUESTA DE LEAD*\n\n` +
+                   `👤 *${lead.name || 'Lead sin nombre'}*\n` +
+                   `📱 ${lead.phone}\n` +
+                   `📝 Mensaje: ${tipoLabel}\n\n` +
+                   `💬 Respondió: "${body.substring(0, 150)}"\n\n` +
+                   `${estadoRespuesta}\n\n` +
+                   `${esPositiva ? '⚡ *¡Contáctalo ahora!*' : ''}`
+        };
+      }
+    }
+
+    // Generar respuesta según tipo de mensaje y respuesta del lead
+    let respuesta = '';
+    let updateLead: Record<string, any> = {};
+
+    switch (tipoMensaje) {
+      case 'lead_frio':
+      case 'reengagement':
+        if (esPositiva) {
+          respuesta = `¡Qué gusto ${nombreLead}! 😊\n\n` +
+                      `Me encanta que sigas interesado en ${propiedad}. ` +
+                      `Tu asesor te contactará en breve para darte toda la información actualizada.\n\n` +
+                      `¿Hay algo específico que te gustaría saber?`;
+          updateLead = { status: 'contacted', notes: { ...notasLead, reactivado: new Date().toISOString() } };
+        } else if (esNegativa) {
+          respuesta = `Entendido ${nombreLead}, sin problema. 👍\n\n` +
+                      `Si en algún momento cambias de opinión, aquí estamos para ayudarte. ¡Que tengas un excelente día!`;
+        } else {
+          respuesta = `¡Gracias por responder ${nombreLead}! 😊\n\n` +
+                      `¿Te gustaría que tu asesor te contacte para platicar sobre ${propiedad}?`;
+        }
+        break;
+
+      case 'aniversario':
+        if (esNeutra || body.length < 50) {
+          respuesta = `¡Nos da mucho gusto saber que estás bien ${nombreLead}! 🏠💙\n\n` +
+                      `Disfruta tu hogar. Si necesitas algo, aquí estamos para ayudarte.`;
+        } else {
+          respuesta = `¡Gracias por compartir ${nombreLead}! 🏠\n\n` +
+                      `Nos alegra que disfrutes tu hogar. Cualquier cosa que necesites, no dudes en escribirnos.`;
+        }
+        break;
+
+      case 'cumpleanos':
+        respuesta = `¡Gracias ${nombreLead}! 🎉\n\n` +
+                    `Esperamos que la pases increíble en tu día especial. ¡Un abrazo grande!`;
+        break;
+
+      case 'postventa':
+        if (esPositiva || esNeutra) {
+          respuesta = `¡Qué bueno saber que todo va bien ${nombreLead}! 🏠\n\n` +
+                      `Gracias por ser parte de nuestra comunidad. Si necesitas algo, aquí estamos.`;
+        } else {
+          respuesta = `Gracias por tu respuesta ${nombreLead}.\n\n` +
+                      `Tu asesor te contactará para ver cómo podemos ayudarte.`;
+        }
+        break;
+
+      case 'recordatorio_pago':
+        if (esPositiva) {
+          respuesta = `Perfecto ${nombreLead}, ¡gracias por confirmar! 💪\n\n` +
+                      `Si tienes alguna duda sobre tu pago, tu asesor está disponible para ayudarte.`;
+        } else {
+          respuesta = `Entendido ${nombreLead}. Tu asesor te contactará para ver las opciones disponibles.`;
+        }
+        break;
+
+      default:
+        // Respuesta genérica
+        if (esPositiva) {
+          respuesta = `¡Perfecto ${nombreLead}! 😊\n\n` +
+                      `Tu asesor te contactará pronto con más información.`;
+        } else if (esNegativa) {
+          respuesta = `Entendido ${nombreLead}, sin problema. 👍\n\n` +
+                      `Si cambias de opinión, aquí estamos.`;
+        } else {
+          respuesta = `¡Gracias por tu respuesta ${nombreLead}! 😊\n\n` +
+                      `Tu asesor revisará tu mensaje y te contactará si es necesario.`;
+        }
+    }
+
+    // Limpiar pending_auto_response después de procesar
+    const newNotes = { ...notasLead };
+    delete newNotes.pending_auto_response;
+    newNotes.last_auto_response = {
+      type: tipoMensaje,
+      response: body.substring(0, 200),
+      responded_at: new Date().toISOString()
+    };
+
+    return {
+      action: 'handled',
+      response: respuesta,
+      sendVia: 'meta',
+      notifyVendor,
+      updateLead: { notes: newNotes, ...updateLead }
+    };
+  }
+
+  private getTipoMensajeLabel(tipo: string): string {
+    const labels: Record<string, string> = {
+      'lead_frio': '❄️ Re-engagement lead frío',
+      'reengagement': '🔄 Re-engagement',
+      'aniversario': '🏠 Felicitación aniversario',
+      'cumpleanos': '🎂 Felicitación cumpleaños',
+      'postventa': '📦 Seguimiento post-venta',
+      'recordatorio_pago': '💰 Recordatorio de pago'
+    };
+    return labels[tipo] || '📩 Mensaje automático';
   }
 }

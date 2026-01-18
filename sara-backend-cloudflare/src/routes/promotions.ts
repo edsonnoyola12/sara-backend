@@ -89,7 +89,7 @@ export async function handlePromotionRoutes(
       try {
         const phone = lead.phone.replace(/\D/g, '');
         const formattedPhone = phone.startsWith('521') ? phone : (phone.startsWith('52') ? '521' + phone.slice(2) : '521' + phone);
-        const personalizedMsg = promo.message.replace('{nombre}', lead.name || 'amigo');
+        const personalizedMsg = promo.message.replace('{nombre}', lead.name || '');
 
         // Enviar imagen
         if (body.send_image && promo.image_url) {

@@ -151,8 +151,9 @@ export class CalendarService {
   // ═══════════════════════════════════════════════════════════════
   async updateEvent(eventId: string, updates: Partial<CalendarEventInput>): Promise<any> {
     const token = await this.getAccessToken();
-    
+
     console.log('📆 updateEvent:', eventId);
+    console.log('📆 updateEvent BODY:', JSON.stringify(updates));
 
     const response = await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(this.calendarId)}/events/${eventId}`,

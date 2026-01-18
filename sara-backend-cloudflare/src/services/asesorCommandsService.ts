@@ -1,7 +1,1204 @@
 import { SupabaseService } from './supabase';
+
+interface CommandResult {
+  action: 'send_message' | 'call_handler' | 'not_recognized';
+  message?: string;
+  handlerName?: string;
+  handlerParams?: any;
+}
+
+interface HandlerResult {
+  message?: string;
+  error?: string;
+  needsExternalHandler?: boolean;
+  leadPhone?: string;
+  leadMessage?: string;
+  vendedorPhone?: string;
+  vendedorMessage?: string;
+}
+
+interface CreditFlowContext {
+  state: string;
+  banco_preferido?: string;
+  ingreso_mensual?: number;
+  enganche?: number;
+  capacidad_credito?: number;
+  modalidad?: string;
+  lead_name: string;
+  lead_phone: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export class AsesorCommandsService {
   constructor(private supabase: SupabaseService) {}
+
+  // ═══════════════════════════════════════════════════════════════════
+  // SINCRONIZAR CON MORTGAGE_APPLICATIONS (para que aparezca en CRM)
+  // ═══════════════════════════════════════════════════════════════════
+  private async syncMortgageApplication(lead: any, newStatus: string, asesorId: string, asesorName: string): Promise<void> {
+    try {
+      // Mapeo de status del lead a status de mortgage_applications
+      const statusMap: Record<string, string> = {
+        'new': 'pending',
+        'credit_qualified': 'pending',
+        'contacted': 'in_review',
+        'documents_pending': 'in_review',
+        'pre_approved': 'sent_to_bank',
+        'approved': 'approved',
+        'rejected': 'rejected'
+      };
+
+      const mortgageStatus = statusMap[newStatus] || 'pending';
+      const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+      const ctx = notes?.credit_flow_context;
+
+      // Buscar si ya existe un mortgage_application para este lead
+      const { data: existingMortgage } = await this.supabase.client
+        .from('mortgage_applications')
+        .select('id')
+        .eq('lead_id', lead.id)
+        .single();
+
+      if (existingMortgage) {
+        // Actualizar existente
+        await this.supabase.client
+          .from('mortgage_applications')
+          .update({
+            status: mortgageStatus,
+            updated_at: new Date().toISOString(),
+            ...(mortgageStatus === 'in_review' && { in_review_at: new Date().toISOString() }),
+            ...(mortgageStatus === 'sent_to_bank' && { sent_to_bank_at: new Date().toISOString() }),
+            ...(mortgageStatus === 'approved' && { decision_at: new Date().toISOString() }),
+            ...(mortgageStatus === 'rejected' && { decision_at: new Date().toISOString() })
+          })
+          .eq('id', existingMortgage.id);
+        console.log(`📊 Mortgage ${existingMortgage.id} actualizado a ${mortgageStatus}`);
+      } else {
+        // Crear nuevo mortgage_application
+        const newMortgage = {
+          lead_id: lead.id,
+          lead_name: lead.name,
+          lead_phone: lead.phone,
+          property_name: lead.property_interest || ctx?.desarrollo || 'Por definir',
+          monthly_income: ctx?.ingreso_mensual || 0,
+          down_payment: ctx?.enganche || 0,
+          bank: ctx?.banco_preferido || 'Por definir',
+          status: mortgageStatus,
+          status_notes: 'Creado desde comandos de WhatsApp',
+          assigned_advisor_id: asesorId,
+          assigned_advisor_name: asesorName,
+          pending_at: new Date().toISOString(),
+          ...(mortgageStatus === 'in_review' && { in_review_at: new Date().toISOString() }),
+          ...(mortgageStatus === 'sent_to_bank' && { sent_to_bank_at: new Date().toISOString() })
+        };
+
+        const { data: created, error } = await this.supabase.client
+          .from('mortgage_applications')
+          .insert(newMortgage)
+          .select('id')
+          .single();
+
+        if (error) {
+          console.error('❌ Error creando mortgage:', error);
+        } else {
+          console.log(`📊 Mortgage ${created?.id} creado con status ${mortgageStatus}`);
+        }
+      }
+    } catch (e) {
+      console.error('❌ Error sincronizando mortgage_application:', e);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // DETECCIÓN DE COMANDOS
+  // ═══════════════════════════════════════════════════════════════════
+  detectCommand(mensaje: string, bodyOriginal: string, nombreAsesor: string): CommandResult {
+    const msg = mensaje.toLowerCase().trim();
+
+    // ━━━ AYUDA ━━━
+    if (msg === 'ayuda' || msg === 'help' || msg === 'comandos' || msg === '?') {
+      return { action: 'send_message', message: this.getMensajeAyuda(nombreAsesor) };
+    }
+
+    // ━━━ MIS LEADS ━━━
+    if (msg === 'mis leads' || msg === 'leads' || msg === 'mis clientes' || msg === 'clientes') {
+      return { action: 'call_handler', handlerName: 'asesorMisLeads' };
+    }
+
+    // ━━━ STATUS [lead] ━━━
+    const statusMatch = msg.match(/^status\s+(.+)$/i) || msg.match(/^ver\s+(.+)$/i) || msg.match(/^info\s+(.+)$/i);
+    if (statusMatch) {
+      return { action: 'call_handler', handlerName: 'asesorStatusLead', handlerParams: { query: statusMatch[1] } };
+    }
+
+    // ━━━ DOCS [lead] ━━━
+    const docsMatch = msg.match(/^docs?\s+(.+)$/i) || msg.match(/^documentos?\s+(.+)$/i) || msg.match(/^pedir docs?\s+(.+)$/i);
+    if (docsMatch) {
+      return { action: 'call_handler', handlerName: 'asesorPedirDocs', handlerParams: { query: docsMatch[1] } };
+    }
+
+    // ━━━ PREAPROBADO [lead] ━━━
+    const preaprobadoMatch = msg.match(/^preaprobado\s+(.+)$/i) || msg.match(/^aprobado\s+(.+)$/i) || msg.match(/^pre-?aprobado\s+(.+)$/i);
+    if (preaprobadoMatch) {
+      return { action: 'call_handler', handlerName: 'asesorPreaprobado', handlerParams: { query: preaprobadoMatch[1] } };
+    }
+
+    // ━━━ RECHAZADO [lead] [motivo] ━━━
+    const rechazadoMatch = msg.match(/^rechazado\s+(\S+)\s+(.+)$/i) || msg.match(/^no aprobado\s+(\S+)\s+(.+)$/i);
+    if (rechazadoMatch) {
+      return { action: 'call_handler', handlerName: 'asesorRechazado', handlerParams: { query: rechazadoMatch[1], motivo: rechazadoMatch[2] } };
+    }
+
+    // ━━━ ADELANTE / AVANZAR [lead] ━━━
+    const adelanteMatch = msg.match(/^(?:adelante|avanzar|siguiente|next)\s+(.+)$/i) ||
+                          msg.match(/^(.+?)\s+(?:adelante|avanzar|al siguiente)$/i);
+    if (adelanteMatch) {
+      return { action: 'call_handler', handlerName: 'asesorMoverLead', handlerParams: { query: adelanteMatch[1], direccion: 'next' } };
+    }
+
+    // ━━━ ATRAS / REGRESAR [lead] ━━━
+    const atrasMatch = msg.match(/^(?:atras|atrás|regresar|anterior|prev)\s+(.+)$/i) ||
+                       msg.match(/^(.+?)\s+(?:atras|atrás|regresar|al anterior)$/i);
+    if (atrasMatch) {
+      return { action: 'call_handler', handlerName: 'asesorMoverLead', handlerParams: { query: atrasMatch[1], direccion: 'prev' } };
+    }
+
+    // ━━━ ON / OFF - Disponibilidad ━━━
+    if (msg === 'on' || msg === 'disponible' || msg === 'activo') {
+      return { action: 'call_handler', handlerName: 'asesorDisponibilidad', handlerParams: { estado: true } };
+    }
+    if (msg === 'off' || msg === 'no disponible' || msg === 'ocupado' || msg === 'inactivo') {
+      return { action: 'call_handler', handlerName: 'asesorDisponibilidad', handlerParams: { estado: false } };
+    }
+
+    // ━━━ CONTACTADO [lead] ━━━
+    const contactadoMatch = msg.match(/^contactado\s+(.+)$/i) || msg.match(/^contacte\s+a?\s*(.+)$/i);
+    if (contactadoMatch) {
+      return { action: 'call_handler', handlerName: 'asesorMarcarContactado', handlerParams: { query: contactadoMatch[1] } };
+    }
+
+    // ━━━ DILE [lead] [mensaje] ━━━
+    const dileMatch = msg.match(/^dile\s+a?\s*(\S+)\s+que\s+(.+)$/i) ||
+                      msg.match(/^mensaje\s+a?\s*(\S+)\s+(.+)$/i) ||
+                      msg.match(/^enviar\s+a?\s*(\S+)\s+(.+)$/i);
+    if (dileMatch) {
+      return { action: 'call_handler', handlerName: 'asesorEnviarMensaje', handlerParams: { query: dileMatch[1], mensaje: dileMatch[2] } };
+    }
+
+    // ━━━ LLAMAR [lead] ━━━
+    const llamarMatch = msg.match(/^llamar\s+(.+)$/i) || msg.match(/^tel(?:efono)?\s+(.+)$/i) || msg.match(/^contacto\s+(.+)$/i);
+    if (llamarMatch) {
+      return { action: 'call_handler', handlerName: 'asesorTelefonoLead', handlerParams: { query: llamarMatch[1] } };
+    }
+
+    // ━━━ ACTUALIZAR [lead] [campo] [valor] ━━━
+    const actualizarMatch = msg.match(/^actualizar\s+(\S+)\s+(\S+)\s+(.+)$/i);
+    if (actualizarMatch) {
+      return { action: 'call_handler', handlerName: 'asesorActualizarLead', handlerParams: {
+        query: actualizarMatch[1],
+        campo: actualizarMatch[2],
+        valor: actualizarMatch[3]
+      }};
+    }
+
+    // ━━━ NUEVO LEAD ━━━
+    if (msg.startsWith('nuevo ') || msg.startsWith('crear ') || msg.startsWith('agregar ')) {
+      return { action: 'call_handler', handlerName: 'asesorCrearLeadHipoteca', handlerParams: { body: bodyOriginal } };
+    }
+
+    // ━━━ AGENDAR CITA ━━━
+    if (msg.startsWith('cita ') || msg.startsWith('agendar ')) {
+      return { action: 'call_handler', handlerName: 'asesorAgendarCita', handlerParams: { body: bodyOriginal } };
+    }
+
+    // ━━━ CANCELAR CITA ━━━
+    if (msg.startsWith('cancelar cita') || msg.startsWith('cancelar ')) {
+      return { action: 'call_handler', handlerName: 'vendedorCancelarCita' };
+    }
+
+    // ━━━ REAGENDAR CITA ━━━
+    if (msg.startsWith('reagendar') || msg.startsWith('mover cita')) {
+      return { action: 'call_handler', handlerName: 'vendedorReagendarCita' };
+    }
+
+    // ━━━ HOY ━━━
+    if (msg === 'hoy' || msg === 'citas hoy' || msg === 'agenda hoy') {
+      return { action: 'call_handler', handlerName: 'asesorCitasHoy' };
+    }
+
+    // ━━━ SEMANA ━━━
+    if (msg === 'semana' || msg === 'esta semana' || msg === 'citas semana') {
+      return { action: 'call_handler', handlerName: 'asesorCitasSemana' };
+    }
+
+    // ━━━ REPORTE ━━━
+    if (msg === 'reporte' || msg === 'mi reporte' || msg === 'stats' || msg === 'estadisticas') {
+      return { action: 'call_handler', handlerName: 'asesorReporte' };
+    }
+
+    // No reconocido
+    return { action: 'not_recognized', message: this.getMensajeNoReconocido(nombreAsesor) };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // EJECUTAR HANDLERS
+  // ═══════════════════════════════════════════════════════════════════
+  async executeHandler(handlerName: string, asesor: any, nombreAsesor: string, params: any): Promise<HandlerResult> {
+    switch (handlerName) {
+      case 'asesorMisLeads':
+        return await this.getMisLeads(asesor.id, nombreAsesor);
+
+      case 'asesorStatusLead':
+        return await this.getStatusLead(asesor.id, params.query, nombreAsesor);
+
+      case 'asesorPedirDocs':
+        return await this.pedirDocumentos(asesor.id, params.query, nombreAsesor);
+
+      case 'asesorPreaprobado':
+        return await this.notificarPreaprobado(asesor.id, params.query, nombreAsesor);
+
+      case 'asesorRechazado':
+        return await this.notificarRechazado(asesor.id, params.query, params.motivo, nombreAsesor);
+
+      case 'asesorEnviarMensaje':
+        return await this.enviarMensajeALead(asesor.id, params.query, params.mensaje, nombreAsesor);
+
+      case 'asesorTelefonoLead':
+        return await this.getTelefonoLead(asesor.id, params.query, nombreAsesor);
+
+      case 'asesorActualizarLead':
+        return await this.actualizarLead(asesor.id, params.query, params.campo, params.valor, nombreAsesor);
+
+      case 'asesorMoverLead':
+        return await this.moverLeadEnFunnel(asesor.id, params.query, params.direccion, nombreAsesor);
+
+      case 'asesorDisponibilidad':
+        return await this.cambiarDisponibilidad(asesor.id, params.estado, nombreAsesor);
+
+      case 'asesorMarcarContactado':
+        return await this.marcarContactado(asesor.id, params.query, nombreAsesor);
+
+      case 'asesorCitasHoy':
+        return await this.getCitasHoy(asesor.id, nombreAsesor);
+
+      case 'asesorCitasSemana':
+        return await this.getCitasSemana(asesor.id, nombreAsesor);
+
+      case 'asesorReporte':
+        return await this.getReporte(asesor.id, nombreAsesor);
+
+      default:
+        return { needsExternalHandler: true };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // MIS LEADS - Ver leads asignados al asesor
+  // ═══════════════════════════════════════════════════════════════════
+  private async getMisLeads(asesorId: string, nombreAsesor: string): Promise<HandlerResult> {
+    try {
+      console.log(`🔍 getMisLeads: asesorId=${asesorId}`);
+
+      // Buscar leads por notas que contengan el asesor_id en credit_flow_context
+      const { data: allLeads } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone, status, created_at, notes')
+        .not('notes', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      const misLeads = allLeads?.filter(l => {
+        if (!l.notes) return false;
+        const notes = typeof l.notes === 'string' ? JSON.parse(l.notes) : l.notes;
+        return notes?.credit_flow_context?.asesor_id === asesorId;
+      }) || [];
+
+      console.log(`🔍 getMisLeads: found ${misLeads.length} leads for asesor ${asesorId}`);
+      if (misLeads.length > 0) {
+        console.log(`🔍 getMisLeads: leads = ${misLeads.map(l => l.name).join(', ')}`);
+      }
+
+      if (misLeads.length === 0) {
+        return { message: `📋 *Tus Leads, ${nombreAsesor}*\n\nNo tienes leads asignados aún.\n\n💡 Los leads te llegarán cuando Sara conecte clientes interesados en crédito.` };
+      }
+
+      return { message: this.formatLeadsList(misLeads, nombreAsesor) };
+    } catch (e) {
+      console.error('Error getMisLeads:', e);
+      return { error: '❌ Error al obtener leads' };
+    }
+  }
+
+  private formatLeadsList(leads: any[], nombreAsesor: string): string {
+    let msg = `📋 *Tus Leads, ${nombreAsesor}*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    leads.forEach((lead, i) => {
+      const status = this.getStatusEmoji(lead.status);
+      const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+      const ctx = notes?.credit_flow_context;
+
+      const banco = ctx?.banco_preferido || '—';
+      const ingreso = ctx?.ingreso_mensual ? `$${ctx.ingreso_mensual.toLocaleString('es-MX')}` : '—';
+
+      msg += `${i + 1}. ${status} *${lead.name}*\n`;
+      msg += `   📱 ${this.formatPhone(lead.phone)}\n`;
+      msg += `   🏦 ${banco} | 💰 ${ingreso}\n\n`;
+    });
+
+    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `💡 Usa *STATUS [nombre]* para ver detalle`;
+
+    return msg;
+  }
+
+  private getStatusEmoji(status: string): string {
+    const emojis: Record<string, string> = {
+      'new': '🆕',
+      'credit_qualified': '✅',
+      'contacted': '📞',
+      'documents_pending': '📄',
+      'pre_approved': '🎉',
+      'approved': '🏆',
+      'rejected': '❌',
+      'closed': '🔒'
+    };
+    return emojis[status] || '📌';
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // STATUS - Ver estado detallado de un lead
+  // ═══════════════════════════════════════════════════════════════════
+  private async getStatusLead(asesorId: string, query: string, nombreAsesor: string): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+
+    if (!lead) {
+      return { message: `❌ No encontré a "${query}" en tus leads.\n\n💡 Usa *MIS LEADS* para ver tu lista.` };
+    }
+
+    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const ctx: CreditFlowContext | undefined = notes?.credit_flow_context;
+
+    let msg = `📊 *STATUS: ${lead.name}*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+    msg += `📱 *Teléfono:* ${this.formatPhone(lead.phone)}\n`;
+    msg += `📌 *Estado:* ${this.getStatusText(lead.status)}\n`;
+    msg += `📅 *Registrado:* ${this.formatDate(lead.created_at)}\n\n`;
+
+    if (ctx) {
+      msg += `💰 *Datos Financieros:*\n`;
+      msg += `├ Ingreso: ${ctx.ingreso_mensual ? `$${ctx.ingreso_mensual.toLocaleString('es-MX')}/mes` : 'No proporcionado'}\n`;
+      msg += `├ Enganche: ${ctx.enganche ? `$${ctx.enganche.toLocaleString('es-MX')}` : 'No proporcionado'}\n`;
+      msg += `├ Capacidad: ${ctx.capacidad_credito ? `$${ctx.capacidad_credito.toLocaleString('es-MX')}` : 'Por calcular'}\n`;
+      msg += `└ Banco: ${ctx.banco_preferido || 'Por definir'}\n\n`;
+      msg += `📞 *Modalidad:* ${ctx.modalidad || 'Por definir'}\n`;
+    }
+
+    msg += `\n━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `💡 Comandos:\n`;
+    msg += `• *DOCS ${lead.name.split(' ')[0]}* - Pedir documentos\n`;
+    msg += `• *PREAPROBADO ${lead.name.split(' ')[0]}* - Notificar aprobación\n`;
+    msg += `• *DILE ${lead.name.split(' ')[0]} que [mensaje]*`;
+
+    return { message: msg };
+  }
+
+  private getStatusText(status: string): string {
+    const texts: Record<string, string> = {
+      'new': '🆕 Nuevo',
+      'credit_qualified': '✅ Calificado',
+      'contacted': '📞 Contactado',
+      'documents_pending': '📄 Esperando docs',
+      'pre_approved': '🎉 Pre-aprobado',
+      'approved': '🏆 Aprobado',
+      'rejected': '❌ Rechazado',
+      'closed': '🔒 Cerrado'
+    };
+    return texts[status] || status;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // DOCS - Pedir documentos al lead
+  // ═══════════════════════════════════════════════════════════════════
+  private async pedirDocumentos(asesorId: string, query: string, nombreAsesor: string): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+
+    if (!lead) {
+      return { message: `❌ No encontré a "${query}" en tus leads.` };
+    }
+
+    // Actualizar status del lead
+    await this.supabase.client
+      .from('leads')
+      .update({ status: 'documents_pending' })
+      .eq('id', lead.id);
+
+    // Sincronizar con mortgage_applications (para CRM)
+    await this.syncMortgageApplication(lead, 'documents_pending', asesorId, nombreAsesor);
+
+    const nombreCorto = lead.name.split(' ')[0];
+    const mensajeParaLead = `¡Hola ${nombreCorto}! 👋
+
+Tu asesor *${nombreAsesor}* está avanzando con tu trámite de crédito 🏠
+
+Para continuar, necesitamos los siguientes documentos:
+
+📄 *Documentos requeridos:*
+1️⃣ Identificación oficial (INE vigente)
+2️⃣ Comprobante de domicilio (no mayor a 3 meses)
+3️⃣ Últimos 3 recibos de nómina
+4️⃣ Estados de cuenta bancarios (últimos 3 meses)
+5️⃣ Constancia de situación fiscal (SAT)
+
+📸 Puedes enviarlos como *foto* o *PDF* por este chat.
+
+¿Tienes alguna duda sobre los documentos? 🤔`;
+
+    // Buscar vendedor asignado para notificarle (usar assigned_to como fallback)
+    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const ctx = notes?.credit_flow_context;
+    let vendedorPhone: string | undefined;
+    let vendedorMessage: string | undefined;
+
+    const vendedorId = ctx?.vendedor_id || lead.assigned_to;
+    if (vendedorId) {
+      const { data: vendedor } = await this.supabase.client
+        .from('team_members')
+        .select('name, phone')
+        .eq('id', vendedorId)
+        .single();
+
+      if (vendedor?.phone) {
+        vendedorPhone = vendedor.phone;
+        vendedorMessage = `📄 *Documentos solicitados*\n\nEl asesor ${nombreAsesor} solicitó documentos a tu cliente *${lead.name}*.\n\n📌 Status: Esperando documentos`;
+      }
+    }
+
+    return {
+      message: `✅ *Solicitud de documentos enviada*\n\n${nombreCorto} recibirá la lista de documentos requeridos.\n\n💡 Cuando envíe los docs, te notificaré.${vendedorPhone ? '\n✅ Vendedor notificado' : ''}`,
+      leadPhone: lead.phone,
+      leadMessage: mensajeParaLead,
+      vendedorPhone,
+      vendedorMessage
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PREAPROBADO - Notificar pre-aprobación al lead
+  // ═══════════════════════════════════════════════════════════════════
+  private async notificarPreaprobado(asesorId: string, query: string, nombreAsesor: string): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+
+    if (!lead) {
+      return { message: `❌ No encontré a "${query}" en tus leads.` };
+    }
+
+    // Actualizar status
+    await this.supabase.client
+      .from('leads')
+      .update({ status: 'pre_approved' })
+      .eq('id', lead.id);
+
+    // Sincronizar con mortgage_applications (para CRM)
+    await this.syncMortgageApplication(lead, 'pre_approved', asesorId, nombreAsesor);
+
+    const nombreCorto = lead.name.split(' ')[0];
+    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const ctx = notes?.credit_flow_context;
+    const banco = ctx?.banco_preferido || 'el banco';
+
+    const mensajeParaLead = `🎉 *¡EXCELENTES NOTICIAS, ${nombreCorto.toUpperCase()}!* 🎉
+
+¡Tu crédito ha sido *PRE-APROBADO* por ${banco}! 🏦✨
+
+Tu asesor *${nombreAsesor}* se pondrá en contacto contigo para los siguientes pasos.
+
+🏠 ¡Estás cada vez más cerca de tu nuevo hogar!
+
+¿Tienes alguna pregunta? Estoy aquí para ayudarte 😊`;
+
+    // Buscar vendedor asignado para notificarle (usar assigned_to como fallback)
+    let vendedorPhone: string | undefined;
+    let vendedorMessage: string | undefined;
+
+    const vendedorId = ctx?.vendedor_id || lead.assigned_to;
+    if (vendedorId) {
+      const { data: vendedor } = await this.supabase.client
+        .from('team_members')
+        .select('name, phone')
+        .eq('id', vendedorId)
+        .single();
+
+      if (vendedor?.phone) {
+        vendedorPhone = vendedor.phone;
+        vendedorMessage = `🎉 *¡CRÉDITO PRE-APROBADO!*\n\nTu cliente *${lead.name}* fue pre-aprobado para crédito hipotecario.\n\n🏦 Banco: ${banco}\n👤 Asesor: ${nombreAsesor}\n\n¡Felicidades! Prepara la siguiente fase.`;
+      }
+    }
+
+    return {
+      message: `✅ *Pre-aprobación notificada*\n\n${nombreCorto} ha sido informado de su pre-aprobación 🎉\n\nStatus actualizado a: *Pre-aprobado*${vendedorPhone ? '\n✅ Vendedor notificado' : ''}`,
+      leadPhone: lead.phone,
+      leadMessage: mensajeParaLead,
+      vendedorPhone,
+      vendedorMessage
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // RECHAZADO - Notificar rechazo al lead
+  // ═══════════════════════════════════════════════════════════════════
+  private async notificarRechazado(asesorId: string, query: string, motivo: string, nombreAsesor: string): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+
+    if (!lead) {
+      return { message: `❌ No encontré a "${query}" en tus leads.` };
+    }
+
+    // Actualizar status
+    await this.supabase.client
+      .from('leads')
+      .update({ status: 'rejected' })
+      .eq('id', lead.id);
+
+    // Sincronizar con mortgage_applications (para CRM)
+    await this.syncMortgageApplication(lead, 'rejected', asesorId, nombreAsesor);
+
+    const nombreCorto = lead.name.split(' ')[0];
+
+    const mensajeParaLead = `Hola ${nombreCorto} 👋
+
+Tu asesor *${nombreAsesor}* me pidió informarte sobre tu solicitud de crédito.
+
+Lamentablemente, en esta ocasión no fue posible aprobar tu crédito.
+
+📋 *Motivo:* ${motivo}
+
+Esto no significa que no puedas obtener un crédito en el futuro. Te recomendamos:
+• Revisar tu historial crediticio
+• Mejorar tu capacidad de pago
+• Intentar nuevamente en 3-6 meses
+
+Si tienes preguntas, tu asesor está disponible para orientarte.
+
+¡No te desanimes! 💪`;
+
+    // Buscar vendedor asignado para notificarle (usar assigned_to como fallback)
+    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const ctx = notes?.credit_flow_context;
+    let vendedorPhone: string | undefined;
+    let vendedorMessage: string | undefined;
+
+    const vendedorId = ctx?.vendedor_id || lead.assigned_to;
+    if (vendedorId) {
+      const { data: vendedor } = await this.supabase.client
+        .from('team_members')
+        .select('name, phone')
+        .eq('id', vendedorId)
+        .single();
+
+      if (vendedor?.phone) {
+        vendedorPhone = vendedor.phone;
+        vendedorMessage = `❌ *Crédito no aprobado*\n\nTu cliente *${lead.name}* no fue aprobado para crédito.\n\n📋 Motivo: ${motivo}\n👤 Asesor: ${nombreAsesor}\n\nPuedes explorar otras opciones con el cliente.`;
+      }
+    }
+
+    return {
+      message: `✅ *Lead notificado del rechazo*\n\n${nombreCorto} ha sido informado.\nMotivo: ${motivo}\n\nStatus: *Rechazado*${vendedorPhone ? '\n✅ Vendedor notificado' : ''}`,
+      leadPhone: lead.phone,
+      leadMessage: mensajeParaLead,
+      vendedorPhone,
+      vendedorMessage
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ENVIAR MENSAJE - Puente asesor → lead
+  // ═══════════════════════════════════════════════════════════════════
+  private async enviarMensajeALead(asesorId: string, query: string, mensaje: string, nombreAsesor: string): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+
+    if (!lead) {
+      return { message: `❌ No encontré a "${query}" en tus leads.` };
+    }
+
+    const nombreCorto = lead.name.split(' ')[0];
+    const mensajeParaLead = `💬 *Mensaje de tu asesor ${nombreAsesor}:*\n\n"${mensaje}"\n\n_Puedes responder aquí y le haré llegar tu mensaje._`;
+
+    // Guardar en notas del asesor que hay un mensaje pendiente de respuesta
+    const { data: asesorData } = await this.supabase.client
+      .from('team_members')
+      .select('notes')
+      .eq('id', asesorId)
+      .single();
+
+    let notes: any = {};
+    if (asesorData?.notes) {
+      notes = typeof asesorData.notes === 'string' ? JSON.parse(asesorData.notes) : asesorData.notes;
+    }
+
+    notes.pending_lead_response = {
+      lead_id: lead.id,
+      lead_name: lead.name,
+      lead_phone: lead.phone,
+      mensaje_enviado: mensaje,
+      timestamp: new Date().toISOString()
+    };
+
+    await this.supabase.client
+      .from('team_members')
+      .update({ notes })
+      .eq('id', asesorId);
+
+    return {
+      message: `✅ *Mensaje enviado a ${nombreCorto}*\n\n"${mensaje}"\n\n💡 Cuando responda, te notificaré.`,
+      leadPhone: lead.phone,
+      leadMessage: mensajeParaLead
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // TELÉFONO - Obtener teléfono del lead
+  // ═══════════════════════════════════════════════════════════════════
+  private async getTelefonoLead(asesorId: string, query: string, nombreAsesor: string): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+
+    if (!lead) {
+      return { message: `❌ No encontré a "${query}" en tus leads.` };
+    }
+
+    const phone = this.formatPhone(lead.phone);
+    return {
+      message: `📱 *${lead.name}*\n\nTeléfono: ${phone}\n\nwa.me/${lead.phone.replace(/\D/g, '')}`
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ACTUALIZAR - Actualizar campo del lead
+  // ═══════════════════════════════════════════════════════════════════
+  private async actualizarLead(asesorId: string, query: string, campo: string, valor: string, nombreAsesor: string): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+
+    if (!lead) {
+      return { message: `❌ No encontré a "${query}" en tus leads.` };
+    }
+
+    const camposPermitidos: Record<string, string> = {
+      'status': 'status',
+      'estado': 'status',
+      'banco': 'banco_preferido',
+      'ingreso': 'ingreso_mensual',
+      'enganche': 'enganche'
+    };
+
+    const campoReal = camposPermitidos[campo.toLowerCase()];
+    if (!campoReal) {
+      return { message: `❌ Campo "${campo}" no reconocido.\n\nCampos válidos: status, banco, ingreso, enganche` };
+    }
+
+    // Si es campo en notas (credit_flow_context)
+    if (['banco_preferido', 'ingreso_mensual', 'enganche'].includes(campoReal)) {
+      const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+      if (!notes.credit_flow_context) notes.credit_flow_context = {};
+
+      if (campoReal === 'ingreso_mensual' || campoReal === 'enganche') {
+        notes.credit_flow_context[campoReal] = parseInt(valor.replace(/\D/g, ''));
+      } else {
+        notes.credit_flow_context[campoReal] = valor;
+      }
+
+      await this.supabase.client.from('leads').update({ notes }).eq('id', lead.id);
+    } else {
+      // Campo directo en leads
+      await this.supabase.client.from('leads').update({ [campoReal]: valor }).eq('id', lead.id);
+    }
+
+    return { message: `✅ *${lead.name}* actualizado\n\n${campo} → ${valor}` };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // CITAS HOY
+  // ═══════════════════════════════════════════════════════════════════
+  private async getCitasHoy(asesorId: string, nombreAsesor: string): Promise<HandlerResult> {
+    const hoy = new Date().toISOString().split('T')[0];
+
+    const { data: citas } = await this.supabase.client
+      .from('appointments')
+      .select('*, leads(name, phone)')
+      .eq('team_member_id', asesorId)
+      .gte('date', hoy)
+      .lt('date', hoy + 'T23:59:59')
+      .order('date', { ascending: true });
+
+    if (!citas || citas.length === 0) {
+      return { message: `📅 *Citas de hoy, ${nombreAsesor}*\n\nNo tienes citas programadas para hoy.` };
+    }
+
+    let msg = `📅 *Citas de hoy, ${nombreAsesor}*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+    citas.forEach((c, i) => {
+      const hora = new Date(c.date).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+      msg += `${i + 1}. ⏰ *${hora}*\n`;
+      msg += `   👤 ${c.leads?.name || 'Sin nombre'}\n`;
+      msg += `   📍 ${c.location || 'Por definir'}\n\n`;
+    });
+
+    return { message: msg };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // CITAS SEMANA
+  // ═══════════════════════════════════════════════════════════════════
+  private async getCitasSemana(asesorId: string, nombreAsesor: string): Promise<HandlerResult> {
+    const hoy = new Date();
+    const finSemana = new Date(hoy);
+    finSemana.setDate(hoy.getDate() + 7);
+
+    const { data: citas } = await this.supabase.client
+      .from('appointments')
+      .select('*, leads(name, phone)')
+      .eq('team_member_id', asesorId)
+      .gte('date', hoy.toISOString())
+      .lt('date', finSemana.toISOString())
+      .order('date', { ascending: true });
+
+    if (!citas || citas.length === 0) {
+      return { message: `📅 *Esta semana, ${nombreAsesor}*\n\nNo tienes citas programadas.` };
+    }
+
+    let msg = `📅 *Citas esta semana, ${nombreAsesor}*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+    citas.forEach((c, i) => {
+      const fecha = new Date(c.date);
+      const dia = fecha.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric' });
+      const hora = fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+      msg += `${i + 1}. 📆 *${dia}* ${hora}\n`;
+      msg += `   👤 ${c.leads?.name || 'Sin nombre'}\n\n`;
+    });
+
+    return { message: msg };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // REPORTE
+  // ═══════════════════════════════════════════════════════════════════
+  private async getReporte(asesorId: string, nombreAsesor: string): Promise<HandlerResult> {
+    // Contar leads por status
+    const { data: allLeads } = await this.supabase.client
+      .from('leads')
+      .select('id, status, notes')
+      .not('notes', 'is', null);
+
+    const misLeads = allLeads?.filter(l => {
+      const notes = typeof l.notes === 'string' ? JSON.parse(l.notes) : l.notes;
+      return notes?.credit_flow_context?.asesor_id === asesorId;
+    }) || [];
+
+    const stats = {
+      total: misLeads.length,
+      nuevos: misLeads.filter(l => l.status === 'new' || l.status === 'credit_qualified').length,
+      enProceso: misLeads.filter(l => ['contacted', 'documents_pending'].includes(l.status)).length,
+      preAprobados: misLeads.filter(l => l.status === 'pre_approved').length,
+      aprobados: misLeads.filter(l => l.status === 'approved').length,
+      rechazados: misLeads.filter(l => l.status === 'rejected').length
+    };
+
+    let msg = `📊 *Tu Reporte, ${nombreAsesor}*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+    msg += `👥 Total leads: *${stats.total}*\n\n`;
+    msg += `🆕 Nuevos: ${stats.nuevos}\n`;
+    msg += `⏳ En proceso: ${stats.enProceso}\n`;
+    msg += `🎉 Pre-aprobados: ${stats.preAprobados}\n`;
+    msg += `🏆 Aprobados: ${stats.aprobados}\n`;
+    msg += `❌ Rechazados: ${stats.rechazados}\n`;
+    msg += `\n━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `📈 Conversión: ${stats.total > 0 ? Math.round((stats.aprobados / stats.total) * 100) : 0}%`;
+
+    return { message: msg };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // MOVER LEAD EN FUNNEL (adelante/atrás)
+  // ═══════════════════════════════════════════════════════════════════
+  private async moverLeadEnFunnel(asesorId: string, query: string, direccion: 'next' | 'prev', nombreAsesor: string): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+
+    if (!lead) {
+      return { message: `❌ No encontré a "${query}" en tus leads.` };
+    }
+
+    // Funnel de crédito hipotecario
+    const funnel = [
+      { key: 'new', label: '🆕 Nuevo' },
+      { key: 'credit_qualified', label: '✅ Calificado' },
+      { key: 'contacted', label: '📞 Contactado' },
+      { key: 'documents_pending', label: '📄 Esperando docs' },
+      { key: 'pre_approved', label: '🎉 Pre-aprobado' },
+      { key: 'approved', label: '🏆 Aprobado' }
+    ];
+
+    const currentIndex = funnel.findIndex(f => f.key === lead.status);
+    if (currentIndex === -1) {
+      return { message: `⚠️ Status actual (${lead.status}) no está en el funnel de crédito.` };
+    }
+
+    let newIndex: number;
+    if (direccion === 'next') {
+      newIndex = Math.min(currentIndex + 1, funnel.length - 1);
+      if (newIndex === currentIndex) {
+        return { message: `✅ ${lead.name} ya está en el último paso: ${funnel[currentIndex].label}` };
+      }
+    } else {
+      newIndex = Math.max(currentIndex - 1, 0);
+      if (newIndex === currentIndex) {
+        return { message: `✅ ${lead.name} ya está en el primer paso: ${funnel[currentIndex].label}` };
+      }
+    }
+
+    const newStatus = funnel[newIndex];
+
+    await this.supabase.client
+      .from('leads')
+      .update({ status: newStatus.key })
+      .eq('id', lead.id);
+
+    // Sincronizar con mortgage_applications (para CRM)
+    await this.syncMortgageApplication(lead, newStatus.key, asesorId, nombreAsesor);
+
+    // Buscar vendedor asignado para notificarle
+    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const ctx = notes?.credit_flow_context;
+    let vendedorPhone: string | undefined;
+    let vendedorMessage: string | undefined;
+
+    // Usar vendedor_id de credit_flow_context, o assigned_to del lead
+    const vendedorId = ctx?.vendedor_id || lead.assigned_to;
+    console.log(`🔍 moverLead: vendedor_id=${vendedorId}, ctx.vendedor_id=${ctx?.vendedor_id}, assigned_to=${lead.assigned_to}`);
+
+    if (vendedorId) {
+      const { data: vendedor } = await this.supabase.client
+        .from('team_members')
+        .select('name, phone')
+        .eq('id', vendedorId)
+        .single();
+
+      console.log(`🔍 moverLead: vendedor encontrado = ${vendedor?.name}, phone=${vendedor?.phone}`);
+
+      if (vendedor?.phone) {
+        vendedorPhone = vendedor.phone;
+        const flecha = direccion === 'next' ? '⬆️' : '⬇️';
+        vendedorMessage = `${flecha} *Actualización de crédito*\n\nTu cliente *${lead.name}* avanzó en su trámite:\n\n${funnel[currentIndex].label}\n      ↓\n${newStatus.label}\n\n👤 Asesor: ${nombreAsesor}`;
+      }
+    }
+
+    const flecha = direccion === 'next' ? '➡️' : '⬅️';
+    return {
+      message: `${flecha} *${lead.name}* movido:\n\n${funnel[currentIndex].label}\n      ↓\n${newStatus.label}${vendedorPhone ? '\n\n✅ Vendedor notificado' : ''}`,
+      vendedorPhone,
+      vendedorMessage
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ON/OFF - Cambiar disponibilidad del asesor
+  // ═══════════════════════════════════════════════════════════════════
+  private async cambiarDisponibilidad(asesorId: string, estado: boolean, nombreAsesor: string): Promise<HandlerResult> {
+    await this.supabase.client
+      .from('team_members')
+      .update({ is_on_duty: estado })
+      .eq('id', asesorId);
+
+    if (estado) {
+      return {
+        message: `✅ *Disponibilidad activada*\n\n${nombreAsesor}, ahora recibirás nuevos leads de crédito.\n\n💡 Escribe *OFF* para pausar.`
+      };
+    } else {
+      return {
+        message: `⏸️ *Disponibilidad pausada*\n\n${nombreAsesor}, no recibirás nuevos leads por ahora.\n\n💡 Escribe *ON* cuando estés listo.`
+      };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // MARCAR COMO CONTACTADO
+  // ═══════════════════════════════════════════════════════════════════
+  private async marcarContactado(asesorId: string, query: string, nombreAsesor: string): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+
+    if (!lead) {
+      return { message: `❌ No encontré a "${query}" en tus leads.` };
+    }
+
+    await this.supabase.client
+      .from('leads')
+      .update({ status: 'contacted' })
+      .eq('id', lead.id);
+
+    // Sincronizar con mortgage_applications (para CRM)
+    await this.syncMortgageApplication(lead, 'contacted', asesorId, nombreAsesor);
+
+    // Buscar vendedor asignado para notificarle (usar assigned_to como fallback)
+    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const ctx = notes?.credit_flow_context;
+    let vendedorPhone: string | undefined;
+    let vendedorMessage: string | undefined;
+
+    const vendedorId = ctx?.vendedor_id || lead.assigned_to;
+    if (vendedorId) {
+      const { data: vendedor } = await this.supabase.client
+        .from('team_members')
+        .select('name, phone')
+        .eq('id', vendedorId)
+        .single();
+
+      if (vendedor?.phone) {
+        vendedorPhone = vendedor.phone;
+        vendedorMessage = `📞 *Cliente contactado*\n\nEl asesor ${nombreAsesor} contactó a tu cliente *${lead.name}*.\n\n📌 Status: Contactado`;
+      }
+    }
+
+    return {
+      message: `📞 *${lead.name}* marcado como *CONTACTADO*\n\n💡 Siguiente: *DOCS ${lead.name.split(' ')[0]}* para pedir documentos${vendedorPhone ? '\n✅ Vendedor notificado' : ''}`,
+      vendedorPhone,
+      vendedorMessage
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // HELPERS
+  // ═══════════════════════════════════════════════════════════════════
+  private async buscarLeadDeAsesor(asesorId: string, query: string): Promise<any | null> {
+    const queryLower = query.toLowerCase().trim();
+    const queryDigits = query.replace(/\D/g, '');
+    console.log(`🔍 buscarLead: asesorId=${asesorId}, query="${query}"`);
+
+    // Buscar todos los leads y filtrar por asesor_id en credit_flow_context
+    const { data: allLeads } = await this.supabase.client
+      .from('leads')
+      .select('*')
+      .not('notes', 'is', null);
+
+    const misLeads = allLeads?.filter(l => {
+      const notes = typeof l.notes === 'string' ? JSON.parse(l.notes || '{}') : (l.notes || {});
+      return notes?.credit_flow_context?.asesor_id === asesorId;
+    }) || [];
+
+    console.log(`🔍 buscarLead: found ${misLeads.length} leads for asesor`);
+    if (misLeads.length > 0) {
+      console.log(`🔍 buscarLead: leads = ${misLeads.map(l => l.name).join(', ')}`);
+    }
+
+    // Buscar por nombre o teléfono
+    const found = misLeads.find(l => {
+      const nombreMatch = l.name?.toLowerCase().includes(queryLower);
+      const telefonoMatch = queryDigits.length >= 4 && l.phone?.includes(queryDigits);
+      return nombreMatch || telefonoMatch;
+    }) || null;
+
+    console.log(`🔍 buscarLead: Resultado para "${query}" = ${found ? found.name : 'NO ENCONTRADO'}`);
+    return found;
+  }
+
+  private formatPhone(phone: string): string {
+    if (!phone) return 'No disponible';
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length === 10) {
+      return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
+    }
+    if (digits.length === 12 && digits.startsWith('52')) {
+      return `+52 ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`;
+    }
+    return phone;
+  }
+
+  private formatDate(dateStr: string): string {
+    if (!dateStr) return 'N/A';
+    return new Date(dateStr).toLocaleDateString('es-MX', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // MENSAJES PREDEFINIDOS
+  // ═══════════════════════════════════════════════════════════════════
+  getMensajeAyuda(nombre: string): string {
+    return `🏦 *Comandos de Asesor, ${nombre}*
+━━━━━━━━━━━━━━━━━━━━
+
+📋 *Ver Leads:*
+• *MIS LEADS* - Ver todos tus leads
+• *STATUS [nombre]* - Ver detalle de un lead
+• *LLAMAR [nombre]* - Ver teléfono
+
+💬 *Comunicación:*
+• *DILE [nombre] que [msg]* - Enviar mensaje vía Sara
+• *DOCS [nombre]* - Pedir documentos
+• *PREAPROBADO [nombre]* - Notificar aprobación
+• *RECHAZADO [nombre] [motivo]* - Notificar rechazo
+
+🔄 *Mover en Funnel:*
+• *ADELANTE [nombre]* - Avanzar al siguiente paso
+• *ATRAS [nombre]* - Regresar al paso anterior
+• *CONTACTADO [nombre]* - Marcar como contactado
+
+📅 *Agenda:*
+• *HOY* - Ver citas de hoy
+• *SEMANA* - Ver citas de la semana
+
+📊 *Reportes:*
+• *REPORTE* - Ver tus estadísticas
+
+⚡ *Disponibilidad:*
+• *ON* - Activar para recibir leads
+• *OFF* - Pausar nuevos leads
+
+━━━━━━━━━━━━━━━━━━━━
+💡 Ejemplo: *ADELANTE Juan*`;
+  }
+
+  getMensajeNoReconocido(nombre: string): string {
+    return `🤔 No entendí ese comando, ${nombre}.
+
+💡 Escribe *AYUDA* para ver los comandos disponibles.
+
+Comandos rápidos:
+• *MIS LEADS*
+• *STATUS [nombre]*
+• *DOCS [nombre]*`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // MÉTODOS LEGACY (para compatibilidad con handler existente)
+  // ═══════════════════════════════════════════════════════════════════
   formatVendedorNoEncontrado(nombre: string, teamMembers: any[]): string {
     return `Vendedor ${nombre} no encontrado`;
+  }
+
+  async processPendingLeadSelection(asesorId: string, mensaje: string, notes: any): Promise<{ handled: boolean; respuesta?: string }> {
+    // Si hay selección pendiente de lead (cuando hay múltiples coincidencias)
+    if (notes?.pending_lead_selection) {
+      const selection = parseInt(mensaje);
+      if (!isNaN(selection) && selection > 0 && selection <= notes.pending_lead_selection.leads.length) {
+        const selectedLead = notes.pending_lead_selection.leads[selection - 1];
+
+        // Limpiar selección pendiente
+        delete notes.pending_lead_selection;
+        await this.supabase.client.from('team_members').update({ notes }).eq('id', asesorId);
+
+        return {
+          handled: true,
+          respuesta: `✅ Seleccionaste a *${selectedLead.name}*\n\n¿Qué quieres hacer?\n• STATUS ${selectedLead.name.split(' ')[0]}\n• DOCS ${selectedLead.name.split(' ')[0]}\n• DILE ${selectedLead.name.split(' ')[0]} que...`
+        };
+      }
+    }
+    return { handled: false };
+  }
+
+  async getPendingVendorQuestion(asesorId: string): Promise<any | null> {
+    const { data } = await this.supabase.client
+      .from('solicitudes_hipoteca')
+      .select('*')
+      .eq('asesor_id', asesorId)
+      .eq('pending_asesor_response', true)
+      .limit(1)
+      .single();
+
+    if (data) {
+      const { data: asesorData } = await this.supabase.client
+        .from('team_members')
+        .select('notes')
+        .eq('id', asesorId)
+        .single();
+
+      return { solicitud: data, notes: asesorData?.notes };
+    }
+    return null;
+  }
+
+  async processPendingVendorQuestion(solicitudId: string, respuesta: string, asesorName: string, leadName: string, status: string): Promise<{ mensajeVendedor: string; confirmacion: string }> {
+    await this.supabase.client
+      .from('solicitudes_hipoteca')
+      .update({
+        pending_asesor_response: false,
+        asesor_notes: respuesta,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', solicitudId);
+
+    return {
+      mensajeVendedor: `💬 *Respuesta de ${asesorName}* sobre ${leadName}:\n\n"${respuesta}"`,
+      confirmacion: `✅ Respuesta enviada al vendedor.`
+    };
+  }
+
+  parseCrearLeadHipoteca(body: string): { nombre: string; telefono: string; nombreVendedor?: string } | null {
+    // nuevo Juan Garcia 5512345678 para Edson
+    const match = body.match(/^(?:nuevo|crear|agregar)\s+(.+?)\s+(\d{10,})\s*(?:para\s+(.+))?$/i);
+    if (match) {
+      return {
+        nombre: match[1].trim(),
+        telefono: match[2],
+        nombreVendedor: match[3]?.trim()
+      };
+    }
+    return null;
+  }
+
+  getMensajeAyudaCrearLeadHipoteca(): string {
+    return `📝 *Formato para crear lead:*
+
+NUEVO [nombre] [teléfono] para [vendedor]
+
+Ejemplo:
+*nuevo Juan Garcia 5512345678 para Edson*
+
+O sin vendedor (se asigna automáticamente):
+*nuevo Maria Lopez 5598765432*`;
+  }
+
+  async verificarLeadExistente(telefono: string): Promise<{ existe: boolean; lead?: any }> {
+    const digits = telefono.replace(/\D/g, '').slice(-10);
+    const { data: lead } = await this.supabase.client
+      .from('leads')
+      .select('*')
+      .like('phone', `%${digits}`)
+      .single();
+
+    return { existe: !!lead, lead };
+  }
+
+  formatLeadYaExiste(lead: any): string {
+    return `⚠️ *Lead ya existe*\n\n👤 ${lead.name}\n📱 ${lead.phone}\n📌 Status: ${lead.status}`;
+  }
+
+  parseAgendarCita(body: string): any {
+    // cita Juan Garcia mañana 10am en oficina
+    return null; // TODO: implementar
+  }
+
+  getMensajeAyudaAgendarCita(): string {
+    return `📅 *Formato para agendar cita:*
+
+CITA [nombre] [fecha] [hora] en [lugar]
+
+Ejemplo:
+*cita Juan Garcia mañana 10am en oficina*`;
+  }
+
+  async buscarOCrearLead(nombre: string, telefono: string): Promise<{ leadId: string; leadName: string; leadPhone: string }> {
+    const { existe, lead } = await this.verificarLeadExistente(telefono);
+    if (existe) {
+      return { leadId: lead.id, leadName: lead.name, leadPhone: lead.phone };
+    }
+
+    const { data: newLead } = await this.supabase.client
+      .from('leads')
+      .insert({ name: nombre, phone: telefono, status: 'new', source: 'asesor' })
+      .select()
+      .single();
+
+    return { leadId: newLead.id, leadName: newLead.name, leadPhone: newLead.phone };
+  }
+
+  async crearCitaHipoteca(datos: any, asesorId: string, asesorName: string, leadId: string, leadName: string, leadPhone: string): Promise<{ error?: string }> {
+    // TODO: implementar
+    return { error: 'No implementado aún' };
   }
 }

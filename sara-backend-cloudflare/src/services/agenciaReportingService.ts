@@ -943,7 +943,7 @@ export class AgenciaReportingService {
     for (const lead of leads) {
       try {
         const phone = lead.phone.startsWith('52') ? lead.phone : '52' + lead.phone;
-        const nombre = lead.name?.split(' ')[0] || 'amigo';
+        const nombre = lead.name?.split(' ')[0] || '';
         const desarrollo = lead.property_interest || 'nuestros desarrollos';
 
         // Verificar si el lead ha interactuado en las últimas 24h

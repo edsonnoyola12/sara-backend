@@ -28,6 +28,78 @@ export class CreditFlowService {
   ) {}
 
   // ═══════════════════════════════════════════════════════════════════
+  // DETECTAR PREGUNTAS NO RELACIONADAS CON EL FLUJO DE CRÉDITO
+  // ═══════════════════════════════════════════════════════════════════
+  private esPreguntaNoRelacionada(msgLower: string): boolean {
+    const preguntasNoRelacionadas = [
+      'promocion', 'promoción', 'descuento', 'oferta',
+      'precio', 'cuanto cuesta', 'cuánto cuesta', 'cuestan',
+      'ubicacion', 'ubicación', 'donde queda', 'dónde queda', 'direccion', 'dirección',
+      'casa', 'casas', 'desarrollo', 'modelo', 'modelos',
+      'recamara', 'recámara', 'habitacion', 'habitación',
+      'cita', 'visita', 'conocer', 'quiero ver',
+      'horario', 'cuando abren', 'cuándo abren', 'disponible',
+      'amenidad', 'alberca', 'gimnasio', 'seguridad',
+      'que incluye', 'qué incluye', 'tienen algo', 'hay algo',
+      'foto', 'fotos', 'video', 'videos', 'imagen',
+      'mapa', 'como llego', 'cómo llego'
+    ];
+
+    // Si contiene palabras clave de preguntas no relacionadas
+    if (preguntasNoRelacionadas.some(p => msgLower.includes(p))) {
+      return true;
+    }
+
+    // Si es una pregunta larga (probablemente no es solo selección)
+    if (msgLower.includes('?') && msgLower.length > 30) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // CANCELAR FLUJO DE CRÉDITO (cuando el lead cambia de tema)
+  // ═══════════════════════════════════════════════════════════════════
+  async cancelarFlujo(leadId: string): Promise<void> {
+    try {
+      // Obtener notas actuales
+      const { data: lead } = await this.supabase.client
+        .from('leads')
+        .select('notes, status')
+        .eq('id', leadId)
+        .single();
+
+      if (lead) {
+        let notas: any = {};
+        if (lead.notes) {
+          if (typeof lead.notes === 'string') {
+            try { notas = JSON.parse(lead.notes); } catch { notas = {}; }
+          } else {
+            notas = lead.notes;
+          }
+        }
+
+        // Eliminar contexto de flujo de crédito
+        delete notas.credit_flow_context;
+
+        // Actualizar lead - quitar status de credit_flow
+        await this.supabase.client
+          .from('leads')
+          .update({
+            notes: notas,
+            status: lead.status === 'credit_flow' ? 'contacted' : lead.status
+          })
+          .eq('id', leadId);
+
+        console.log(`🏦 Flujo de crédito CANCELADO para lead ${leadId}`);
+      }
+    } catch (e) {
+      console.log('⚠️ Error cancelando flujo de crédito:', e);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // INICIAR FLUJO DE CRÉDITO
   // ═══════════════════════════════════════════════════════════════════
   async iniciarFlujoCredito(lead: any): Promise<{ mensaje: string; context: CreditFlowContext }> {
@@ -151,6 +223,14 @@ Escribe el nombre del banco o "no sé" si quieres que te oriente.`,
         const bancoDetectado = this.detectarBanco(msgLower);
         const nombreCorto = context.lead_name.split(' ')[0];
 
+        // Si es pregunta no relacionada, PAUSAR flujo y pasar a IA
+        if (this.esPreguntaNoRelacionada(msgLower) && !bancoDetectado) {
+          console.log('🏦 CRÉDITO: Pregunta no relacionada, CANCELANDO flujo para IA');
+          // Cancelar flujo de crédito para que el lead pueda conversar libremente
+          await this.cancelarFlujo(leadId);
+          return { respuesta: null, context, passToAI: true };
+        }
+
         if (bancoDetectado) {
           context.banco_preferido = bancoDetectado;
           context.state = 'ofrecer_simulacion';
@@ -198,6 +278,13 @@ O escribe "no sé" para que te oriente.`,
       // ESTADO: Ofrecer simulación
       // ─────────────────────────────────────────────────────────────
       case 'ofrecer_simulacion':
+        // Si es pregunta no relacionada, pasar a IA
+        if (this.esPreguntaNoRelacionada(msgLower)) {
+          console.log('🏦 CRÉDITO: Pregunta no relacionada en ofrecer_simulacion, CANCELANDO flujo');
+          await this.cancelarFlujo(leadId);
+          return { respuesta: null, context, passToAI: true };
+        }
+
         const quiereSimulacion = msgLower.includes('si') || msgLower.includes('sí') ||
                                   msgLower === 's' || msgLower.includes('simulacion') ||
                                   msgLower.includes('simulación') || msgLower.includes('ok') ||
@@ -247,6 +334,13 @@ O escribe "no sé" para que te oriente.`,
       // ESTADO: Esperando ingreso mensual
       // ─────────────────────────────────────────────────────────────
       case 'esperando_ingreso':
+        // Si es pregunta no relacionada, pasar a IA
+        if (this.esPreguntaNoRelacionada(msgLower)) {
+          console.log('🏦 CRÉDITO: Pregunta no relacionada en esperando_ingreso, CANCELANDO flujo');
+          await this.cancelarFlujo(leadId);
+          return { respuesta: null, context, passToAI: true };
+        }
+
         const ingreso = this.extraerMonto(msgLimpio);
 
         if (ingreso && ingreso >= 5000) {
@@ -286,6 +380,13 @@ O escribe "no sé" para que te oriente.`,
       // ESTADO: Esperando enganche
       // ─────────────────────────────────────────────────────────────
       case 'esperando_enganche':
+        // Si es pregunta no relacionada, pasar a IA
+        if (this.esPreguntaNoRelacionada(msgLower)) {
+          console.log('🏦 CRÉDITO: Pregunta no relacionada en esperando_enganche, CANCELANDO flujo');
+          await this.cancelarFlujo(leadId);
+          return { respuesta: null, context, passToAI: true };
+        }
+
         let enganche = 0;
 
         if (msgLower.includes('no tengo') || msgLower.includes('nada') || msgLower === '0') {
@@ -341,6 +442,13 @@ ${simulacion}
       // ESTADO: Esperando modalidad de contacto
       // ─────────────────────────────────────────────────────────────
       case 'esperando_modalidad':
+        // Si es pregunta no relacionada, pasar a IA
+        if (this.esPreguntaNoRelacionada(msgLower)) {
+          console.log('🏦 CRÉDITO: Pregunta no relacionada en esperando_modalidad, CANCELANDO flujo');
+          await this.cancelarFlujo(leadId);
+          return { respuesta: null, context, passToAI: true };
+        }
+
         const modalidad = this.detectarModalidad(msgLower);
 
         if (modalidad) {
@@ -498,6 +606,61 @@ Responde 1, 2 o 3.`,
   // ═══════════════════════════════════════════════════════════════════
   detectarIntencionCredito(mensaje: string): boolean {
     const msgLower = mensaje.toLowerCase();
+    // Normalizar: quitar espacios extras y unir palabras pegadas comunes
+    const msgNormalizado = msgLower
+      .replace(/\s+/g, ' ')  // múltiples espacios -> uno
+      .trim();
+
+    // Frases que indican que el lead YA ESTÁ EN PROCESO (NO iniciar flujo)
+    const frasesYaEnProceso = [
+      // Esperando aprobación
+      'espero aprobacion', 'espero aprobación', 'esperando aprobacion', 'esperando aprobación',
+      'espero mi aprobacion', 'espero mi aprobación',
+      // Esperando crédito (ya en proceso)
+      'espero mi credito', 'espero mi crédito', 'espero el credito', 'espero el crédito',
+      'esperando mi credito', 'esperando mi crédito',
+      // Ya tramitando
+      'ya estoy tramitando', 'ya lo tramite', 'ya lo tramité',
+      'ya meti papeles', 'ya metí papeles', 'ya entregue papeles', 'ya entregué papeles',
+      // Ya visitó/conoció
+      'ya lo conoci', 'ya lo conocí', 'ya conozco', 'ya visite', 'ya visité', 'ya fui',
+      // En proceso
+      'en proceso', 'mi tramite', 'mi trámite', 'mi solicitud',
+      // Solo espero (con variantes)
+      'estoy esperando', 'solo espero', 'sólo espero', 'nomas espero', 'nomás espero',
+      'nada mas espero', 'nada más espero',
+      // Ya aplicó
+      'ya aplique', 'ya apliqué', 'ya lo solicite', 'ya lo solicité',
+      // Ya tiene/aprobaron
+      'ya tengo credito', 'ya tengo crédito', 'ya me aprobaron',
+      // En revisión
+      'me estan revisando', 'me están revisando', 'en revision', 'en revisión',
+      'ya hice el tramite', 'ya hice el trámite'
+    ];
+
+    // Si el mensaje indica que YA está en proceso, NO detectar como nueva intención
+    if (frasesYaEnProceso.some(frase => msgNormalizado.includes(frase))) {
+      console.log('🏦 Crédito: Lead ya en proceso, no iniciar flujo nuevo');
+      return false;
+    }
+
+    // Detección con regex para typos comunes (palabras pegadas)
+    // "solonespero" -> "solo espero", "yaestoy" -> "ya estoy", etc.
+    const regexYaEnProceso = [
+      /solo?\s*n?e?spero/i,           // "solo espero", "solonespero", "soloespero"
+      /espero\s*(mi|el)?\s*cred/i,    // "espero mi credito", "espero credito"
+      /ya\s*(lo)?\s*(conoc|visit|fui)/i,  // "ya conocí", "ya visité", "ya fui"
+      /en\s*proces/i,                 // "en proceso"
+      /esperando\s*(aprob|cred)/i,    // "esperando aprobación", "esperando crédito"
+      /ya\s*(me\s*)?(aprob|tramit)/i, // "ya me aprobaron", "ya tramité"
+    ];
+
+    if (regexYaEnProceso.some(regex => regex.test(msgNormalizado))) {
+      console.log('🏦 Crédito: Lead ya en proceso (regex), no iniciar flujo nuevo');
+      return false;
+    }
+
+    // Palabras clave que indican NUEVA intención de crédito
     const palabrasClave = [
       'credito', 'crédito', 'hipoteca', 'hipotecario',
       'financiamiento', 'prestamo', 'préstamo',
@@ -509,7 +672,7 @@ Responde 1, 2 o 3.`,
       'quiero un credito', 'quiero un crédito'
     ];
 
-    return palabrasClave.some(palabra => msgLower.includes(palabra));
+    return palabrasClave.some(palabra => msgNormalizado.includes(palabra));
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -780,6 +943,10 @@ ${msgContacto} 📞
 🏦 Banco preferido: ${context.banco_preferido || 'Por definir'}
 📞 Prefiere: ${context.modalidad || 'Por definir'}
 🏠 Interés: ${lead.property_interest || 'Por definir'}
+
+━━━━━━━━━━━━━━━━━━━━
+💬 *Para escribirle por WhatsApp:*
+Escribe: \`mensaje ${context.lead_name?.split(' ')[0] || 'nombre'}\`
 
 ⏰ ¡Contactar pronto!`;
   }

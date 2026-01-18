@@ -291,19 +291,40 @@ SOBRE GRUPO SANTA RITA (INFORMACIÓN DE LA EMPRESA)
 ⚠️ SOLO Priv. Andes tiene ALBERCA. Los demás NO tienen alberca ni gimnasio.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
-📌 RESPUESTAS A OBJECIONES COMUNES
+⚠️⚠️⚠️ MANEJO DE OBJECIONES - CRÍTICO ⚠️⚠️⚠️
 ━━━━━━━━━━━━━━━━━━━━━━━━
-Si dicen "está muy caro": "Tenemos casas en un amplio rango de precios y convenios con todas las instituciones de crédito para encontrar la opción perfecta para ti."
+🚨 REGLA DE ORO: NUNCA TE RINDAS ANTE UNA OBJECIÓN
+🚨 NUNCA digas "ok", "sin problema", "está bien" y te despidas
+🚨 SIEMPRE intenta superar la objeción con alternativas
 
-Si dicen "lo voy a pensar": "El mejor momento para comprar tu casa fue ayer; el segundo mejor es HOY. Cada día que pasa, nuestras propiedades aumentan de valor por plusvalía. Congela el precio firmando hoy."
+📌 "ESTÁ MUY CARO" / "NO ME ALCANZA" / "ES MUCHO DINERO":
+➜ NUNCA digas "ok, sin problema". SIEMPRE responde:
+"Entiendo tu preocupación por el precio 😊 Tenemos opciones desde $1.5 millones en Monte Verde y Andes.
+Además, con INFONAVIT o crédito bancario puedes pagar mensualidades desde $12,000.
+¿Cuál es tu presupuesto aproximado? Así te recomiendo la mejor opción para ti."
 
-Si dicen "no tengo enganche": "Con INFONAVIT puedes financiar el 100% del valor de la propiedad sin necesidad de enganche. Te puedo conectar con un asesor para darte toda la información."
+📌 "NO ME INTERESA" / "NO GRACIAS" / "PASO":
+➜ NUNCA te despidas inmediatamente. SIEMPRE responde:
+"¡Claro! Solo para asegurarme de darte la mejor info... ¿hay algo específico que no te convenció?
+A veces la gente cambia de opinión cuando conoce las promociones actuales o los planes de financiamiento.
+¿Puedo compartirte algo más antes de que te vayas?"
 
-Si dicen "no me alcanza el crédito": "Tenemos casas para un amplio rango de ingresos y convenios especiales con los bancos. Déjame conectarte con un asesor para revisar tus opciones."
+📌 "LO VOY A PENSAR":
+➜ "¡Por supuesto! Solo te comento que nuestras propiedades aumentan de valor cada mes por plusvalía.
+Con un apartado de solo $20,000 (reembolsable) puedes congelar el precio mientras decides.
+¿Te gustaría que te reserve alguna casa mientras lo piensas?"
 
-Si dicen "queda muy lejos": "Tenemos desarrollos en distintas zonas del área metropolitana de Zacatecas y Guadalupe con las mejores ubicaciones. ¿Te gustaría conocerlos en persona?"
+📌 "NO TENGO ENGANCHE":
+➜ "¡Buenas noticias! Con INFONAVIT puedes financiar el 100% sin enganche.
+¿Tienes INFONAVIT o FOVISSSTE? Te conecto con un asesor que te ayuda gratis."
 
-Si dicen "no conozco la zona": "Te comparto la ubicación en Google Maps para que tengas mejor referencia. También puedo agendarte una visita guiada."
+📌 "NO ME ALCANZA EL CRÉDITO":
+➜ "Tenemos convenios especiales con BBVA y Banorte con tasas preferenciales.
+Además, puedes usar crédito conyugal para aumentar tu capacidad. ¿Te conecto con un asesor para revisar opciones?"
+
+📌 "QUEDA MUY LEJOS" / "NO CONOZCO LA ZONA":
+➜ "Te entiendo. ¿Qué zona te queda mejor? Tenemos desarrollos en Zacatecas y Guadalupe.
+Te puedo compartir la ubicación exacta en Google Maps. ¿Te gustaría agendar una visita para conocer?"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 📌 DIFERENCIADORES DE GRUPO SANTA RITA
@@ -685,6 +706,18 @@ CONVERSACIÓN SOBRE CRÉDITO - SOLO SI EL CLIENTE LO PIDE
 - NO preguntes banco, ingreso, enganche - eso lo ve el asesor
 - Responde: "¡Listo! Te conecto con nuestro asesor de crédito para que te oriente"
 - El sistema enviará automáticamente los datos del asesor
+
+⚠️ "YA ESTOY EN PROCESO DE CRÉDITO" / "ESPERO MI APROBACIÓN":
+Si el cliente dice algo como:
+- "espero mi aprobación", "ya estoy tramitando", "ya metí papeles"
+- "ya lo conocí", "ya visité", "ya fui"
+- "solo espero", "en proceso", "en revisión"
+➜ NO inicies flujo de crédito nuevo
+➜ Responde con empatía y apoyo:
+  "¡Qué bien [nombre]! Me da gusto que ya estés avanzando con tu trámite 🙌
+   ¡Te deseamos mucho éxito con tu aprobación! Si necesitas algo mientras esperas, aquí estoy para ayudarte."
+➜ Si ya visitó, felicítalo: "¡Qué bueno que ya conociste [desarrollo]!"
+➜ Pregunta si necesita algo más o tiene alguna duda mientras espera
 
 ⚠️⚠️⚠️ IMPORTANTE - FLUJO DE CRÉDITO SIMPLIFICADO ⚠️⚠️⚠️
 
@@ -1505,9 +1538,17 @@ RECUERDA:
         }
       }
 
-      // CORRECCIÓN: Si tiene fecha Y hora, forzar confirmar_cita (excepto reagendar)
-      if (parsed.extracted_data?.fecha && parsed.extracted_data?.hora && parsed.intent !== 'reagendar_cita') {
+      // CORRECCIÓN: Si tiene fecha Y hora Y DESARROLLO, forzar confirmar_cita (excepto reagendar)
+      // NO crear cita si no sabemos qué desarrollo quiere visitar
+      const tieneDesarrollo = parsed.extracted_data?.desarrollo ||
+                              parsed.propiedad_sugerida ||
+                              (lead.property_interest && lead.property_interest !== 'null');
+
+      if (parsed.extracted_data?.fecha && parsed.extracted_data?.hora && tieneDesarrollo && parsed.intent !== 'reagendar_cita') {
         parsed.intent = 'confirmar_cita';
+        console.log('📅 Forzando confirmar_cita: tiene fecha, hora Y desarrollo');
+      } else if (parsed.extracted_data?.fecha && parsed.extracted_data?.hora && !tieneDesarrollo) {
+        console.log('📅 NO forzar cita: tiene fecha/hora pero FALTA desarrollo');
       }
       
       return {
@@ -3459,13 +3500,16 @@ Tú dime, ¿por dónde empezamos?`;
       if (analysis.intent === 'confirmar_cita' && datosExtraidos.fecha && datosExtraidos.hora) {
         if (!tieneNombreParaCita) {
           console.log('⏸️ Cita en espera - falta nombre real del cliente (tiene: ' + nombreCliente + ')');
+        } else if (!desarrolloInteres) {
+          // NO crear cita si falta el desarrollo - Sara debe preguntar primero
+          console.log('⏸️ Cita en espera - falta desarrollo (Claude preguntará cuál quiere visitar)');
         } else {
           console.log('🧠 Claude decidió: Crear cita');
           try {
             const cleanPhone = from.replace('whatsapp:+', '').replace(/\D/g, '');
             await this.handler.crearCitaCompleta(
               from, cleanPhone, lead,
-              desarrolloInteres || 'Por definir',
+              desarrolloInteres,
               datosExtraidos.fecha,
               String(datosExtraidos.hora),
               teamMembers, analysis, properties, env
