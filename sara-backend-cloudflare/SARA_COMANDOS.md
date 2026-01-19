@@ -337,7 +337,7 @@ Total: 8 actividades
 | `leads` / `mis leads` | ✅ Probado 2026-01-19 |
 | `hoy` | ✅ Probado 2026-01-19 |
 | `ayuda` | ✅ Probado 2026-01-19 |
-| `reagendar [nombre] [día] [hora]` | ⏳ En prueba |
+| `reagendar [nombre] [día] [hora]` | ✅ Probado 2026-01-19 |
 | `cancelar cita con [nombre]` | ⏳ En prueba |
 
 ### Bugs arreglados en pruebas
