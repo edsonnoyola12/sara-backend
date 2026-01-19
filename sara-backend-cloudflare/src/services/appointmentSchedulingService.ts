@@ -93,6 +93,17 @@ export class AppointmentSchedulingService {
         })
         .eq('id', appointment.id);
 
+      // Registrar actividad en lead_activities
+      await this.supabase.client
+        .from('lead_activities')
+        .insert({
+          lead_id: lead.id,
+          type: 'whatsapp',
+          notes: `Cita cancelada por ${vendedor.name} (era: ${formatearFechaLegible(appointment.scheduled_date)} ${formatearHoraLegible(appointment.scheduled_time)})`,
+          created_by: vendedor.id
+        });
+      console.log(`📋 Actividad registrada: Cita cancelada para ${lead.name}`);
+
       // Cancelar en Google Calendar si existe
       if (this.calendar && appointment.google_event_id) {
         try {
@@ -151,6 +162,17 @@ Puedes reagendar cuando quieras.`;
           cancelled_by: vendedor.name
         })
         .eq('id', appointment.id);
+
+      // Registrar actividad en lead_activities
+      await this.supabase.client
+        .from('lead_activities')
+        .insert({
+          lead_id: leadId,
+          type: 'whatsapp',
+          notes: `Cita cancelada por ${vendedor.name} (era: ${formatearFechaLegible(appointment.scheduled_date)} ${formatearHoraLegible(appointment.scheduled_time)})`,
+          created_by: vendedor.id
+        });
+      console.log(`📋 Actividad registrada: Cita cancelada para ${leadName}`);
 
       // Cancelar en Google Calendar si existe
       if (this.calendar && appointment.google_event_id) {
@@ -271,6 +293,17 @@ reagendar ${nombreLead} mañana 4pm`;
           updated_at: new Date().toISOString()
         })
         .eq('id', appointment.id);
+
+      // Registrar actividad en lead_activities
+      await this.supabase.client
+        .from('lead_activities')
+        .insert({
+          lead_id: lead.id,
+          type: 'whatsapp',
+          notes: `Cita reagendada por ${vendedor.name} (nueva: ${formatearFechaLegible(nuevaFecha)} ${formatearHoraLegible(nuevaHoraISO)})`,
+          created_by: vendedor.id
+        });
+      console.log(`📋 Actividad registrada: Cita reagendada para ${lead.name}`);
 
       // Actualizar en Google Calendar si existe
       if (this.calendar && appointment.google_event_id) {
