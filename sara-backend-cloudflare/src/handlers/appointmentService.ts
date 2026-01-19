@@ -183,10 +183,17 @@ export function crearEventoCalendar(
 // PARSEO DE COMANDOS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-// Parsear comando de cancelar cita: "cancelar cita con Ana"
+// Parsear comando de cancelar cita: "cancelar cita con Ana" o "cancelar cita Ana"
 export function parseCancelarCitaCommand(body: string): string | null {
-  const match = body.match(/cancelar cita (?:con|de)\s+([a-záéíóúñ\s]+)/i);
-  return match ? match[1].trim() : null;
+  // Acepta: "cancelar cita con Ana", "cancelar cita de Ana", "cancelar cita Ana"
+  const match = body.match(/cancelar\s+(?:cita\s+)?(?:con|de|a)?\s*([a-záéíóúñ\s]+)/i);
+  if (!match) return null;
+
+  // Limpiar el nombre (quitar "cita" si quedó)
+  let nombre = match[1].trim();
+  nombre = nombre.replace(/^cita\s+/i, '').trim();
+
+  return nombre || null;
 }
 
 // Parsear comando de reagendar: "reagendar Ana mañana 4pm"

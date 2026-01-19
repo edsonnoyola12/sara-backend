@@ -62,13 +62,20 @@
 
 ## COMANDOS VENDEDOR
 
-| Comando | Acción |
-|---------|--------|
-| `#mas` / `#continuar` | Extender bridge 6 min más |
-| `#cerrar` / `#fin` | Terminar conexiones activas |
-| `reagendar` | Reagendar cita |
-| `cancelar cita` | Cancelar cita |
-| Números `1`, `2`, `3`, `4` | Responder a opciones pendientes |
+| Comando | Acción | Handler |
+|---------|--------|---------|
+| `citas` / `mis citas` | Ver citas de hoy | `vendedorCitasHoy` |
+| `leads` / `mis leads` | Ver leads activos | `vendedorResumenLeads` |
+| `hoy` / `resumen` | Briefing del día | `vendedorBriefing` |
+| `meta` | Ver avance de meta mensual | `vendedorMetaAvance` |
+| `ayuda` / `help` / `?` | Ver comandos disponibles | `vendedorAyuda` |
+| `briefing` | Resumen matutino | `vendedorBriefing` |
+| `agendar cita con [nombre]` | Agendar nueva cita | `vendedorAgendarCita` |
+| `reagendar [nombre] [día] [hora]` | Reagendar cita existente | `vendedorReagendarCita` |
+| `cancelar cita con [nombre]` | Cancelar cita | `vendedorCancelarCita` |
+| `#mas` / `#continuar` | Extender bridge 6 min más | - |
+| `#cerrar` / `#fin` | Terminar conexiones activas | - |
+| Números `1`, `2`, `3`, `4` | Responder a opciones pendientes | - |
 
 ---
 
@@ -268,8 +275,10 @@ Total: 8 actividades
 
 | Teléfono | Rol | Nombre |
 |----------|-----|--------|
-| 5212224558475 | CEO | CEO Test |
-| 5215610016226 | Lead | Cumpleañero Prueba |
+| 5212224558475 | CEO/Asesor | CEO Test / Asesor Crédito Test |
+| 5215610016226 | Vendedor | Edson Vendedor |
+
+> **IMPORTANTE**: Solo usar estos 2 teléfonos para pruebas. NO enviar mensajes a otros team_members.
 
 ---
 
@@ -289,22 +298,54 @@ Total: 8 actividades
 
 ## COMANDOS PROBADOS ✅
 
-| Comando | Rol | Estado |
-|---------|-----|--------|
-| `bridge [nombre]` | CEO | ✅ Probado |
-| `#cerrar` | CEO | ✅ Probado |
-| `#mas` | CEO | ✅ Probado |
-| `mensaje [nombre]` | CEO | ✅ Probado |
-| `actividad` | CEO | ✅ Probado |
-| `ayuda` | CEO | ✅ Probado |
-| `reporte` | CEO | ✅ Probado |
-| `hoy` | CEO | ✅ Probado |
-| Selección `1`, `2`, `3` | CEO | ✅ Probado |
+### CEO
+| Comando | Estado |
+|---------|--------|
+| `bridge [nombre]` | ✅ Probado |
+| `#cerrar` | ✅ Probado |
+| `#mas` | ✅ Probado |
+| `mensaje [nombre]` | ✅ Probado |
+| `actividad` | ✅ Probado |
+| `ayuda` | ✅ Probado |
+| `reporte` | ✅ Probado |
+| `hoy` | ✅ Probado |
+| Selección `1`, `2`, `3` | ✅ Probado |
 
-### Pendientes por probar:
-- Comandos de Asesor Hipotecario
-- `reagendar` (vendedor)
-- `cancelar cita` (vendedor)
+### Asesor Hipotecario
+| Comando | Estado |
+|---------|--------|
+| `ayuda` | ✅ Probado 2026-01-18 |
+| `mis leads` | ✅ Probado 2026-01-18 |
+| `reporte` | ✅ Probado 2026-01-18 |
+| `hoy` | ✅ Probado 2026-01-18 |
+| `semana` | ✅ Probado 2026-01-18 |
+| `on` / `off` | ✅ Probado 2026-01-18 |
+| `status [nombre]` | ✅ Probado 2026-01-18 |
+| `docs [nombre]` | ✅ Probado 2026-01-18 |
+| `preaprobado [nombre]` | ✅ Probado 2026-01-19 (sync con mortgage_applications OK) |
+| `rechazado [nombre] [motivo]` | ✅ Probado 2026-01-19 (sync con mortgage_applications OK) |
+| `dile [nombre] que [msg]` | ✅ Probado 2026-01-19 |
+| `llamar [nombre]` | ✅ Probado 2026-01-18 |
+| `adelante [nombre]` | ✅ Probado 2026-01-18 (sync con mortgage_applications OK) |
+| `atras [nombre]` | ✅ Probado 2026-01-18 (sync con mortgage_applications OK) |
+| `contactado [nombre]` | ✅ Probado 2026-01-19 (sync con mortgage_applications OK) |
+
+### Vendedor
+| Comando | Estado |
+|---------|--------|
+| `citas` | ✅ Probado 2026-01-19 |
+| `leads` / `mis leads` | ✅ Probado 2026-01-19 |
+| `hoy` | ✅ Probado 2026-01-19 |
+| `ayuda` | ✅ Probado 2026-01-19 |
+| `reagendar [nombre] [día] [hora]` | ⏳ En prueba |
+| `cancelar cita con [nombre]` | ⏳ En prueba |
+
+### Bugs arreglados en pruebas
+10. ✅ JSON parsing en `asesorCommandsService.ts` - algunos leads tenían `notes` como texto plano, agregado `safeParseNotes()` helper
+11. ✅ Vendedor no respondía (error `detectCoordinadorCommand is not a function`) - Agregada función stub en vendorCommandsService.ts
+12. ✅ Vendedor no respondía (error `detectRouteCommand is not a function`) - Agregada función con detección de comandos básicos
+13. ✅ Comando "citas" fallaba (`getCitasHoy is not a function`) - Implementadas funciones en vendorCommandsService.ts
+14. ✅ Notificación vendedor fallaba fuera de 24h (error 131047) - Implementado template `reactivar_equipo` + pending_notification
 
 ---
 
@@ -331,4 +372,27 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-17 23:00*
+*Última actualización: 2026-01-19 15:15*
+
+---
+
+## HISTORIAL DE CAMBIOS
+
+### 2026-01-19
+
+**Sesión 3 (14:00-15:15)**
+- ✅ Arreglado error `detectCoordinadorCommand is not a function` en vendedor
+- ✅ Arreglado error `detectRouteCommand is not a function` en vendedor
+- ✅ Implementada detección de comandos básicos de vendedor (citas, leads, hoy, ayuda, reagendar, cancelar)
+- ✅ Implementadas funciones `getCitasHoy`, `formatCitasHoy`, `getBriefing`, `formatBriefing`, `getMetaAvance`, `formatMetaAvance`, `getResumenLeads`, `formatResumenLeads` en vendorCommandsService.ts
+- ✅ Implementado sistema de notificación vendedor con template cuando está fuera de ventana 24h (error 131047)
+- ✅ Agregada lógica de pending_notification para entregar mensaje cuando vendedor responde al template
+- 🔧 Teléfono de prueba vendedor: 5215610016226 (Edson Vendedor)
+
+**Sesión 2 (mañana)**
+- ✅ Comandos asesor hipotecario completamente probados
+- ✅ Sync entre comandos asesor y tabla mortgage_applications
+
+**Sesión 1 (ayer)**
+- ✅ Sistema bridge CEO funcionando
+- ✅ Sistema mensaje intermediado funcionando

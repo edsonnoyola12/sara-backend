@@ -818,6 +818,25 @@ export class WhatsAppHandler {
           console.log('⚠️ Error actualizando last_sara_interaction:', e);
         }
 
+        // ═══ VERIFICAR SI HAY NOTIFICACIÓN PENDIENTE ═══
+        try {
+          const vendedorNotes = typeof vendedor.notes === 'object' ? vendedor.notes : {};
+          if (vendedorNotes?.pending_notification?.message) {
+            console.log(`📬 Enviando notificación pendiente a ${vendedor.name}`);
+            await this.meta.sendWhatsAppMessage(cleanPhone, vendedorNotes.pending_notification.message);
+
+            // Limpiar la notificación pendiente
+            const { pending_notification, ...restNotes } = vendedorNotes;
+            await this.supabase.client
+              .from('team_members')
+              .update({ notes: restNotes })
+              .eq('id', vendedor.id);
+            console.log(`✅ Notificación pendiente enviada y limpiada`);
+          }
+        } catch (e) {
+          console.log('⚠️ Error procesando notificación pendiente:', e);
+        }
+
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // PRIMERO: DETECTAR RESPUESTAS A APROBACIÓN DE FOLLOW-UPS
         // Respuestas simples: ok, si, no, o mensaje directo
@@ -3336,6 +3355,26 @@ export class WhatsAppHandler {
         await this.vendedorBuscarPorTelefono(from, params.telefono, vendedor);
         break;
 
+      // ━━━ REPORTES Y CONSULTAS BÁSICAS ━━━
+      case 'vendedorCitasHoy':
+        await this.vendedorCitasHoy(from, vendedor, nombreVendedor);
+        break;
+      case 'vendedorResumenLeads':
+        await this.vendedorResumenLeads(from, vendedor, nombreVendedor);
+        break;
+      case 'vendedorResumenHoy':
+        await this.vendedorBriefing(from, vendedor, nombreVendedor);
+        break;
+      case 'vendedorAyuda':
+        await this.vendedorAyuda(from, nombreVendedor);
+        break;
+      case 'vendedorBriefing':
+        await this.vendedorBriefing(from, vendedor, nombreVendedor);
+        break;
+      case 'vendedorMetaAvance':
+        await this.vendedorMetaAvance(from, vendedor, nombreVendedor);
+        break;
+
       default:
         console.log('Handler vendedor no reconocido (fallback):', result.handlerName);
         return false;
@@ -3775,6 +3814,43 @@ export class WhatsAppHandler {
           await this.enviarMensajePendienteLead(from, body, asesor, notes.pending_message_to_lead);
           return;
         }
+
+        // Verificar si hay pending_cita_action (cancelar/reagendar con múltiples leads)
+        if (notes?.pending_cita_action) {
+          const selNum = parseInt(mensaje);
+          if (!isNaN(selNum) && selNum > 0 && selNum <= notes.pending_cita_action.leads.length) {
+            const selectedLead = notes.pending_cita_action.leads[selNum - 1];
+            const action = notes.pending_cita_action.action;
+
+            // Limpiar pending_cita_action
+            delete notes.pending_cita_action;
+            await this.supabase.client
+              .from('team_members')
+              .update({ notes })
+              .eq('id', asesor.id);
+
+            if (action === 'cancelar') {
+              // Ejecutar cancelación con el lead seleccionado por ID
+              const schedulingService = new AppointmentSchedulingService(this.supabase, this.calendar);
+              const result = await schedulingService.cancelarCitaPorId(selectedLead.id, selectedLead.name, asesor);
+
+              if (!result.success) {
+                await this.meta.sendWhatsAppMessage(from, `⚠️ ${result.error || 'No se pudo cancelar la cita'}`);
+              } else {
+                await this.meta.sendWhatsAppMessage(from, schedulingService.formatCancelarCitaExito(result));
+              }
+              return;
+            } else if (action === 'reagendar') {
+              // Pedir fecha/hora para reagendar
+              await this.meta.sendWhatsAppMessage(from,
+                `📅 *Reagendar cita de ${selectedLead.name}*\n\n` +
+                `Escribe: reagendar ${selectedLead.name.split(' ')[0]} [día] [hora]\n\n` +
+                `Ejemplo: reagendar ${selectedLead.name.split(' ')[0]} mañana 4pm`
+              );
+              return;
+            }
+          }
+        }
       } catch (e) {
         // notes no es JSON válido
       }
@@ -3834,11 +3910,72 @@ export class WhatsAppHandler {
 
       // Notificar vendedor si es necesario
       if (handlerResult.vendedorPhone && handlerResult.vendedorMessage) {
-        await this.meta.sendWhatsAppMessage(
-          handlerResult.vendedorPhone.replace(/\D/g, ''),
-          handlerResult.vendedorMessage
-        );
-        console.log(`📤 Mensaje enviado a vendedor ${handlerResult.vendedorPhone}`);
+        const vendedorPhoneClean = handlerResult.vendedorPhone.replace(/\D/g, '');
+
+        // Verificar si vendedor está dentro de ventana 24h ANTES de enviar
+        // Buscar por sufijo del teléfono para evitar problemas de formato
+        const phoneSuffix = vendedorPhoneClean.slice(-10);
+        const { data: vendedorData } = await this.supabase.client
+          .from('team_members')
+          .select('name, last_sara_interaction')
+          .like('phone', `%${phoneSuffix}`)
+          .single();
+
+        const nombreVendedor = vendedorData?.name?.split(' ')[0] || 'Equipo';
+        const lastInteraction = vendedorData?.last_sara_interaction;
+        const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const dentroVentana24h = lastInteraction && lastInteraction > hace24h;
+
+        console.log(`🔍 Vendedor ${nombreVendedor}: last_interaction=${lastInteraction}, dentro24h=${dentroVentana24h}`);
+
+        if (dentroVentana24h) {
+          // Dentro de ventana 24h: enviar mensaje normal
+          await this.meta.sendWhatsAppMessage(vendedorPhoneClean, handlerResult.vendedorMessage);
+          console.log(`📤 Mensaje enviado a vendedor ${handlerResult.vendedorPhone}`);
+        } else {
+          // Fuera de ventana 24h: guardar notificación pendiente y enviar template de reactivación
+          console.log(`⚠️ Vendedor ${vendedorPhoneClean} fuera de ventana 24h, guardando notificación pendiente`);
+          try {
+            // Guardar la notificación pendiente en notes del vendedor
+            if (vendedorData) {
+              const { data: vendedorFull } = await this.supabase.client
+                .from('team_members')
+                .select('id, notes')
+                .like('phone', `%${phoneSuffix}`)
+                .single();
+
+              if (vendedorFull) {
+                const currentNotes = typeof vendedorFull.notes === 'object' ? vendedorFull.notes : {};
+                await this.supabase.client
+                  .from('team_members')
+                  .update({
+                    notes: {
+                      ...currentNotes,
+                      pending_notification: {
+                        message: handlerResult.vendedorMessage,
+                        created_at: new Date().toISOString()
+                      }
+                    }
+                  })
+                  .eq('id', vendedorFull.id);
+                console.log(`📝 Notificación pendiente guardada para ${nombreVendedor}`);
+              }
+            }
+
+            // Enviar template de reactivación
+            await this.meta.sendTemplate(vendedorPhoneClean, 'reactivar_equipo', 'es_MX', [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: nombreVendedor }
+                ]
+              }
+            ], true); // bypassRateLimit=true para notificaciones
+            console.log(`📤 Template reactivar_equipo enviado a vendedor ${vendedorPhoneClean}`);
+          } catch (templateErr) {
+            console.error('❌ Error enviando template a vendedor:', templateErr);
+          }
+        }
       }
 
       // Responder al asesor
@@ -4925,11 +5062,23 @@ Responde con fecha y hora:
       const result = await schedulingService.cancelarCitaCompleto(nombreLead, vendedor);
 
       if (result.multipleLeads) {
+        // Guardar estado para selección numérica
+        const notes = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
+        notes.pending_cita_action = {
+          action: 'cancelar',
+          leads: result.multipleLeads,
+          timestamp: new Date().toISOString()
+        };
+        await this.supabase.client
+          .from('team_members')
+          .update({ notes })
+          .eq('id', vendedor.id);
+
         let msg = `🤝 Encontré ${result.multipleLeads.length} leads:\n\n`;
         result.multipleLeads.forEach((l: any, i: number) => {
           msg += `${i + 1}. ${l.name} (...${l.phone?.slice(-4) || '????'})\n`;
         });
-        msg += `\nEscribe nombre completo.`;
+        msg += `\nResponde con el *número* para cancelar.`;
         await this.twilio.sendWhatsAppMessage(from, msg);
         return;
       }

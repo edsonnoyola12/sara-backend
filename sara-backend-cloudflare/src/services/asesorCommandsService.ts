@@ -33,6 +33,17 @@ interface CreditFlowContext {
 export class AsesorCommandsService {
   constructor(private supabase: SupabaseService) {}
 
+  // Helper para parsear notes de forma segura (algunos leads tienen texto plano)
+  private safeParseNotes(notes: any): any {
+    if (!notes) return {};
+    if (typeof notes === 'object') return notes;
+    try {
+      return JSON.parse(notes);
+    } catch {
+      return {}; // notes no es JSON válido
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // SINCRONIZAR CON MORTGAGE_APPLICATIONS (para que aparezca en CRM)
   // ═══════════════════════════════════════════════════════════════════
@@ -50,7 +61,7 @@ export class AsesorCommandsService {
       };
 
       const mortgageStatus = statusMap[newStatus] || 'pending';
-      const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+      const notes = this.safeParseNotes(lead.notes);
       const ctx = notes?.credit_flow_context;
 
       // Buscar si ya existe un mortgage_application para este lead
@@ -310,8 +321,12 @@ export class AsesorCommandsService {
 
       const misLeads = allLeads?.filter(l => {
         if (!l.notes) return false;
-        const notes = typeof l.notes === 'string' ? JSON.parse(l.notes) : l.notes;
-        return notes?.credit_flow_context?.asesor_id === asesorId;
+        try {
+          const notes = this.safeParseNotes(l.notes);
+          return notes?.credit_flow_context?.asesor_id === asesorId;
+        } catch {
+          return false; // notes no es JSON válido
+        }
       }) || [];
 
       console.log(`🔍 getMisLeads: found ${misLeads.length} leads for asesor ${asesorId}`);
@@ -335,7 +350,7 @@ export class AsesorCommandsService {
 
     leads.forEach((lead, i) => {
       const status = this.getStatusEmoji(lead.status);
-      const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+      const notes = this.safeParseNotes(lead.notes);
       const ctx = notes?.credit_flow_context;
 
       const banco = ctx?.banco_preferido || '—';
@@ -376,7 +391,7 @@ export class AsesorCommandsService {
       return { message: `❌ No encontré a "${query}" en tus leads.\n\n💡 Usa *MIS LEADS* para ver tu lista.` };
     }
 
-    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const notes = this.safeParseNotes(lead.notes);
     const ctx: CreditFlowContext | undefined = notes?.credit_flow_context;
 
     let msg = `📊 *STATUS: ${lead.name}*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
@@ -454,7 +469,7 @@ Para continuar, necesitamos los siguientes documentos:
 ¿Tienes alguna duda sobre los documentos? 🤔`;
 
     // Buscar vendedor asignado para notificarle (usar assigned_to como fallback)
-    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const notes = this.safeParseNotes(lead.notes);
     const ctx = notes?.credit_flow_context;
     let vendedorPhone: string | undefined;
     let vendedorMessage: string | undefined;
@@ -502,7 +517,7 @@ Para continuar, necesitamos los siguientes documentos:
     await this.syncMortgageApplication(lead, 'pre_approved', asesorId, nombreAsesor);
 
     const nombreCorto = lead.name.split(' ')[0];
-    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const notes = this.safeParseNotes(lead.notes);
     const ctx = notes?.credit_flow_context;
     const banco = ctx?.banco_preferido || 'el banco';
 
@@ -582,7 +597,7 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
 ¡No te desanimes! 💪`;
 
     // Buscar vendedor asignado para notificarle (usar assigned_to como fallback)
-    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const notes = this.safeParseNotes(lead.notes);
     const ctx = notes?.credit_flow_context;
     let vendedorPhone: string | undefined;
     let vendedorMessage: string | undefined;
@@ -630,10 +645,7 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
       .eq('id', asesorId)
       .single();
 
-    let notes: any = {};
-    if (asesorData?.notes) {
-      notes = typeof asesorData.notes === 'string' ? JSON.parse(asesorData.notes) : asesorData.notes;
-    }
+    let notes: any = this.safeParseNotes(asesorData?.notes);
 
     notes.pending_lead_response = {
       lead_id: lead.id,
@@ -696,7 +708,7 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
 
     // Si es campo en notas (credit_flow_context)
     if (['banco_preferido', 'ingreso_mensual', 'enganche'].includes(campoReal)) {
-      const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+      const notes = this.safeParseNotes(lead.notes);
       if (!notes.credit_flow_context) notes.credit_flow_context = {};
 
       if (campoReal === 'ingreso_mensual' || campoReal === 'enganche') {
@@ -786,7 +798,7 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
       .not('notes', 'is', null);
 
     const misLeads = allLeads?.filter(l => {
-      const notes = typeof l.notes === 'string' ? JSON.parse(l.notes) : l.notes;
+      const notes = this.safeParseNotes(l.notes);
       return notes?.credit_flow_context?.asesor_id === asesorId;
     }) || [];
 
@@ -832,9 +844,17 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
       { key: 'approved', label: '🏆 Aprobado' }
     ];
 
-    const currentIndex = funnel.findIndex(f => f.key === lead.status);
+    let currentIndex = funnel.findIndex(f => f.key === lead.status);
+
+    // Manejar status especiales (rejected puede volver al funnel)
     if (currentIndex === -1) {
-      return { message: `⚠️ Status actual (${lead.status}) no está en el funnel de crédito.` };
+      if (lead.status === 'rejected' && direccion === 'prev') {
+        // Si está rechazado y quiere ir atrás, lo movemos a "pre_approved" o "documents_pending"
+        currentIndex = funnel.findIndex(f => f.key === 'pre_approved');
+        if (currentIndex === -1) currentIndex = funnel.length - 1;
+      } else {
+        return { message: `⚠️ Status actual (${lead.status}) no está en el funnel de crédito.` };
+      }
     }
 
     let newIndex: number;
@@ -861,7 +881,7 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
     await this.syncMortgageApplication(lead, newStatus.key, asesorId, nombreAsesor);
 
     // Buscar vendedor asignado para notificarle
-    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const notes = this.safeParseNotes(lead.notes);
     const ctx = notes?.credit_flow_context;
     let vendedorPhone: string | undefined;
     let vendedorMessage: string | undefined;
@@ -882,13 +902,13 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
       if (vendedor?.phone) {
         vendedorPhone = vendedor.phone;
         const flecha = direccion === 'next' ? '⬆️' : '⬇️';
-        vendedorMessage = `${flecha} *Actualización de crédito*\n\nTu cliente *${lead.name}* avanzó en su trámite:\n\n${funnel[currentIndex].label}\n      ↓\n${newStatus.label}\n\n👤 Asesor: ${nombreAsesor}`;
+        vendedorMessage = `${flecha} *Actualización de crédito*\n\nTu cliente *${lead.name}* cambió de etapa:\n\n📍 *De:* ${funnel[currentIndex].label}\n📍 *A:* ${newStatus.label}\n\n👤 Asesor: ${nombreAsesor}`;
       }
     }
 
     const flecha = direccion === 'next' ? '➡️' : '⬅️';
     return {
-      message: `${flecha} *${lead.name}* movido:\n\n${funnel[currentIndex].label}\n      ↓\n${newStatus.label}${vendedorPhone ? '\n\n✅ Vendedor notificado' : ''}`,
+      message: `${flecha} *${lead.name}* movido:\n\n📍 *De:* ${funnel[currentIndex].label}\n📍 *A:* ${newStatus.label}${vendedorPhone ? '\n\n✅ Vendedor notificado' : ''}`,
       vendedorPhone,
       vendedorMessage
     };
@@ -933,7 +953,7 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
     await this.syncMortgageApplication(lead, 'contacted', asesorId, nombreAsesor);
 
     // Buscar vendedor asignado para notificarle (usar assigned_to como fallback)
-    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const notes = this.safeParseNotes(lead.notes);
     const ctx = notes?.credit_flow_context;
     let vendedorPhone: string | undefined;
     let vendedorMessage: string | undefined;
@@ -974,7 +994,7 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
       .not('notes', 'is', null);
 
     const misLeads = allLeads?.filter(l => {
-      const notes = typeof l.notes === 'string' ? JSON.parse(l.notes || '{}') : (l.notes || {});
+      const notes = this.safeParseNotes(l.notes);
       return notes?.credit_flow_context?.asesor_id === asesorId;
     }) || [];
 
