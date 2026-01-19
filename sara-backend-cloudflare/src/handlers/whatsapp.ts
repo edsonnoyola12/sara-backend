@@ -2687,6 +2687,37 @@ export class WhatsAppHandler {
     }
 
     // ═══════════════════════════════════════════════════════════
+    // 3.5. SELECCIÓN PENDIENTE DE CANCELAR CITA
+    // ═══════════════════════════════════════════════════════════
+    if (/^[1-9]$/.test(mensaje.trim()) && notasVendedor?.pending_cita_action) {
+      const pendingAction = notasVendedor.pending_cita_action;
+      const idx = parseInt(mensaje.trim()) - 1;
+
+      if (idx >= 0 && idx < pendingAction.leads.length) {
+        const selectedLead = pendingAction.leads[idx];
+        // Limpiar pending_cita_action
+        const { pending_cita_action, ...restNotes } = notasVendedor;
+        await this.supabase.client
+          .from('team_members')
+          .update({ notes: restNotes })
+          .eq('id', vendedor.id);
+
+        if (pendingAction.action === 'cancelar') {
+          // Cancelar cita del lead seleccionado
+          const schedulingService = new AppointmentSchedulingService(this.supabase, this.calendar);
+          const result = await schedulingService.cancelarCitaPorId(selectedLead.id, selectedLead.name, vendedor);
+
+          if (result.success) {
+            await this.twilio.sendWhatsAppMessage(from, schedulingService.formatCancelarCitaExito(result));
+          } else {
+            await this.twilio.sendWhatsAppMessage(from, `⚠️ ${result.error || 'Error al cancelar'}`);
+          }
+        }
+        return;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // 3b. CONFIRMACIONES PENDIENTES (respuestas "1", "2", "si", "no")
     // ═══════════════════════════════════════════════════════════
     if (await this.handlePendingConfirmations(from, mensaje, vendedor, nombreVendedor)) {

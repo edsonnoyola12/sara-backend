@@ -338,7 +338,8 @@ Total: 8 actividades
 | `hoy` | ✅ Probado 2026-01-19 |
 | `ayuda` | ✅ Probado 2026-01-19 |
 | `reagendar [nombre] [día] [hora]` | ✅ Probado 2026-01-19 |
-| `cancelar cita con [nombre]` | ⏳ En prueba |
+| `cancelar cita con [nombre]` | ✅ Probado 2026-01-19 |
+| Selección `1`, `2` en múltiples leads | ✅ Probado 2026-01-19 |
 
 ### Bugs arreglados en pruebas
 10. ✅ JSON parsing en `asesorCommandsService.ts` - algunos leads tenían `notes` como texto plano, agregado `safeParseNotes()` helper
@@ -346,6 +347,7 @@ Total: 8 actividades
 12. ✅ Vendedor no respondía (error `detectRouteCommand is not a function`) - Agregada función con detección de comandos básicos
 13. ✅ Comando "citas" fallaba (`getCitasHoy is not a function`) - Implementadas funciones en vendorCommandsService.ts
 14. ✅ Notificación vendedor fallaba fuera de 24h (error 131047) - Implementado template `reactivar_equipo` + pending_notification
+15. ✅ Selección "1" en cancelar cita no funcionaba - Agregado manejo de `pending_cita_action` en vendedor handler
 
 ---
 
