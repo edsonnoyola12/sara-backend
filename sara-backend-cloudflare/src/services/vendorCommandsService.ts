@@ -72,7 +72,7 @@ export class VendorCommandsService {
 
     // ═══ AGENDAR CITA ═══
     if (/^(agendar|cita\s+con)/i.test(msg)) {
-      return { matched: true, handlerName: 'vendedorAgendarCita', handlerParams: { texto: body } };
+      return { matched: true, handlerName: 'vendedorAgendarCitaCompleta', handlerParams: { texto: body } };
     }
 
     // ═══ BRIEFING ═══
