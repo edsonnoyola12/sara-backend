@@ -2622,7 +2622,72 @@ export class WhatsAppHandler {
     }
 
     // ═══════════════════════════════════════════════════════════
-    // 3. CONFIRMACIONES PENDIENTES (respuestas "1", "2", "si", "no")
+    // 3. SELECCIÓN PENDIENTE DE REAGENDAR (respuestas "1", "2", etc.)
+    // ═══════════════════════════════════════════════════════════
+    if (/^[1-9]$/.test(mensaje.trim()) && notasVendedor?.pending_reagendar_selection) {
+      const selection = notasVendedor.pending_reagendar_selection;
+      const idx = parseInt(mensaje.trim()) - 1;
+
+      if (idx >= 0 && idx < selection.leads.length) {
+        const selectedLead = selection.leads[idx];
+        // Limpiar la selección pendiente
+        const { pending_reagendar_selection, ...restNotes } = notasVendedor;
+        await this.supabase.client
+          .from('team_members')
+          .update({ notes: restNotes })
+          .eq('id', vendedor.id);
+
+        // Ejecutar reagendar con el lead seleccionado
+        const schedulingService = new AppointmentSchedulingService(this.supabase, this.calendar);
+
+        // Buscar cita activa del lead
+        const { data: appointment } = await this.supabase.client
+          .from('appointments')
+          .select('*')
+          .eq('lead_id', selectedLead.id)
+          .in('status', ['scheduled', 'confirmed'])
+          .order('scheduled_date', { ascending: true })
+          .limit(1)
+          .single();
+
+        if (!appointment) {
+          await this.twilio.sendWhatsAppMessage(from, `⚠️ ${selectedLead.name} no tiene citas pendientes para reagendar.`);
+          return;
+        }
+
+        // Parsear fecha/hora del comando original
+        const originalBody = selection.original_body || '';
+        const parsed = this.parseReagendarParams(originalBody);
+
+        if (!parsed.dia || !parsed.hora) {
+          await this.twilio.sendWhatsAppMessage(from,
+            `📅 *Reagendar cita de ${selectedLead.name}*\n\n` +
+            `¿Para cuándo la movemos?\n\n` +
+            `*Escribe:*\n` +
+            `reagendar ${selectedLead.name} [día] [hora]\n\n` +
+            `*Ejemplo:*\n` +
+            `reagendar ${selectedLead.name} mañana 4pm`
+          );
+          return;
+        }
+
+        // Ejecutar reagendar completo
+        const result = await schedulingService.reagendarCitaCompleto(
+          `reagendar ${selectedLead.name} ${parsed.dia} ${parsed.hora}`,
+          vendedor
+        );
+
+        if (result.success) {
+          await this.twilio.sendWhatsAppMessage(from, schedulingService.formatReagendarCitaExito(result));
+        } else {
+          await this.twilio.sendWhatsAppMessage(from, `⚠️ ${result.error || 'Error al reagendar'}`);
+        }
+        return;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 3b. CONFIRMACIONES PENDIENTES (respuestas "1", "2", "si", "no")
     // ═══════════════════════════════════════════════════════════
     if (await this.handlePendingConfirmations(from, mensaje, vendedor, nombreVendedor)) {
       return;
@@ -5118,6 +5183,26 @@ Responde con fecha y hora:
         result.multipleLeads.forEach((l: any, i: number) => {
           msg += `${i + 1}. ${l.name} (...${l.phone?.slice(-4) || '????'})\n`;
         });
+        // Guardar contexto para procesar la selección
+        const { data: vendedorData } = await this.supabase.client
+          .from('team_members')
+          .select('notes')
+          .eq('id', vendedor.id)
+          .single();
+        const currentNotes = typeof vendedorData?.notes === 'object' ? vendedorData.notes : {};
+        await this.supabase.client
+          .from('team_members')
+          .update({
+            notes: {
+              ...currentNotes,
+              pending_reagendar_selection: {
+                leads: result.multipleLeads.map((l: any) => ({ id: l.id, name: l.name })),
+                original_body: body,
+                created_at: new Date().toISOString()
+              }
+            }
+          })
+          .eq('id', vendedor.id);
         await this.twilio.sendWhatsAppMessage(from, msg);
         return;
       }
@@ -6339,13 +6424,41 @@ Responde con fecha y hora:
     if (horaMatch) {
       let hours = parseInt(horaMatch[1]);
       const minutes = horaMatch[2] || '00';
-      
+
       if (hora.toLowerCase().includes('pm') && hours < 12) hours += 12;
       if (hora.toLowerCase().includes('am') && hours === 12) hours = 0;
-      
+
       return `${hours.toString().padStart(2, '0')}:${minutes}:00`;
     }
     return '12:00:00';
+  }
+
+  // Parsear parámetros de reagendar (día y hora) del comando original
+  private parseReagendarParams(body: string): { dia?: string; hora?: string } {
+    // Ejemplos: "reagendar juan mañana 4pm", "reagendar ana lunes 10am"
+    const texto = body.toLowerCase().trim();
+
+    // Buscar día
+    const diasPatterns = [
+      'hoy', 'mañana', 'pasado mañana',
+      'lunes', 'martes', 'miércoles', 'miercoles', 'jueves', 'viernes', 'sábado', 'sabado', 'domingo'
+    ];
+    let dia: string | undefined;
+    for (const d of diasPatterns) {
+      if (texto.includes(d)) {
+        dia = d;
+        break;
+      }
+    }
+
+    // Buscar hora
+    const horaMatch = texto.match(/(\d{1,2})\s*(am|pm|:?\d{0,2}\s*(am|pm)?)/i);
+    let hora: string | undefined;
+    if (horaMatch) {
+      hora = horaMatch[0].trim();
+    }
+
+    return { dia, hora };
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
