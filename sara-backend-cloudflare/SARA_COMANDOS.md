@@ -337,9 +337,11 @@ Total: 8 actividades
 | `leads` / `mis leads` | ✅ Probado 2026-01-19 |
 | `hoy` | ✅ Probado 2026-01-19 |
 | `ayuda` | ✅ Probado 2026-01-19 |
-| `reagendar [nombre] [día] [hora]` | ✅ Probado 2026-01-19 |
+| `agendar cita con [nombre] [día] [hora]` | ✅ Probado 2026-01-19 |
+| `reagendar [nombre] [día] [hora]` | ✅ Probado 2026-01-19 (con sync Google Calendar) |
 | `cancelar cita con [nombre]` | ✅ Probado 2026-01-19 |
 | Selección `1`, `2` en múltiples leads | ✅ Probado 2026-01-19 |
+| Responder `1` para notificar lead (reagendar) | ✅ Probado 2026-01-19 |
 
 ### Bugs arreglados en pruebas
 10. ✅ JSON parsing en `asesorCommandsService.ts` - algunos leads tenían `notes` como texto plano, agregado `safeParseNotes()` helper
@@ -348,6 +350,10 @@ Total: 8 actividades
 13. ✅ Comando "citas" fallaba (`getCitasHoy is not a function`) - Implementadas funciones en vendorCommandsService.ts
 14. ✅ Notificación vendedor fallaba fuera de 24h (error 131047) - Implementado template `reactivar_equipo` + pending_notification
 15. ✅ Selección "1" en cancelar cita no funcionaba - Agregado manejo de `pending_cita_action` en vendedor handler
+16. ✅ Google Calendar creaba duplicados en reagendar - Ahora busca y elimina evento viejo antes de crear nuevo
+17. ✅ AM/PM parsing incorrecto ("10 am" → 10pm) - Arreglado `parseReagendarParams` para extraer am/pm correctamente
+18. ✅ Notificación al lead no se enviaba tras reagendar - Arreglado `hayReagendarPendiente` con filtro JSON correcto
+19. ✅ Timezone incorrecto en Google Calendar - Arreglado para usar America/Mexico_City sin conversión UTC
 
 ---
 
@@ -374,13 +380,20 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-19 15:15*
+*Última actualización: 2026-01-19 18:20*
 
 ---
 
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-19
+
+**Sesión 4 (16:00-18:20)**
+- ✅ Arreglado Google Calendar creando duplicados en reagendar - agregado `findEventsByName` en CalendarService
+- ✅ Arreglado AM/PM parsing ("10 am" con espacio se interpretaba como PM)
+- ✅ Arreglado notificación al lead tras reagendar - `hayReagendarPendiente` ahora usa filtro JSON correcto
+- ✅ Arreglado timezone en Google Calendar (usaba UTC, ahora America/Mexico_City)
+- ✅ Flujo completo de reagendar probado: comando → selección → confirmación → notificación lead → sync Calendar
 
 **Sesión 3 (14:00-15:15)**
 - ✅ Arreglado error `detectCoordinadorCommand is not a function` en vendedor
