@@ -589,12 +589,23 @@ export class WhatsAppHandler {
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // VERIFICAR SI LEAD ESTÁ EN FLUJO DE CRÉDITO
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // IMPORTANTE: Saltar si el teléfono es de un vendedor/team_member
+      const msgPhoneForCreditCheck = cleanPhone.replace(/\D/g, '').slice(-10);
+      const esTeamMemberCredito = teamMembers.some((tm: any) => {
+        if (!tm.phone) return false;
+        return tm.phone.replace(/\D/g, '').slice(-10) === msgPhoneForCreditCheck;
+      });
+
+      if (esTeamMemberCredito) {
+        console.log('⏭️ FLUJO CRÉDITO: Saltando - teléfono es de team_member');
+      }
+
       try {
         const { CreditFlowService } = await import('../services/creditFlowService');
         const creditService = new CreditFlowService(this.supabase, this.env?.OPENAI_API_KEY);
 
-        // Verificar si está en flujo de crédito activo
-        const enFlujoCredito = lead?.id ? await creditService.estaEnFlujoCredito(lead.id) : false;
+        // Verificar si está en flujo de crédito activo (SOLO si NO es team_member)
+        const enFlujoCredito = !esTeamMemberCredito && lead?.id ? await creditService.estaEnFlujoCredito(lead.id) : false;
 
         if (enFlujoCredito) {
           console.log(`🏦 Lead ${lead.id} en flujo de crédito - procesando respuesta`);
@@ -640,8 +651,8 @@ export class WhatsAppHandler {
           }
         }
 
-        // Detectar si quiere iniciar flujo de crédito
-        if (lead?.id && creditService.detectarIntencionCredito(trimmedBody)) {
+        // Detectar si quiere iniciar flujo de crédito (SOLO si NO es team_member)
+        if (!esTeamMemberCredito && lead?.id && creditService.detectarIntencionCredito(trimmedBody)) {
           // Verificar que no esté ya en un flujo
           if (!enFlujoCredito) {
             console.log(`🏦 Iniciando flujo de crédito para lead ${lead.id}`);
@@ -4113,6 +4124,12 @@ export class WhatsAppHandler {
       case 'vendedorVideo':
         await this.vendedorEnviarVideo(from, params.desarrollo, vendedor);
         break;
+      case 'vendedorPasarACredito':
+        await this.vendedorPasarACredito(from, params.nombreLead, vendedor);
+        break;
+      case 'vendedorNuevoLead':
+        await this.vendedorNuevoLead(from, params.nombre, params.telefono, params.desarrollo, vendedor);
+        break;
 
       default:
         console.log('Handler vendedor no reconocido (fallback):', result.handlerName);
@@ -6541,6 +6558,165 @@ Responde con fecha y hora:
     } catch (e) {
       console.log('Error en video:', e);
       await this.twilio.sendWhatsAppMessage(from, `❌ Error al obtener video.`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // VENDEDOR: PASAR LEAD A CREDITO/ASESOR HIPOTECARIO
+  // ═══════════════════════════════════════════════════════════════════
+  private async vendedorPasarACredito(from: string, nombreLead: string, vendedor: any): Promise<void> {
+    console.log(`🏦 Vendedor ${vendedor.name} pasa "${nombreLead}" a crédito`);
+
+    try {
+      // Buscar el lead
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone, email, property_interest, budget')
+        .eq('assigned_to', vendedor.id)
+        .ilike('name', `%${nombreLead}%`)
+        .limit(5);
+
+      if (!leads || leads.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from, `❌ No encontré lead "${nombreLead}" en tus leads asignados.`);
+        return;
+      }
+
+      // Si hay múltiples, usar el primero (o podrías pedir selección)
+      const lead = leads[0];
+
+      // Buscar asesor hipotecario disponible
+      const { data: asesores } = await this.supabase.client
+        .from('team_members')
+        .select('id, name, phone, role')
+        .or('role.ilike.%asesor%,role.ilike.%hipoteca%,role.ilike.%credito%,role.ilike.%crédito%')
+        .limit(10);
+
+      if (asesores.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from, `❌ No hay asesores hipotecarios disponibles.`);
+        return;
+      }
+
+      // Usar el primer asesor disponible (puedes agregar round robin después)
+      const asesor = asesores[0];
+
+      // Actualizar lead con needs_mortgage y asesor_banco_id
+      await this.supabase.client
+        .from('leads')
+        .update({
+          needs_mortgage: true,
+          asesor_banco_id: asesor.id,
+          credit_status: 'pending_contact'
+        })
+        .eq('id', lead.id);
+
+      // Notificar al vendedor
+      await this.twilio.sendWhatsAppMessage(from,
+        `✅ *Lead pasado a crédito*\n\n` +
+        `👤 ${lead.name}\n` +
+        `🏦 Asesor asignado: ${asesor.name}\n\n` +
+        `El asesor recibirá notificación para contactarlo.`
+      );
+
+      // Notificar al asesor
+      const asesorPhone = asesor.phone?.replace(/\D/g, '');
+      if (asesorPhone) {
+        const msgAsesor =
+          `🏦 *Nuevo lead para crédito*\n\n` +
+          `👤 *${lead.name}*\n` +
+          `📱 ${lead.phone || 'Sin teléfono'}\n` +
+          `🏠 Interés: ${lead.property_interest || 'No especificado'}\n` +
+          `💰 Presupuesto: ${lead.budget ? `$${Number(lead.budget).toLocaleString()}` : 'No especificado'}\n\n` +
+          `📤 Enviado por: ${vendedor.name}\n\n` +
+          `💡 Usa: \`status ${lead.name}\` para ver más detalles`;
+
+        try {
+          await this.twilio.sendWhatsAppMessage(`whatsapp:+${asesorPhone}`, msgAsesor);
+        } catch (e) {
+          console.log('Error notificando asesor:', e);
+        }
+      }
+
+    } catch (e) {
+      console.log('Error en pasarACredito:', e);
+      await this.twilio.sendWhatsAppMessage(from, `❌ Error al pasar lead a crédito.`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // VENDEDOR: NUEVO LEAD (se queda con el vendedor, no round robin)
+  // ═══════════════════════════════════════════════════════════════════
+  private async vendedorNuevoLead(from: string, nombre: string, telefono: string, desarrollo: string | null, vendedor: any): Promise<void> {
+    console.log(`➕ Vendedor ${vendedor.name} agrega lead: ${nombre} ${telefono} ${desarrollo || ''}`);
+
+    try {
+      // Normalizar teléfono (agregar 521 si es necesario)
+      let phoneNormalized = telefono.replace(/\D/g, '');
+      if (phoneNormalized.length === 10) {
+        phoneNormalized = '521' + phoneNormalized;
+      } else if (phoneNormalized.length === 12 && phoneNormalized.startsWith('52')) {
+        phoneNormalized = '521' + phoneNormalized.slice(2);
+      }
+
+      // Verificar si ya existe un lead con ese teléfono
+      const { data: existente } = await this.supabase.client
+        .from('leads')
+        .select('id, name, assigned_to')
+        .eq('phone', phoneNormalized)
+        .limit(1);
+
+      if (existente && existente.length > 0) {
+        const leadExistente = existente[0];
+        // Verificar si ya es del vendedor
+        if (leadExistente.assigned_to === vendedor.id) {
+          await this.twilio.sendWhatsAppMessage(from,
+            `⚠️ Este lead ya existe y es tuyo:\n\n` +
+            `👤 ${leadExistente.name}\n` +
+            `📱 ${phoneNormalized}`
+          );
+        } else {
+          await this.twilio.sendWhatsAppMessage(from,
+            `⚠️ Este teléfono ya está registrado con otro lead:\n\n` +
+            `👤 ${leadExistente.name}\n\n` +
+            `Contacta a tu coordinador si necesitas reasignación.`
+          );
+        }
+        return;
+      }
+
+      // Crear el lead asignado al vendedor
+      const { data: nuevoLead, error } = await this.supabase.client
+        .from('leads')
+        .insert({
+          name: nombre,
+          phone: phoneNormalized,
+          property_interest: desarrollo || null,
+          assigned_to: vendedor.id,
+          captured_by: vendedor.id,
+          created_by: vendedor.id,
+          source: 'vendedor_directo',
+          status: 'new',
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.log('Error creando lead:', error);
+        await this.twilio.sendWhatsAppMessage(from, `❌ Error al crear lead: ${error.message}`);
+        return;
+      }
+
+      await this.twilio.sendWhatsAppMessage(from,
+        `✅ *Lead registrado*\n\n` +
+        `👤 ${nombre}\n` +
+        `📱 ${phoneNormalized}\n` +
+        (desarrollo ? `🏠 Interés: ${desarrollo}\n` : '') +
+        `\n📌 El lead está asignado a ti.`
+      );
+
+    } catch (e) {
+      console.log('Error en nuevoLead:', e);
+      await this.twilio.sendWhatsAppMessage(from, `❌ Error al registrar lead.`);
     }
   }
 

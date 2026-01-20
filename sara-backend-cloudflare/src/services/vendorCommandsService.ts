@@ -151,6 +151,32 @@ export class VendorCommandsService {
       return { matched: true, handlerName: 'vendedorVideo', handlerParams: { desarrollo: matchVideo[1].trim() } };
     }
 
+    // ═══ PASAR A CREDITO / ASESOR ═══
+    // Formato: "credito Juan", "credito a Juan", "pasar Juan a credito", "hipoteca Juan", "asesor Juan"
+    const matchCredito = msg.match(/^(?:credito|crédito|hipoteca|pasar\s+a\s+credito|pasar\s+a\s+asesor)\s+(?:a\s+)?(.+)$/i);
+    if (matchCredito) {
+      return { matched: true, handlerName: 'vendedorPasarACredito', handlerParams: { nombreLead: matchCredito[1].trim() } };
+    }
+    const matchPasarCredito = msg.match(/^pasar\s+(.+?)\s+a\s+(?:credito|crédito|hipoteca|asesor)$/i);
+    if (matchPasarCredito) {
+      return { matched: true, handlerName: 'vendedorPasarACredito', handlerParams: { nombreLead: matchPasarCredito[1].trim() } };
+    }
+
+    // ═══ NUEVO LEAD / AGREGAR LEAD ═══
+    // Formato: "nuevo lead Juan 5551234567", "agregar Juan 5551234567 Monte Verde"
+    const matchNuevoLead = msg.match(/^(?:nuevo\s+lead|agregar|registrar|capturar)\s+([a-záéíóúñü\s]+?)\s+(\d{10,15})(?:\s+(.+))?$/i);
+    if (matchNuevoLead) {
+      return {
+        matched: true,
+        handlerName: 'vendedorNuevoLead',
+        handlerParams: {
+          nombre: matchNuevoLead[1].trim(),
+          telefono: matchNuevoLead[2].trim(),
+          desarrollo: matchNuevoLead[3]?.trim() || null
+        }
+      };
+    }
+
     return { matched: false };
   }
 

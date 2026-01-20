@@ -82,11 +82,26 @@
 | `brochure [desarrollo/modelo]` | Enviar brochure del desarrollo | `vendedorEnviarBrochure` |
 | `ubicacion [desarrollo/modelo]` | Enviar GPS del desarrollo | `vendedorEnviarUbicacion` |
 | `video [desarrollo/modelo]` | Enviar video del desarrollo | `vendedorEnviarVideo` |
+| `credito [nombre]` | Pasar lead a asesor hipotecario | `vendedorPasarACredito` |
+| `nuevo lead [nombre] [tel] [desarrollo]` | Registrar lead directo (se queda con el vendedor) | `vendedorNuevoLead` |
 | `#mas` / `#continuar` | Extender bridge 6 min más | - |
 | `#cerrar` / `#fin` | Terminar conexiones activas | - |
 | Números `1`, `2`, `3`, `4` | Responder a opciones pendientes | - |
 
 > **NOTA**: Los comandos brochure/ubicacion/video buscan por nombre de desarrollo (ej: "Monte Verde") O por nombre de modelo (ej: "Acacia", "Fresno").
+
+### Comando: credito [nombre]
+Pasa un lead a un asesor hipotecario:
+- `credito Juan` - Pasa el lead Juan al asesor
+- `credito a María` - También funciona con "a"
+- `hipoteca Pedro` - Alias
+- `pasar Juan a credito` - Formato alternativo
+
+### Comando: nuevo lead
+Registra un lead que se queda asignado al vendedor (NO entra a round robin):
+- `nuevo lead Juan Pérez 5551234567` - Sin desarrollo
+- `nuevo lead María López 5559876543 Monte Verde` - Con desarrollo
+- `agregar Pedro García 5551112222` - Alias
 
 ---
 
