@@ -2626,10 +2626,12 @@ export class WhatsAppHandler {
     // ═══════════════════════════════════════════════════════════
     if (/^[1-9]$/.test(mensaje.trim()) && notasVendedor?.pending_reagendar_selection) {
       const selection = notasVendedor.pending_reagendar_selection;
+      console.log('📅 PENDING REAGENDAR SELECTION:', JSON.stringify(selection));
       const idx = parseInt(mensaje.trim()) - 1;
 
       if (idx >= 0 && idx < selection.leads.length) {
         const selectedLead = selection.leads[idx];
+        console.log('📅 Lead seleccionado para reagendar:', selectedLead?.name);
         // Limpiar la selección pendiente
         const { pending_reagendar_selection, ...restNotes } = notasVendedor;
         await this.supabase.client
@@ -2671,11 +2673,16 @@ export class WhatsAppHandler {
           return;
         }
 
-        // Ejecutar reagendar completo
-        const result = await schedulingService.reagendarCitaCompleto(
-          `reagendar ${selectedLead.name} ${parsed.dia} ${parsed.hora}`,
+        // Ejecutar reagendar con el lead ya seleccionado
+        console.log('📅 Llamando reagendarCitaConSeleccion con:', selectedLead.name, parsed.dia, parsed.hora, parsed.ampm);
+        const result = await schedulingService.reagendarCitaConSeleccion(
+          selectedLead,
+          parsed.dia,
+          parsed.hora,
+          parsed.ampm || 'pm',
           vendedor
         );
+        console.log('📅 Resultado reagendarCitaConSeleccion:', JSON.stringify(result));
 
         if (result.success) {
           await this.twilio.sendWhatsAppMessage(from, schedulingService.formatReagendarCitaExito(result));
@@ -2712,6 +2719,59 @@ export class WhatsAppHandler {
           } else {
             await this.twilio.sendWhatsAppMessage(from, `⚠️ ${result.error || 'Error al cancelar'}`);
           }
+        }
+        return;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 3.6. SELECCIÓN PENDIENTE DE AGENDAR CITA
+    // ═══════════════════════════════════════════════════════════
+    if (/^[1-9]$/.test(mensaje.trim()) && notasVendedor?.pending_agendar_cita) {
+      const pendingAgendar = notasVendedor.pending_agendar_cita;
+      console.log('📅 PENDING AGENDAR:', JSON.stringify(pendingAgendar));
+      const idx = parseInt(mensaje.trim()) - 1;
+
+      if (idx >= 0 && idx < pendingAgendar.leads.length) {
+        const selectedLead = pendingAgendar.leads[idx];
+        console.log('📅 Lead seleccionado:', selectedLead?.name, 'dia:', pendingAgendar.dia, 'hora:', pendingAgendar.hora, 'ampm:', pendingAgendar.ampm);
+        // Limpiar pending_agendar_cita
+        const { pending_agendar_cita, ...restNotes } = notasVendedor;
+        await this.supabase.client
+          .from('team_members')
+          .update({ notes: restNotes })
+          .eq('id', vendedor.id);
+
+        // Crear cita con el lead seleccionado
+        const calendarLocal = new CalendarService(
+          this.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+          this.env.GOOGLE_PRIVATE_KEY,
+          this.env.GOOGLE_CALENDAR_ID
+        );
+        const schedulingService = new AppointmentSchedulingService(this.supabase, calendarLocal);
+
+        if (!pendingAgendar.dia || !pendingAgendar.hora) {
+          // Si no hay día/hora, pedir que complete
+          await this.twilio.sendWhatsAppMessage(from,
+            `✅ Seleccionaste a *${selectedLead.name}*\n\n` +
+            `¿Cuándo quieres agendar la cita?\n\n` +
+            `Escribe: *agendar ${selectedLead.name} mañana 4pm*`
+          );
+          return;
+        }
+
+        const result = await schedulingService.agendarCitaConSeleccion(
+          selectedLead,
+          pendingAgendar.dia,
+          pendingAgendar.hora,
+          pendingAgendar.ampm || 'pm',
+          vendedor
+        );
+
+        if (result.success) {
+          await this.twilio.sendWhatsAppMessage(from, schedulingService.formatAgendarCitaExito(result));
+        } else {
+          await this.twilio.sendWhatsAppMessage(from, `⚠️ ${result.error || 'Error al agendar'}`);
         }
         return;
       }
@@ -5126,6 +5186,29 @@ Responde con fecha y hora:
         return;
       }
       if (result.multipleLeads) {
+        // Guardar estado pendiente para selección
+        const { data: vendedorActual } = await this.supabase.client
+          .from('team_members')
+          .select('notes')
+          .eq('id', vendedor.id)
+          .single();
+
+        const notasActuales = vendedorActual?.notes || {};
+        await this.supabase.client
+          .from('team_members')
+          .update({
+            notes: {
+              ...notasActuales,
+              pending_agendar_cita: {
+                leads: result.multipleLeads,
+                dia: result.dia,
+                hora: result.hora,
+                ampm: result.ampm
+              }
+            }
+          })
+          .eq('id', vendedor.id);
+
         await this.twilio.sendWhatsAppMessage(from, schedulingService.formatMultipleLeadsCita(result.multipleLeads));
         return;
       }
@@ -5395,24 +5478,27 @@ Responde con fecha y hora:
 
   private async hayReagendarPendiente(vendedorId: string): Promise<boolean> {
     // Buscar leads con pending_reagendar del vendedor actual
+    // Usar filtro JSON para buscar específicamente leads con pending_reagendar
     const { data, error } = await this.supabase.client
       .from('leads')
       .select('id, name, notes')
-      .not('notes', 'is', null)
-      .limit(50);
+      .not('notes->pending_reagendar', 'is', null)
+      .limit(100);
 
     console.log('🔍 hayReagendarPendiente - buscando para vendedor:', vendedorId);
-    console.log('🔍 hayReagendarPendiente - leads con notes:', data?.length);
+    console.log('🔍 hayReagendarPendiente - leads con pending_reagendar:', data?.length, 'error:', error?.message || 'ninguno');
+
+    if (data?.length) {
+      data.forEach((l: any) => {
+        console.log('🔍 Lead con pending_reagendar:', l.name, 'vendedor_id:', l.notes?.pending_reagendar?.vendedor_id);
+      });
+    }
 
     const conReagendar = data?.filter((l: any) => {
-      const tiene = l.notes?.pending_reagendar?.vendedor_id === vendedorId;
-      if (l.notes?.pending_reagendar) {
-        console.log('🔍 Lead con pending_reagendar:', l.name, l.notes.pending_reagendar);
-      }
-      return tiene;
+      return l.notes?.pending_reagendar?.vendedor_id === vendedorId;
     });
 
-    console.log('🔍 hayReagendarPendiente - encontrados:', conReagendar?.length);
+    console.log('🔍 hayReagendarPendiente - encontrados para este vendedor:', conReagendar?.length);
     return conReagendar && conReagendar.length > 0;
   }
 
@@ -6465,8 +6551,8 @@ Responde con fecha y hora:
   }
 
   // Parsear parámetros de reagendar (día y hora) del comando original
-  private parseReagendarParams(body: string): { dia?: string; hora?: string } {
-    // Ejemplos: "reagendar juan mañana 4pm", "reagendar ana lunes 10am"
+  private parseReagendarParams(body: string): { dia?: string; hora?: string; ampm?: string } {
+    // Ejemplos: "reagendar juan mañana 4pm", "reagendar ana lunes 10am", "reagendar ana lunes 10 am"
     const texto = body.toLowerCase().trim();
 
     // Buscar día
@@ -6482,14 +6568,24 @@ Responde con fecha y hora:
       }
     }
 
-    // Buscar hora
-    const horaMatch = texto.match(/(\d{1,2})\s*(am|pm|:?\d{0,2}\s*(am|pm)?)/i);
+    // Buscar hora y am/pm
+    const horaMatch = texto.match(/(\d{1,2})\s*(am|pm)?/i);
     let hora: string | undefined;
+    let ampm: string | undefined;
+
     if (horaMatch) {
-      hora = horaMatch[0].trim();
+      hora = horaMatch[1]; // Solo el número
+      ampm = horaMatch[2]?.toLowerCase(); // am o pm si existe
+
+      // Si no encontró am/pm en el match, buscar después del número
+      if (!ampm) {
+        const afterNumber = texto.slice(texto.indexOf(horaMatch[0]) + horaMatch[0].length).trim();
+        if (afterNumber.startsWith('am')) ampm = 'am';
+        else if (afterNumber.startsWith('pm')) ampm = 'pm';
+      }
     }
 
-    return { dia, hora };
+    return { dia, hora, ampm };
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

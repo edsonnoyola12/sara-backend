@@ -275,6 +275,35 @@ export class CalendarService {
   }
 
   // ═══════════════════════════════════════════════════════════════
+  // BUSCAR EVENTOS POR NOMBRE (para encontrar duplicados)
+  // ═══════════════════════════════════════════════════════════════
+  async findEventsByName(searchText: string, timeMin?: string, timeMax?: string): Promise<any[]> {
+    const token = await this.getAccessToken();
+
+    // Buscar en un rango amplio si no se especifica
+    const min = timeMin || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 días atrás
+    const max = timeMax || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(); // 90 días adelante
+
+    const queryParams = `timeMin=${min}&timeMax=${max}&singleEvents=true&orderBy=startTime&maxResults=100&q=${encodeURIComponent(searchText)}`;
+
+    const response = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(this.calendarId)}/events?${queryParams}`,
+      {
+        headers: { 'Authorization': `Bearer ${token}` }
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('❌ Error buscando eventos:', error);
+      return [];
+    }
+
+    const data = await response.json() as any;
+    return data.items || [];
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   // WEBHOOK - Suscribirse a cambios del calendario
   // ═══════════════════════════════════════════════════════════════
   async watchCalendar(channelId: string, webhookUrl: string): Promise<any> {
