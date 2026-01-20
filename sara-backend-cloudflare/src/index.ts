@@ -9298,6 +9298,66 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       });
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // ACTUALIZACIÓN DE PRECIOS - 1ero de cada mes a la 1am México (7am UTC)
+    // Incremento: 0.5% mensual (6% anual)
+    // ═══════════════════════════════════════════════════════════
+    if (event.cron === '0 7 1 * *') {
+      console.log('💰 ACTUALIZANDO PRECIOS MENSUALES (+0.5%)...');
+      try {
+        // Obtener todas las propiedades con precios
+        const { data: properties, error: propsError } = await supabase.client
+          .from('properties')
+          .select('id, name, price_from, price_to');
+
+        if (propsError) {
+          console.error('❌ Error obteniendo properties:', propsError);
+        } else if (properties && properties.length > 0) {
+          const factor = 1.005; // 0.5% de incremento
+          let actualizadas = 0;
+
+          for (const prop of properties) {
+            const newPriceFrom = prop.price_from ? Math.round(prop.price_from * factor) : null;
+            const newPriceTo = prop.price_to ? Math.round(prop.price_to * factor) : null;
+
+            const { error: updateError } = await supabase.client
+              .from('properties')
+              .update({
+                price_from: newPriceFrom,
+                price_to: newPriceTo,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', prop.id);
+
+            if (!updateError) {
+              actualizadas++;
+              console.log(`   ✅ ${prop.name}: $${prop.price_from?.toLocaleString()} → $${newPriceFrom?.toLocaleString()}`);
+            } else {
+              console.log(`   ❌ Error actualizando ${prop.name}:`, updateError);
+            }
+          }
+
+          console.log(`💰 PRECIOS ACTUALIZADOS: ${actualizadas}/${properties.length} propiedades`);
+
+          // Notificar al CEO
+          try {
+            await meta.sendWhatsAppMessage('5212224558475',
+              `💰 *PRECIOS ACTUALIZADOS*\n\n` +
+              `Se aplicó el incremento mensual del 0.5%\n` +
+              `📊 ${actualizadas} propiedades actualizadas\n\n` +
+              `_Incremento anual: 6%_`
+            );
+          } catch (e) {
+            console.log('⚠️ No se pudo notificar al CEO sobre precios');
+          }
+        } else {
+          console.log('⚠️ No hay propiedades para actualizar');
+        }
+      } catch (e) {
+        console.error('❌ Error en actualización de precios:', e);
+      }
+    }
+
     // (Cumpleaños movido más abajo para incluir leads + equipo)
 
     // 8am L-V: Briefing matutino (solo primer ejecucion de la hora)

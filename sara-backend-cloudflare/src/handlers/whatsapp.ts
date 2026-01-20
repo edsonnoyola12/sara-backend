@@ -410,11 +410,18 @@ export class WhatsAppHandler {
       }
 
       // Obtener datos
-      const [lead, properties, teamMembers] = await Promise.all([
+      const [leadResult, properties, teamMembers] = await Promise.all([
         this.getOrCreateLead(cleanPhone),
         this.getAllProperties(),
         this.getAllTeamMembers()
       ]);
+
+      const lead = leadResult.lead;
+      const isNewLead = leadResult.isNew;
+
+      if (isNewLead) {
+        console.log('🆕 LEAD NUEVO detectado - se generará video de bienvenida cuando tenga nombre + desarrollo');
+      }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // 🚫 VERIFICAR SI LEAD ESTÁ MARCADO COMO DO NOT CONTACT
@@ -651,14 +658,15 @@ export class WhatsAppHandler {
           }
         }
 
-        // Detectar si quiere iniciar flujo de crédito (SOLO si NO es team_member)
+        // DESACTIVADO: Ya no auto-iniciamos flujo de crédito
+        // Claude decidirá qué hacer cuando mencionen crédito
+        // Si Claude detecta que realmente quiere simulación, pondrá intent='solicitar_credito'
+        // y el handler de solicitar_credito iniciará el flujo
         if (!esTeamMemberCredito && lead?.id && creditService.detectarIntencionCredito(trimmedBody)) {
-          // Verificar que no esté ya en un flujo
           if (!enFlujoCredito) {
-            console.log(`🏦 Iniciando flujo de crédito para lead ${lead.id}`);
-            const { mensaje } = await creditService.iniciarFlujoCredito(lead);
-            await this.meta.sendWhatsAppMessage(cleanPhone, mensaje);
-            return;
+            // En vez de iniciar automáticamente, dejamos que Claude piense
+            console.log(`🧠 Usuario menciona crédito - dejando que CLAUDE decida qué hacer`);
+            // NO return - continúa a Claude para que piense
           }
         }
       } catch (creditErr) {
@@ -1040,41 +1048,41 @@ export class WhatsAppHandler {
       // PROCESAR MENSAJE DE LEAD (delegado a LeadMessageService)
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       const leadMessageService = new LeadMessageService(this.supabase);
-      const leadResult = await leadMessageService.processLeadMessage(lead, body, cleanPhone);
+      const leadMsgResult = await leadMessageService.processLeadMessage(lead, body, cleanPhone);
 
       // Ejecutar resultado del servicio
-      if (leadResult.action === 'handled') {
+      if (leadMsgResult.action === 'handled') {
         // Handler especial para encuestas
-        if (leadResult.response === '__SURVEY__') {
+        if (leadMsgResult.response === '__SURVEY__') {
           console.log('📋 Lead en encuesta, step:', lead.survey_step);
           await this.handleSurveyResponse(from, body, lead);
           return;
         }
 
         // Actualizar lead si es necesario
-        if (leadResult.updateLead) {
-          await this.supabase.client.from('leads').update(leadResult.updateLead).eq('id', lead.id);
+        if (leadMsgResult.updateLead) {
+          await this.supabase.client.from('leads').update(leadMsgResult.updateLead).eq('id', lead.id);
         }
 
         // Enviar respuesta al lead
-        if (leadResult.response) {
-          if (leadResult.sendVia === 'meta') {
-            await this.meta.sendWhatsAppMessage(cleanPhone, leadResult.response);
+        if (leadMsgResult.response) {
+          if (leadMsgResult.sendVia === 'meta') {
+            await this.meta.sendWhatsAppMessage(cleanPhone, leadMsgResult.response);
           } else {
-            await this.twilio.sendWhatsAppMessage(from, leadResult.response);
+            await this.twilio.sendWhatsAppMessage(from, leadMsgResult.response);
           }
         }
 
         // Notificar al vendedor si es necesario
-        if (leadResult.notifyVendor) {
-          await this.meta.sendWhatsAppMessage(leadResult.notifyVendor.phone, leadResult.notifyVendor.message);
+        if (leadMsgResult.notifyVendor) {
+          await this.meta.sendWhatsAppMessage(leadMsgResult.notifyVendor.phone, leadMsgResult.notifyVendor.message);
         }
 
         // Borrar evento de Google Calendar si es necesario (cancelación)
-        if (leadResult.deleteCalendarEvent) {
+        if (leadMsgResult.deleteCalendarEvent) {
           try {
-            await this.calendar.deleteEvent(leadResult.deleteCalendarEvent);
-            console.log('🗑️ Evento de Calendar borrado:', leadResult.deleteCalendarEvent);
+            await this.calendar.deleteEvent(leadMsgResult.deleteCalendarEvent);
+            console.log('🗑️ Evento de Calendar borrado:', leadMsgResult.deleteCalendarEvent);
           } catch (calErr) {
             console.log('⚠️ Error borrando evento de Calendar:', calErr);
           }
@@ -1084,15 +1092,15 @@ export class WhatsAppHandler {
       }
 
       // Si hay notificación de vendedor pendiente (ej: respuesta a broadcast), enviarla
-      if (leadResult.notifyVendor) {
-        await this.meta.sendWhatsAppMessage(leadResult.notifyVendor.phone, leadResult.notifyVendor.message);
+      if (leadMsgResult.notifyVendor) {
+        await this.meta.sendWhatsAppMessage(leadMsgResult.notifyVendor.phone, leadMsgResult.notifyVendor.message);
         console.log('📢 Notificación de broadcast enviada a vendedor');
       }
 
       // Si hay contexto de broadcast, pasarlo a la IA
-      if (leadResult.broadcastContext) {
-        lead.broadcast_context = leadResult.broadcastContext;
-        console.log('📢 Contexto de broadcast pasado a IA:', leadResult.broadcastContext.message?.substring(0, 50));
+      if (leadMsgResult.broadcastContext) {
+        lead.broadcast_context = leadMsgResult.broadcastContext;
+        console.log('📢 Contexto de broadcast pasado a IA:', leadMsgResult.broadcastContext.message?.substring(0, 50));
       }
 
       // Si llegamos aquí, continuar a análisis con IA (delegado a aiConversationService)
@@ -1159,6 +1167,27 @@ export class WhatsAppHandler {
 
       // Ejecutar (delegado a aiConversationService)
       await aiService.executeAIDecision(analysis, from, cleanPhone, lead, properties, teamMembers, body, env);
+
+      // ═══════════════════════════════════════════════════════════════
+      // 🎬 VIDEO VEO 3 DE BIENVENIDA - PRIMER CONTACTO
+      // Disparar si: tiene nombre + desarrollo de interés + no ha recibido video aún
+      // La función generarVideoBienvenidaSiAplica verifica si ya se envió video
+      // ═══════════════════════════════════════════════════════════════
+      const tieneNombreReal = lead.name &&
+                              lead.name !== 'Sin nombre' &&
+                              lead.name !== 'Cliente' &&
+                              lead.name.toLowerCase() !== 'amigo';
+
+      const desarrolloInteres = analysis.extracted_data?.desarrollo ||
+                                lead.property_interest ||
+                                '';
+
+      // Generar video de bienvenida si tenemos nombre + desarrollo
+      // La función ya verifica internamente si ya se envió video antes
+      if (tieneNombreReal && desarrolloInteres) {
+        console.log(`🎬 Verificando video Veo 3 para ${lead.name} - ${desarrolloInteres}`);
+        await this.generarVideoBienvenidaSiAplica(from, lead, desarrolloInteres, cleanPhone, properties, env);
+      }
 
     } catch (error) {
       console.error('❌ Error:', error);
@@ -4130,6 +4159,12 @@ export class WhatsAppHandler {
       case 'vendedorNuevoLead':
         await this.vendedorNuevoLead(from, params.nombre, params.telefono, params.desarrollo, vendedor);
         break;
+      case 'vendedorLeadsHot':
+        await this.vendedorLeadsHot(from, vendedor, nombreVendedor);
+        break;
+      case 'vendedorLeadsPendientes':
+        await this.vendedorLeadsPendientes(from, vendedor, nombreVendedor);
+        break;
 
       default:
         console.log('Handler vendedor no reconocido (fallback):', result.handlerName);
@@ -4391,14 +4426,17 @@ export class WhatsAppHandler {
         await this.twilio.sendWhatsAppMessage(from, vendorService.formatMultipleLeads(result.multipleLeads));
         return;
       }
-      await this.vendedorCambiarEtapaConNombre(from, result.lead!.name, vendedor, result.newStatus!, vendorService.getFunnelStageLabel(result.newStatus!));
+      // Enviar confirmación directamente
+      const etapaLabel = vendorService.getFunnelStageLabel(result.newStatus!);
+      await this.twilio.sendWhatsAppMessage(from,
+        `✅ *${result.lead!.name}* movido a ${etapaLabel}`
+      );
       return;
     }
 
     // Formato: "Hilda atrás" - formato legacy
     const matchAtras = body.match(/(?:regresar\s+(?:a\s+)?)?([a-záéíóúñA-ZÁÉÍÓÚÑ\s]+?)\s+(?:para\s+)?(?:atras|atrás|regresar|anterior)/i);
     if (matchAtras) {
-      const vendorService = new VendorCommandsService(this.supabase);
       const result = await vendorService.moveFunnelStep(matchAtras[1].trim(), vendedor.id, vendedor.role, 'prev');
       if (!result.success) {
         await this.twilio.sendWhatsAppMessage(from, result.error || 'Error al mover lead');
@@ -4408,7 +4446,10 @@ export class WhatsAppHandler {
         await this.twilio.sendWhatsAppMessage(from, vendorService.formatMultipleLeads(result.multipleLeads));
         return;
       }
-      await this.vendedorCambiarEtapaConNombre(from, result.lead!.name, vendedor, result.newStatus!, vendorService.getFunnelStageLabel(result.newStatus!));
+      const etapaLabel = vendorService.getFunnelStageLabel(result.newStatus!);
+      await this.twilio.sendWhatsAppMessage(from,
+        `✅ *${result.lead!.name}* movido a ${etapaLabel}`
+      );
       return;
     }
 
@@ -6721,6 +6762,103 @@ Responde con fecha y hora:
     }
   }
 
+  // HOT: Leads calientes
+  private async vendedorLeadsHot(from: string, vendedor: any, nombre: string): Promise<void> {
+    try {
+      // Buscar leads con score >= 70 (calientes)
+      const { data: leads, error } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone, status, score, last_activity_at')
+        .eq('assigned_to', vendedor.id)
+        .gte('score', 70)
+        .not('status', 'in', '("won","lost","dnc")')
+        .order('score', { ascending: false })
+        .limit(10);
+
+      if (error) {
+        console.log('Error obteniendo leads hot:', error);
+        await this.twilio.sendWhatsAppMessage(from, '❌ Error al obtener leads calientes.');
+        return;
+      }
+
+      if (!leads || leads.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `🔥 *${nombre}, no tienes leads calientes*\n\n` +
+          `Los leads HOT tienen score ≥70.\n` +
+          `Sigue dando seguimiento para calentar tus leads! 💪`
+        );
+        return;
+      }
+
+      let msg = `🔥 *LEADS CALIENTES* (${leads.length})\n`;
+      msg += `_Score ≥70 - Listos para cerrar_\n\n`;
+
+      leads.forEach((lead: any, i: number) => {
+        msg += `${i + 1}. *${lead.name || 'Sin nombre'}* (${lead.score}🔥)\n`;
+        msg += `   📱 ${lead.phone || 'Sin tel'}\n`;
+        msg += `   📊 Status: ${lead.status || 'new'}\n\n`;
+      });
+
+      msg += `_Escribe "contactar [nombre]" para dar seguimiento_`;
+
+      await this.twilio.sendWhatsAppMessage(from, msg);
+    } catch (e) {
+      console.log('Error en leads hot:', e);
+      await this.twilio.sendWhatsAppMessage(from, '❌ Error al obtener leads calientes.');
+    }
+  }
+
+  // PENDIENTES: Leads sin seguimiento reciente
+  private async vendedorLeadsPendientes(from: string, vendedor: any, nombre: string): Promise<void> {
+    try {
+      // Buscar leads asignados sin actividad en los últimos 3 días
+      const hace3Dias = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
+      const { data: leads, error } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone, status, last_activity_at, score')
+        .eq('assigned_to', vendedor.id)
+        .not('status', 'in', '("won","lost","dnc")')
+        .or(`last_activity_at.is.null,last_activity_at.lt.${hace3Dias}`)
+        .order('last_activity_at', { ascending: true, nullsFirst: true })
+        .limit(10);
+
+      if (error) {
+        console.log('Error obteniendo pendientes:', error);
+        await this.twilio.sendWhatsAppMessage(from, '❌ Error al obtener leads pendientes.');
+        return;
+      }
+
+      if (!leads || leads.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `✅ *${nombre}, no tienes leads pendientes!*\n\n` +
+          `Todos tus leads tienen seguimiento reciente. ¡Buen trabajo! 🎯`
+        );
+        return;
+      }
+
+      let msg = `⏰ *LEADS PENDIENTES DE SEGUIMIENTO*\n`;
+      msg += `_${leads.length} lead(s) sin actividad en 3+ días_\n\n`;
+
+      leads.forEach((lead: any, i: number) => {
+        const diasSinActividad = lead.last_activity_at
+          ? Math.floor((Date.now() - new Date(lead.last_activity_at).getTime()) / (1000 * 60 * 60 * 24))
+          : '∞';
+        const temp = lead.score >= 70 ? '🔥' : lead.score >= 40 ? '🟡' : '🔵';
+        msg += `${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*\n`;
+        msg += `   📱 ${lead.phone || 'Sin tel'}\n`;
+        msg += `   ⏱️ ${diasSinActividad} días sin actividad\n\n`;
+      });
+
+      msg += `_Escribe "contactar [nombre]" para iniciar seguimiento_`;
+
+      await this.twilio.sendWhatsAppMessage(from, msg);
+    } catch (e) {
+      console.log('Error en leads pendientes:', e);
+      await this.twilio.sendWhatsAppMessage(from, '❌ Error al obtener leads pendientes.');
+    }
+  }
+
   private async vendedorBuscarPorTelefono(from: string, telefono: string, vendedor: any): Promise<void> {
     try {
       const vendorService = new VendorCommandsService(this.supabase);
@@ -6990,7 +7128,7 @@ Responde con fecha y hora:
   // OBTENER O CREAR LEAD
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  private async getOrCreateLead(phone: string): Promise<any> {
+  private async getOrCreateLead(phone: string): Promise<{ lead: any; isNew: boolean }> {
     const leadService = new LeadManagementService(this.supabase);
     return leadService.getOrCreateLead(phone);
   }

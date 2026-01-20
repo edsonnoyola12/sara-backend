@@ -8,7 +8,7 @@ export interface CreditFlowContext {
   lead_id: string;
   lead_name: string;
   lead_phone: string;
-  state: 'pedir_nombre' | 'esperando_banco' | 'ofrecer_simulacion' | 'esperando_ingreso' | 'esperando_enganche' | 'mostrar_simulacion' | 'esperando_modalidad' | 'conectando_asesor' | 'completado';
+  state: 'pedir_nombre' | 'esperando_banco' | 'ofrecer_simulacion' | 'esperando_ingreso' | 'esperando_enganche' | 'mostrar_simulacion' | 'esperando_modalidad' | 'esperando_cita_presencial' | 'conectando_asesor' | 'completado';
   banco_preferido?: string;
   ingreso_mensual?: number;
   enganche?: number;
@@ -17,6 +17,7 @@ export interface CreditFlowContext {
   asesor_id?: string;
   asesor_name?: string;
   asesor_phone?: string;
+  desarrollo_interes?: string;
   created_at: string;
   updated_at: string;
 }
@@ -28,9 +29,29 @@ export class CreditFlowService {
   ) {}
 
   // ═══════════════════════════════════════════════════════════════════
+  // DETECTAR SI USUARIO YA TIENE CRÉDITO (no necesita simulación)
+  // ═══════════════════════════════════════════════════════════════════
+  private yaTieneCredito(msgLower: string): boolean {
+    const frases = [
+      'ya tengo credito', 'ya tengo crédito', 'ya tengo mi credito', 'ya tengo mi crédito',
+      'ya tengo el credito', 'ya tengo el crédito', 'ya cuento con credito', 'ya cuento con crédito',
+      'ya lo tengo', 'tengo aprobado', 'me aprobaron', 'ya me aprobaron',
+      'ya estoy preaprobado', 'ya tengo preaprobacion', 'ya tengo preaprobación',
+      'no necesito credito', 'no necesito crédito', 'no ocupo credito', 'no ocupo crédito',
+      'ya twngo credito', 'ya t2ngo', // typos comunes
+    ];
+    return frases.some(f => msgLower.includes(f));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // DETECTAR PREGUNTAS NO RELACIONADAS CON EL FLUJO DE CRÉDITO
   // ═══════════════════════════════════════════════════════════════════
   private esPreguntaNoRelacionada(msgLower: string): boolean {
+    // Si ya tiene crédito, salir del flujo
+    if (this.yaTieneCredito(msgLower)) {
+      return true;
+    }
+
     const preguntasNoRelacionadas = [
       'promocion', 'promoción', 'descuento', 'oferta',
       'precio', 'cuanto cuesta', 'cuánto cuesta', 'cuestan',
@@ -223,10 +244,21 @@ Escribe el nombre del banco o "no sé" si quieres que te oriente.`,
         const bancoDetectado = this.detectarBanco(msgLower);
         const nombreCorto = context.lead_name.split(' ')[0];
 
+        // Si NO es una respuesta simple (banco o "no sé"), dejar que CLAUDE piense
+        const esRespuestaSimple = bancoDetectado ||
+                                   msgLower === 'no se' ||
+                                   msgLower === 'no sé' ||
+                                   msgLower.length < 10;
+
+        if (!esRespuestaSimple) {
+          console.log('🏦 CRÉDITO: Mensaje complejo, pasando a CLAUDE para que piense:', mensaje);
+          await this.cancelarFlujo(leadId);
+          return { respuesta: null, context, passToAI: true };
+        }
+
         // Si es pregunta no relacionada, PAUSAR flujo y pasar a IA
         if (this.esPreguntaNoRelacionada(msgLower) && !bancoDetectado) {
           console.log('🏦 CRÉDITO: Pregunta no relacionada, CANCELANDO flujo para IA');
-          // Cancelar flujo de crédito para que el lead pueda conversar libremente
           await this.cancelarFlujo(leadId);
           return { respuesta: null, context, passToAI: true };
         }
@@ -334,6 +366,15 @@ O escribe "no sé" para que te oriente.`,
       // ESTADO: Esperando ingreso mensual
       // ─────────────────────────────────────────────────────────────
       case 'esperando_ingreso':
+        const ingresoDetectado = this.extraerMonto(msgLimpio);
+
+        // Si NO es un monto y el mensaje es largo, dejar que CLAUDE piense
+        if (!ingresoDetectado && msgLower.length > 15) {
+          console.log('🏦 CRÉDITO: Mensaje complejo en ingreso, pasando a CLAUDE:', mensaje);
+          await this.cancelarFlujo(leadId);
+          return { respuesta: null, context, passToAI: true };
+        }
+
         // Si es pregunta no relacionada, pasar a IA
         if (this.esPreguntaNoRelacionada(msgLower)) {
           console.log('🏦 CRÉDITO: Pregunta no relacionada en esperando_ingreso, CANCELANDO flujo');
@@ -341,7 +382,7 @@ O escribe "no sé" para que te oriente.`,
           return { respuesta: null, context, passToAI: true };
         }
 
-        const ingreso = this.extraerMonto(msgLimpio);
+        const ingreso = ingresoDetectado;
 
         if (ingreso && ingreso >= 5000) {
           context.ingreso_mensual = ingreso;
@@ -380,6 +421,20 @@ O escribe "no sé" para que te oriente.`,
       // ESTADO: Esperando enganche
       // ─────────────────────────────────────────────────────────────
       case 'esperando_enganche':
+        // Si el mensaje es largo y no parece monto, dejar que CLAUDE piense
+        const engancheDetectado = this.extraerMonto(msgLimpio);
+        const esRespuestaEnganche = engancheDetectado ||
+                                     msgLower.includes('no tengo') ||
+                                     msgLower.includes('nada') ||
+                                     msgLower === '0' ||
+                                     msgLower.length < 15;
+
+        if (!esRespuestaEnganche) {
+          console.log('🏦 CRÉDITO: Mensaje complejo en enganche, pasando a CLAUDE:', mensaje);
+          await this.cancelarFlujo(leadId);
+          return { respuesta: null, context, passToAI: true };
+        }
+
         // Si es pregunta no relacionada, pasar a IA
         if (this.esPreguntaNoRelacionada(msgLower)) {
           console.log('🏦 CRÉDITO: Pregunta no relacionada en esperando_enganche, CANCELANDO flujo');
@@ -392,7 +447,7 @@ O escribe "no sé" para que te oriente.`,
         if (msgLower.includes('no tengo') || msgLower.includes('nada') || msgLower === '0') {
           enganche = 0;
         } else {
-          enganche = this.extraerMonto(msgLimpio) || 0;
+          enganche = engancheDetectado || 0;
         }
 
         context.enganche = enganche;
@@ -442,6 +497,21 @@ ${simulacion}
       // ESTADO: Esperando modalidad de contacto
       // ─────────────────────────────────────────────────────────────
       case 'esperando_modalidad':
+        const modalidadDetectada = this.detectarModalidad(msgLower);
+
+        // Si NO es 1/2/3 o palabra clave y mensaje largo, dejar que CLAUDE piense
+        const esRespuestaModalidad = modalidadDetectada ||
+                                      msgLower === '1' ||
+                                      msgLower === '2' ||
+                                      msgLower === '3' ||
+                                      msgLower.length < 12;
+
+        if (!esRespuestaModalidad) {
+          console.log('🏦 CRÉDITO: Mensaje complejo en modalidad, pasando a CLAUDE:', mensaje);
+          await this.cancelarFlujo(leadId);
+          return { respuesta: null, context, passToAI: true };
+        }
+
         // Si es pregunta no relacionada, pasar a IA
         if (this.esPreguntaNoRelacionada(msgLower)) {
           console.log('🏦 CRÉDITO: Pregunta no relacionada en esperando_modalidad, CANCELANDO flujo');
@@ -449,13 +519,11 @@ ${simulacion}
           return { respuesta: null, context, passToAI: true };
         }
 
-        const modalidad = this.detectarModalidad(msgLower);
+        const modalidad = modalidadDetectada;
 
         if (modalidad) {
           context.modalidad = modalidad;
-          context.state = 'conectando_asesor';
           context.updated_at = new Date().toISOString();
-          await this.guardarContexto(leadId, context);
 
           // Actualizar lead
           await this.supabase.client
@@ -463,6 +531,34 @@ ${simulacion}
             .update({ modalidad_asesoria: modalidad })
             .eq('id', leadId);
 
+          // ═══ PRESENCIAL: Mostrar casas y pedir cita ═══
+          if (modalidad === 'presencial') {
+            console.log('🏠 PRESENCIAL: Mostrando casas dentro del presupuesto y pidiendo cita');
+            context.state = 'esperando_cita_presencial';
+            await this.guardarContexto(leadId, context);
+
+            const nombreCorto = context.lead_name.split(' ')[0];
+            const presupuesto = context.capacidad_credito || 2000000;
+            const presupuestoTxt = (presupuesto / 1000000).toFixed(1).replace('.0', '');
+
+            // Mostrar desarrollos que caben en su presupuesto
+            const desarrollos = this.obtenerDesarrollosPorPresupuesto(presupuesto);
+
+            return {
+              respuesta: `¡Perfecto ${nombreCorto}! 🎉
+
+Con tu capacidad de *$${presupuestoTxt}M*, te recomiendo visitar:
+
+${desarrollos}
+
+📅 *¿Qué día y hora te gustaría visitarnos?*
+
+Atendemos de Lunes a Viernes 9am-6pm y Sábados 9am-2pm 😊`,
+              context
+            };
+          }
+
+          // ═══ LLAMADA/WHATSAPP: Conectar con asesor Y EMPUJAR A CITA ═══
           // Buscar asesor
           const asesor = await this.buscarAsesor(context.banco_preferido);
 
@@ -472,17 +568,13 @@ ${simulacion}
             context.asesor_phone = asesor.phone;
           }
 
-          context.state = 'completado';
-          await this.guardarContexto(leadId, context);
-
           // Marcar lead como calificado Y asignar al asesor
           const updateData: any = {
             status: 'credit_qualified',
-            stage: 'qualified',  // Para que aparezca en el funnel
+            stage: 'qualified',
             updated_at: new Date().toISOString()
           };
 
-          // Asignar asesor si existe
           if (asesor?.id) {
             updateData.assigned_to = asesor.id;
             console.log(`✅ Lead asignado a asesor: ${asesor.name} (${asesor.id})`);
@@ -493,7 +585,7 @@ ${simulacion}
             .update(updateData)
             .eq('id', leadId);
 
-          // Crear mortgage_application para tracking
+          // Crear mortgage_application
           if (asesor?.id) {
             await this.supabase.client
               .from('mortgage_applications')
@@ -512,6 +604,12 @@ ${simulacion}
             console.log(`📊 Mortgage application creada para lead ${leadId}`);
           }
 
+          // IMPORTANTE: Transicionar a esperando cita (NO completado)
+          // Porque el mensaje de asesor incluye push para visita
+          context.state = 'esperando_cita_presencial';
+          await this.guardarContexto(leadId, context);
+          console.log('🏠 Flujo crédito: Esperando fecha/hora para cita después de conectar asesor');
+
           return {
             respuesta: `¡Perfecto! 🎉`,
             context,
@@ -528,6 +626,122 @@ ${simulacion}
 3️⃣ *Presencial*
 
 Responde 1, 2 o 3.`,
+          context
+        };
+
+      // ─────────────────────────────────────────────────────────────
+      // ESTADO: Esperando cita presencial (después de elegir opción 3)
+      // ─────────────────────────────────────────────────────────────
+      case 'esperando_cita_presencial':
+        console.log('🏠 CITA PRESENCIAL: Procesando fecha/hora');
+
+        // Si pregunta algo no relacionado, pasar a IA pero mantener contexto
+        if (this.esPreguntaNoRelacionada(msgLower)) {
+          console.log('🏠 Pregunta no relacionada en cita presencial, pasando a IA');
+          return { respuesta: null, context, passToAI: true };
+        }
+
+        // Detectar fecha/hora en el mensaje
+        const fechaHoraCita = this.extraerFechaHora(msgLower);
+
+        if (fechaHoraCita.fecha && fechaHoraCita.hora) {
+          console.log(`🏠 Fecha/hora detectada: ${fechaHoraCita.fecha} ${fechaHoraCita.hora}`);
+
+          // Crear cita directamente
+          const fechaReal = this.parsearFechaTexto(fechaHoraCita.fecha);
+          const desarrollo = context.desarrollo_interes || 'Por definir en visita';
+          const nombreCitaCorto = context.lead_name.split(' ')[0];
+
+          // Validar hora dentro de horario
+          const horaNum = parseInt(fechaHoraCita.hora.split(':')[0]);
+          const esSabado = fechaReal.getDay() === 6;
+          const horaFinAtencion = esSabado ? 14 : 18;
+
+          if (horaNum < 9 || horaNum >= horaFinAtencion) {
+            const horaFinTxt = esSabado ? '2pm' : '6pm';
+            return {
+              respuesta: `⚠️ ${nombreCitaCorto}, las ${horaNum}:00 está fuera de nuestro horario.
+
+📅 Atendemos de 9am a ${horaFinTxt}
+
+¿A qué hora dentro de ese horario te gustaría venir? 😊`,
+              context
+            };
+          }
+
+          // Crear la cita en appointments
+          const fechaStr = fechaReal.toISOString().split('T')[0];
+          try {
+            await this.supabase.client
+              .from('appointments')
+              .insert({
+                lead_id: leadId,
+                lead_name: context.lead_name,
+                lead_phone: context.lead_phone,
+                scheduled_date: fechaStr,
+                scheduled_time: fechaHoraCita.hora,
+                property_name: desarrollo,
+                status: 'scheduled',
+                notes: `Cita post-crédito. Presupuesto: $${((context.capacidad_credito || 0) / 1000000).toFixed(1)}M`,
+                created_at: new Date().toISOString()
+              });
+            console.log(`✅ Cita creada: ${fechaStr} ${fechaHoraCita.hora} en ${desarrollo}`);
+          } catch (e) {
+            console.error('Error creando cita:', e);
+          }
+
+          // Marcar flujo como completado
+          context.state = 'completado';
+          await this.guardarContexto(leadId, context);
+
+          // Formatear fecha para mensaje
+          const diasSemana = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+          const diaSemana = diasSemana[fechaReal.getDay()];
+          const fechaLegible = `${diaSemana} ${fechaReal.getDate()}/${fechaReal.getMonth() + 1}`;
+
+          return {
+            respuesta: `✅ *¡Cita confirmada ${nombreCitaCorto}!*
+
+📅 *${fechaLegible}* a las *${horaNum}:00*
+🏠 Visitaremos casas dentro de tu presupuesto
+
+Te esperamos en nuestra oficina. Si tienes algún cambio, avísame 😊
+
+¡Nos vemos pronto! 🎉`,
+            context
+          };
+        }
+
+        // Si menciona un desarrollo específico, guardarlo
+        const desarrolloMencionado = this.detectarDesarrollo(msgLower);
+        if (desarrolloMencionado) {
+          context.desarrollo_interes = desarrolloMencionado;
+          await this.guardarContexto(leadId, context);
+        }
+
+        // Si solo da hora o solo fecha, pedir lo que falta
+        if (fechaHora.hora && !fechaHora.fecha) {
+          return {
+            respuesta: `¡Perfecto! ¿Y qué día te gustaría venir? 📅`,
+            context
+          };
+        }
+
+        if (fechaHora.fecha && !fechaHora.hora) {
+          return {
+            respuesta: `¡${fechaHora.fecha} me parece bien! ¿A qué hora te acomoda? ⏰
+
+Atendemos de 9am a 6pm (sábados hasta 2pm)`,
+            context
+          };
+        }
+
+        // No detectó fecha ni hora
+        const nombreCortoCita = context.lead_name.split(' ')[0];
+        return {
+          respuesta: `${nombreCortoCita}, ¿qué día y hora te gustaría visitarnos? 📅
+
+Por ejemplo: "mañana a las 11am" o "el sábado a las 10"`,
           context
         };
 
@@ -951,20 +1165,30 @@ Responde 1, 2 o 3.`,
       msgContacto = 'Te llamará en breve';
     } else if (context.modalidad === 'whatsapp') {
       msgContacto = 'Te escribirá por WhatsApp';
-    } else if (context.modalidad === 'presencial') {
-      msgContacto = 'Te esperamos en oficina para atenderte';
     }
+
+    // Mostrar casas dentro del presupuesto y empujar a cita
+    const presupuesto = context.capacidad_credito || 2000000;
+    const presupuestoTxt = (presupuesto / 1000000).toFixed(1).replace('.0', '');
+    const desarrollos = this.obtenerDesarrollosPorPresupuesto(presupuesto);
 
     return `✅ *¡Listo ${nombreCorto}!*
 
 Tu asesor hipotecario es:
-
 👤 *${nombreAsesor}*
 📱 ${telAsesor}
-
 ${msgContacto} 📞
 
-¡Mucho éxito con tu crédito! 🏠`;
+━━━━━━━━━━━━━━━━━━━━
+🏠 *¡AHORA VAMOS A VER TU CASA!*
+━━━━━━━━━━━━━━━━━━━━
+
+Con tu capacidad de *$${presupuestoTxt}M*, te recomiendo:
+
+${desarrollos}
+
+📅 *¿Qué día y hora te gustaría visitarnos?*
+Atendemos L-V 9am-6pm y Sáb 9am-2pm`;
   }
 
   // Generar notificación para el asesor
@@ -1001,5 +1225,144 @@ ${msgContacto} 📞
 Escribe: \`mensaje ${context.lead_name?.split(' ')[0] || 'nombre'}\`
 
 ⏰ ¡Contactar pronto!`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // OBTENER DESARROLLOS POR PRESUPUESTO
+  // ═══════════════════════════════════════════════════════════════════
+  private obtenerDesarrollosPorPresupuesto(presupuesto: number): string {
+    // Desarrollos con precios aproximados
+    const desarrollos = [
+      { nombre: 'Andes', precio: 1500000, desc: 'Excelente ubicación en Guadalupe' },
+      { nombre: 'Monte Verde', precio: 1500000, desc: 'Ambiente familiar con áreas verdes' },
+      { nombre: 'Los Encinos', precio: 2900000, desc: 'Casas amplias de 3 recámaras' },
+      { nombre: 'Miravalle', precio: 2900000, desc: 'Diseño moderno de 3 niveles' },
+      { nombre: 'Distrito Falco', precio: 3500000, desc: 'Premium en zona de alta plusvalía' },
+    ];
+
+    // Filtrar por presupuesto (con 10% de margen)
+    const compatibles = desarrollos.filter(d => d.precio <= presupuesto * 1.1);
+
+    if (compatibles.length === 0) {
+      return `🏡 *Andes* - Desde $1.5M
+➜ Excelente ubicación en Guadalupe
+
+🏡 *Monte Verde* - Desde $1.5M
+➜ Ambiente familiar con áreas verdes`;
+    }
+
+    return compatibles
+      .slice(0, 3)
+      .map(d => `🏡 *${d.nombre}* - Desde $${(d.precio / 1000000).toFixed(1)}M
+➜ ${d.desc}`)
+      .join('\n\n');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PARSEAR TEXTO DE FECHA A DATE
+  // ═══════════════════════════════════════════════════════════════════
+  private parsearFechaTexto(fechaTexto: string): Date {
+    const hoy = new Date();
+    // Ajustar a zona horaria México
+    hoy.setHours(hoy.getHours() - 6);
+
+    switch (fechaTexto.toLowerCase()) {
+      case 'hoy':
+        return hoy;
+      case 'mañana':
+        const manana = new Date(hoy);
+        manana.setDate(manana.getDate() + 1);
+        return manana;
+      case 'lunes':
+      case 'martes':
+      case 'miércoles':
+      case 'jueves':
+      case 'viernes':
+      case 'sábado':
+        const diasMap: { [key: string]: number } = {
+          'domingo': 0, 'lunes': 1, 'martes': 2, 'miércoles': 3,
+          'jueves': 4, 'viernes': 5, 'sábado': 6
+        };
+        const diaObjetivo = diasMap[fechaTexto.toLowerCase()];
+        const diaActual = hoy.getDay();
+        let diasHasta = diaObjetivo - diaActual;
+        if (diasHasta <= 0) diasHasta += 7; // Próxima semana
+        const fechaDia = new Date(hoy);
+        fechaDia.setDate(fechaDia.getDate() + diasHasta);
+        return fechaDia;
+      default:
+        return hoy;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // EXTRAER FECHA Y HORA DEL MENSAJE
+  // ═══════════════════════════════════════════════════════════════════
+  private extraerFechaHora(msg: string): { fecha: string | null; hora: string | null } {
+    let fecha: string | null = null;
+    let hora: string | null = null;
+
+    // Detectar día
+    const hoy = new Date();
+    if (msg.includes('hoy')) {
+      fecha = 'hoy';
+    } else if (msg.includes('mañana') || msg.includes('manana')) {
+      fecha = 'mañana';
+    } else if (msg.includes('lunes')) {
+      fecha = 'lunes';
+    } else if (msg.includes('martes')) {
+      fecha = 'martes';
+    } else if (msg.includes('miercoles') || msg.includes('miércoles')) {
+      fecha = 'miércoles';
+    } else if (msg.includes('jueves')) {
+      fecha = 'jueves';
+    } else if (msg.includes('viernes')) {
+      fecha = 'viernes';
+    } else if (msg.includes('sabado') || msg.includes('sábado')) {
+      fecha = 'sábado';
+    }
+
+    // Detectar hora
+    const horaMatch = msg.match(/(\d{1,2})\s*(am|pm|:00|hrs?)?/i);
+    if (horaMatch) {
+      let horaNum = parseInt(horaMatch[1]);
+      const sufijo = horaMatch[2]?.toLowerCase() || '';
+
+      // Ajustar PM
+      if (sufijo === 'pm' && horaNum < 12) {
+        horaNum += 12;
+      }
+      // Asumir PM para horas pequeñas sin sufijo (ej: "a las 3" = 3pm)
+      if (!sufijo && horaNum >= 1 && horaNum <= 6) {
+        horaNum += 12;
+      }
+
+      hora = `${horaNum}:00`;
+    }
+
+    return { fecha, hora };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // DETECTAR NOMBRE DE DESARROLLO EN EL MENSAJE
+  // ═══════════════════════════════════════════════════════════════════
+  private detectarDesarrollo(msg: string): string | null {
+    const desarrollos = [
+      { nombres: ['andes'], valor: 'Andes' },
+      { nombres: ['monte verde', 'monteverde'], valor: 'Monte Verde' },
+      { nombres: ['encinos', 'los encinos'], valor: 'Los Encinos' },
+      { nombres: ['miravalle'], valor: 'Miravalle' },
+      { nombres: ['falco', 'distrito falco'], valor: 'Distrito Falco' },
+      { nombres: ['portento'], valor: 'Portento' },
+      { nombres: ['reserva'], valor: 'Reserva' },
+    ];
+
+    for (const d of desarrollos) {
+      if (d.nombres.some(n => msg.includes(n))) {
+        return d.valor;
+      }
+    }
+
+    return null;
   }
 }

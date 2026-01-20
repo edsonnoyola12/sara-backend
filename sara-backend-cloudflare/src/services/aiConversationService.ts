@@ -15,6 +15,7 @@ import { CalendarService } from './calendar';
 import { ClaudeService } from './claude';
 import { scoringService } from './leadScoring';
 import { PromocionesService } from './promocionesService';
+import { HORARIOS } from '../handlers/constants';
 
 // Interfaces
 interface AIAnalysis {
@@ -66,11 +67,19 @@ export class AIConversationService {
 
     // ═══ DETECTAR CONVERSACIÓN NUEVA ═══
     // Si el historial está vacío o muy corto, es una conversación nueva
-    // El nombre guardado podría ser de otra persona que usó el mismo teléfono
+    // PERO si el lead ya tiene nombre REAL (no placeholder), lo usamos
     const esConversacionNueva = historialParaOpenAI.length <= 1;
-    const nombreConfirmado = esConversacionNueva ? false : !!lead.name;
 
-    console.log('🔍 ¿Conversación nueva?', esConversacionNueva, '| Nombre confirmado:', nombreConfirmado);
+    // Nombres que NO son reales (placeholders)
+    const nombresPlaceholder = ['sin nombre', 'cliente', 'amigo', 'usuario', 'lead', 'desconocido', 'n/a', 'na', 'no disponible'];
+    const tieneNombreReal = lead.name &&
+                            lead.name.trim().length > 0 &&
+                            !nombresPlaceholder.includes(lead.name.toLowerCase().trim());
+
+    // Si tiene nombre real, usarlo aunque sea conversación "nueva" (ej: viene de flujo crédito)
+    const nombreConfirmado = tieneNombreReal;
+
+    console.log('🔍 ¿Conversación nueva?', esConversacionNueva, '| Nombre real:', tieneNombreReal, '| Nombre confirmado:', nombreConfirmado, '| lead.name:', lead.name);
 
     // Verificar si ya existe cita confirmada para este lead
     let citaExistenteInfo = '';
@@ -148,6 +157,41 @@ El cliente está RESPONDIENDO a ese mensaje. Debes:
     const prompt = `
 ⚠️ INSTRUCCIÓN CRÍTICA: Debes responder ÚNICAMENTE con un objeto JSON válido.
 NO escribas texto antes ni después del JSON. Tu respuesta debe empezar con { y terminar con }.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🧠🧠🧠 PIENSA PRIMERO - ANTES DE RESPONDER 🧠🧠🧠
+━━━━━━━━━━━━━━━━━━━━━━━━
+ANTES de escribir tu respuesta, PIENSA:
+
+1. **¿QUÉ ESTÁ PIDIENDO REALMENTE?**
+   - ¿Información sobre casas/precios/ubicación/seguridad?
+   - ¿Ya tiene crédito y solo quiere ver casas?
+   - ¿Necesita ayuda con crédito hipotecario?
+   - ¿Quiere agendar una visita?
+   - ¿Está respondiendo a algo que le pregunté?
+
+2. **¿QUÉ CONTEXTO TENGO?**
+   - Nombre: ${nombreConfirmado ? lead.name : 'NO TENGO'}
+   - Interés: ${lead.property_interest || 'NO SÉ'}
+   - ¿Ya tiene cita?: ${citaExistenteInfo || 'NO'}
+   - Historial: revisa los mensajes anteriores
+
+3. **¿CÓMO LO ACERCO A UNA CITA?**
+   Tu objetivo SIEMPRE es: **AGENDAR UNA VISITA A LAS CASAS**
+   - Si pregunta sobre crédito → Responde Y luego ofrece ver casas
+   - Si pregunta sobre casas → Responde Y ofrece visita
+   - Si pregunta sobre seguridad/ubicación → Responde Y ofrece visita
+   - Si ya tiene crédito → Perfecto, ¿cuándo quiere visitar?
+
+4. **¿QUÉ ACCIÓN TOMO?**
+   - ¿Necesito pedir nombre? → Solo si NO lo tengo
+   - ¿Necesito mostrar casas? → Si preguntó por ellas
+   - ¿Necesito agendar cita? → Si ya tiene nombre + interés + quiere visitar
+   - ¿Necesito info de crédito? → Solo si específicamente lo pide
+
+NO seas un bot rígido. PIENSA como vendedora inteligente que quiere ayudar Y vender.
+━━━━━━━━━━━━━━━━━━━━━━━━
+
 ${promocionesContext}${broadcastContext}
 Eres SARA, una **agente inmobiliaria HUMANA y conversacional** de Grupo Santa Rita en Zacatecas, México.
 
@@ -1045,8 +1089,9 @@ DATOS DEL CLIENTE
 - Score: ${lead.lead_score || 0}/100
 ${citaExistenteInfo ? `- Cita: ${citaExistenteInfo}` : '- Cita: ❌ NO TIENE CITA AÚN'}
 
-${esConversacionNueva ? '⚠️⚠️⚠️ CONVERSACIÓN NUEVA - DEBES PREGUNTAR NOMBRE EN TU PRIMER MENSAJE ⚠️⚠️⚠️' : ''}
+${esConversacionNueva && !nombreConfirmado ? '⚠️⚠️⚠️ CONVERSACIÓN NUEVA - DEBES PREGUNTAR NOMBRE EN TU PRIMER MENSAJE ⚠️⚠️⚠️' : ''}
 ${!nombreConfirmado ? '⚠️ CRÍTICO: NO TENGO NOMBRE CONFIRMADO. Pide el nombre antes de continuar.' : ''}
+${nombreConfirmado ? `✅ YA TENGO EL NOMBRE: ${lead.name} - NO vuelvas a pedirlo, úsalo en tu respuesta` : ''}
 ${citaExistenteInfo ? `
 🚫🚫🚫 PROHIBIDO - LEE ESTO 🚫🚫🚫
 EL CLIENTE YA TIENE CITA CONFIRMADA.
@@ -2011,6 +2056,10 @@ Tú dime, ¿por dónde empezamos?`;
     console.log('👍 executeAIDecision RECIBE:');
     console.log('   - properties:', Array.isArray(properties) ? `Array[${properties.length}]` : typeof properties);
     console.log('   - teamMembers:', Array.isArray(teamMembers) ? `Array[${teamMembers.length}]` : typeof teamMembers);
+
+    // Flag para evitar doble envío cuando hora está fuera de horario
+    let yaEnvioMensajeHorarioInvalido = false;
+
     // ═══════════════════════════════════════════════════════════════════════════
     // 🧠 CONFIAR EN CLAUDE: Claude es el cerebro, el código ejecuta sus decisiones
     // ═══════════════════════════════════════════════════════════════════════════
@@ -2428,9 +2477,20 @@ Tú dime, ¿por dónde empezamos?`;
               return;
             }
           } else {
-            const respuesta = `${nombreLeadCorto}, no tienes cita pendiente para reagendar. 🤔\n\n¿Te gustaría agendar una visita?`;
-            await this.meta.sendWhatsAppMessage(from, respuesta);
-            return;
+            // No tiene cita para reagendar, PERO si tiene fecha y hora, tratarlo como nueva cita
+            const tieneFechaHora = analysis.extracted_data?.fecha && analysis.extracted_data?.hora;
+            const tieneDesarrollo = analysis.extracted_data?.desarrollo || lead.property_interest;
+
+            if (tieneFechaHora && tieneDesarrollo) {
+              console.log('📅 Reagendar sin cita previa → Convirtiendo a confirmar_cita');
+              // Cambiar el intent a confirmar_cita y continuar el flujo normal
+              analysis.intent = 'confirmar_cita';
+              // NO hacer return, continuar para crear la cita
+            } else {
+              const respuesta = `${nombreLeadCorto}, no tienes cita pendiente para reagendar. 🤔\n\n¿Te gustaría agendar una visita?`;
+              await this.meta.sendWhatsAppMessage(from, respuesta);
+              return;
+            }
           }
         }
 
@@ -2976,25 +3036,14 @@ Tú dime, ¿por dónde empezamos?`;
         }
       }
       
-      // 1. GUARDAR HISTORIAL PRIMERO (antes de cualquier acción)
-      try {
-        const historialActual = lead.conversation_history || [];
-        historialActual.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
-        historialActual.push({ role: 'assistant', content: claudeResponse, timestamp: new Date().toISOString() });
-        await this.supabase.client
-          .from('leads')
-          .update({ conversation_history: historialActual.slice(-30) })
-          .eq('id', lead.id);
-        console.log('🧠 Historial guardado');
-      } catch (e) {
-        console.log('⚠️ Error guardando historial');
-      }
-      
       // ═══════════════════════════════════════════════════════════════
       // 🧠 CLAUDE DECIDE - CÓDIGO SOLO EJECUTA
       // Sin detecciones hardcodeadas - Claude ya analizó todo
       // ═══════════════════════════════════════════════════════════════
-      
+
+      // NOTA: El historial se guarda MÁS ABAJO, después de validar horario
+      // para no contaminar el historial con "te agendo" cuando la hora está fuera de horario
+
       // 2. ENVIAR RESPUESTA (con interceptación si falta nombre)
       const tieneNombreReal = nombreCliente && nombreCliente !== 'Sin nombre' && nombreCliente !== 'amigo' && nombreCliente !== 'Cliente' && nombreCliente.length > 2;
       
@@ -3034,14 +3083,60 @@ Tú dime, ¿por dónde empezamos?`;
         // ✅ FIX: NO hacer return - continuar para enviar recursos
       }
       
+      // ═══════════════════════════════════════════════════════════════
+      // VALIDAR HORARIO ANTES DE ENVIAR RESPUESTA (evitar doble mensaje)
+      // ═══════════════════════════════════════════════════════════════
+      let horaFueraDeHorario = false;
+      let mensajeHorarioInvalido = '';
+
+      if (analysis.intent === 'confirmar_cita' && analysis.extracted_data?.fecha && analysis.extracted_data?.hora) {
+        const horaExtraida = analysis.extracted_data.hora;
+        let horaNumero = 0;
+        const horaMatch = horaExtraida.match(/(\d+)/);
+        if (horaMatch) {
+          horaNumero = parseInt(horaMatch[1]);
+          if (horaExtraida.toLowerCase().includes('pm') && horaNumero < 12) {
+            horaNumero += 12;
+          } else if (horaExtraida.toLowerCase().includes('am') && horaNumero === 12) {
+            horaNumero = 0;
+          }
+        }
+
+        const fechaExtraida = analysis.extracted_data.fecha || '';
+        const fechaCita = this.handler.parseFecha(fechaExtraida, horaExtraida);
+        const esSabado = fechaCita.getDay() === 6;
+        const horaInicioAtencion = HORARIOS.HORA_INICIO_DEFAULT;
+        const horaFinAtencion = esSabado ? HORARIOS.HORA_FIN_SABADO : HORARIOS.HORA_FIN_DEFAULT;
+
+        if (horaNumero > 0 && (horaNumero < horaInicioAtencion || horaNumero >= horaFinAtencion)) {
+          console.log(`⚠️ HORA FUERA DE HORARIO (validación temprana): ${horaNumero}:00`);
+          horaFueraDeHorario = true;
+          yaEnvioMensajeHorarioInvalido = true; // Marcar que enviaremos mensaje de horario inválido
+          const nombreClienteCorto = nombreCliente?.split(' ')[0] || '';
+          const horaFinTexto = esSabado ? '2:00 PM' : '6:00 PM';
+          const diaTexto = esSabado ? ' los sábados' : '';
+
+          mensajeHorarioInvalido = `⚠️ ${nombreClienteCorto ? nombreClienteCorto + ', las ' : 'Las '}*${horaNumero}:00* está fuera de nuestro horario de atención${diaTexto}.
+
+📅 *Horario disponible${diaTexto}:* 9:00 AM a ${horaFinTexto}
+
+¿A qué hora dentro de este horario te gustaría visitarnos? 😊`;
+        }
+      }
+
       // Si tenemos nombre o no es intent de cita → enviar respuesta normal de Claude
       // PERO filtrar pregunta de crédito si está pegada (debe ir separada después)
-      let respuestaLimpia = claudeResponse
-        .replace(/\n*¿Te gustaría que te ayudemos con el crédito hipotecario\?.*😊/gi, '')
-        .replace(/\n*Mientras tanto,?\s*¿te gustaría que te ayudemos con el crédito.*$/gi, '')
-        .replace(/\n*¿Te gustaría que te ayudemos con el crédito.*$/gi, '')
-        .replace(/Responde \*?SÍ\*? para orientarte.*$/gi, '')
-        .trim();
+      let respuestaLimpia = horaFueraDeHorario ? mensajeHorarioInvalido : claudeResponse;
+
+      // Solo aplicar filtros si NO es mensaje de horario inválido
+      if (!horaFueraDeHorario) {
+        respuestaLimpia = respuestaLimpia
+          .replace(/\n*¿Te gustaría que te ayudemos con el crédito hipotecario\?.*😊/gi, '')
+          .replace(/\n*Mientras tanto,?\s*¿te gustaría que te ayudemos con el crédito.*$/gi, '')
+          .replace(/\n*¿Te gustaría que te ayudemos con el crédito.*$/gi, '')
+          .replace(/Responde \*?SÍ\*? para orientarte.*$/gi, '')
+          .trim();
+      }
 
       // ═══ FIX: Si se enviarán recursos después, quitar pregunta de nombre (irá al final) ═══
       if (seEnviaranRecursos && !tieneNombreReal) {
@@ -3236,6 +3331,20 @@ Tú dime, ¿por dónde empezamos?`;
       } else if (!interceptoCita) {
         await this.twilio.sendWhatsAppMessage(from, respuestaLimpia);
         console.log('✅ Respuesta de Claude enviada (sin pregunta de crédito)');
+
+        // ═══ GUARDAR HISTORIAL CON RESPUESTA CORRECTA (después de validar horario) ═══
+        try {
+          const historialActual = lead.conversation_history || [];
+          historialActual.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
+          historialActual.push({ role: 'assistant', content: respuestaLimpia, timestamp: new Date().toISOString() });
+          await this.supabase.client
+            .from('leads')
+            .update({ conversation_history: historialActual.slice(-30) })
+            .eq('id', lead.id);
+          console.log('🧠 Historial guardado (respuesta correcta)');
+        } catch (e) {
+          console.log('⚠️ Error guardando historial');
+        }
 
         // Marcar tiempo de última respuesta
         await this.supabase.client
@@ -5636,9 +5745,15 @@ Un asesor te contactará muy pronto. ¿Hay algo más en lo que pueda ayudarte?`;
       }
     }
 
-    await this.twilio.sendWhatsAppMessage(from, respuestaPrincipal);
-    console.log('✅ Respuesta enviada');
-    
+    // Solo enviar respuestaPrincipal si NO se envió ya en el flujo anterior
+    // (evitar doble mensaje cuando hora fuera de horario)
+    if (!yaEnvioMensajeHorarioInvalido) {
+      await this.twilio.sendWhatsAppMessage(from, respuestaPrincipal);
+      console.log('✅ Respuesta enviada');
+    } else {
+      console.log('⏭️ Respuesta ya enviada anteriormente (horario inválido)');
+    }
+
     // CORRECCIÓN: Si send_contactos pero NO incluye datos del asesor, enviar mensaje adicional
     // Solo si NO fue notificado previamente
     if (analysis.send_contactos && !respuestaPrincipal.includes('teléfono:') && !respuestaPrincipal.includes('Tel:') && !lead.asesor_notificado) {

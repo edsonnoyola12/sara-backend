@@ -177,6 +177,16 @@ export class VendorCommandsService {
       };
     }
 
+    // ═══ HOT - Leads calientes ═══
+    if (/^hot$/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorLeadsHot' };
+    }
+
+    // ═══ PENDIENTES - Leads sin seguimiento ═══
+    if (/^pendientes$/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorLeadsPendientes' };
+    }
+
     return { matched: false };
   }
 
@@ -425,7 +435,7 @@ export class VendorCommandsService {
   formatMultipleLeads(leads: any[]): string {
     let msg = `🔍 Encontré ${leads.length} leads:\n\n`;
     leads.forEach((l, i) => {
-      msg += `*${i + 1}.* ${l.name} (${this.STAGE_LABELS[l.stage] || l.stage})\n`;
+      msg += `*${i + 1}.* ${l.name} (${this.STAGE_LABELS[l.status] || l.status})\n`;
     });
     msg += `\n💡 Sé más específico con el nombre`;
     return msg;
@@ -445,11 +455,12 @@ export class VendorCommandsService {
   }> {
     try {
       const esAdmin = ['admin', 'coordinador', 'ceo', 'director'].includes(role?.toLowerCase() || '');
+      console.log(`🔍 moveFunnelStep: buscando "${nombreLead}", vendedorId=${vendedorId}, role=${role}, esAdmin=${esAdmin}`);
 
       // Buscar leads por nombre
       let query = this.supabase.client
         .from('leads')
-        .select('id, name, stage, assigned_to')
+        .select('id, name, status, assigned_to')
         .ilike('name', `%${nombreLead}%`);
 
       if (!esAdmin) {
@@ -457,6 +468,7 @@ export class VendorCommandsService {
       }
 
       const { data: leads, error } = await query.limit(10);
+      console.log(`🔍 moveFunnelStep: encontrados=${leads?.length || 0}, error=${error?.message || 'ninguno'}`);
 
       if (error || !leads || leads.length === 0) {
         return { success: false, error: `❌ No encontré a "${nombreLead}"` };
@@ -472,14 +484,14 @@ export class VendorCommandsService {
       }
 
       const lead = leads[0];
-      const currentIndex = this.FUNNEL_STAGES.indexOf(lead.stage);
+      const currentIndex = this.FUNNEL_STAGES.indexOf(lead.status);
 
       if (currentIndex === -1) {
-        // Stage no está en el funnel estándar, moverlo a contacted
+        // Status no está en el funnel estándar, moverlo a contacted
         const newStatus = direction === 'next' ? 'contacted' : 'new';
         await this.supabase.client
           .from('leads')
-          .update({ stage: newStatus, updated_at: new Date().toISOString() })
+          .update({ status: newStatus, updated_at: new Date().toISOString() })
           .eq('id', lead.id);
         return { success: true, lead, newStatus };
       }
@@ -493,8 +505,8 @@ export class VendorCommandsService {
 
       if (newIndex === currentIndex) {
         const msg = direction === 'next'
-          ? `⚠️ ${lead.name} ya está en la última etapa (${this.STAGE_LABELS[lead.stage]})`
-          : `⚠️ ${lead.name} ya está en la primera etapa (${this.STAGE_LABELS[lead.stage]})`;
+          ? `⚠️ ${lead.name} ya está en la última etapa (${this.STAGE_LABELS[lead.status]})`
+          : `⚠️ ${lead.name} ya está en la primera etapa (${this.STAGE_LABELS[lead.status]})`;
         return { success: false, error: msg };
       }
 
@@ -502,10 +514,10 @@ export class VendorCommandsService {
 
       await this.supabase.client
         .from('leads')
-        .update({ stage: newStatus, updated_at: new Date().toISOString() })
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
         .eq('id', lead.id);
 
-      console.log(`✅ Lead ${lead.name} movido de ${lead.stage} a ${newStatus}`);
+      console.log(`✅ Lead ${lead.name} movido de ${lead.status} a ${newStatus}`);
 
       return { success: true, lead, newStatus };
     } catch (e) {
