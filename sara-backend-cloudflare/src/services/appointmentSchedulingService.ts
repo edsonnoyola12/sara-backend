@@ -2,15 +2,18 @@ import { SupabaseService } from './supabase';
 import { GoogleCalendarService } from './googleCalendar';
 import { parseCancelarCitaCommand, parseReagendarCommand, formatearFechaLegible, formatearHoraLegible } from '../handlers/appointmentService';
 import { parseFechaISO, parseHoraISO } from '../handlers/dateParser';
+import { parseHora } from '../utils/vendedorParsers';
 
 interface CancelarResult {
   success?: boolean;
   error?: string;
   multipleLeads?: any[];
   leadName?: string;
+  leadPhone?: string;  // Para notificar al lead
   fechaStr?: string;
   horaStr?: string;
   appointmentId?: string;
+  leadId?: string;     // Para el flujo de notificación
 }
 
 interface ReagendarResult {
@@ -21,6 +24,8 @@ interface ReagendarResult {
   multipleLeads?: any[];
   nombreLead?: string;
   leadName?: string;
+  leadId?: string;
+  leadPhone?: string;
   nuevaFecha?: string;
   nuevaHora?: string;
   appointmentId?: string;
@@ -34,11 +39,16 @@ interface AgendarResult {
   multipleLeads?: any[];
   nombreLead?: string;
   leadName?: string;
+  leadPhone?: string;  // para notificación
   fecha?: string;
   hora?: string;
   dia?: string;      // día raw del parsing (mañana, viernes, etc)
+  minutos?: string;  // minutos del parsing (00-59)
   ampm?: string;     // am/pm del parsing
+  desarrollo?: string; // desarrollo del comando
   appointmentId?: string;
+  ubicacion?: string;  // dirección del desarrollo
+  gpsLink?: string;    // link de Google Maps
 }
 
 export class AppointmentSchedulingService {
@@ -154,8 +164,10 @@ Puedes reagendar cuando quieras.`;
   // Cancelar cita directamente por ID del lead (cuando ya se seleccionó de múltiples)
   async cancelarCitaPorId(leadId: string, leadName: string, vendedor: any): Promise<CancelarResult> {
     try {
+      console.log(`🗑️ CANCELAR CITA - Lead: ${leadName} (${leadId})`);
+
       // Buscar cita activa del lead
-      const { data: appointment } = await this.supabase.client
+      const { data: appointment, error: appError } = await this.supabase.client
         .from('appointments')
         .select('*')
         .eq('lead_id', leadId)
@@ -164,12 +176,22 @@ Puedes reagendar cuando quieras.`;
         .limit(1)
         .single();
 
+      console.log(`🗑️ Cita encontrada:`, appointment ? `ID=${appointment.id}, status=${appointment.status}` : 'ninguna', appError ? `error=${appError.message}` : '');
+
       if (!appointment) {
         return { error: `${leadName} no tiene citas pendientes.` };
       }
 
-      // Cancelar la cita
-      await this.supabase.client
+      // Buscar teléfono del lead
+      const { data: lead } = await this.supabase.client
+        .from('leads')
+        .select('phone')
+        .eq('id', leadId)
+        .single();
+      console.log(`🗑️ Teléfono del lead:`, lead?.phone || 'no tiene');
+
+      // Cancelar la cita en Supabase
+      const { error: updateError } = await this.supabase.client
         .from('appointments')
         .update({
           status: 'cancelled',
@@ -177,6 +199,12 @@ Puedes reagendar cuando quieras.`;
           cancelled_by: vendedor.name
         })
         .eq('id', appointment.id);
+
+      if (updateError) {
+        console.error(`🗑️ ❌ Error actualizando cita en Supabase:`, updateError);
+        return { error: 'Error al cancelar en la base de datos.' };
+      }
+      console.log(`🗑️ ✅ Cita actualizada a status=cancelled en Supabase`);
 
       // Registrar actividad en lead_activities
       await this.supabase.client
@@ -187,27 +215,60 @@ Puedes reagendar cuando quieras.`;
           notes: `Cita cancelada por ${vendedor.name} (era: ${formatearFechaLegible(appointment.scheduled_date)} ${formatearHoraLegible(appointment.scheduled_time)})`,
           created_by: vendedor.id
         });
-      console.log(`📋 Actividad registrada: Cita cancelada para ${leadName}`);
+      console.log(`🗑️ ✅ Actividad registrada en lead_activities`);
 
-      // Cancelar en Google Calendar si existe
-      if (this.calendar && appointment.google_event_id) {
-        try {
-          await this.calendar.deleteEvent(appointment.google_event_id);
-        } catch (e) {
-          console.log('⚠️ No se pudo eliminar evento de Calendar:', e);
+      // Cancelar en Google Calendar
+      if (this.calendar) {
+        let calendarDeleted = false;
+
+        // Primero intentar con el event_id guardado
+        if (appointment.google_event_id) {
+          try {
+            await this.calendar.deleteEvent(appointment.google_event_id);
+            calendarDeleted = true;
+            console.log(`🗑️ ✅ Evento eliminado de Calendar por ID: ${appointment.google_event_id}`);
+          } catch (e) {
+            console.log(`🗑️ ⚠️ No se pudo eliminar por ID, buscando por nombre...`);
+          }
         }
+
+        // Si no hay event_id o falló, buscar por nombre del lead
+        if (!calendarDeleted) {
+          try {
+            const existingEvents = await this.calendar.findEventsByName(`Cita: ${leadName}`);
+            console.log(`🗑️ Eventos encontrados en Calendar para "${leadName}":`, existingEvents.length);
+
+            for (const event of existingEvents) {
+              if (event.id) {
+                await this.calendar.deleteEvent(event.id);
+                console.log(`🗑️ ✅ Evento eliminado de Calendar: ${event.id}`);
+                calendarDeleted = true;
+              }
+            }
+          } catch (e) {
+            console.log(`🗑️ ⚠️ Error buscando/eliminando eventos por nombre:`, e);
+          }
+        }
+
+        if (!calendarDeleted) {
+          console.log(`🗑️ ⚠️ No se encontró evento en Calendar para eliminar`);
+        }
+      } else {
+        console.log(`🗑️ ⚠️ Calendar service no disponible`);
       }
 
       return {
         success: true,
         leadName: leadName,
+        leadId: leadId,
+        leadPhone: lead?.phone || undefined,
         fechaStr: formatearFechaLegible(appointment.scheduled_date),
         horaStr: formatearHoraLegible(appointment.scheduled_time),
         appointmentId: appointment.id
       };
 
     } catch (e) {
-      console.error('Error cancelando cita por ID:', e);
+      console.error('🗑️ ❌ Error cancelando cita por ID:', e);
       return { error: 'Error interno al cancelar cita.' };
     }
   }
@@ -339,6 +400,8 @@ reagendar ${nombreLead} mañana 4pm`;
       return {
         success: true,
         leadName: lead.name,
+        leadId: lead.id,
+        leadPhone: lead.phone,
         nuevaFecha: formatearFechaLegible(nuevaFecha),
         nuevaHora: formatearHoraLegible(nuevaHoraISO),
         appointmentId: appointment.id
@@ -351,9 +414,9 @@ reagendar ${nombreLead} mañana 4pm`;
   }
 
   // Reagendar cita cuando ya tenemos el lead seleccionado (evita búsqueda por nombre)
-  async reagendarCitaConSeleccion(lead: any, dia: string, hora: string, ampm: string, vendedor: any): Promise<ReagendarResult> {
+  async reagendarCitaConSeleccion(lead: any, dia: string, hora: string, ampm: string, vendedor: any, minutos?: string): Promise<ReagendarResult> {
     try {
-      console.log('📅 reagendarCitaConSeleccion:', { lead: lead?.name, dia, hora, ampm, vendedor: vendedor?.name });
+      console.log('📅 reagendarCitaConSeleccion:', { lead: lead?.name, dia, hora, minutos, ampm, vendedor: vendedor?.name });
 
       // Validar parámetros
       if (!lead?.id || !lead?.name) {
@@ -407,8 +470,9 @@ reagendar ${nombreLead} mañana 4pm`;
       if (ampm?.toLowerCase() === 'am' && horaNum === 12) {
         horaNum = 0;
       }
-      const nuevaHoraISO = `${String(horaNum).padStart(2, '0')}:00:00`;
-      console.log('📅 Hora parseada:', { hora, ampm, horaNum, nuevaHoraISO });
+      const mins = minutos || '00';
+      const nuevaHoraISO = `${String(horaNum).padStart(2, '0')}:${mins}:00`;
+      console.log('📅 Hora parseada:', { hora, minutos: mins, ampm, horaNum, nuevaHoraISO });
 
       // Actualizar la cita
       console.log('📅 Actualizando cita ID:', appointment.id, 'con fecha:', nuevaFecha, 'hora:', nuevaHoraISO);
@@ -543,28 +607,51 @@ reagendar ${nombreLead} mañana 4pm`;
   // AGENDAR CITA
   // ═══════════════════════════════════════════════════════════════════
 
-  parseAgendarCommand(body: string): { nombreLead?: string; dia?: string; hora?: string; ampm?: string } {
-    // Patrones: "agendar cita con Juan mañana 4pm" o "agendar cumpleañero viernes 10am"
-    const texto = body.toLowerCase().trim();
+  parseAgendarCommand(body: string): { nombreLead?: string; dia?: string; hora?: string; minutos?: string; ampm?: string; desarrollo?: string } {
+    // Patrones: "agendar cita con Juan mañana 4pm Distrito Falco"
+    let texto = body.toLowerCase().trim();
 
-    // Extraer nombre del lead
-    // Patrones: "agendar cita cumpleañero", "agendar cumpleañero", "cita con juan"
-    const nombreMatch = texto.match(/(?:agendar(?:\s+cita)?|cita)\s+(?:con\s+)?([a-záéíóúñ\s]+?)(?:\s+(?:para\s+)?(?:el\s+)?(?:mañana|hoy|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo|\d))/i);
+    // ═══ NORMALIZAR ERRORES COMUNES ═══
+    // Errores de "mañana"
+    texto = texto.replace(/mañnaa|mañaan|manana|mannana|mñana|ma[ñn]a+na/gi, 'mañana');
+    // Errores de días
+    texto = texto.replace(/lune?s?(?![\w])/gi, 'lunes');
+    texto = texto.replace(/marte?s?(?![\w])/gi, 'martes');
+    texto = texto.replace(/miercole?s?|miércole?s?/gi, 'miercoles');
+    texto = texto.replace(/jueve?s?(?![\w])/gi, 'jueves');
+    texto = texto.replace(/vierne?s?(?![\w])/gi, 'viernes');
+    texto = texto.replace(/sabad?o?|sabádo?/gi, 'sabado');
+    texto = texto.replace(/doming?o?(?![\w])/gi, 'domingo');
+    // Quitar "a las", "a la", "a kas", "alas", etc.
+    texto = texto.replace(/\s+a\s*(las?|kas?|l|k)\s+/gi, ' ');
+    texto = texto.replace(/\s+alas\s+/gi, ' ');
+    // Quitar "para el", "el", "para"
+    texto = texto.replace(/\s+(para\s+el|para|el)\s+/gi, ' ');
+    // Normalizar espacios múltiples
+    texto = texto.replace(/\s+/g, ' ').trim();
+
+    // ═══ EXTRAER NOMBRE DEL LEAD ═══
+    const nombreMatch = texto.match(/(?:agendar(?:\s+cita)?|cita)\s+(?:con\s+)?([a-záéíóúñ\s]+?)(?:\s+(?:mañana|hoy|pasado|lunes|martes|miercoles|jueves|viernes|sabado|domingo|\d))/i);
     const nombreLead = nombreMatch ? nombreMatch[1].trim() : undefined;
 
-    // Extraer día
-    const diasPatterns = ['hoy', 'mañana', 'pasado mañana', 'lunes', 'martes', 'miércoles', 'miercoles', 'jueves', 'viernes', 'sábado', 'sabado', 'domingo'];
+    // ═══ EXTRAER DÍA ═══
+    const diasPatterns = ['hoy', 'mañana', 'pasado mañana', 'pasado', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
     let dia: string | undefined;
     for (const d of diasPatterns) {
       if (texto.includes(d)) { dia = d; break; }
     }
 
-    // Extraer hora
-    const horaMatch = texto.match(/(\d{1,2})\s*(am|pm)?/i);
-    const hora = horaMatch ? horaMatch[1] : undefined;
-    const ampm = horaMatch ? horaMatch[2] : undefined;
+    // ═══ EXTRAER HORA ═══
+    const { hora, minutos, ampm } = parseHora(texto);
 
-    return { nombreLead, dia, hora, ampm };
+    // ═══ EXTRAER DESARROLLO ═══
+    let desarrollo: string | undefined;
+    const desarrolloMatch = body.match(/(?:\d{1,2}(?::\d{2})?\s*(?:am|pm))\s+(?:en\s+)?(.+)$/i);
+    if (desarrolloMatch) {
+      desarrollo = desarrolloMatch[1].trim();
+    }
+
+    return { nombreLead, dia, hora, minutos, ampm, desarrollo };
   }
 
   getMensajeAyudaAgendar(): string {
@@ -600,15 +687,34 @@ agendar ${nombreLead} mañana 4pm`;
   }
 
   formatAgendarCitaExito(result: AgendarResult): string {
-    return `✅ *Cita agendada*
+    // Formatear teléfono del lead
+    const leadPhoneFormatted = result.leadPhone
+      ? result.leadPhone.replace(/\D/g, '').slice(-10)
+      : '';
 
-👤 ${result.leadName}
-📅 ${result.fecha}
-🕐 ${result.hora}
+    let msg = `✅ *Cita agendada*
 
-¿Le aviso a ${result.leadName}?
+👤 ${result.leadName}`;
+
+    if (leadPhoneFormatted) {
+      msg += `\n📱 ${leadPhoneFormatted}`;
+    }
+
+    msg += `\n📅 ${result.fecha}
+🕐 ${result.hora}`;
+
+    if (result.ubicacion && result.ubicacion !== 'Por confirmar') {
+      msg += `\n📍 ${result.ubicacion}`;
+    }
+    if (result.gpsLink) {
+      msg += `\n🗺️ ${result.gpsLink}`;
+    }
+
+    msg += `\n\n¿Le aviso a ${result.leadName}?
 *1.* Sí, mándale mensaje
 *2.* No, yo le aviso`;
+
+    return msg;
   }
 
   async agendarCitaCompleto(body: string, vendedor: any): Promise<AgendarResult> {
@@ -619,10 +725,10 @@ agendar ${nombreLead} mañana 4pm`;
         return { needsHelp: true };
       }
 
-      // Buscar leads que coincidan
+      // Buscar leads que coincidan (incluir property_interest para ubicación)
       const { data: leads } = await this.supabase.client
         .from('leads')
-        .select('id, name, phone')
+        .select('id, name, phone, property_interest')
         .eq('assigned_to', vendedor.id)
         .ilike('name', `%${parsed.nombreLead}%`)
         .limit(10);
@@ -637,7 +743,9 @@ agendar ${nombreLead} mañana 4pm`;
           nombreLead: parsed.nombreLead,
           dia: parsed.dia,
           hora: parsed.hora,
-          ampm: parsed.ampm
+          minutos: parsed.minutos,
+          ampm: parsed.ampm,
+          desarrollo: parsed.desarrollo
         };
       }
 
@@ -661,7 +769,32 @@ agendar ${nombreLead} mañana 4pm`;
       if (parsed.ampm?.toLowerCase() === 'am' && horaNum === 12) {
         horaNum = 0;
       }
-      const horaISO = `${String(horaNum).padStart(2, '0')}:00:00`;
+      const mins = parsed.minutos || '00';
+      const horaISO = `${String(horaNum).padStart(2, '0')}:${mins}:00`;
+      console.log('📅 Hora parseada para agendar:', { hora: parsed.hora, minutos: mins, ampm: parsed.ampm, horaNum, horaISO });
+
+      // Buscar ubicación: primero del desarrollo en comando, luego del property_interest del lead
+      let ubicacion = 'Por confirmar';
+      let gpsLink = '';
+      const desarrolloBuscar = parsed.desarrollo || lead.property_interest;
+      console.log('🔍 Desarrollo a buscar:', desarrolloBuscar);
+
+      if (desarrolloBuscar) {
+        const { data: propData } = await this.supabase.client
+          .from('properties')
+          .select('name, development, address, location, gps_link')
+          .or(`name.ilike.%${desarrolloBuscar}%,development.ilike.%${desarrolloBuscar}%`)
+          .limit(1)
+          .single();
+
+        if (propData) {
+          ubicacion = propData.address || propData.location || propData.development || desarrolloBuscar;
+          gpsLink = propData.gps_link || '';
+          console.log('📍 Ubicación encontrada:', { ubicacion, gpsLink: gpsLink ? 'SÍ' : 'NO' });
+        } else {
+          console.log('⚠️ No se encontró propiedad para:', desarrolloBuscar);
+        }
+      }
 
       // Crear la cita en DB
       const { data: appointment, error: insertError } = await this.supabase.client
@@ -673,6 +806,8 @@ agendar ${nombreLead} mañana 4pm`;
           scheduled_date: fechaStr,
           scheduled_time: horaISO,
           status: 'scheduled',
+          location: ubicacion,
+          property_name: parsed.desarrollo || lead.property_interest || '',
           created_at: new Date().toISOString()
         })
         .select()
@@ -701,11 +836,12 @@ agendar ${nombreLead} mañana 4pm`;
           // No usar new Date() porque interpreta como UTC en Workers
           const startISO = `${fechaStr}T${horaISO}`;
           const endHour = (horaNum + 1) % 24;
-          const endISO = `${fechaStr}T${String(endHour).padStart(2, '0')}:00:00`;
+          const endISO = `${fechaStr}T${String(endHour).padStart(2, '0')}:${mins}:00`;
 
           const event = await this.calendar.createEvent({
             summary: `Cita: ${lead.name}`,
-            description: `Cita con ${lead.name}\nVendedor: ${vendedor.name}\nTeléfono: ${lead.phone || 'N/A'}`,
+            description: `Cita con ${lead.name}\nVendedor: ${vendedor.name}\nTeléfono: ${lead.phone || 'N/A'}${gpsLink ? '\nMaps: ' + gpsLink : ''}`,
+            location: ubicacion,
             start: { dateTime: startISO, timeZone: 'America/Mexico_City' },
             end: { dateTime: endISO, timeZone: 'America/Mexico_City' }
           });
@@ -731,9 +867,12 @@ agendar ${nombreLead} mañana 4pm`;
       return {
         success: true,
         leadName: lead.name,
+        leadPhone: lead.phone,
         fecha: formatearFechaLegible(fechaStr),
         hora: formatearHoraLegible(horaISO),
-        appointmentId: appointment.id
+        appointmentId: appointment.id,
+        ubicacion,
+        gpsLink
       };
 
     } catch (e) {
@@ -745,9 +884,9 @@ agendar ${nombreLead} mañana 4pm`;
   // ═══════════════════════════════════════════════════════════════════
   // AGENDAR CITA CON LEAD YA SELECCIONADO
   // ═══════════════════════════════════════════════════════════════════
-  async agendarCitaConSeleccion(lead: any, dia: string, hora: string, ampm: string, vendedor: any): Promise<AgendarResult> {
+  async agendarCitaConSeleccion(lead: any, dia: string, hora: string, ampm: string, vendedor: any, minutos?: string, desarrollo?: string): Promise<AgendarResult> {
     try {
-      console.log('📅 agendarCitaConSeleccion:', { lead: lead?.name, dia, hora, ampm, vendedor: vendedor?.name });
+      console.log('📅 agendarCitaConSeleccion:', { lead: lead?.name, dia, hora, minutos, ampm, desarrollo, vendedor: vendedor?.name });
 
       // Validar parámetros
       if (!lead?.id || !lead?.name) {
@@ -778,8 +917,32 @@ agendar ${nombreLead} mañana 4pm`;
       if (ampm?.toLowerCase() === 'am' && horaNum === 12) {
         horaNum = 0;
       }
-      const horaISO = `${String(horaNum).padStart(2, '0')}:00:00`;
-      console.log('📅 Hora parseada:', { hora, ampm, horaNum, horaISO });
+      const mins = minutos || '00';
+      const horaISO = `${String(horaNum).padStart(2, '0')}:${mins}:00`;
+      console.log('📅 Hora parseada:', { hora, minutos: mins, ampm, horaNum, horaISO });
+
+      // Buscar ubicación: primero del desarrollo del comando, luego del property_interest del lead
+      let ubicacion = 'Por confirmar';
+      let gpsLink = '';
+      const desarrolloBuscar = desarrollo || lead.property_interest;
+      console.log('🔍 Desarrollo a buscar (selección):', desarrolloBuscar);
+
+      if (desarrolloBuscar) {
+        const { data: propData } = await this.supabase.client
+          .from('properties')
+          .select('name, development, address, location, gps_link')
+          .or(`name.ilike.%${desarrolloBuscar}%,development.ilike.%${desarrolloBuscar}%`)
+          .limit(1)
+          .single();
+
+        if (propData) {
+          ubicacion = propData.address || propData.location || propData.development || desarrolloBuscar;
+          gpsLink = propData.gps_link || '';
+          console.log('📍 Ubicación encontrada:', { ubicacion, gpsLink: gpsLink ? 'SÍ' : 'NO' });
+        } else {
+          console.log('⚠️ No se encontró propiedad para:', desarrolloBuscar);
+        }
+      }
 
       // Crear la cita en DB
       const { data: appointment, error: insertError } = await this.supabase.client
@@ -791,6 +954,8 @@ agendar ${nombreLead} mañana 4pm`;
           scheduled_date: fechaStr,
           scheduled_time: horaISO,
           status: 'scheduled',
+          location: ubicacion,
+          property_name: desarrollo || lead.property_interest || '',
           created_at: new Date().toISOString()
         })
         .select()
@@ -819,11 +984,12 @@ agendar ${nombreLead} mañana 4pm`;
           const startISO = `${fechaStr}T${horaISO}`;
           // Calcular hora de fin (+1 hora)
           const endHour = (horaNum + 1) % 24;
-          const endISO = `${fechaStr}T${String(endHour).padStart(2, '0')}:00:00`;
+          const endISO = `${fechaStr}T${String(endHour).padStart(2, '0')}:${mins}:00`;
 
           const event = await this.calendar.createEvent({
             summary: `Cita: ${lead.name}`,
-            description: `Cita con ${lead.name}\nVendedor: ${vendedor.name}\nTeléfono: ${lead.phone || 'N/A'}`,
+            description: `Cita con ${lead.name}\nVendedor: ${vendedor.name}\nTeléfono: ${lead.phone || 'N/A'}${gpsLink ? '\nMaps: ' + gpsLink : ''}`,
+            location: ubicacion,
             start: { dateTime: startISO, timeZone: 'America/Mexico_City' },
             end: { dateTime: endISO, timeZone: 'America/Mexico_City' }
           });
@@ -848,9 +1014,12 @@ agendar ${nombreLead} mañana 4pm`;
       return {
         success: true,
         leadName: lead.name,
+        leadPhone: lead.phone,
         fecha: formatearFechaLegible(fechaStr),
         hora: formatearHoraLegible(horaISO),
-        appointmentId: appointment.id
+        appointmentId: appointment.id,
+        ubicacion,
+        gpsLink
       };
 
     } catch (e) {

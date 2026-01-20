@@ -224,8 +224,8 @@ export class WhatsAppHandler {
 
       const leadData = leadActual || lead;
 
-      // Notificar al asesor
-      if (result.asesor.phone) {
+      // Notificar al asesor (solo si está activo)
+      if (result.asesor.phone && result.asesor.is_active !== false) {
         const notif = `🔥 *LEAD COMPLETÓ FLUJO DE CRÉDITO*\n\n` +
           `👤 *${leadData.name || 'Sin nombre'}*\n` +
           `📱 ${leadData.phone}\n` +
@@ -631,14 +631,14 @@ export class WhatsAppHandler {
                 console.log(`🏦 Enviando datos asesor al lead: ${msgCliente.substring(0, 50)}...`);
                 await this.meta.sendWhatsAppMessage(cleanPhone, msgCliente);
 
-                // Notificar al asesor
-                if (asesor.phone) {
+                // Notificar al asesor (solo si está activo)
+                if (asesor.phone && asesor.is_active !== false) {
                   const msgAsesor = creditService.generarNotificacionAsesor(lead, resultado.context);
                   console.log(`🏦 Notificando asesor ${asesor.name} en ${asesor.phone}`);
                   await this.meta.sendWhatsAppMessage(asesor.phone, msgAsesor);
                   console.log(`📤 Asesor ${asesor.name} notificado exitosamente`);
                 } else {
-                  console.log(`⚠️ Asesor sin teléfono`);
+                  console.log(`⚠️ Asesor sin teléfono o inactivo (is_active=${asesor.is_active})`);
                 }
               } else {
                 console.log(`⚠️ No se encontró asesor o contexto - enviando mensaje genérico`);
@@ -5171,8 +5171,8 @@ export class WhatsAppHandler {
         return;
       }
 
-      // Notificar al asesor si existe
-      if (result.asesor?.phone) {
+      // Notificar al asesor si existe y está activo
+      if (result.asesor?.phone && result.asesor?.is_active !== false) {
         const asesorPhone = result.asesor.phone.replace(/\D/g, '');
         const notificacion = vendorService.formatNotificacionAsesor(result.lead, result.banco!, vendedor.name);
         await this.twilio.sendWhatsAppMessage(asesorPhone, notificacion);
@@ -5207,8 +5207,8 @@ export class WhatsAppHandler {
         return;
       }
 
-      // Notificar al asesor si existe
-      if (result.asesor?.phone) {
+      // Notificar al asesor si existe y está activo
+      if (result.asesor?.phone && result.asesor?.is_active !== false) {
         const asesorPhone = result.asesor.phone.replace(/\D/g, '');
         const notificacion = vendorService.formatNotificacionAsesor(result.lead, result.banco!, vendedor.name);
         await this.twilio.sendWhatsAppMessage(asesorPhone, notificacion);
@@ -5313,11 +5313,13 @@ export class WhatsAppHandler {
         return;
       }
 
-      // Notificar al asesor
-      await this.twilio.sendWhatsAppMessage(result.asesor.phone, vendorService.formatMensajeAsesorNuevoLead(result.lead, result.vendedor));
+      // Notificar al asesor (solo si está activo)
+      if (result.asesor.is_active !== false) {
+        await this.twilio.sendWhatsAppMessage(result.asesor.phone, vendorService.formatMensajeAsesorNuevoLead(result.lead, result.vendedor));
+      }
       // Confirmar al vendedor
       await this.twilio.sendWhatsAppMessage(from, vendorService.formatConfirmacionAsesorAsignado(result.lead, result.asesor));
-      console.log(`✅ Lead ${result.lead.name} asignado a asesor ${result.asesor.name}`);
+      console.log(`✅ Lead ${result.lead.name} asignado a asesor ${result.asesor.name} (notif=${result.asesor.is_active !== false})`);
     } catch (e) {
       console.log('❌ Error asignando asesor:', e);
       await this.twilio.sendWhatsAppMessage(from, '❌ Error al asignar. Intenta de nuevo.');
@@ -5339,11 +5341,13 @@ export class WhatsAppHandler {
         return;
       }
 
-      // Enviar mensaje al asesor
-      await this.twilio.sendWhatsAppMessage(result.asesor.phone, vendorService.formatMensajeAsesorPregunta(result.lead, result.solicitud, result.vendedor));
+      // Enviar mensaje al asesor (solo si está activo)
+      if (result.asesor.is_active !== false) {
+        await this.twilio.sendWhatsAppMessage(result.asesor.phone, vendorService.formatMensajeAsesorPregunta(result.lead, result.solicitud, result.vendedor));
+      }
       // Confirmar al vendedor
       await this.twilio.sendWhatsAppMessage(from, vendorService.formatConfirmacionPreguntaEnviada(result.asesor, result.lead));
-      console.log(`✅ Pregunta enviada a asesor ${result.asesor.name} sobre ${result.lead.name}`);
+      console.log(`✅ Pregunta a asesor ${result.asesor.name} sobre ${result.lead.name} (notif=${result.asesor.is_active !== false})`);
     } catch (e) {
       console.log('❌ Error preguntando a asesor:', e);
       await this.twilio.sendWhatsAppMessage(from, '❌ Error. Intenta de nuevo.');
@@ -5820,8 +5824,8 @@ Responde con fecha y hora:
       return;
     }
 
-    // Notificar al asesor si fue asignado
-    if (result.asesor?.phone) {
+    // Notificar al asesor si fue asignado y está activo
+    if (result.asesor?.phone && result.asesor?.is_active !== false) {
       const aPhone = result.asesor.phone.replace(/[^0-9]/g, '');
       const aFormatted = aPhone.startsWith('52') ? aPhone : '52' + aPhone.slice(-10);
       await this.twilio.sendWhatsAppMessage(this.formatPhoneMX(aFormatted),
@@ -6614,27 +6618,12 @@ Responde con fecha y hora:
         `✅ *Lead pasado a crédito*\n\n` +
         `👤 ${lead.name}\n` +
         `🏦 Asesor asignado: ${asesor.name}\n\n` +
-        `El asesor recibirá notificación para contactarlo.`
+        `El lead quedó marcado para seguimiento de crédito.`
       );
 
-      // Notificar al asesor
-      const asesorPhone = asesor.phone?.replace(/\D/g, '');
-      if (asesorPhone) {
-        const msgAsesor =
-          `🏦 *Nuevo lead para crédito*\n\n` +
-          `👤 *${lead.name}*\n` +
-          `📱 ${lead.phone || 'Sin teléfono'}\n` +
-          `🏠 Interés: ${lead.property_interest || 'No especificado'}\n` +
-          `💰 Presupuesto: ${lead.budget ? `$${Number(lead.budget).toLocaleString()}` : 'No especificado'}\n\n` +
-          `📤 Enviado por: ${vendedor.name}\n\n` +
-          `💡 Usa: \`status ${lead.name}\` para ver más detalles`;
-
-        try {
-          await this.twilio.sendWhatsAppMessage(`whatsapp:+${asesorPhone}`, msgAsesor);
-        } catch (e) {
-          console.log('Error notificando asesor:', e);
-        }
-      }
+      // DESACTIVADO: Notificaciones a asesores temporalmente deshabilitadas
+      // const asesorPhone = asesor.phone?.replace(/\D/g, '');
+      // if (asesorPhone) { ... }
 
     } catch (e) {
       console.log('Error en pasarACredito:', e);
@@ -7340,8 +7329,8 @@ Responde con fecha y hora:
         console.log(isReschedule ? '📤 Notificación de REAGENDAMIENTO enviada a vendedor' : '📤 Notificación enviada a vendedor');
       }
 
-      // 2. Notificar al ASESOR HIPOTECARIO (si necesita crédito)
-      if (necesitaCredito && asesorHipotecario?.phone) {
+      // 2. Notificar al ASESOR HIPOTECARIO (si necesita crédito y está activo)
+      if (necesitaCredito && asesorHipotecario?.phone && asesorHipotecario?.is_active !== false) {
         const msgAsesor = appointmentService.formatMensajeAsesorNuevaCita(result, desarrollo, fecha, hora);
         await this.twilio.sendWhatsAppMessage(asesorHipotecario.phone, msgAsesor);
         console.log('📤 Notificación enviada a asesor hipotecario');
@@ -7491,15 +7480,15 @@ Responde con fecha y hora:
         return;
       }
 
-      // ═══ ENVIAR NOTIFICACIONES SEGÚN LA ACCIÓN ═══
+      // ═══ ENVIAR NOTIFICACIONES SEGÚN LA ACCIÓN (solo si asesor activo) ═══
       const { asesor, action, cambios } = result;
 
-      if (action === 'created' && asesor?.phone) {
+      if (action === 'created' && asesor?.phone && asesor?.is_active !== false) {
         // Nuevo lead hipotecario - notificar asesor
         const msg = mortgageService.formatMensajeNuevoLead(result);
         await this.twilio.sendWhatsAppMessage(asesor.phone, msg);
         console.log('📤 Asesor notificado de NUEVO lead:', asesor.name);
-      } else if (action === 'updated' && cambios.length > 0 && asesor?.phone) {
+      } else if (action === 'updated' && cambios.length > 0 && asesor?.phone && asesor?.is_active !== false) {
         // Actualización de info - notificar asesor
         const msg = mortgageService.formatMensajeActualizacion(result);
         await this.twilio.sendWhatsAppMessage(asesor.phone, msg);

@@ -1241,7 +1241,7 @@ ${statusAnterior} → ${statusNuevo}
             .eq('id', data.assigned_to)
             .single();
 
-          if (asesor?.phone) {
+          if (asesor?.phone && asesor?.is_active !== false) {
             const mensaje = `🏦 *LEAD ASIGNADO PARA CRÉDITO*
 ━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1484,8 +1484,8 @@ ${creditoInfo}${citaInfo}
             console.log('📋 Mortgage creado:', mortgage?.id, 'Asesor:', asesorAsignado?.name || 'Sin asignar');
           }
           
-          // Notificar al asesor si el usuario lo pidió
-          if (body.enviar_a_asesor && asesorAsignado?.phone) {
+          // Notificar al asesor si el usuario lo pidió (solo si está activo)
+          if (body.enviar_a_asesor && asesorAsignado?.phone && asesorAsignado?.is_active !== false) {
             const msgAsesor = `🏦 *NUEVO LEAD DE CRÉDITO*
 ━━━━━━━━━━━━━━━━━━━━━
 
@@ -3653,8 +3653,8 @@ Mensaje: ${mensaje}`;
                           );
                           await meta.sendWhatsAppMessage(from, msgCliente);
 
-                          // Notificar al asesor
-                          if (asesor.phone) {
+                          // Notificar al asesor (solo si está activo)
+                          if (asesor.phone && asesor.is_active !== false) {
                             const msgAsesor = creditService.generarNotificacionAsesor(lead, resultado.context);
                             await meta.sendWhatsAppMessage(asesor.phone, msgAsesor);
                             console.log(`📤 Asesor ${asesor.name} notificado`);
@@ -11716,7 +11716,7 @@ async function enviarReporteDiarioAsesores(supabase: SupabaseService, meta: Meta
     const fechaHoy = `${hoy.getDate()}/${hoy.getMonth()+1}/${hoy.getFullYear()}`;
 
     for (const asesor of asesores) {
-      if (!asesor.phone) continue;
+      if (!asesor.phone || asesor.is_active === false) continue;
 
       const nuevasHoy = hipotecasHoy?.filter(h => h.assigned_advisor_id === asesor.id) || [];
       const aprobadasAsesorHoy = aprobadasHoy?.filter(h => h.assigned_advisor_id === asesor.id) || [];
@@ -11776,7 +11776,7 @@ async function enviarReporteSemanalAsesores(supabase: SupabaseService, meta: Met
     const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
 
     for (const asesor of asesores) {
-      if (!asesor.phone) continue;
+      if (!asesor.phone || asesor.is_active === false) continue;
 
       const nuevasSem = hipotecasSemana?.filter(h => h.assigned_advisor_id === asesor.id) || [];
       const aprobadasAsesor = aprobadasSemana?.filter(h => h.assigned_advisor_id === asesor.id) || [];
@@ -11847,7 +11847,7 @@ async function enviarReporteMensualAsesores(supabase: SupabaseService, meta: Met
     const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
 
     for (const asesor of asesores) {
-      if (!asesor.phone) continue;
+      if (!asesor.phone || asesor.is_active === false) continue;
 
       const nuevasMes = hipotecasMes?.filter(h => h.assigned_advisor_id === asesor.id) || [];
       const aprobadasAsesor = aprobadasMes?.filter(h => h.assigned_advisor_id === asesor.id) || [];
@@ -12624,8 +12624,8 @@ Revísalos en el CRM y márcalos como contactados.`;
   fechaLimite.setDate(fechaLimite.getDate() - diasSinMovimiento);
   
   for (const asesor of asesores || []) {
-    if (!asesor.phone) continue;
-    
+    if (!asesor.phone || asesor.is_active === false) continue;
+
     const { data: hipotecasSinMover } = await supabase.client
       .from('mortgage_applications')
       .select('*')
@@ -12781,7 +12781,7 @@ async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: MetaWhat
 
       for (const hip of hipotecasFrias) {
         const asesor = hip.team_members;
-        if (!asesor?.id || !asesor?.phone) continue;
+        if (!asesor?.id || !asesor?.phone || asesor?.is_active === false) continue;
         if (!asesoresMap.has(asesor.id)) {
           asesoresMap.set(asesor.id, asesor);
           hipotecasPorAsesor.set(asesor.id, []);
@@ -15196,12 +15196,12 @@ async function seguimientoHipotecas(supabase: SupabaseService, meta: MetaWhatsAp
       return;
     }
 
-    // Notificar a asesores
+    // Notificar a asesores (solo si están activos)
     for (const hip of hipotecasEstancadas) {
       const asesor = hip.team_members;
       const lead = hip.leads;
 
-      if (!asesor?.phone) continue;
+      if (!asesor?.phone || asesor?.is_active === false) continue;
 
       const diasEnBanco = Math.floor((Date.now() - new Date(hip.updated_at).getTime()) / (1000 * 60 * 60 * 24));
 

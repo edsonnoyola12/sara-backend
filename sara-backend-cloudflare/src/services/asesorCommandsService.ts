@@ -15,6 +15,7 @@ interface HandlerResult {
   leadMessage?: string;
   vendedorPhone?: string;
   vendedorMessage?: string;
+  vendedorDentro24h?: boolean;
 }
 
 interface CreditFlowContext {
@@ -252,43 +253,53 @@ export class AsesorCommandsService {
     return { action: 'not_recognized', message: this.getMensajeNoReconocido(nombreAsesor) };
   }
 
+  // Helper para detectar si es admin/CEO
+  private isAdmin(role: string | undefined): boolean {
+    if (!role) return false;
+    const r = role.toLowerCase();
+    return r.includes('ceo') || r.includes('admin') || r.includes('director') || r.includes('gerente') || r.includes('owner') || r.includes('dueño');
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // EJECUTAR HANDLERS
   // ═══════════════════════════════════════════════════════════════════
   async executeHandler(handlerName: string, asesor: any, nombreAsesor: string, params: any): Promise<HandlerResult> {
+    const esAdmin = this.isAdmin(asesor.role);
+    console.log(`🔐 executeHandler: role=${asesor.role}, esAdmin=${esAdmin}`);
+
     switch (handlerName) {
       case 'asesorMisLeads':
-        return await this.getMisLeads(asesor.id, nombreAsesor);
+        return await this.getMisLeads(asesor.id, nombreAsesor, esAdmin);
 
       case 'asesorStatusLead':
-        return await this.getStatusLead(asesor.id, params.query, nombreAsesor);
+        return await this.getStatusLead(asesor.id, params.query, nombreAsesor, esAdmin);
 
       case 'asesorPedirDocs':
-        return await this.pedirDocumentos(asesor.id, params.query, nombreAsesor);
+        return await this.pedirDocumentos(asesor.id, params.query, nombreAsesor, esAdmin);
 
       case 'asesorPreaprobado':
-        return await this.notificarPreaprobado(asesor.id, params.query, nombreAsesor);
+        return await this.notificarPreaprobado(asesor.id, params.query, nombreAsesor, esAdmin);
 
       case 'asesorRechazado':
-        return await this.notificarRechazado(asesor.id, params.query, params.motivo, nombreAsesor);
+        return await this.notificarRechazado(asesor.id, params.query, params.motivo, nombreAsesor, esAdmin);
 
       case 'asesorEnviarMensaje':
-        return await this.enviarMensajeALead(asesor.id, params.query, params.mensaje, nombreAsesor);
+        return await this.enviarMensajeALead(asesor.id, params.query, params.mensaje, nombreAsesor, esAdmin);
 
       case 'asesorTelefonoLead':
-        return await this.getTelefonoLead(asesor.id, params.query, nombreAsesor);
+        return await this.getTelefonoLead(asesor.id, params.query, nombreAsesor, esAdmin);
 
       case 'asesorActualizarLead':
-        return await this.actualizarLead(asesor.id, params.query, params.campo, params.valor, nombreAsesor);
+        return await this.actualizarLead(asesor.id, params.query, params.campo, params.valor, nombreAsesor, esAdmin);
 
       case 'asesorMoverLead':
-        return await this.moverLeadEnFunnel(asesor.id, params.query, params.direccion, nombreAsesor);
+        return await this.moverLeadEnFunnel(asesor.id, params.query, params.direccion, nombreAsesor, esAdmin);
 
       case 'asesorDisponibilidad':
         return await this.cambiarDisponibilidad(asesor.id, params.estado, nombreAsesor);
 
       case 'asesorMarcarContactado':
-        return await this.marcarContactado(asesor.id, params.query, nombreAsesor);
+        return await this.marcarContactado(asesor.id, params.query, nombreAsesor, esAdmin);
 
       case 'asesorCitasHoy':
         return await this.getCitasHoy(asesor.id, nombreAsesor);
@@ -307,27 +318,33 @@ export class AsesorCommandsService {
   // ═══════════════════════════════════════════════════════════════════
   // MIS LEADS - Ver leads asignados al asesor
   // ═══════════════════════════════════════════════════════════════════
-  private async getMisLeads(asesorId: string, nombreAsesor: string): Promise<HandlerResult> {
+  private async getMisLeads(asesorId: string, nombreAsesor: string, esAdmin: boolean = false): Promise<HandlerResult> {
     try {
-      console.log(`🔍 getMisLeads: asesorId=${asesorId}`);
+      console.log(`🔍 getMisLeads: asesorId=${asesorId}, esAdmin=${esAdmin}`);
 
-      // Buscar leads por notas que contengan el asesor_id en credit_flow_context
+      // Buscar leads
       const { data: allLeads } = await this.supabase.client
         .from('leads')
         .select('id, name, phone, status, created_at, notes')
-        .not('notes', 'is', null)
         .order('created_at', { ascending: false })
         .limit(100);
 
-      const misLeads = allLeads?.filter(l => {
-        if (!l.notes) return false;
-        try {
-          const notes = this.safeParseNotes(l.notes);
-          return notes?.credit_flow_context?.asesor_id === asesorId;
-        } catch {
-          return false; // notes no es JSON válido
-        }
-      }) || [];
+      let misLeads: any[] = [];
+      if (esAdmin) {
+        // Admin ve todos los leads
+        misLeads = allLeads || [];
+      } else {
+        // Asesor ve solo sus leads
+        misLeads = allLeads?.filter(l => {
+          if (!l.notes) return false;
+          try {
+            const notes = this.safeParseNotes(l.notes);
+            return notes?.credit_flow_context?.asesor_id === asesorId || l.assigned_to === asesorId;
+          } catch {
+            return false;
+          }
+        }) || [];
+      }
 
       console.log(`🔍 getMisLeads: found ${misLeads.length} leads for asesor ${asesorId}`);
       if (misLeads.length > 0) {
@@ -384,8 +401,8 @@ export class AsesorCommandsService {
   // ═══════════════════════════════════════════════════════════════════
   // STATUS - Ver estado detallado de un lead
   // ═══════════════════════════════════════════════════════════════════
-  private async getStatusLead(asesorId: string, query: string, nombreAsesor: string): Promise<HandlerResult> {
-    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+  private async getStatusLead(asesorId: string, query: string, nombreAsesor: string, esAdmin: boolean = false): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query, esAdmin);
 
     if (!lead) {
       return { message: `❌ No encontré a "${query}" en tus leads.\n\n💡 Usa *MIS LEADS* para ver tu lista.` };
@@ -434,8 +451,8 @@ export class AsesorCommandsService {
   // ═══════════════════════════════════════════════════════════════════
   // DOCS - Pedir documentos al lead
   // ═══════════════════════════════════════════════════════════════════
-  private async pedirDocumentos(asesorId: string, query: string, nombreAsesor: string): Promise<HandlerResult> {
-    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+  private async pedirDocumentos(asesorId: string, query: string, nombreAsesor: string, esAdmin: boolean = false): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query, esAdmin);
 
     if (!lead) {
       return { message: `❌ No encontré a "${query}" en tus leads.` };
@@ -500,8 +517,8 @@ Para continuar, necesitamos los siguientes documentos:
   // ═══════════════════════════════════════════════════════════════════
   // PREAPROBADO - Notificar pre-aprobación al lead
   // ═══════════════════════════════════════════════════════════════════
-  private async notificarPreaprobado(asesorId: string, query: string, nombreAsesor: string): Promise<HandlerResult> {
-    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+  private async notificarPreaprobado(asesorId: string, query: string, nombreAsesor: string, esAdmin: boolean = false): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query, esAdmin);
 
     if (!lead) {
       return { message: `❌ No encontré a "${query}" en tus leads.` };
@@ -561,8 +578,8 @@ Tu asesor *${nombreAsesor}* se pondrá en contacto contigo para los siguientes p
   // ═══════════════════════════════════════════════════════════════════
   // RECHAZADO - Notificar rechazo al lead
   // ═══════════════════════════════════════════════════════════════════
-  private async notificarRechazado(asesorId: string, query: string, motivo: string, nombreAsesor: string): Promise<HandlerResult> {
-    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+  private async notificarRechazado(asesorId: string, query: string, motivo: string, nombreAsesor: string, esAdmin: boolean = false): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query, esAdmin);
 
     if (!lead) {
       return { message: `❌ No encontré a "${query}" en tus leads.` };
@@ -628,8 +645,8 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
   // ═══════════════════════════════════════════════════════════════════
   // ENVIAR MENSAJE - Puente asesor → lead
   // ═══════════════════════════════════════════════════════════════════
-  private async enviarMensajeALead(asesorId: string, query: string, mensaje: string, nombreAsesor: string): Promise<HandlerResult> {
-    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+  private async enviarMensajeALead(asesorId: string, query: string, mensaje: string, nombreAsesor: string, esAdmin: boolean = false): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query, esAdmin);
 
     if (!lead) {
       return { message: `❌ No encontré a "${query}" en tus leads.` };
@@ -670,8 +687,8 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
   // ═══════════════════════════════════════════════════════════════════
   // TELÉFONO - Obtener teléfono del lead
   // ═══════════════════════════════════════════════════════════════════
-  private async getTelefonoLead(asesorId: string, query: string, nombreAsesor: string): Promise<HandlerResult> {
-    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+  private async getTelefonoLead(asesorId: string, query: string, nombreAsesor: string, esAdmin: boolean = false): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query, esAdmin);
 
     if (!lead) {
       return { message: `❌ No encontré a "${query}" en tus leads.` };
@@ -686,8 +703,8 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
   // ═══════════════════════════════════════════════════════════════════
   // ACTUALIZAR - Actualizar campo del lead
   // ═══════════════════════════════════════════════════════════════════
-  private async actualizarLead(asesorId: string, query: string, campo: string, valor: string, nombreAsesor: string): Promise<HandlerResult> {
-    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+  private async actualizarLead(asesorId: string, query: string, campo: string, valor: string, nombreAsesor: string, esAdmin: boolean = false): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query, esAdmin);
 
     if (!lead) {
       return { message: `❌ No encontré a "${query}" en tus leads.` };
@@ -827,8 +844,8 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
   // ═══════════════════════════════════════════════════════════════════
   // MOVER LEAD EN FUNNEL (adelante/atrás)
   // ═══════════════════════════════════════════════════════════════════
-  private async moverLeadEnFunnel(asesorId: string, query: string, direccion: 'next' | 'prev', nombreAsesor: string): Promise<HandlerResult> {
-    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+  private async moverLeadEnFunnel(asesorId: string, query: string, direccion: 'next' | 'prev', nombreAsesor: string, esAdmin: boolean = false): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query, esAdmin);
 
     if (!lead) {
       return { message: `❌ No encontré a "${query}" en tus leads.` };
@@ -890,10 +907,11 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
     const vendedorId = ctx?.vendedor_id || lead.assigned_to;
     console.log(`🔍 moverLead: vendedor_id=${vendedorId}, ctx.vendedor_id=${ctx?.vendedor_id}, assigned_to=${lead.assigned_to}`);
 
+    let vendedorDentro24h = false;
     if (vendedorId) {
       const { data: vendedor } = await this.supabase.client
         .from('team_members')
-        .select('name, phone')
+        .select('name, phone, last_sara_interaction')
         .eq('id', vendedorId)
         .single();
 
@@ -903,6 +921,11 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
         vendedorPhone = vendedor.phone;
         const flecha = direccion === 'next' ? '⬆️' : '⬇️';
         vendedorMessage = `${flecha} *Actualización de crédito*\n\nTu cliente *${lead.name}* cambió de etapa:\n\n📍 *De:* ${funnel[currentIndex].label}\n📍 *A:* ${newStatus.label}\n\n👤 Asesor: ${nombreAsesor}`;
+
+        // Verificar ventana 24h
+        const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        vendedorDentro24h = vendedor.last_sara_interaction && vendedor.last_sara_interaction > hace24h;
+        console.log(`🔍 moverLead: last_sara_interaction=${vendedor.last_sara_interaction}, dentro24h=${vendedorDentro24h}`);
       }
     }
 
@@ -910,7 +933,8 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
     return {
       message: `${flecha} *${lead.name}* movido:\n\n📍 *De:* ${funnel[currentIndex].label}\n📍 *A:* ${newStatus.label}${vendedorPhone ? '\n\n✅ Vendedor notificado' : ''}`,
       vendedorPhone,
-      vendedorMessage
+      vendedorMessage,
+      vendedorDentro24h
     };
   }
 
@@ -937,8 +961,8 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
   // ═══════════════════════════════════════════════════════════════════
   // MARCAR COMO CONTACTADO
   // ═══════════════════════════════════════════════════════════════════
-  private async marcarContactado(asesorId: string, query: string, nombreAsesor: string): Promise<HandlerResult> {
-    const lead = await this.buscarLeadDeAsesor(asesorId, query);
+  private async marcarContactado(asesorId: string, query: string, nombreAsesor: string, esAdmin: boolean = false): Promise<HandlerResult> {
+    const lead = await this.buscarLeadDeAsesor(asesorId, query, esAdmin);
 
     if (!lead) {
       return { message: `❌ No encontré a "${query}" en tus leads.` };
@@ -982,24 +1006,31 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
   // ═══════════════════════════════════════════════════════════════════
   // HELPERS
   // ═══════════════════════════════════════════════════════════════════
-  private async buscarLeadDeAsesor(asesorId: string, query: string): Promise<any | null> {
+  private async buscarLeadDeAsesor(asesorId: string, query: string, esAdmin: boolean = false): Promise<any | null> {
     const queryLower = query.toLowerCase().trim();
     const queryDigits = query.replace(/\D/g, '');
-    console.log(`🔍 buscarLead: asesorId=${asesorId}, query="${query}"`);
+    console.log(`🔍 buscarLead: asesorId=${asesorId}, query="${query}", esAdmin=${esAdmin}`);
 
-    // Buscar todos los leads y filtrar por asesor_id en credit_flow_context
+    // Buscar todos los leads
     const { data: allLeads } = await this.supabase.client
       .from('leads')
-      .select('*')
-      .not('notes', 'is', null);
+      .select('*');
 
-    const misLeads = allLeads?.filter(l => {
-      const notes = this.safeParseNotes(l.notes);
-      return notes?.credit_flow_context?.asesor_id === asesorId;
-    }) || [];
+    let misLeads: any[] = [];
 
-    console.log(`🔍 buscarLead: found ${misLeads.length} leads for asesor`);
-    if (misLeads.length > 0) {
+    if (esAdmin) {
+      // Admin/CEO puede ver TODOS los leads
+      misLeads = allLeads || [];
+    } else {
+      // Asesor solo ve sus leads (por credit_flow_context o assigned_to)
+      misLeads = allLeads?.filter(l => {
+        const notes = this.safeParseNotes(l.notes);
+        return notes?.credit_flow_context?.asesor_id === asesorId || l.assigned_to === asesorId;
+      }) || [];
+    }
+
+    console.log(`🔍 buscarLead: found ${misLeads.length} leads ${esAdmin ? '(admin mode)' : 'for asesor'}`);
+    if (misLeads.length > 0 && misLeads.length <= 10) {
       console.log(`🔍 buscarLead: leads = ${misLeads.map(l => l.name).join(', ')}`);
     }
 

@@ -475,11 +475,42 @@ ${simulacion}
           context.state = 'completado';
           await this.guardarContexto(leadId, context);
 
-          // Marcar lead como completado
+          // Marcar lead como calificado Y asignar al asesor
+          const updateData: any = {
+            status: 'credit_qualified',
+            stage: 'qualified',  // Para que aparezca en el funnel
+            updated_at: new Date().toISOString()
+          };
+
+          // Asignar asesor si existe
+          if (asesor?.id) {
+            updateData.assigned_to = asesor.id;
+            console.log(`✅ Lead asignado a asesor: ${asesor.name} (${asesor.id})`);
+          }
+
           await this.supabase.client
             .from('leads')
-            .update({ status: 'credit_qualified' })
+            .update(updateData)
             .eq('id', leadId);
+
+          // Crear mortgage_application para tracking
+          if (asesor?.id) {
+            await this.supabase.client
+              .from('mortgage_applications')
+              .upsert({
+                lead_id: leadId,
+                lead_name: context.lead_name,
+                lead_phone: context.lead_phone,
+                assigned_advisor_id: asesor.id,
+                monthly_income: context.ingreso_mensual || 0,
+                down_payment: context.enganche || 0,
+                bank: context.banco_preferido || 'Por definir',
+                status: 'pending',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'lead_id' });
+            console.log(`📊 Mortgage application creada para lead ${leadId}`);
+          }
 
           return {
             respuesta: `¡Perfecto! 🎉`,
@@ -795,7 +826,28 @@ Responde 1, 2 o 3.`,
       const activos = asesores?.filter(a => a.is_active !== false) || [];
       console.log('🔍 Asesores activos (is_active != false):', activos.length);
 
-      return activos[0] || null;
+      if (activos.length === 0) return null;
+      if (activos.length === 1) return activos[0];
+
+      // ═══ ROUND-ROBIN: Asignar al asesor con MENOS leads activos ═══
+      const counts: Record<string, number> = {};
+      for (const a of activos) {
+        const { count } = await this.supabase.client
+          .from('leads')
+          .select('id', { count: 'exact', head: true })
+          .eq('assigned_to', a.id)
+          .in('status', ['credit_qualified', 'contacted', 'documents_pending', 'pre_approved']);
+        counts[a.id] = count || 0;
+        console.log(`📊 Asesor ${a.name}: ${counts[a.id]} leads activos`);
+      }
+
+      // Retornar asesor con menos leads (round-robin por carga)
+      const asesorMenosLeads = activos.reduce((min, a) =>
+        counts[a.id] < counts[min.id] ? a : min
+      );
+      console.log(`✅ Round-robin: Asignando a ${asesorMenosLeads.name} (${counts[asesorMenosLeads.id]} leads)`);
+
+      return asesorMenosLeads;
     } catch (e) {
       console.error('Error buscando asesor:', e);
       return null;

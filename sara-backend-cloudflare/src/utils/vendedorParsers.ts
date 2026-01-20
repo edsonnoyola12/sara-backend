@@ -2,16 +2,85 @@
 // Funciones de parsing para comandos de vendedor - extraídas para testing
 
 /**
- * Parsea parámetros del comando reagendar
- * Ejemplos: "reagendar juan mañana 4pm", "reagendar ana lunes 10am", "reagendar ana lunes 10 am"
+ * Parsea hora en múltiples formatos
+ * Soporta: "9am", "9 am", "9:45am", "9:45 am", "945am", "1030pm"
  */
-export function parseReagendarParams(body: string): { dia?: string; hora?: string; ampm?: string } {
-  const texto = body.toLowerCase().trim();
+export function parseHora(texto: string): { hora?: string; minutos?: string; ampm?: string } {
+  const t = texto.toLowerCase();
+
+  // Formato 1: "9:45am", "9:45 am", "10:30pm"
+  let match = t.match(/(\d{1,2}):(\d{2})\s*(am|pm)/i);
+  if (match) {
+    return { hora: match[1], minutos: match[2], ampm: match[3].toLowerCase() };
+  }
+
+  // Formato 2: "945am", "1030pm" (sin dos puntos, 3-4 dígitos pegados a am/pm)
+  match = t.match(/(\d{1,2})(\d{2})(am|pm)/i);
+  if (match) {
+    return { hora: match[1], minutos: match[2], ampm: match[3].toLowerCase() };
+  }
+
+  // Formato 3: "9am", "10 pm" (solo hora, sin minutos)
+  match = t.match(/(\d{1,2})\s*(am|pm)/i);
+  if (match) {
+    return { hora: match[1], minutos: '00', ampm: match[2].toLowerCase() };
+  }
+
+  // Formato 4: "9:45" sin am/pm
+  match = t.match(/(\d{1,2}):(\d{2})(?!\d)/);
+  if (match) {
+    return { hora: match[1], minutos: match[2], ampm: undefined };
+  }
+
+  // Formato 5: solo número "9", "10"
+  match = t.match(/\b(\d{1,2})\b(?!\d|:)/);
+  if (match) {
+    // Buscar am/pm después
+    const afterMatch = t.slice(t.indexOf(match[0]) + match[0].length).trim();
+    let ampm: string | undefined;
+    if (afterMatch.startsWith('am')) ampm = 'am';
+    else if (afterMatch.startsWith('pm')) ampm = 'pm';
+    return { hora: match[1], minutos: '00', ampm };
+  }
+
+  return {};
+}
+
+/**
+ * Normaliza errores comunes de ortografía en días/fechas
+ */
+export function normalizarTexto(input: string): string {
+  let texto = input.toLowerCase().trim();
+  // Errores de "mañana"
+  texto = texto.replace(/mañnaa|mañaan|manana|mannana|mñana|ma[ñn]a+na/gi, 'mañana');
+  // Errores de días
+  texto = texto.replace(/lune?s?(?![\w])/gi, 'lunes');
+  texto = texto.replace(/marte?s?(?![\w])/gi, 'martes');
+  texto = texto.replace(/miercole?s?|miércole?s?/gi, 'miercoles');
+  texto = texto.replace(/jueve?s?(?![\w])/gi, 'jueves');
+  texto = texto.replace(/vierne?s?(?![\w])/gi, 'viernes');
+  texto = texto.replace(/sabad?o?|sabádo?/gi, 'sabado');
+  texto = texto.replace(/doming?o?(?![\w])/gi, 'domingo');
+  // Quitar "a las", "a la", "a kas", "alas", etc.
+  texto = texto.replace(/\s+a\s*(las?|kas?|l|k)\s+/gi, ' ');
+  texto = texto.replace(/\s+alas\s+/gi, ' ');
+  // Quitar "para el", "el", "para"
+  texto = texto.replace(/\s+(para\s+el|para|el)\s+/gi, ' ');
+  // Normalizar espacios múltiples
+  return texto.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Parsea parámetros del comando reagendar
+ * Ejemplos: "reagendar juan mañana 4pm", "reagendar ana lunes 10am", "reagendar ana lunes 9:45am"
+ */
+export function parseReagendarParams(body: string): { dia?: string; hora?: string; minutos?: string; ampm?: string } {
+  const texto = normalizarTexto(body);
 
   // Buscar día
   const diasPatterns = [
-    'hoy', 'mañana', 'pasado mañana',
-    'lunes', 'martes', 'miércoles', 'miercoles', 'jueves', 'viernes', 'sábado', 'sabado', 'domingo'
+    'hoy', 'mañana', 'pasado mañana', 'pasado',
+    'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'
   ];
   let dia: string | undefined;
   for (const d of diasPatterns) {
@@ -21,32 +90,19 @@ export function parseReagendarParams(body: string): { dia?: string; hora?: strin
     }
   }
 
-  // Buscar hora y am/pm
-  const horaMatch = texto.match(/(\d{1,2})\s*(am|pm)?/i);
-  let hora: string | undefined;
-  let ampm: string | undefined;
+  // Usar parseHora para extraer hora completa
+  const { hora, minutos, ampm } = parseHora(texto);
 
-  if (horaMatch) {
-    hora = horaMatch[1]; // Solo el número
-    ampm = horaMatch[2]?.toLowerCase(); // am o pm si existe
-
-    // Si no encontró am/pm en el match, buscar después del número
-    if (!ampm) {
-      const afterNumber = texto.slice(texto.indexOf(horaMatch[0]) + horaMatch[0].length).trim();
-      if (afterNumber.startsWith('am')) ampm = 'am';
-      else if (afterNumber.startsWith('pm')) ampm = 'pm';
-    }
-  }
-
-  return { dia, hora, ampm };
+  return { dia, hora, minutos, ampm };
 }
 
 /**
  * Parsea parámetros del comando agendar cita
- * Ejemplos: "agendar cita con juan mañana 4pm", "agendar cita pedro lunes 10am"
+ * Ejemplos: "agendar cita con juan mañana 4pm", "agendar cita pedro lunes 9:45am"
  */
-export function parseAgendarParams(body: string): { nombreLead?: string; dia?: string; hora?: string; ampm?: string } {
-  const texto = body.toLowerCase().trim();
+export function parseAgendarParams(body: string): { nombreLead?: string; dia?: string; hora?: string; minutos?: string; ampm?: string } {
+  // Normalizar errores de ortografía
+  const texto = normalizarTexto(body);
 
   // Quitar prefijos comunes
   let sinPrefijo = texto
@@ -56,8 +112,8 @@ export function parseAgendarParams(body: string): { nombreLead?: string; dia?: s
 
   // Buscar día
   const diasPatterns = [
-    'hoy', 'mañana', 'pasado mañana',
-    'lunes', 'martes', 'miércoles', 'miercoles', 'jueves', 'viernes', 'sábado', 'sabado', 'domingo'
+    'hoy', 'mañana', 'pasado mañana', 'pasado',
+    'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'
   ];
   let dia: string | undefined;
   let diaIndex = -1;
@@ -74,35 +130,22 @@ export function parseAgendarParams(body: string): { nombreLead?: string; dia?: s
   let nombreLead: string | undefined;
   if (diaIndex > 0) {
     nombreLead = sinPrefijo.substring(0, diaIndex).trim();
-    // Quitar "a la", "a las" del final del nombre
-    nombreLead = nombreLead.replace(/\s+(a\s+la|a\s+las?|para)\s*$/i, '').trim();
   }
 
-  // Buscar hora y am/pm
-  const horaMatch = sinPrefijo.match(/(\d{1,2})\s*(am|pm)?/i);
-  let hora: string | undefined;
-  let ampm: string | undefined;
+  // Usar parseHora para extraer hora completa
+  const { hora, minutos, ampm } = parseHora(sinPrefijo);
 
-  if (horaMatch) {
-    hora = horaMatch[1];
-    ampm = horaMatch[2]?.toLowerCase();
-
-    if (!ampm) {
-      const afterNumber = sinPrefijo.slice(sinPrefijo.indexOf(horaMatch[0]) + horaMatch[0].length).trim();
-      if (afterNumber.startsWith('am')) ampm = 'am';
-      else if (afterNumber.startsWith('pm')) ampm = 'pm';
-    }
-  }
-
-  return { nombreLead, dia, hora, ampm };
+  return { nombreLead, dia, hora, minutos, ampm };
 }
 
 /**
- * Convierte hora + ampm a formato ISO (HH:00:00)
+ * Convierte hora + minutos + ampm a formato ISO (HH:MM:00)
  */
-export function convertirHoraISO(hora: string, ampm?: string): string {
+export function convertirHoraISO(hora: string, ampm?: string, minutos?: string): string {
   let horaNum = parseInt(hora);
   if (isNaN(horaNum)) return '12:00:00';
+
+  const mins = minutos || '00';
 
   if (ampm === 'pm' && horaNum < 12) {
     horaNum += 12;
@@ -111,5 +154,5 @@ export function convertirHoraISO(hora: string, ampm?: string): string {
     horaNum = 0;
   }
 
-  return `${String(horaNum).padStart(2, '0')}:00:00`;
+  return `${String(horaNum).padStart(2, '0')}:${mins}:00`;
 }
