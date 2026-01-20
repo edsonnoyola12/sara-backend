@@ -125,6 +125,49 @@ export class CEOCommandsService {
       return { action: 'call_handler', handlerName: 'verActividad' };
     }
 
+    // ═══ MOVER LEAD EN FUNNEL (adelante/atrás) ═══
+    // Formato: "adelante [nombre]" o "[nombre] adelante"
+    let matchMover = msgLower.match(/^(?:adelante|avanzar|siguiente|proximo|próximo)\s+(.+)$/i);
+    if (matchMover) {
+      return { action: 'call_handler', handlerName: 'ceoMoverLead', handlerParams: { nombreLead: matchMover[1].trim(), direccion: 'next' } };
+    }
+    matchMover = msgLower.match(/^(.+?)\s+(?:adelante|al\s+siguiente|avanzar)$/i);
+    if (matchMover) {
+      return { action: 'call_handler', handlerName: 'ceoMoverLead', handlerParams: { nombreLead: matchMover[1].trim(), direccion: 'next' } };
+    }
+    matchMover = msgLower.match(/^(?:atras|atrás|regresar|anterior)\s+(.+)$/i);
+    if (matchMover) {
+      return { action: 'call_handler', handlerName: 'ceoMoverLead', handlerParams: { nombreLead: matchMover[1].trim(), direccion: 'prev' } };
+    }
+    matchMover = msgLower.match(/^(.+?)\s+(?:atras|atrás|al\s+anterior|regresar)$/i);
+    if (matchMover) {
+      return { action: 'call_handler', handlerName: 'ceoMoverLead', handlerParams: { nombreLead: matchMover[1].trim(), direccion: 'prev' } };
+    }
+
+    // ═══ QUIEN ES [nombre] - Buscar lead ═══
+    const matchQuienEs = msgLower.match(/^(?:quien\s+es|quién\s+es|buscar|info\s+de?)\s+(.+)$/i);
+    if (matchQuienEs) {
+      return { action: 'call_handler', handlerName: 'ceoQuienEs', handlerParams: { nombreLead: matchQuienEs[1].trim() } };
+    }
+
+    // ═══ BROCHURE [desarrollo] ═══
+    const matchBrochure = msgLower.match(/^(?:brochure|brouchure|folleto|catalogo|catálogo)\s+(.+)$/i);
+    if (matchBrochure) {
+      return { action: 'call_handler', handlerName: 'ceoBrochure', handlerParams: { desarrollo: matchBrochure[1].trim() } };
+    }
+
+    // ═══ UBICACION [desarrollo] ═══
+    const matchUbicacion = msgLower.match(/^(?:ubicacion|ubicación|donde\s+(?:queda|esta|está)|gps|mapa)\s+(.+)$/i);
+    if (matchUbicacion) {
+      return { action: 'call_handler', handlerName: 'ceoUbicacion', handlerParams: { desarrollo: matchUbicacion[1].trim() } };
+    }
+
+    // ═══ VIDEO [desarrollo] ═══
+    const matchVideo = msgLower.match(/^(?:video|ver|tour)\s+(.+)$/i);
+    if (matchVideo) {
+      return { action: 'call_handler', handlerName: 'ceoVideo', handlerParams: { desarrollo: matchVideo[1].trim() } };
+    }
+
     // ═══ NO RECONOCIDO ═══
     return {
       action: 'not_recognized',
@@ -366,6 +409,26 @@ export class CEOCommandsService {
 
         // ━━━ VER ACTIVIDAD / BITÁCORA ━━━
         case 'verActividad':
+          return { needsExternalHandler: true };
+
+        // ━━━ MOVER LEAD EN FUNNEL ━━━
+        case 'ceoMoverLead':
+          return { needsExternalHandler: true };
+
+        // ━━━ QUIEN ES - BUSCAR LEAD ━━━
+        case 'ceoQuienEs':
+          return { needsExternalHandler: true };
+
+        // ━━━ BROCHURE ━━━
+        case 'ceoBrochure':
+          return { needsExternalHandler: true };
+
+        // ━━━ UBICACION ━━━
+        case 'ceoUbicacion':
+          return { needsExternalHandler: true };
+
+        // ━━━ VIDEO ━━━
+        case 'ceoVideo':
           return { needsExternalHandler: true };
 
         default:

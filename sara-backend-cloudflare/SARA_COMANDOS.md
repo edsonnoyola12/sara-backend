@@ -35,6 +35,12 @@
 | `#mas` / `#continuar` | Extender bridge 6 min más | `ceoExtenderBridge` |
 | `#cerrar` / `#fin` | Terminar TODAS las conexiones | `ceoCerrarBridge` |
 | `actividad` / `bitácora` | Ver actividad del día | `verActividad` |
+| `adelante [nombre]` | Mover lead al siguiente paso del funnel | `ceoMoverLead` |
+| `atras [nombre]` | Regresar lead al paso anterior | `ceoMoverLead` |
+| `quien es [nombre]` | Ver info completa del lead | `ceoQuienEs` |
+| `brochure [desarrollo/modelo]` | Enviar brochure del desarrollo | `ceoBrochure` |
+| `ubicacion [desarrollo/modelo]` | Enviar GPS del desarrollo | `ceoUbicacion` |
+| `video [desarrollo/modelo]` | Enviar video del desarrollo | `ceoVideo` |
 
 ---
 
@@ -73,9 +79,14 @@
 | `agendar cita con [nombre]` | Agendar nueva cita | `vendedorAgendarCita` |
 | `reagendar [nombre] [día] [hora]` | Reagendar cita existente | `vendedorReagendarCita` |
 | `cancelar cita con [nombre]` | Cancelar cita | `vendedorCancelarCita` |
+| `brochure [desarrollo/modelo]` | Enviar brochure del desarrollo | `vendedorEnviarBrochure` |
+| `ubicacion [desarrollo/modelo]` | Enviar GPS del desarrollo | `vendedorEnviarUbicacion` |
+| `video [desarrollo/modelo]` | Enviar video del desarrollo | `vendedorEnviarVideo` |
 | `#mas` / `#continuar` | Extender bridge 6 min más | - |
 | `#cerrar` / `#fin` | Terminar conexiones activas | - |
 | Números `1`, `2`, `3`, `4` | Responder a opciones pendientes | - |
+
+> **NOTA**: Los comandos brochure/ubicacion/video buscan por nombre de desarrollo (ej: "Monte Verde") O por nombre de modelo (ej: "Acacia", "Fresno").
 
 ---
 
@@ -310,6 +321,12 @@ Total: 8 actividades
 | `reporte` | ✅ Probado |
 | `hoy` | ✅ Probado |
 | Selección `1`, `2`, `3` | ✅ Probado |
+| `adelante [nombre]` | ✅ Probado 2026-01-20 |
+| `atras [nombre]` | ✅ Probado 2026-01-20 |
+| `quien es [nombre]` | ✅ Probado 2026-01-20 |
+| `brochure [desarrollo/modelo]` | ✅ Probado 2026-01-20 |
+| `ubicacion [desarrollo/modelo]` | ✅ Probado 2026-01-20 |
+| `video [desarrollo/modelo]` | ✅ Probado 2026-01-20 |
 
 ### Asesor Hipotecario
 | Comando | Estado |
@@ -340,12 +357,22 @@ Total: 8 actividades
 | `agendar cita con [nombre] [día] [hora]` | ✅ Probado 2026-01-19 |
 | `reagendar [nombre] [día] [hora]` | ✅ Probado 2026-01-19 (con sync Google Calendar) |
 | `cancelar cita con [nombre]` | ✅ Probado 2026-01-19 |
+| `brochure [desarrollo/modelo]` | ✅ Probado 2026-01-20 |
+| `ubicacion [desarrollo/modelo]` | ✅ Probado 2026-01-20 |
+| `video [desarrollo/modelo]` | ✅ Probado 2026-01-20 |
 | Selección `1`, `2` en múltiples leads | ✅ Probado 2026-01-19 |
 | Responder `1` para notificar lead (reagendar) | ✅ Probado 2026-01-19 |
 
 ### Bugs arreglados en pruebas
 10. ✅ JSON parsing en `asesorCommandsService.ts` - algunos leads tenían `notes` como texto plano, agregado `safeParseNotes()` helper
 11. ✅ Vendedor no respondía (error `detectCoordinadorCommand is not a function`) - Agregada función stub en vendorCommandsService.ts
+20. ✅ CEO comandos adelante/atras/brochure/ubicacion/video no implementados - Agregados en ceoCommandsService.ts y whatsapp.ts
+21. ✅ Búsqueda de leads con acentos (ñ, é) fallaba - Agregada normalización de texto
+22. ✅ Leads duplicados causaban error - Agregada lógica para usar primer match
+23. ✅ Columna `google_maps_url` no existía - Cambiado a `gps_link`
+24. ✅ Columna `video_url` vacía - Agregado fallback a `youtube_link`
+25. ✅ Búsqueda solo por desarrollo, no por modelo - Agregada búsqueda por `name` como fallback
+26. ✅ Typo "brouchure" no reconocido - Agregado como alias
 12. ✅ Vendedor no respondía (error `detectRouteCommand is not a function`) - Agregada función con detección de comandos básicos
 13. ✅ Comando "citas" fallaba (`getCitasHoy is not a function`) - Implementadas funciones en vendorCommandsService.ts
 14. ✅ Notificación vendedor fallaba fuera de 24h (error 131047) - Implementado template `reactivar_equipo` + pending_notification
@@ -380,11 +407,23 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-19 18:20*
+*Última actualización: 2026-01-20 08:00*
 
 ---
 
 ## HISTORIAL DE CAMBIOS
+
+### 2026-01-20
+
+**Sesión 1 (07:00-08:00)**
+- ✅ Implementados comandos CEO: adelante, atras, quien es, brochure, ubicacion, video
+- ✅ Implementados comandos Vendedor: brochure, ubicacion, video
+- ✅ Arreglada búsqueda de leads con acentos (normalización de texto)
+- ✅ Arreglado manejo de leads duplicados
+- ✅ Corregidas columnas: `gps_link` (no google_maps_url), `youtube_link` como fallback de video_url
+- ✅ Agregada búsqueda por nombre de modelo además de desarrollo
+- ✅ Actualizados GPS links de todos los desarrollos en Supabase:
+  - Distrito Falco, Andes, Los Encinos, Villa Galiano, Villa Campelo, Alpes, Miravalle, Monte Verde
 
 ### 2026-01-19
 

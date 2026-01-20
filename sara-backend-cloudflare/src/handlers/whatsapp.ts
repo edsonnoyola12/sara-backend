@@ -10,7 +10,7 @@ import { resourceService } from '../services/resourceService';
 import { CalendarService } from '../services/calendar';
 import { ReportsService } from '../services/reportsService';
 import { BridgeService } from '../services/bridgeService';
-import { VendorCommandsService, VendorRouteResult } from '../services/vendorCommandsService';
+import { VendorCommandsService, VendorRouteResult, sanitizeNotes } from '../services/vendorCommandsService';
 import { AppointmentSchedulingService } from '../services/appointmentSchedulingService';
 import { MortgageService, CrearActualizarMortgageResult, MortgageData } from '../services/mortgageService';
 import { AgenciaReportingService } from '../services/agenciaReportingService';
@@ -1543,6 +1543,31 @@ export class WhatsAppHandler {
         await this.mostrarActividadesHoy(from, ceo);
         break;
 
+      // ━━━ MOVER LEAD EN FUNNEL ━━━
+      case 'ceoMoverLead':
+        await this.ceoMoverLead(from, params?.nombreLead, params?.direccion, ceo);
+        break;
+
+      // ━━━ QUIEN ES - BUSCAR LEAD ━━━
+      case 'ceoQuienEs':
+        await this.ceoQuienEs(from, params?.nombreLead);
+        break;
+
+      // ━━━ BROCHURE ━━━
+      case 'ceoBrochure':
+        await this.ceoBrochure(from, params?.desarrollo);
+        break;
+
+      // ━━━ UBICACION ━━━
+      case 'ceoUbicacion':
+        await this.ceoUbicacion(from, params?.desarrollo);
+        break;
+
+      // ━━━ VIDEO ━━━
+      case 'ceoVideo':
+        await this.ceoVideo(from, params?.desarrollo);
+        break;
+
       default:
         console.log('Handler CEO no reconocido:', handlerName);
     }
@@ -2014,6 +2039,320 @@ export class WhatsAppHandler {
     } catch (e) {
       console.log('❌ Error en ceoCerrarBridge:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al cerrar conexiones.`);
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // CEO MOVER LEAD - Mover lead en funnel (adelante/atrás)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async ceoMoverLead(from: string, nombreLead: string, direccion: 'next' | 'prev', ceo: any): Promise<void> {
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+    console.log(`📌 CEO mover lead: "${nombreLead}" ${direccion}`);
+
+    // Normalizar texto (remover acentos para búsqueda tolerante)
+    const normalizar = (str: string) => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const nombreNormalizado = normalizar(nombreLead);
+    console.log(`📌 Nombre normalizado: "${nombreNormalizado}"`);
+
+    try {
+      // CEO puede ver TODOS los leads - buscar con ilike primero
+      let { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('*')
+        .ilike('name', `%${nombreLead}%`)
+        .limit(5);
+
+      console.log(`📌 Búsqueda ilike: ${leads?.length || 0} resultados`);
+
+      // Si no encuentra, buscar todos y filtrar manualmente (más tolerante a acentos)
+      if (!leads || leads.length === 0) {
+        const { data: allLeads, error: allErr } = await this.supabase.client
+          .from('leads')
+          .select('*')
+          .limit(100);
+
+        console.log(`📌 Total leads en BD: ${allLeads?.length || 0}, error: ${allErr?.message || 'ninguno'}`);
+        if (allLeads && allLeads.length > 0) {
+          console.log(`📌 Primeros 5 leads: ${allLeads.slice(0, 5).map(l => l.name).join(', ')}`);
+        }
+
+        leads = allLeads?.filter(l => normalizar(l.name || '').includes(nombreNormalizado)) || [];
+        console.log(`📌 Búsqueda manual: ${leads.length} resultados`);
+      }
+
+      const FUNNEL_STAGES = ['new', 'contacted', 'qualified', 'visit_scheduled', 'visited', 'negotiating', 'reserved', 'sold', 'delivered'];
+      const stageLabels: Record<string, string> = {
+        'new': '🆕 Nuevo',
+        'contacted': '📞 Contactado',
+        'qualified': '✅ Calificado',
+        'visit_scheduled': '📅 Cita Agendada',
+        'visited': '🏠 Visitado',
+        'negotiating': '💰 Negociando',
+        'reserved': '📝 Reservado',
+        'sold': '✅ Vendido',
+        'delivered': '🏠 Entregado'
+      };
+
+      if (!leads || leads.length === 0) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ No encontré a "${nombreLead}"`);
+        return;
+      }
+
+      if (leads.length > 1) {
+        // Buscar match exacto o parcial más cercano
+        const exactMatch = leads.find(l => normalizar(l.name || '') === nombreNormalizado);
+        if (exactMatch) {
+          leads = [exactMatch];
+        } else {
+          // Si todos tienen el mismo nombre (duplicados), usar el primero
+          const nombresUnicos = new Set(leads.map(l => normalizar(l.name || '')));
+          if (nombresUnicos.size === 1) {
+            console.log(`📌 Duplicados detectados, usando el primero`);
+            leads = [leads[0]];
+          } else {
+            const lista = leads.map((l, i) => `${i + 1}. ${l.name}`).join('\n');
+            await this.meta.sendWhatsAppMessage(cleanPhone,
+              `🔍 Encontré ${leads.length} leads:\n${lista}\n\n_Sé más específico._`
+            );
+            return;
+          }
+        }
+      }
+
+      const lead = leads[0] as any;
+      console.log(`📌 Lead keys: ${Object.keys(lead).join(', ')}`);
+      console.log(`📌 Lead status fields: funnel_status=${lead.funnel_status}, stage=${lead.stage}, status=${lead.status}`);
+      const currentStatus = lead.funnel_status || lead.stage || lead.status || 'new';
+      const currentIndex = FUNNEL_STAGES.indexOf(currentStatus);
+      let newIndex = direccion === 'next' ? currentIndex + 1 : currentIndex - 1;
+
+      if (newIndex < 0) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `⚠️ ${lead.name} ya está en la primera etapa (${stageLabels[currentStatus] || currentStatus})`);
+        return;
+      }
+      if (newIndex >= FUNNEL_STAGES.length) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `⚠️ ${lead.name} ya está en la última etapa (${stageLabels[currentStatus] || currentStatus})`);
+        return;
+      }
+
+      const newStage = FUNNEL_STAGES[newIndex];
+      // Usar la columna que exista (funnel_status o status)
+      const updateCol = lead.funnel_status !== undefined ? 'funnel_status' : (lead.stage !== undefined ? 'stage' : 'status');
+      console.log(`📌 Actualizando columna: ${updateCol} = ${newStage}`);
+      await this.supabase.client.from('leads').update({ [updateCol]: newStage }).eq('id', lead.id);
+
+      await this.meta.sendWhatsAppMessage(cleanPhone,
+        `✅ *${lead.name}* movido:\n${stageLabels[currentStatus] || currentStatus} → ${stageLabels[newStage] || newStage}`
+      );
+
+    } catch (e) {
+      console.log('❌ Error en ceoMoverLead:', e);
+      await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al mover lead.`);
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // CEO QUIEN ES - Buscar información de un lead
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async ceoQuienEs(from: string, nombreLead: string): Promise<void> {
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+    console.log(`🔍 CEO busca: "${nombreLead}"`);
+
+    const normalizar = (str: string) => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const nombreNormalizado = normalizar(nombreLead);
+
+    try {
+      let { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone, stage, status, created_at, notes, assigned_to')
+        .ilike('name', `%${nombreLead}%`)
+        .limit(5);
+
+      // Búsqueda tolerante a acentos si no encuentra
+      if (!leads || leads.length === 0) {
+        const { data: allLeads } = await this.supabase.client
+          .from('leads')
+          .select('id, name, phone, stage, status, created_at, notes, assigned_to')
+          .limit(100);
+        leads = allLeads?.filter(l => normalizar(l.name || '').includes(nombreNormalizado)) || [];
+      }
+
+      if (!leads || leads.length === 0) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ No encontré a "${nombreLead}"`);
+        return;
+      }
+
+      if (leads.length === 1) {
+        const l = leads[0];
+        const { data: vendedor } = l.assigned_to ?
+          await this.supabase.client.from('team_members').select('name').eq('id', l.assigned_to).single() : { data: null };
+
+        const stageLabels: Record<string, string> = {
+          'nuevo': '🆕 Nuevo', 'contactado': '📞 Contactado', 'interesado': '💡 Interesado',
+          'cita_agendada': '📅 Cita Agendada', 'visitado': '🏠 Visitado', 'negociacion': '💰 Negociación',
+          'apartado': '✍️ Apartado', 'escrituracion': '📝 Escrituración', 'ganado': '🎉 Ganado'
+        };
+
+        await this.meta.sendWhatsAppMessage(cleanPhone,
+          `📋 *${l.name}*\n\n` +
+          `📱 ${l.phone || 'Sin teléfono'}\n` +
+          `📊 ${stageLabels[l.stage || 'nuevo'] || l.stage || 'Sin etapa'}\n` +
+          `👤 ${vendedor?.name || 'Sin asignar'}\n` +
+          `📅 Registrado: ${new Date(l.created_at).toLocaleDateString('es-MX')}`
+        );
+      } else {
+        const lista = leads.map((l, i) => `${i + 1}. *${l.name}* - ${l.stage || 'nuevo'}`).join('\n');
+        await this.meta.sendWhatsAppMessage(cleanPhone,
+          `🔍 Encontré ${leads.length} leads:\n\n${lista}\n\n_Escribe "quien es [nombre completo]" para más detalles._`
+        );
+      }
+    } catch (e) {
+      console.log('❌ Error en ceoQuienEs:', e);
+      await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al buscar lead.`);
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // CEO BROCHURE - Enviar brochure de desarrollo
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async ceoBrochure(from: string, desarrollo: string): Promise<void> {
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+    console.log(`📄 CEO pide brochure: "${desarrollo}"`);
+
+    try {
+      const { data: props } = await this.supabase.client
+        .from('properties')
+        .select('development, brochure_urls')
+        .ilike('development', `%${desarrollo}%`)
+        .not('brochure_urls', 'is', null)
+        .limit(1);
+
+      if (!props || props.length === 0) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ No encontré brochure para "${desarrollo}"`);
+        return;
+      }
+
+      const prop = props[0];
+      let urls: string[] = [];
+      if (typeof prop.brochure_urls === 'string') {
+        urls = prop.brochure_urls.split(',').map(u => u.trim()).filter(u => u);
+      } else if (Array.isArray(prop.brochure_urls)) {
+        urls = prop.brochure_urls;
+      }
+
+      if (urls.length === 0) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ ${prop.development} no tiene brochure configurado.`);
+        return;
+      }
+
+      await this.meta.sendWhatsAppMessage(cleanPhone, `📄 *Brochure ${prop.development}*\n\n${urls[0]}`);
+    } catch (e) {
+      console.log('❌ Error en ceoBrochure:', e);
+      await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al obtener brochure.`);
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // CEO UBICACION - Enviar ubicación de desarrollo
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async ceoUbicacion(from: string, desarrollo: string): Promise<void> {
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+    console.log(`📍 CEO pide ubicación: "${desarrollo}"`);
+
+    try {
+      // Buscar por desarrollo O por nombre del modelo
+      let foundByName = false;
+      let { data: props } = await this.supabase.client
+        .from('properties')
+        .select('name, development, gps_link, address')
+        .ilike('development', `%${desarrollo}%`)
+        .limit(1);
+
+      // Si no encuentra por desarrollo, buscar por nombre del modelo
+      if (!props || props.length === 0) {
+        const { data: byName } = await this.supabase.client
+          .from('properties')
+          .select('name, development, gps_link, address')
+          .ilike('name', `%${desarrollo}%`)
+          .limit(1);
+        props = byName;
+        foundByName = true;
+      }
+
+      if (!props || props.length === 0) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ No encontré ubicación para "${desarrollo}"`);
+        return;
+      }
+
+      const prop = props[0];
+      if (!prop.gps_link && !prop.address) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ ${prop.development} no tiene ubicación configurada.`);
+        return;
+      }
+
+      // Solo mostrar nombre del modelo si buscaron por modelo
+      const titulo = foundByName && prop.name && prop.name !== prop.development
+        ? `${prop.name} (${prop.development})`
+        : prop.development;
+      let msg = `📍 *Ubicación ${titulo}*\n\n`;
+      if (prop.address) msg += `${prop.address}\n\n`;
+      if (prop.gps_link) msg += `${prop.gps_link}`;
+
+      await this.meta.sendWhatsAppMessage(cleanPhone, msg);
+    } catch (e) {
+      console.log('❌ Error en ceoUbicacion:', e);
+      await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al obtener ubicación.`);
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // CEO VIDEO - Enviar video de desarrollo
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async ceoVideo(from: string, desarrollo: string): Promise<void> {
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+    console.log(`🎬 CEO pide video: "${desarrollo}"`);
+
+    try {
+      // Buscar por desarrollo O por nombre del modelo
+      let foundByName = false;
+      let { data: props } = await this.supabase.client
+        .from('properties')
+        .select('name, development, video_url, youtube_link')
+        .ilike('development', `%${desarrollo}%`)
+        .limit(1);
+
+      // Si no encuentra por desarrollo, buscar por nombre del modelo
+      if (!props || props.length === 0) {
+        const { data: byName } = await this.supabase.client
+          .from('properties')
+          .select('name, development, video_url, youtube_link')
+          .ilike('name', `%${desarrollo}%`)
+          .limit(1);
+        props = byName;
+        foundByName = true;
+      }
+
+      if (!props || props.length === 0) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ No encontré video para "${desarrollo}"`);
+        return;
+      }
+
+      const prop = props[0];
+      const videoUrl = prop.video_url || prop.youtube_link;
+
+      if (!videoUrl) {
+        await this.meta.sendWhatsAppMessage(cleanPhone, `❌ ${prop.development} no tiene video configurado.`);
+        return;
+      }
+
+      // Solo mostrar nombre del modelo si buscaron por modelo
+      const titulo = foundByName && prop.name && prop.name !== prop.development
+        ? `${prop.name} (${prop.development})`
+        : prop.development;
+      await this.meta.sendWhatsAppMessage(cleanPhone, `🎬 *Video ${titulo}*\n\n${videoUrl}`);
+    } catch (e) {
+      console.log('❌ Error en ceoVideo:', e);
+      await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al obtener video.`);
     }
   }
 
@@ -2675,18 +3014,36 @@ export class WhatsAppHandler {
         }
 
         // Ejecutar reagendar con el lead ya seleccionado
-        console.log('📅 Llamando reagendarCitaConSeleccion con:', selectedLead.name, parsed.dia, parsed.hora, parsed.ampm);
+        console.log('📅 Llamando reagendarCitaConSeleccion con:', selectedLead.name, parsed.dia, parsed.hora, parsed.minutos, parsed.ampm);
         const result = await schedulingService.reagendarCitaConSeleccion(
           selectedLead,
           parsed.dia,
           parsed.hora,
           parsed.ampm || 'pm',
-          vendedor
+          vendedor,
+          parsed.minutos
         );
         console.log('📅 Resultado reagendarCitaConSeleccion:', JSON.stringify(result));
 
         if (result.success) {
           await this.twilio.sendWhatsAppMessage(from, schedulingService.formatReagendarCitaExito(result));
+
+          // Guardar estado para notificación al lead (si tiene teléfono)
+          if (selectedLead.phone) {
+            const notesToSave = sanitizeNotes(restNotes);
+            notesToSave.pending_reagendar_notify = {
+              lead_id: selectedLead.id,
+              lead_name: selectedLead.name,
+              lead_phone: selectedLead.phone,
+              fecha: result.nuevaFecha,
+              hora: result.nuevaHora,
+              timestamp: Date.now()
+            };
+            await this.supabase.client
+              .from('team_members')
+              .update({ notes: notesToSave })
+              .eq('id', vendedor.id);
+          }
         } else {
           await this.twilio.sendWhatsAppMessage(from, `⚠️ ${result.error || 'Error al reagendar'}`);
         }
@@ -2717,6 +3074,29 @@ export class WhatsAppHandler {
 
           if (result.success) {
             await this.twilio.sendWhatsAppMessage(from, schedulingService.formatCancelarCitaExito(result));
+
+            // Preguntar si desea notificar al lead (si tiene teléfono)
+            if (result.leadPhone) {
+              const notesToUpdate = restNotes || {};
+              notesToUpdate.pending_cancelar_notify = {
+                lead_id: result.leadId,
+                lead_name: result.leadName,
+                lead_phone: result.leadPhone,
+                fecha: result.fechaStr,
+                hora: result.horaStr,
+                timestamp: Date.now()
+              };
+              await this.supabase.client
+                .from('team_members')
+                .update({ notes: notesToUpdate })
+                .eq('id', vendedor.id);
+
+              await this.twilio.sendWhatsAppMessage(from,
+                `📱 *¿Deseas notificar a ${result.leadName} de la cancelación?*\n\n` +
+                `1️⃣ Sí, enviar mensaje\n` +
+                `2️⃣ No, yo le aviso`
+              );
+            }
           } else {
             await this.twilio.sendWhatsAppMessage(from, `⚠️ ${result.error || 'Error al cancelar'}`);
           }
@@ -2735,7 +3115,7 @@ export class WhatsAppHandler {
 
       if (idx >= 0 && idx < pendingAgendar.leads.length) {
         const selectedLead = pendingAgendar.leads[idx];
-        console.log('📅 Lead seleccionado:', selectedLead?.name, 'dia:', pendingAgendar.dia, 'hora:', pendingAgendar.hora, 'ampm:', pendingAgendar.ampm);
+        console.log('📅 Lead seleccionado:', selectedLead?.name, 'dia:', pendingAgendar.dia, 'hora:', pendingAgendar.hora, 'minutos:', pendingAgendar.minutos, 'ampm:', pendingAgendar.ampm);
         // Limpiar pending_agendar_cita
         const { pending_agendar_cita, ...restNotes } = notasVendedor;
         await this.supabase.client
@@ -2766,16 +3146,206 @@ export class WhatsAppHandler {
           pendingAgendar.dia,
           pendingAgendar.hora,
           pendingAgendar.ampm || 'pm',
-          vendedor
+          vendedor,
+          pendingAgendar.minutos,
+          pendingAgendar.desarrollo
         );
 
         if (result.success) {
           await this.twilio.sendWhatsAppMessage(from, schedulingService.formatAgendarCitaExito(result));
+
+          // Guardar estado para notificación al lead (si tiene teléfono)
+          console.log('📱 DEBUG: selectedLead.phone =', selectedLead.phone);
+          if (selectedLead.phone) {
+            const notesToSave = sanitizeNotes(restNotes);
+            notesToSave.pending_agendar_notify = {
+              lead_id: selectedLead.id,
+              lead_name: selectedLead.name,
+              lead_phone: selectedLead.phone,
+              fecha: result.fecha,
+              hora: result.hora,
+              ubicacion: result.ubicacion,
+              gpsLink: result.gpsLink,
+              timestamp: Date.now()
+            };
+            console.log('📱 DEBUG: Guardando pending_agendar_notify:', JSON.stringify(notesToSave));
+            const { error } = await this.supabase.client
+              .from('team_members')
+              .update({ notes: notesToSave })
+              .eq('id', vendedor.id);
+            if (error) console.log('📱 DEBUG: Error guardando notes:', error);
+            else console.log('📱 DEBUG: Notes guardadas OK');
+          } else {
+            console.log('📱 DEBUG: Lead sin teléfono, no se guarda pending_agendar_notify');
+          }
         } else {
           await this.twilio.sendWhatsAppMessage(from, `⚠️ ${result.error || 'Error al agendar'}`);
         }
         return;
       }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 3.7. RESPUESTA A NOTIFICACIÓN DE AGENDAR
+    // ═══════════════════════════════════════════════════════════
+    if (/^[12]$/.test(mensaje.trim()) && notasVendedor?.pending_agendar_notify) {
+      const pendingNotify = notasVendedor.pending_agendar_notify;
+      console.log('📱 PENDING AGENDAR NOTIFY:', JSON.stringify(pendingNotify));
+
+      // Limpiar pending_agendar_notify
+      const { pending_agendar_notify, ...restNotesAgendar } = notasVendedor;
+      const cleanNotes = sanitizeNotes(restNotesAgendar);
+      await this.supabase.client
+        .from('team_members')
+        .update({ notes: cleanNotes })
+        .eq('id', vendedor.id);
+
+      if (mensaje.trim() === '1') {
+        // Enviar notificación al lead
+        const leadPhone = pendingNotify.lead_phone.startsWith('521')
+          ? pendingNotify.lead_phone
+          : `521${pendingNotify.lead_phone.replace(/\D/g, '').slice(-10)}`;
+
+        // Formatear teléfono del vendedor para el lead
+        const vendedorPhone = vendedor.phone?.replace(/\D/g, '').slice(-10) || '';
+        const vendedorPhoneFormatted = vendedorPhone ? `52${vendedorPhone}` : '';
+
+        let mensajeLead = `¡Hola ${pendingNotify.lead_name.split(' ')[0]}! 👋\n\n` +
+          `Te confirmamos tu cita:\n` +
+          `📅 ${pendingNotify.fecha}\n` +
+          `🕐 ${pendingNotify.hora}`;
+
+        // Agregar ubicación si existe
+        if (pendingNotify.ubicacion && pendingNotify.ubicacion !== 'Por confirmar') {
+          mensajeLead += `\n📍 ${pendingNotify.ubicacion}`;
+        }
+        if (pendingNotify.gpsLink) {
+          mensajeLead += `\n🗺️ ${pendingNotify.gpsLink}`;
+        }
+
+        // Agregar info del asesor
+        mensajeLead += `\n\n👤 Te atenderá: *${nombreVendedor}*`;
+        if (vendedorPhoneFormatted) {
+          mensajeLead += `\n📱 ${vendedorPhoneFormatted}`;
+        }
+
+        mensajeLead += `\n\n¡Te esperamos!`;
+
+        await this.meta.sendWhatsAppMessage(leadPhone, mensajeLead);
+        await this.twilio.sendWhatsAppMessage(from, `✅ *Notificación enviada a ${pendingNotify.lead_name}*`);
+
+        // Registrar actividad
+        await this.supabase.client
+          .from('lead_activities')
+          .insert({
+            lead_id: pendingNotify.lead_id,
+            type: 'whatsapp',
+            notes: `Lead notificado de cita por ${nombreVendedor}`,
+            created_by: vendedor.id
+          });
+      } else {
+        await this.twilio.sendWhatsAppMessage(from, `✅ Entendido, tú le avisarás a ${pendingNotify.lead_name}.`);
+      }
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 3.8. RESPUESTA A NOTIFICACIÓN DE CANCELACIÓN
+    // ═══════════════════════════════════════════════════════════
+    if (/^[12]$/.test(mensaje.trim()) && notasVendedor?.pending_cancelar_notify) {
+      const pendingNotify = notasVendedor.pending_cancelar_notify;
+      console.log('📱 PENDING CANCELAR NOTIFY:', JSON.stringify(pendingNotify));
+
+      // Limpiar pending_cancelar_notify (sanitizar para evitar corrupción)
+      const { pending_cancelar_notify, ...restNotesCancelar } = notasVendedor;
+      const cleanNotesCancelar = sanitizeNotes(restNotesCancelar);
+      await this.supabase.client
+        .from('team_members')
+        .update({ notes: cleanNotesCancelar })
+        .eq('id', vendedor.id);
+
+      if (mensaje.trim() === '1') {
+        // Enviar notificación al lead
+        const leadPhone = pendingNotify.lead_phone.startsWith('521')
+          ? pendingNotify.lead_phone
+          : `521${pendingNotify.lead_phone.replace(/\D/g, '').slice(-10)}`;
+
+        const mensajeLead = `Hola ${pendingNotify.lead_name.split(' ')[0]}, te informamos que tu cita programada para el ${pendingNotify.fecha} a las ${pendingNotify.hora} ha sido cancelada.\n\n` +
+          `Si deseas reagendar, por favor contacta a tu asesor.\n\n` +
+          `Disculpa las molestias.`;
+
+        await this.meta.sendWhatsAppMessage(leadPhone, mensajeLead);
+        await this.twilio.sendWhatsAppMessage(from, `✅ *Notificación enviada a ${pendingNotify.lead_name}*`);
+
+        // Registrar actividad
+        await this.supabase.client
+          .from('lead_activities')
+          .insert({
+            lead_id: pendingNotify.lead_id,
+            type: 'whatsapp',
+            notes: `Lead notificado de cancelación por ${nombreVendedor}`,
+            created_by: vendedor.id
+          });
+      } else {
+        await this.twilio.sendWhatsAppMessage(from, `✅ Entendido, tú le avisarás a ${pendingNotify.lead_name}.`);
+      }
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 3.9. RESPUESTA A NOTIFICACIÓN DE REAGENDAR
+    // ═══════════════════════════════════════════════════════════
+    if (/^[12]$/.test(mensaje.trim()) && notasVendedor?.pending_reagendar_notify) {
+      const pendingNotify = notasVendedor.pending_reagendar_notify;
+      console.log('📱 PENDING REAGENDAR NOTIFY:', JSON.stringify(pendingNotify));
+
+      // Limpiar pending_reagendar_notify
+      const { pending_reagendar_notify, ...restNotesReagendar } = notasVendedor;
+      const cleanNotesReagendar = sanitizeNotes(restNotesReagendar);
+      await this.supabase.client
+        .from('team_members')
+        .update({ notes: cleanNotesReagendar })
+        .eq('id', vendedor.id);
+
+      if (mensaje.trim() === '1') {
+        // Enviar notificación al lead
+        const leadPhone = pendingNotify.lead_phone.startsWith('521')
+          ? pendingNotify.lead_phone
+          : `521${pendingNotify.lead_phone.replace(/\D/g, '').slice(-10)}`;
+
+        // Formatear teléfono del vendedor para el lead
+        const vendedorPhone = vendedor.phone?.replace(/\D/g, '').slice(-10) || '';
+        const vendedorPhoneFormatted = vendedorPhone ? `52${vendedorPhone}` : '';
+
+        let mensajeLead = `¡Hola ${pendingNotify.lead_name.split(' ')[0]}! 👋\n\n` +
+          `Tu cita ha sido *reagendada*:\n` +
+          `📅 ${pendingNotify.fecha}\n` +
+          `🕐 ${pendingNotify.hora}`;
+
+        // Agregar info del asesor
+        mensajeLead += `\n\n👤 Te atenderá: *${nombreVendedor}*`;
+        if (vendedorPhoneFormatted) {
+          mensajeLead += `\n📱 ${vendedorPhoneFormatted}`;
+        }
+
+        mensajeLead += `\n\n¡Te esperamos!`;
+
+        await this.meta.sendWhatsAppMessage(leadPhone, mensajeLead);
+        await this.twilio.sendWhatsAppMessage(from, `✅ *Notificación enviada a ${pendingNotify.lead_name}*`);
+
+        // Registrar actividad
+        await this.supabase.client
+          .from('lead_activities')
+          .insert({
+            lead_id: pendingNotify.lead_id,
+            type: 'whatsapp',
+            notes: `Lead notificado de reagenda por ${nombreVendedor}`,
+            created_by: vendedor.id
+          });
+      } else {
+        await this.twilio.sendWhatsAppMessage(from, `✅ Entendido, tú le avisarás a ${pendingNotify.lead_name}.`);
+      }
+      return;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -3531,6 +4101,18 @@ export class WhatsAppHandler {
       case 'vendedorMetaAvance':
         await this.vendedorMetaAvance(from, vendedor, nombreVendedor);
         break;
+      case 'vendedorQuienEs':
+        await this.vendedorQuienEs(from, params.nombre, vendedor);
+        break;
+      case 'vendedorBrochure':
+        await this.vendedorEnviarBrochure(from, params.desarrollo, vendedor);
+        break;
+      case 'vendedorUbicacion':
+        await this.vendedorEnviarUbicacion(from, params.desarrollo, vendedor);
+        break;
+      case 'vendedorVideo':
+        await this.vendedorEnviarVideo(from, params.desarrollo, vendedor);
+        break;
 
       default:
         console.log('Handler vendedor no reconocido (fallback):', result.handlerName);
@@ -3743,11 +4325,47 @@ export class WhatsAppHandler {
    * Mueve lead en el funnel (siguiente/anterior/específico)
    */
   private async vendedorMoverEtapa(from: string, body: string, mensaje: string, vendedor: any, nombreVendedor: string): Promise<void> {
-    // Formato: "Hilda al siguiente"
-    const matchSiguiente = body.match(/(?:mover\s+(?:a\s+)?)?([a-záéíóúñA-ZÁÉÍÓÚÑ\s]+?)\s+(?:al?\s+)?(?:siguiente|proximo|próximo|avanzar|adelante)/i);
-    if (matchSiguiente) {
-      const vendorService = new VendorCommandsService(this.supabase);
-      const result = await vendorService.moveFunnelStep(matchSiguiente[1].trim(), vendedor.id, vendedor.role, 'next');
+    const vendorService = new VendorCommandsService(this.supabase);
+    let nombreLead: string | null = null;
+    let direccion: 'next' | 'prev' | null = null;
+
+    // Formato 1: "[nombre] adelante/al siguiente"
+    let match = body.match(/^([a-záéíóúñA-ZÁÉÍÓÚÑ\s]+?)\s+(?:al?\s+)?(?:siguiente|proximo|próximo|avanzar|adelante)$/i);
+    if (match) {
+      nombreLead = match[1].trim();
+      direccion = 'next';
+    }
+
+    // Formato 2: "adelante/avanzar [nombre]"
+    if (!nombreLead) {
+      match = body.match(/^(?:adelante|avanzar|siguiente|proximo|próximo)\s+(.+)$/i);
+      if (match) {
+        nombreLead = match[1].trim();
+        direccion = 'next';
+      }
+    }
+
+    // Formato 3: "[nombre] atrás/anterior"
+    if (!nombreLead) {
+      match = body.match(/^([a-záéíóúñA-ZÁÉÍÓÚÑ\s]+?)\s+(?:para\s+)?(?:atras|atrás|regresar|anterior)$/i);
+      if (match) {
+        nombreLead = match[1].trim();
+        direccion = 'prev';
+      }
+    }
+
+    // Formato 4: "atrás/regresar [nombre]"
+    if (!nombreLead) {
+      match = body.match(/^(?:atras|atrás|regresar|anterior)\s+(.+)$/i);
+      if (match) {
+        nombreLead = match[1].trim();
+        direccion = 'prev';
+      }
+    }
+
+    if (nombreLead && direccion) {
+      console.log(`📌 Mover lead: "${nombreLead}" ${direccion}`);
+      const result = await vendorService.moveFunnelStep(nombreLead, vendedor.id, vendedor.role, direccion);
       if (!result.success) {
         await this.twilio.sendWhatsAppMessage(from, result.error || 'Error al mover lead');
         return;
@@ -3760,7 +4378,7 @@ export class WhatsAppHandler {
       return;
     }
 
-    // Formato: "Hilda atrás"
+    // Formato: "Hilda atrás" - formato legacy
     const matchAtras = body.match(/(?:regresar\s+(?:a\s+)?)?([a-záéíóúñA-ZÁÉÍÓÚÑ\s]+?)\s+(?:para\s+)?(?:atras|atrás|regresar|anterior)/i);
     if (matchAtras) {
       const vendorService = new VendorCommandsService(this.supabase);
@@ -3994,7 +4612,32 @@ export class WhatsAppHandler {
               if (!result.success) {
                 await this.meta.sendWhatsAppMessage(from, `⚠️ ${result.error || 'No se pudo cancelar la cita'}`);
               } else {
+                // Confirmar cancelación
                 await this.meta.sendWhatsAppMessage(from, schedulingService.formatCancelarCitaExito(result));
+
+                // Preguntar si desea notificar al lead (si tiene teléfono)
+                if (result.leadPhone) {
+                  // Guardar estado pendiente de notificación (sanitizar para evitar corrupción)
+                  const currentNotes = sanitizeNotes(asesor.notes);
+                  currentNotes.pending_cancelar_notify = {
+                    lead_id: result.leadId,
+                    lead_name: result.leadName,
+                    lead_phone: result.leadPhone,
+                    fecha: result.fechaStr,
+                    hora: result.horaStr,
+                    timestamp: Date.now()
+                  };
+                  await this.supabase.client
+                    .from('team_members')
+                    .update({ notes: currentNotes })
+                    .eq('id', asesor.id);
+
+                  await this.meta.sendWhatsAppMessage(from,
+                    `📱 *¿Deseas notificar a ${result.leadName} de la cancelación?*\n\n` +
+                    `1️⃣ Sí, enviar mensaje\n` +
+                    `2️⃣ No, yo le aviso`
+                  );
+                }
               }
               return;
             } else if (action === 'reagendar') {
@@ -4068,22 +4711,39 @@ export class WhatsAppHandler {
       // Notificar vendedor si es necesario
       if (handlerResult.vendedorPhone && handlerResult.vendedorMessage) {
         const vendedorPhoneClean = handlerResult.vendedorPhone.replace(/\D/g, '');
-
-        // Verificar si vendedor está dentro de ventana 24h ANTES de enviar
-        // Buscar por sufijo del teléfono para evitar problemas de formato
         const phoneSuffix = vendedorPhoneClean.slice(-10);
-        const { data: vendedorData } = await this.supabase.client
-          .from('team_members')
-          .select('name, last_sara_interaction')
-          .like('phone', `%${phoneSuffix}`)
-          .single();
 
-        const nombreVendedor = vendedorData?.name?.split(' ')[0] || 'Equipo';
-        const lastInteraction = vendedorData?.last_sara_interaction;
-        const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        const dentroVentana24h = lastInteraction && lastInteraction > hace24h;
+        // Si el handler ya verificó la ventana 24h, usar ese valor
+        // Si no, hacer el lookup
+        let dentroVentana24h = handlerResult.vendedorDentro24h;
+        let nombreVendedor = 'Equipo';
+        let vendedorId: string | undefined;
 
-        console.log(`🔍 Vendedor ${nombreVendedor}: last_interaction=${lastInteraction}, dentro24h=${dentroVentana24h}`);
+        if (dentroVentana24h === undefined) {
+          // Buscar vendedor por teléfono para verificar ventana 24h
+          const { data: vendedorData } = await this.supabase.client
+            .from('team_members')
+            .select('id, name, last_sara_interaction')
+            .like('phone', `%${phoneSuffix}`)
+            .single();
+
+          vendedorId = vendedorData?.id;
+          nombreVendedor = vendedorData?.name?.split(' ')[0] || 'Equipo';
+          const lastInteraction = vendedorData?.last_sara_interaction;
+          const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+          dentroVentana24h = lastInteraction && lastInteraction > hace24h;
+          console.log(`🔍 Vendedor ${nombreVendedor}: last_interaction=${lastInteraction}, dentro24h=${dentroVentana24h}`);
+        } else {
+          console.log(`🔍 Vendedor: usando ventana24h del handler = ${dentroVentana24h}`);
+          // Obtener ID para guardar pending_notification si es necesario
+          const { data: vendedorData } = await this.supabase.client
+            .from('team_members')
+            .select('id, name')
+            .like('phone', `%${phoneSuffix}`)
+            .single();
+          vendedorId = vendedorData?.id;
+          nombreVendedor = vendedorData?.name?.split(' ')[0] || 'Equipo';
+        }
 
         if (dentroVentana24h) {
           // Dentro de ventana 24h: enviar mensaje normal
@@ -4094,11 +4754,11 @@ export class WhatsAppHandler {
           console.log(`⚠️ Vendedor ${vendedorPhoneClean} fuera de ventana 24h, guardando notificación pendiente`);
           try {
             // Guardar la notificación pendiente en notes del vendedor
-            if (vendedorData) {
+            if (vendedorId) {
               const { data: vendedorFull } = await this.supabase.client
                 .from('team_members')
-                .select('id, notes')
-                .like('phone', `%${phoneSuffix}`)
+                .select('notes')
+                .eq('id', vendedorId)
                 .single();
 
               if (vendedorFull) {
@@ -4114,7 +4774,7 @@ export class WhatsAppHandler {
                       }
                     }
                   })
-                  .eq('id', vendedorFull.id);
+                  .eq('id', vendedorId);
                 console.log(`📝 Notificación pendiente guardada para ${nombreVendedor}`);
               }
             }
@@ -5194,7 +5854,8 @@ Responde con fecha y hora:
           .eq('id', vendedor.id)
           .single();
 
-        const notasActuales = vendedorActual?.notes || {};
+        // SIEMPRE sanitizar notas antes de spread para evitar corrupción
+        const notasActuales = sanitizeNotes(vendedorActual?.notes);
         await this.supabase.client
           .from('team_members')
           .update({
@@ -5204,7 +5865,9 @@ Responde con fecha y hora:
                 leads: result.multipleLeads,
                 dia: result.dia,
                 hora: result.hora,
-                ampm: result.ampm
+                minutos: result.minutos,
+                ampm: result.ampm,
+                desarrollo: result.desarrollo
               }
             }
           })
@@ -5219,6 +5882,31 @@ Responde con fecha y hora:
       }
 
       await this.twilio.sendWhatsAppMessage(from, schedulingService.formatAgendarCitaExito(result));
+
+      // Guardar estado para notificación al lead (si tiene teléfono)
+      if (result.leadPhone) {
+        const { data: vendedorActualNotify } = await this.supabase.client
+          .from('team_members')
+          .select('notes')
+          .eq('id', vendedor.id)
+          .single();
+
+        const notesToSave = sanitizeNotes(vendedorActualNotify?.notes);
+        notesToSave.pending_agendar_notify = {
+          lead_id: result.appointmentId,  // En este caso no tenemos lead_id directo
+          lead_name: result.leadName,
+          lead_phone: result.leadPhone,
+          fecha: result.fecha,
+          hora: result.hora,
+          ubicacion: result.ubicacion,
+          gpsLink: result.gpsLink,
+          timestamp: Date.now()
+        };
+        await this.supabase.client
+          .from('team_members')
+          .update({ notes: notesToSave })
+          .eq('id', vendedor.id);
+      }
     } catch (error) {
       console.error('Error en agendarCitaCompleta:', error);
       await this.twilio.sendWhatsAppMessage(from, 'Error al agendar cita. Intenta de nuevo.');
@@ -5242,8 +5930,12 @@ Responde con fecha y hora:
       const result = await schedulingService.cancelarCitaCompleto(nombreLead, vendedor);
 
       if (result.multipleLeads) {
-        // Guardar estado para selección numérica
-        const notes = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
+        // Guardar estado para selección numérica (sanitizar para evitar corrupción)
+        let rawNotes = vendedor.notes;
+        if (typeof rawNotes === 'string') {
+          try { rawNotes = JSON.parse(rawNotes); } catch (e) { rawNotes = {}; }
+        }
+        const notes = sanitizeNotes(rawNotes);
         notes.pending_cita_action = {
           action: 'cancelar',
           leads: result.multipleLeads,
@@ -5298,13 +5990,13 @@ Responde con fecha y hora:
         result.multipleLeads.forEach((l: any, i: number) => {
           msg += `${i + 1}. ${l.name} (...${l.phone?.slice(-4) || '????'})\n`;
         });
-        // Guardar contexto para procesar la selección
+        // Guardar contexto para procesar la selección (sanitizar para evitar corrupción)
         const { data: vendedorData } = await this.supabase.client
           .from('team_members')
           .select('notes')
           .eq('id', vendedor.id)
           .single();
-        const currentNotes = typeof vendedorData?.notes === 'object' ? vendedorData.notes : {};
+        const currentNotes = sanitizeNotes(vendedorData?.notes);
         await this.supabase.client
           .from('team_members')
           .update({
@@ -5327,6 +6019,32 @@ Responde con fecha y hora:
       }
 
       await this.twilio.sendWhatsAppMessage(from, schedulingService.formatReagendarCitaExito(result));
+
+      // Guardar estado para notificación al lead (si tiene teléfono)
+      if (result.leadPhone) {
+        const { data: vendedorData } = await this.supabase.client
+          .from('team_members')
+          .select('notes')
+          .eq('id', vendedor.id)
+          .single();
+        const currentNotes = sanitizeNotes(vendedorData?.notes);
+        await this.supabase.client
+          .from('team_members')
+          .update({
+            notes: {
+              ...currentNotes,
+              pending_reagendar_notify: {
+                lead_id: result.leadId,
+                lead_name: result.leadName,
+                lead_phone: result.leadPhone,
+                fecha: result.nuevaFecha,
+                hora: result.nuevaHora,
+                timestamp: Date.now()
+              }
+            }
+          })
+          .eq('id', vendedor.id);
+      }
     } catch (error) {
       console.error('Error reagendando cita:', error);
       await this.twilio.sendWhatsAppMessage(from, 'Error al reagendar cita.');
@@ -5659,6 +6377,170 @@ Responde con fecha y hora:
     } catch (e) {
       console.log('Error en meta avance:', e);
       await this.twilio.sendWhatsAppMessage(from, 'Error al obtener meta.');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // VENDEDOR: QUIEN ES [nombre] - Buscar info de lead
+  // ═══════════════════════════════════════════════════════════════════
+  private async vendedorQuienEs(from: string, nombreLead: string, vendedor: any): Promise<void> {
+    try {
+      const esAdmin = ['admin', 'coordinador', 'ceo', 'director'].includes(vendedor.role?.toLowerCase() || '');
+
+      let query = this.supabase.client
+        .from('leads')
+        .select('id, name, phone, stage, status, created_at, notes')
+        .ilike('name', `%${nombreLead}%`);
+
+      if (!esAdmin) {
+        query = query.eq('assigned_to', vendedor.id);
+      }
+
+      const { data: leads } = await query.limit(5);
+
+      if (!leads || leads.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from, `❌ No encontré a "${nombreLead}" en tus leads.`);
+        return;
+      }
+
+      if (leads.length === 1) {
+        const l = leads[0];
+        const msg = `👤 *${l.name}*\n\n` +
+          `📱 Tel: ${l.phone || 'No disponible'}\n` +
+          `📌 Etapa: ${l.stage || l.status || 'Sin etapa'}\n` +
+          `📅 Registrado: ${new Date(l.created_at).toLocaleDateString('es-MX')}`;
+        await this.twilio.sendWhatsAppMessage(from, msg);
+      } else {
+        let msg = `🔍 Encontré ${leads.length} leads:\n\n`;
+        leads.forEach((l, i) => {
+          msg += `*${i + 1}.* ${l.name} (${l.stage || l.status || 'Sin etapa'})\n`;
+        });
+        await this.twilio.sendWhatsAppMessage(from, msg);
+      }
+    } catch (e) {
+      console.log('Error en quien es:', e);
+      await this.twilio.sendWhatsAppMessage(from, `❌ Error al buscar "${nombreLead}".`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // VENDEDOR: BROCHURE [desarrollo] - Enviar brochure de desarrollo
+  // ═══════════════════════════════════════════════════════════════════
+  private async vendedorEnviarBrochure(from: string, desarrollo: string, vendedor: any): Promise<void> {
+    try {
+      // Buscar por desarrollo O por nombre del modelo
+      let { data: props } = await this.supabase.client
+        .from('properties')
+        .select('name, development, brochure_urls')
+        .ilike('development', `%${desarrollo}%`)
+        .not('brochure_urls', 'is', null)
+        .limit(1);
+
+      // Si no encuentra por desarrollo, buscar por nombre del modelo
+      if (!props || props.length === 0) {
+        const { data: byName } = await this.supabase.client
+          .from('properties')
+          .select('name, development, brochure_urls')
+          .ilike('name', `%${desarrollo}%`)
+          .not('brochure_urls', 'is', null)
+          .limit(1);
+        props = byName;
+      }
+
+      if (!props || props.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from, `❌ No encontré brochure para "${desarrollo}".`);
+        return;
+      }
+
+      const brochureRaw = props[0].brochure_urls;
+      const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
+
+      if (!brochureUrl) {
+        await this.twilio.sendWhatsAppMessage(from, `❌ "${desarrollo}" no tiene brochure configurado.`);
+        return;
+      }
+
+      await this.twilio.sendWhatsAppMessage(from, `📄 *Brochure ${props[0].development}:*\n${brochureUrl}`);
+    } catch (e) {
+      console.log('Error en brochure:', e);
+      await this.twilio.sendWhatsAppMessage(from, `❌ Error al obtener brochure.`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // VENDEDOR: UBICACION [desarrollo] - Enviar GPS del desarrollo
+  // ═══════════════════════════════════════════════════════════════════
+  private async vendedorEnviarUbicacion(from: string, desarrollo: string, vendedor: any): Promise<void> {
+    try {
+      // Buscar por desarrollo O por nombre del modelo
+      let { data: props } = await this.supabase.client
+        .from('properties')
+        .select('name, development, gps_link, address')
+        .ilike('development', `%${desarrollo}%`)
+        .not('gps_link', 'is', null)
+        .limit(1);
+
+      // Si no encuentra por desarrollo, buscar por nombre del modelo
+      if (!props || props.length === 0) {
+        const { data: byName } = await this.supabase.client
+          .from('properties')
+          .select('name, development, gps_link, address')
+          .ilike('name', `%${desarrollo}%`)
+          .not('gps_link', 'is', null)
+          .limit(1);
+        props = byName;
+      }
+
+      if (!props || props.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from, `❌ No encontré ubicación para "${desarrollo}".`);
+        return;
+      }
+
+      const prop = props[0];
+      let msg = `📍 *Ubicación ${prop.development}:*\n`;
+      if (prop.address) msg += `${prop.address}\n`;
+      msg += `\n🗺️ ${prop.gps_link}`;
+
+      await this.twilio.sendWhatsAppMessage(from, msg);
+    } catch (e) {
+      console.log('Error en ubicacion:', e);
+      await this.twilio.sendWhatsAppMessage(from, `❌ Error al obtener ubicación.`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // VENDEDOR: VIDEO [desarrollo] - Enviar video del desarrollo
+  // ═══════════════════════════════════════════════════════════════════
+  private async vendedorEnviarVideo(from: string, desarrollo: string, vendedor: any): Promise<void> {
+    try {
+      // Buscar por desarrollo O por nombre del modelo
+      let { data: props } = await this.supabase.client
+        .from('properties')
+        .select('name, development, youtube_link')
+        .ilike('development', `%${desarrollo}%`)
+        .not('youtube_link', 'is', null)
+        .limit(1);
+
+      // Si no encuentra por desarrollo, buscar por nombre del modelo
+      if (!props || props.length === 0) {
+        const { data: byName } = await this.supabase.client
+          .from('properties')
+          .select('name, development, youtube_link')
+          .ilike('name', `%${desarrollo}%`)
+          .not('youtube_link', 'is', null)
+          .limit(1);
+        props = byName;
+      }
+
+      if (!props || props.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from, `❌ No encontré video para "${desarrollo}".`);
+        return;
+      }
+
+      await this.twilio.sendWhatsAppMessage(from, `🎬 *Video ${props[0].development}:*\n${props[0].youtube_link}`);
+    } catch (e) {
+      console.log('Error en video:', e);
+      await this.twilio.sendWhatsAppMessage(from, `❌ Error al obtener video.`);
     }
   }
 
@@ -6553,7 +7435,7 @@ Responde con fecha y hora:
 
   // Parsear parámetros de reagendar (día y hora) del comando original
   // NOTA: Usa función extraída en utils/vendedorParsers.ts para facilitar testing
-  private parseReagendarParams(body: string): { dia?: string; hora?: string; ampm?: string } {
+  private parseReagendarParams(body: string): { dia?: string; hora?: string; minutos?: string; ampm?: string } {
     return parseReagendarParamsUtil(body);
   }
 

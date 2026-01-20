@@ -1,4 +1,25 @@
 import { SupabaseService } from './supabase';
+
+/**
+ * Sanitiza notas para evitar corrupción.
+ * Elimina keys numéricos y asegura que sea un objeto válido.
+ */
+export function sanitizeNotes(notes: any): Record<string, any> {
+  // Si no es objeto o es null/undefined, retornar objeto vacío
+  if (!notes || typeof notes !== 'object' || Array.isArray(notes)) {
+    return {};
+  }
+
+  // Filtrar keys numéricos (señal de corrupción)
+  const sanitized: Record<string, any> = {};
+  for (const key of Object.keys(notes)) {
+    if (!/^\d+$/.test(key)) {
+      sanitized[key] = notes[key];
+    }
+  }
+  return sanitized;
+}
+
 export class VendorCommandsService {
   constructor(private supabase: SupabaseService) {}
 
@@ -18,7 +39,22 @@ export class VendorCommandsService {
           notas = vendedor.notes;
         }
       }
-      return { notes: notas, notasVendedor: notas };
+
+      // SIEMPRE sanitizar notas para prevenir corrupción
+      const notasSanitizadas = sanitizeNotes(notas);
+
+      // Si hubo limpieza (diferente tamaño), guardar en BD
+      const keysOriginal = Object.keys(notas).length;
+      const keysSanitizadas = Object.keys(notasSanitizadas).length;
+      if (keysOriginal !== keysSanitizadas) {
+        console.log(`⚠️ NOTAS SANITIZADAS para ${vendedorId}: ${keysOriginal} -> ${keysSanitizadas} keys`);
+        await this.supabase.client
+          .from('team_members')
+          .update({ notes: notasSanitizadas })
+          .eq('id', vendedorId);
+      }
+
+      return { notes: notasSanitizadas, notasVendedor: notasSanitizadas };
     } catch (e) {
       return { notes: {}, notasVendedor: {} };
     }
@@ -83,6 +119,36 @@ export class VendorCommandsService {
     // ═══ META ═══
     if (/^(mi\s+)?meta$/i.test(msg)) {
       return { matched: true, handlerName: 'vendedorMetaAvance' };
+    }
+
+    // ═══ MOVER ETAPA (adelante/atrás/pasó a) ═══
+    // Formato: "Juan adelante", "Juan al siguiente", "Juan atrás", "Juan pasó a negociación"
+    if (/\b(siguiente|adelante|avanzar|proximo|próximo|atras|atrás|regresar|anterior|pasó\s+a|paso\s+a|pasa\s+a)\b/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorMoverEtapa', handlerParams: { texto: body } };
+    }
+
+    // ═══ QUIEN ES [nombre] ═══
+    const matchQuienEs = msg.match(/^(?:quien\s+es|quién\s+es|buscar|info\s+de?)\s+(.+)$/i);
+    if (matchQuienEs) {
+      return { matched: true, handlerName: 'vendedorQuienEs', handlerParams: { nombre: matchQuienEs[1].trim() } };
+    }
+
+    // ═══ BROCHURE [desarrollo] ═══
+    const matchBrochure = msg.match(/^(?:brochure|brouchure|folleto|catalogo|catálogo)\s+(.+)$/i);
+    if (matchBrochure) {
+      return { matched: true, handlerName: 'vendedorBrochure', handlerParams: { desarrollo: matchBrochure[1].trim() } };
+    }
+
+    // ═══ UBICACION [desarrollo] ═══
+    const matchUbicacion = msg.match(/^(?:ubicacion|ubicación|donde\s+(?:queda|esta|está)|gps|mapa)\s+(.+)$/i);
+    if (matchUbicacion) {
+      return { matched: true, handlerName: 'vendedorUbicacion', handlerParams: { desarrollo: matchUbicacion[1].trim() } };
+    }
+
+    // ═══ VIDEO [desarrollo] ═══
+    const matchVideo = msg.match(/^(?:video|ver|tour)\s+(.+)$/i);
+    if (matchVideo) {
+      return { matched: true, handlerName: 'vendedorVideo', handlerParams: { desarrollo: matchVideo[1].trim() } };
     }
 
     return { matched: false };
@@ -296,5 +362,223 @@ export class VendorCommandsService {
     });
 
     return msg;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // MOVER FUNNEL (adelante/atrás)
+  // ═══════════════════════════════════════════════════════════════════
+
+  private readonly FUNNEL_STAGES = [
+    'new',
+    'contacted',
+    'qualified',
+    'visit_scheduled',
+    'visited',
+    'negotiating',
+    'reserved',
+    'sold',
+    'delivered'
+  ];
+
+  private readonly STAGE_LABELS: Record<string, string> = {
+    'new': '🆕 NUEVO',
+    'contacted': '📞 CONTACTADO',
+    'qualified': '✅ CALIFICADO',
+    'visit_scheduled': '📅 CITA AGENDADA',
+    'visited': '🏠 VISITÓ',
+    'negotiating': '💰 NEGOCIANDO',
+    'reserved': '📝 RESERVADO',
+    'sold': '✅ VENDIDO',
+    'delivered': '🏠 ENTREGADO'
+  };
+
+  getFunnelStageLabel(stage: string): string {
+    return this.STAGE_LABELS[stage] || stage;
+  }
+
+  formatMultipleLeads(leads: any[]): string {
+    let msg = `🔍 Encontré ${leads.length} leads:\n\n`;
+    leads.forEach((l, i) => {
+      msg += `*${i + 1}.* ${l.name} (${this.STAGE_LABELS[l.stage] || l.stage})\n`;
+    });
+    msg += `\n💡 Sé más específico con el nombre`;
+    return msg;
+  }
+
+  async moveFunnelStep(
+    nombreLead: string,
+    vendedorId: string,
+    role: string,
+    direction: 'next' | 'prev'
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    multipleLeads?: any[];
+    lead?: any;
+    newStatus?: string;
+  }> {
+    try {
+      const esAdmin = ['admin', 'coordinador', 'ceo', 'director'].includes(role?.toLowerCase() || '');
+
+      // Buscar leads por nombre
+      let query = this.supabase.client
+        .from('leads')
+        .select('id, name, stage, assigned_to')
+        .ilike('name', `%${nombreLead}%`);
+
+      if (!esAdmin) {
+        query = query.eq('assigned_to', vendedorId);
+      }
+
+      const { data: leads, error } = await query.limit(10);
+
+      if (error || !leads || leads.length === 0) {
+        return { success: false, error: `❌ No encontré a "${nombreLead}"` };
+      }
+
+      if (leads.length > 1) {
+        // Si hay match exacto, usarlo
+        const exactMatch = leads.find(l => l.name.toLowerCase() === nombreLead.toLowerCase());
+        if (!exactMatch) {
+          return { success: false, multipleLeads: leads };
+        }
+        leads.splice(0, leads.length, exactMatch);
+      }
+
+      const lead = leads[0];
+      const currentIndex = this.FUNNEL_STAGES.indexOf(lead.stage);
+
+      if (currentIndex === -1) {
+        // Stage no está en el funnel estándar, moverlo a contacted
+        const newStatus = direction === 'next' ? 'contacted' : 'new';
+        await this.supabase.client
+          .from('leads')
+          .update({ stage: newStatus, updated_at: new Date().toISOString() })
+          .eq('id', lead.id);
+        return { success: true, lead, newStatus };
+      }
+
+      let newIndex: number;
+      if (direction === 'next') {
+        newIndex = Math.min(currentIndex + 1, this.FUNNEL_STAGES.length - 1);
+      } else {
+        newIndex = Math.max(currentIndex - 1, 0);
+      }
+
+      if (newIndex === currentIndex) {
+        const msg = direction === 'next'
+          ? `⚠️ ${lead.name} ya está en la última etapa (${this.STAGE_LABELS[lead.stage]})`
+          : `⚠️ ${lead.name} ya está en la primera etapa (${this.STAGE_LABELS[lead.stage]})`;
+        return { success: false, error: msg };
+      }
+
+      const newStatus = this.FUNNEL_STAGES[newIndex];
+
+      await this.supabase.client
+        .from('leads')
+        .update({ stage: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', lead.id);
+
+      console.log(`✅ Lead ${lead.name} movido de ${lead.stage} a ${newStatus}`);
+
+      return { success: true, lead, newStatus };
+    } catch (e) {
+      console.error('Error en moveFunnelStep:', e);
+      return { success: false, error: '❌ Error al mover lead' };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // VER LEADS POR TIPO
+  // ═══════════════════════════════════════════════════════════════════
+  async getLeadsPorTipo(vendedorId: string, esAdmin: boolean, tipo: string): Promise<any[]> {
+    let query = this.supabase.client
+      .from('leads')
+      .select('id, name, stage, phone, updated_at')
+      .order('updated_at', { ascending: false })
+      .limit(20);
+
+    if (!esAdmin) {
+      query = query.eq('assigned_to', vendedorId);
+    }
+
+    switch (tipo) {
+      case 'compradores':
+        query = query.in('stage', ['reserved', 'sold', 'delivered']);
+        break;
+      case 'caidos':
+        query = query.eq('stage', 'lost');
+        break;
+      case 'inactivos':
+        const hace30dias = new Date();
+        hace30dias.setDate(hace30dias.getDate() - 30);
+        query = query.lt('updated_at', hace30dias.toISOString());
+        break;
+      case 'archivados':
+        query = query.eq('stage', 'archived');
+        break;
+      default:
+        // todos activos
+        query = query.in('stage', ['new', 'contacted', 'qualified', 'visit_scheduled', 'visited', 'negotiating']);
+    }
+
+    const { data } = await query;
+    return data || [];
+  }
+
+  formatLeadsPorTipo(leads: any[]): string {
+    if (!leads || leads.length === 0) {
+      return `📭 No hay leads en esta categoría`;
+    }
+
+    let msg = `👥 *LEADS* (${leads.length})\n\n`;
+    leads.slice(0, 15).forEach(l => {
+      msg += `• ${l.name} (${this.STAGE_LABELS[l.stage] || l.stage})\n`;
+    });
+
+    if (leads.length > 15) {
+      msg += `\n... y ${leads.length - 15} más`;
+    }
+
+    return msg;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ARCHIVAR/DESARCHIVAR LEAD
+  // ═══════════════════════════════════════════════════════════════════
+  async archivarDesarchivarLead(
+    nombreLead: string,
+    vendedorId: string,
+    esAdmin: boolean,
+    archivar: boolean
+  ): Promise<{ success: boolean; error?: string; lead?: any }> {
+    try {
+      let query = this.supabase.client
+        .from('leads')
+        .select('id, name, stage')
+        .ilike('name', `%${nombreLead}%`);
+
+      if (!esAdmin) {
+        query = query.eq('assigned_to', vendedorId);
+      }
+
+      const { data: leads } = await query.limit(1);
+
+      if (!leads || leads.length === 0) {
+        return { success: false, error: `❌ No encontré a "${nombreLead}"` };
+      }
+
+      const lead = leads[0];
+      const newStage = archivar ? 'archived' : 'new';
+
+      await this.supabase.client
+        .from('leads')
+        .update({ stage: newStage, updated_at: new Date().toISOString() })
+        .eq('id', lead.id);
+
+      return { success: true, lead };
+    } catch (e) {
+      return { success: false, error: '❌ Error al actualizar lead' };
+    }
   }
 }
