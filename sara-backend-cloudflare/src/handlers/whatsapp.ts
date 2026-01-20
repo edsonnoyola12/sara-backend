@@ -1,6 +1,7 @@
 import { SupabaseService } from '../services/supabase';
 import { ClaudeService } from '../services/claude';
 import { TwilioService } from '../services/twilio';
+import { parseReagendarParams as parseReagendarParamsUtil } from '../utils/vendedorParsers';
 import { FollowupService } from '../services/followupService';
 import { FollowupApprovalService } from '../services/followupApprovalService';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
@@ -6551,41 +6552,9 @@ Responde con fecha y hora:
   }
 
   // Parsear parámetros de reagendar (día y hora) del comando original
+  // NOTA: Usa función extraída en utils/vendedorParsers.ts para facilitar testing
   private parseReagendarParams(body: string): { dia?: string; hora?: string; ampm?: string } {
-    // Ejemplos: "reagendar juan mañana 4pm", "reagendar ana lunes 10am", "reagendar ana lunes 10 am"
-    const texto = body.toLowerCase().trim();
-
-    // Buscar día
-    const diasPatterns = [
-      'hoy', 'mañana', 'pasado mañana',
-      'lunes', 'martes', 'miércoles', 'miercoles', 'jueves', 'viernes', 'sábado', 'sabado', 'domingo'
-    ];
-    let dia: string | undefined;
-    for (const d of diasPatterns) {
-      if (texto.includes(d)) {
-        dia = d;
-        break;
-      }
-    }
-
-    // Buscar hora y am/pm
-    const horaMatch = texto.match(/(\d{1,2})\s*(am|pm)?/i);
-    let hora: string | undefined;
-    let ampm: string | undefined;
-
-    if (horaMatch) {
-      hora = horaMatch[1]; // Solo el número
-      ampm = horaMatch[2]?.toLowerCase(); // am o pm si existe
-
-      // Si no encontró am/pm en el match, buscar después del número
-      if (!ampm) {
-        const afterNumber = texto.slice(texto.indexOf(horaMatch[0]) + horaMatch[0].length).trim();
-        if (afterNumber.startsWith('am')) ampm = 'am';
-        else if (afterNumber.startsWith('pm')) ampm = 'pm';
-      }
-    }
-
-    return { dia, hora, ampm };
+    return parseReagendarParamsUtil(body);
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
