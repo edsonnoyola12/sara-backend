@@ -4208,6 +4208,138 @@ Mensaje: ${mensaje}`;
     }
 
     // ═══════════════════════════════════════════════════════════
+    // TEST FOLLOW-UPS: Verificar qué leads cumplen criterios
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/test-followups') {
+      console.log('🔍 TEST: Verificando criterios de follow-ups...');
+
+      const ahora = new Date();
+      const hace24h = new Date(ahora.getTime() - 24 * 60 * 60 * 1000);
+      const hace3dias = new Date(ahora.getTime() - 3 * 24 * 60 * 60 * 1000);
+      const hace7dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      const resultados: any = {};
+
+      // 1. Follow-up 24h leads nuevos
+      const { data: leads24h } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, created_at, alerta_enviada_24h')
+        .eq('status', 'new')
+        .lt('created_at', hace24h.toISOString())
+        .is('alerta_enviada_24h', null)
+        .not('phone', 'is', null)
+        .limit(10);
+
+      resultados.followUp24h = {
+        criterio: 'status=new, created_at < 24h, alerta_enviada_24h IS NULL',
+        encontrados: leads24h?.length || 0,
+        leads: leads24h?.map(l => ({ name: l.name, phone: l.phone, created: l.created_at })) || []
+      };
+
+      // 2. Reminder docs crédito
+      const { data: leadsDocs } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, credit_status, updated_at')
+        .eq('credit_status', 'docs_requested')
+        .lt('updated_at', hace3dias.toISOString())
+        .not('phone', 'is', null)
+        .limit(10);
+
+      resultados.reminderDocs = {
+        criterio: 'credit_status=docs_requested, updated_at < 3 días',
+        encontrados: leadsDocs?.length || 0,
+        leads: leadsDocs?.map(l => ({ name: l.name, phone: l.phone })) || []
+      };
+
+      // 3. Video felicitación post-venta
+      const { data: leadsSold } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, property_interest, notes, updated_at')
+        .eq('status', 'sold')
+        .gt('updated_at', hace7dias.toISOString())
+        .not('phone', 'is', null)
+        .limit(10);
+
+      const leadsSinVideo = leadsSold?.filter(l => {
+        const notas = typeof l.notes === 'object' ? l.notes : {};
+        return !(notas as any)?.video_felicitacion_generado;
+      }) || [];
+
+      resultados.videoPostVenta = {
+        criterio: 'status=sold, updated_at > 7 días, sin video_felicitacion_generado',
+        encontrados: leadsSinVideo.length,
+        leads: leadsSinVideo.map(l => ({ name: l.name, property_interest: l.property_interest }))
+      };
+
+      // Distribución de status
+      const { data: allLeads } = await supabase.client
+        .from('leads')
+        .select('status')
+        .limit(2000);
+
+      const statusCount: Record<string, number> = {};
+      allLeads?.forEach(l => {
+        statusCount[l.status || 'null'] = (statusCount[l.status || 'null'] || 0) + 1;
+      });
+      resultados.distribucionStatus = statusCount;
+
+      // Credit status distribution
+      const { data: creditLeads } = await supabase.client
+        .from('leads')
+        .select('credit_status')
+        .limit(1000);
+
+      const creditCount: Record<string, number> = {};
+      creditLeads?.forEach(l => {
+        creditCount[l.credit_status || 'null'] = (creditCount[l.credit_status || 'null'] || 0) + 1;
+      });
+      resultados.distribucionCreditStatus = creditCount;
+
+      return corsResponse(JSON.stringify(resultados, null, 2));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // TEST: Listar leads y actualizar status
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/list-leads') {
+      const { data: leads } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, status, property_interest')
+        .limit(20);
+      return corsResponse(JSON.stringify(leads, null, 2));
+    }
+
+    if (url.pathname.startsWith('/set-sold/')) {
+      const leadId = url.pathname.split('/').pop();
+      const { data: lead, error } = await supabase.client
+        .from('leads')
+        .update({
+          status: 'sold',
+          updated_at: new Date().toISOString(),
+          notes: { video_felicitacion_generado: null } // Reset para probar
+        })
+        .eq('id', leadId)
+        .select()
+        .single();
+
+      if (error) {
+        return corsResponse(JSON.stringify({ error: error.message }), 400);
+      }
+      return corsResponse(JSON.stringify({
+        message: 'Lead actualizado a sold',
+        lead: { id: lead.id, name: lead.name, status: lead.status, property_interest: lead.property_interest }
+      }, null, 2));
+    }
+
+    // Forzar ejecución de video post-venta
+    if (url.pathname === '/run-video-postventa') {
+      console.log('🎬 Forzando ejecución de video post-venta...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await videoFelicitacionPostVenta(supabase, meta, env);
+      return corsResponse(JSON.stringify({ message: 'Video post-venta ejecutado. Revisa /debug-videos para ver el estado.' }));
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // REENVIAR VIDEO: Para videos que tienen URL pero no se enviaron
     // ═══════════════════════════════════════════════════════════
     if (url.pathname.startsWith('/retry-video/')) {
@@ -17305,26 +17437,47 @@ async function videoFelicitacionPostVenta(supabase: SupabaseService, meta: MetaW
         }
 
         // Llamar a Google Veo 3 API
-        const googleApiKey = env.GOOGLE_AI_API_KEY;
+        const googleApiKey = env.GEMINI_API_KEY;
         if (!googleApiKey) {
-          console.log('🎬 GOOGLE_AI_API_KEY no configurada');
+          console.log('🎬 GEMINI_API_KEY no configurada');
           break;
         }
 
+        // Descargar imagen y convertir a base64
+        console.log(`🎬 Descargando imagen de ${desarrollo}...`);
+        const imgResponse = await fetch(fotoDesarrollo);
+        if (!imgResponse.ok) {
+          console.error(`Error descargando imagen para ${lead.name}`);
+          continue;
+        }
+        const imgBuffer = await imgResponse.arrayBuffer();
+        // Convertir a base64 de forma eficiente (evita stack overflow en imágenes grandes)
+        const bytes = new Uint8Array(imgBuffer);
+        let binary = '';
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          const chunk = bytes.subarray(i, i + chunkSize);
+          binary += String.fromCharCode.apply(null, Array.from(chunk));
+        }
+        const imgBase64 = btoa(binary);
+        console.log(`🎬 Imagen descargada: ${bytes.length} bytes`);
+
         const veoResponse = await fetch(
-          'https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:predictLongRunning?key=' + googleApiKey,
+          'https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning',
           {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': googleApiKey
+            },
             body: JSON.stringify({
               instances: [{
                 prompt: prompt,
-                image: { gcsUri: '', httpUri: fotoDesarrollo }
+                image: { bytesBase64Encoded: imgBase64, mimeType: 'image/jpeg' }
               }],
               parameters: {
-                aspectRatio: '16:9',
-                personGeneration: 'allow_adult',
-                sampleCount: 1
+                aspectRatio: '9:16',
+                durationSeconds: 8
               }
             })
           }
