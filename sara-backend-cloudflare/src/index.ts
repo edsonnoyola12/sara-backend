@@ -4314,8 +4314,18 @@ Mensaje: ${mensaje}`;
 
       try {
         const apiKey = env.GEMINI_API_KEY;
-        // Usar thumbnail de YouTube como foto (tamaño pequeño y seguro)
-        const testFoto = 'https://img.youtube.com/vi/xzPXJ00yK0A/maxresdefault.jpg';
+
+        // Fotos de fachadas por desarrollo
+        const fotosDesarrollo: Record<string, string> = {
+          'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg',
+          'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2021/07/M4215335.jpg',
+          'Andes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg',
+          'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-min-scaled-e1740520053367.jpg',
+          'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
+          'Acacia': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/ACACIA-1-scaled.jpg'
+        };
+
+        const testFoto = fotosDesarrollo[desarrollo] || fotosDesarrollo['Monte Verde'];
 
         const imgResponse = await fetch(testFoto);
         const imgBuffer = await imgResponse.arrayBuffer();
@@ -4335,8 +4345,8 @@ Mensaje: ${mensaje}`;
         const esFemenino = nombreLower.endsWith('a') && !excepcionesMasculinas.some(e => nombreLower.includes(e));
         const bienvenida = esFemenino ? 'bienvenida' : 'bienvenido';
 
-        // PROMPT: Avatar DENTRO de la propiedad, no frente a pantalla
-        const prompt = `A friendly female real estate agent standing inside the property shown in the image. She is positioned naturally in the space, at a comfortable distance from camera. The room and house surroundings are visible around her. She smiles and speaks welcomingly in Spanish: "Hola ${nombre}, ${bienvenida} a ti y a tu familia a tu nuevo hogar aquí en ${desarrollo}". Wide shot showing both agent and interior, cinematic lighting, 4k.`;
+        // PROMPT: Avatar DENTRO de la propiedad, SIN subtítulos ni texto
+        const prompt = `A friendly female real estate agent standing inside the property shown in the image. She is positioned naturally in the space, at a comfortable distance from camera. The room and house surroundings are visible around her. She smiles and speaks welcomingly in Spanish: "Hola ${nombre}, ${bienvenida} a ti y a tu familia a tu nuevo hogar aquí en ${desarrollo}". Wide shot showing both agent and interior, cinematic lighting, 4k. No text, no subtitles, no captions, no overlays, clean video only.`;
 
         const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning', {
           method: 'POST',
