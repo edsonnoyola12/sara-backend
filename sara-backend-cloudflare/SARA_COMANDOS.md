@@ -502,6 +502,40 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 - **Límite**: Máx 15 videos/día (configurable en `system_config`)
 - **Función**: `videoFelicitacionPostVenta()`
 
+### 4. Video de Bienvenida Lead Nuevo (Veo 3)
+- **Horario**: Cada 2 horas de 8am-8pm
+- **Target**: Leads con `status='new'` creados en últimas 2 horas
+- **Campo de control**: `notes.video_bienvenida_enviado` (fecha)
+- **Acción**:
+  - Genera video personalizado con Veo 3
+  - Avatar dando la bienvenida frente a fachada del desarrollo
+  - Se guarda en `pending_videos` para envío automático
+- **Función**: `videoBienvenidaLeadNuevo()`
+
+### 5. Alertas de Leads Calientes
+- **Horario**: En tiempo real (cada mensaje de lead)
+- **Target**: Cualquier lead que envíe mensaje con señales de compra
+- **Señales detectadas**:
+  - **Muy alta**: visita, apartado, urgencia, decisión de compra
+  - **Alta**: precio, crédito
+  - **Media**: disponibilidad (no alerta)
+- **Acción**:
+  - Alerta inmediata al vendedor con contexto
+  - Guarda historial en `notes.historial_señales_calientes`
+- **Cooldown**: 30 minutos entre alertas del mismo lead
+- **Funciones**: `detectarSeñalesCalientes()`, `alertarLeadCaliente()`
+
+### 6. Recuperación Abandonos Crédito
+- **Horario**: 3pm L-V
+- **Target**: Leads con `credit_flow_context` abandonado 7-30 días
+- **Campo de control**: `notes.ultimo_intento_recuperacion_credito` (fecha)
+- **Cooldown**: 14 días entre intentos
+- **Acción**:
+  - Mensaje personalizado según etapa donde abandonaron
+  - Notifica al vendedor/asesor
+- **Límite**: Máx 5 por ejecución
+- **Función**: `recuperarAbandonosCredito()`
+
 ### Otros Follow-ups Existentes
 | Función | Horario | Descripción |
 |---------|---------|-------------|
@@ -517,6 +551,13 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-21
+
+**Sesión 3 (13:00-)**
+- ✅ Corregido prompt de video post-venta (fachada en lugar de interior, "¡Felicidades!" en lugar de "hogar")
+- ✅ Implementado video de bienvenida para leads nuevos con Veo 3
+- ✅ Implementada detección de leads calientes en tiempo real
+- ✅ Implementada recuperación de abandonos en proceso de crédito
+- ✅ Documentación actualizada de todos los follow-ups
 
 **Sesión 2 (01:00-)**
 - ✅ Implementado follow-up 24h para leads nuevos (campo `alerta_enviada_24h`)

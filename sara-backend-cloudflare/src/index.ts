@@ -3681,6 +3681,31 @@ Mensaje: ${mensaje}`;
           }
           // ═══ FIN MANEJO DE IMÁGENES ═══
 
+          // ═══ DETECCIÓN DE LEADS CALIENTES ═══
+          // Detectar señales de compra ANTES de procesar el mensaje
+          if (text && text.length > 3) {
+            try {
+              const señalesCalientes = detectarSeñalesCalientes(text);
+              if (señalesCalientes.length > 0) {
+                // Buscar el lead para obtener info
+                const cleanPhoneHot = from.replace(/\D/g, '');
+                const { data: leadHot } = await supabase.client
+                  .from('leads')
+                  .select('id, name, phone, assigned_to, property_interest, notes')
+                  .or(`phone.eq.${cleanPhoneHot},phone.like.%${cleanPhoneHot.slice(-10)}`)
+                  .single();
+
+                if (leadHot && leadHot.assigned_to) {
+                  console.log(`🔥 Señales calientes detectadas para ${leadHot.name}: ${señalesCalientes.map(s => s.tipo).join(', ')}`);
+                  await alertarLeadCaliente(supabase, meta, leadHot, text, señalesCalientes);
+                }
+              }
+            } catch (hotErr) {
+              console.error('Error en detección de leads calientes:', hotErr);
+            }
+          }
+          // ═══ FIN DETECCIÓN DE LEADS CALIENTES ═══
+
           await handler.handleIncomingMessage(`whatsapp:+${from}`, text, env);
 
           console.log('✅ Mensaje procesado correctamente');
@@ -4337,6 +4362,13 @@ Mensaje: ${mensaje}`;
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       await videoFelicitacionPostVenta(supabase, meta, env);
       return corsResponse(JSON.stringify({ message: 'Video post-venta ejecutado. Revisa /debug-videos para ver el estado.' }));
+    }
+
+    if (url.pathname === '/run-video-bienvenida') {
+      console.log('🎬 Forzando ejecución de video bienvenida...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await videoBienvenidaLeadNuevo(supabase, meta, env);
+      return corsResponse(JSON.stringify({ message: 'Video bienvenida ejecutado. Revisa /debug-videos para ver el estado.' }));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -9938,6 +9970,20 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     if (mexicoHour === 10 && isFirstRunOfHour) {
       console.log('🎬 Verificando nuevas ventas para video felicitación...');
       await videoFelicitacionPostVenta(supabase, meta, env);
+    }
+
+    // VIDEO BIENVENIDA LEADS NUEVOS: cada 2 horas en horario laboral (8am-8pm)
+    // Genera video personalizado Veo 3 para leads que acaban de entrar al sistema
+    if (isFirstRunOfHour && mexicoHour >= 8 && mexicoHour <= 20 && mexicoHour % 2 === 0) {
+      console.log('🎬 Verificando leads nuevos para video de bienvenida...');
+      await videoBienvenidaLeadNuevo(supabase, meta, env);
+    }
+
+    // RECUPERACIÓN ABANDONOS CRÉDITO: 3pm L-V
+    // Re-engagement para leads que empezaron proceso de crédito pero no continuaron
+    if (mexicoHour === 15 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('🏦 Verificando abandonos de crédito para recuperación...');
+      await recuperarAbandonosCredito(supabase, meta);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -17559,5 +17605,533 @@ async function videoFelicitacionPostVenta(supabase: SupabaseService, meta: MetaW
 
   } catch (e) {
     console.error('Error en videoFelicitacionPostVenta:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// VIDEO DE BIENVENIDA PARA LEADS NUEVOS (Veo 3)
+// Genera video personalizado cuando un lead nuevo interactúa
+// ═══════════════════════════════════════════════════════════
+async function videoBienvenidaLeadNuevo(supabase: SupabaseService, meta: MetaWhatsAppService, env: Env): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace2horas = new Date(ahora.getTime() - 2 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar leads nuevos de las últimas 2 horas que NO tienen video de bienvenida
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, property_interest, notes, created_at, status')
+      .eq('status', 'new')
+      .gt('created_at', hace2horas.toISOString())
+      .not('phone', 'is', null)
+      .limit(5);
+
+    if (!leads || leads.length === 0) {
+      console.log('🎬 No hay leads nuevos para video de bienvenida');
+      return;
+    }
+
+    // Filtrar los que ya tienen video de bienvenida
+    const leadsParaVideo = leads.filter(lead => {
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      return !(notas as any)?.video_bienvenida_enviado;
+    });
+
+    if (leadsParaVideo.length === 0) {
+      console.log('🎬 Todos los leads nuevos ya tienen video de bienvenida');
+      return;
+    }
+
+    console.log(`🎬 Leads nuevos para video de bienvenida: ${leadsParaVideo.length}`);
+
+    // Fotos de fachadas por desarrollo
+    const fotosDesarrollo: Record<string, string> = {
+      'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg',
+      'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2021/07/M4215335.jpg',
+      'Andes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg',
+      'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-min-scaled-e1740520053367.jpg',
+      'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
+      'Acacia': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/ACACIA-1-scaled.jpg'
+    };
+
+    let generados = 0;
+
+    for (const lead of leadsParaVideo) {
+      if (!lead.phone) continue;
+
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      const nombre = lead.name?.split(' ')[0] || 'amigo';
+      const desarrollo = lead.property_interest || 'Grupo Santa Rita';
+
+      // Obtener foto del desarrollo
+      let fotoDesarrollo = fotosDesarrollo[desarrollo];
+      if (!fotoDesarrollo) {
+        for (const [key, url] of Object.entries(fotosDesarrollo)) {
+          if (desarrollo.toLowerCase().includes(key.toLowerCase())) {
+            fotoDesarrollo = url;
+            break;
+          }
+        }
+      }
+      fotoDesarrollo = fotoDesarrollo || fotosDesarrollo['Monte Verde'];
+
+      // Prompt para video de bienvenida - Avatar dando la bienvenida
+      const prompt = `A friendly female real estate agent standing in front of the beautiful house facade shown in the image. She smiles warmly and speaks welcoming in Spanish: "¡Hola ${nombre}! Soy Sara de Grupo Santa Rita. Me da mucho gusto que te interese ${desarrollo}. Estoy aquí para ayudarte a encontrar tu casa ideal. ¿Te gustaría agendar una visita?". Wide shot showing agent and house facade, warm daylight, 4k. No text, no subtitles, no captions, no overlays, clean video only.`;
+
+      try {
+        // Verificar límites de API
+        const { data: configData } = await supabase.client
+          .from('system_config')
+          .select('value')
+          .eq('key', 'veo3_daily_count')
+          .single();
+
+        const dailyCount = configData?.value ? parseInt(configData.value) : 0;
+        if (dailyCount >= 20) { // Límite de 20 videos/día incluyendo bienvenida + felicitación
+          console.log('🎬 Límite diario de videos Veo 3 alcanzado');
+          break;
+        }
+
+        const googleApiKey = env.GEMINI_API_KEY;
+        if (!googleApiKey) {
+          console.log('🎬 GEMINI_API_KEY no configurada');
+          break;
+        }
+
+        // Descargar imagen y convertir a base64
+        console.log(`🎬 Descargando imagen para bienvenida ${nombre} (${desarrollo})...`);
+        const imgResponse = await fetch(fotoDesarrollo);
+        if (!imgResponse.ok) {
+          console.error(`Error descargando imagen para ${lead.name}`);
+          continue;
+        }
+        const imgBuffer = await imgResponse.arrayBuffer();
+        const bytes = new Uint8Array(imgBuffer);
+        let binary = '';
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          const chunk = bytes.subarray(i, i + chunkSize);
+          binary += String.fromCharCode.apply(null, Array.from(chunk));
+        }
+        const imgBase64 = btoa(binary);
+
+        const veoResponse = await fetch(
+          'https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': googleApiKey
+            },
+            body: JSON.stringify({
+              instances: [{
+                prompt: prompt,
+                image: { bytesBase64Encoded: imgBase64, mimeType: 'image/jpeg' }
+              }],
+              parameters: {
+                aspectRatio: '9:16',
+                durationSeconds: 8
+              }
+            })
+          }
+        );
+
+        if (!veoResponse.ok) {
+          const errorText = await veoResponse.text();
+          console.error(`Error Veo 3 bienvenida para ${lead.name}:`, errorText);
+          continue;
+        }
+
+        const veoData = await veoResponse.json() as any;
+        const operationName = veoData.name;
+
+        if (operationName) {
+          // Normalizar teléfono
+          let phoneNormalizado = lead.phone?.replace(/\D/g, '') || '';
+          if (phoneNormalizado.length === 10) {
+            phoneNormalizado = '521' + phoneNormalizado;
+          } else if (phoneNormalizado.startsWith('1') && phoneNormalizado.length === 11) {
+            phoneNormalizado = '52' + phoneNormalizado;
+          } else if (!phoneNormalizado.startsWith('52')) {
+            phoneNormalizado = '52' + phoneNormalizado;
+          }
+
+          // Guardar operación pendiente
+          await supabase.client.from('pending_videos').insert({
+            lead_id: lead.id,
+            lead_name: lead.name,
+            lead_phone: phoneNormalizado,
+            desarrollo: desarrollo,
+            operation_id: operationName,
+            video_type: 'bienvenida_lead_nuevo',
+            sent: false,
+            created_at: new Date().toISOString()
+          });
+
+          // Marcar en notas que se generó el video
+          const notasActualizadas = {
+            ...notas,
+            video_bienvenida_enviado: hoyStr,
+            video_bienvenida_operation: operationName
+          };
+
+          await supabase.client
+            .from('leads')
+            .update({ notes: notasActualizadas })
+            .eq('id', lead.id);
+
+          // Actualizar contador diario
+          await supabase.client
+            .from('system_config')
+            .upsert({
+              key: 'veo3_daily_count',
+              value: String(dailyCount + 1),
+              updated_at: new Date().toISOString()
+            });
+
+          generados++;
+          console.log(`🎬 Video bienvenida iniciado para: ${lead.name} (${desarrollo})`);
+        }
+
+        await new Promise(r => setTimeout(r, 3000)); // Pausa entre llamadas API
+
+      } catch (err) {
+        console.error(`Error generando video bienvenida para ${lead.name}:`, err);
+      }
+    }
+
+    console.log(`🎬 Videos de bienvenida iniciados: ${generados}`);
+
+  } catch (e) {
+    console.error('Error en videoBienvenidaLeadNuevo:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// DETECCIÓN DE LEADS CALIENTES
+// Analiza mensajes para detectar señales de compra y alertar al vendedor
+// ═══════════════════════════════════════════════════════════
+interface HotLeadSignal {
+  tipo: string;
+  intensidad: 'media' | 'alta' | 'muy_alta';
+  keywords: string[];
+}
+
+function detectarSeñalesCalientes(mensaje: string): HotLeadSignal[] {
+  const msgLower = mensaje.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const señales: HotLeadSignal[] = [];
+
+  // Señales de PRECIO (alta intención)
+  const precioPatterns = [
+    /cuanto (cuesta|vale|es)/i, /precio/i, /costo/i, /cotiza/i,
+    /que precio/i, /cuanto saldria/i, /a cuanto/i, /valor/i
+  ];
+  if (precioPatterns.some(p => p.test(msgLower))) {
+    señales.push({ tipo: 'precio', intensidad: 'alta', keywords: ['precio', 'costo', 'cotización'] });
+  }
+
+  // Señales de CRÉDITO (alta intención)
+  const creditoPatterns = [
+    /credito/i, /hipoteca/i, /infonavit/i, /fovissste/i,
+    /financiamiento/i, /prestamo/i, /banco/i, /mensualidad/i
+  ];
+  if (creditoPatterns.some(p => p.test(msgLower))) {
+    señales.push({ tipo: 'credito', intensidad: 'alta', keywords: ['crédito', 'hipoteca', 'financiamiento'] });
+  }
+
+  // Señales de VISITA (muy alta intención)
+  const visitaPatterns = [
+    /quiero (ver|visitar|conocer)/i, /cuando puedo (ir|visitar)/i,
+    /agendar (cita|visita)/i, /recorrido/i, /mostrar/i,
+    /quisiera (ver|conocer|visitar)/i, /me gustaria (ver|visitar)/i
+  ];
+  if (visitaPatterns.some(p => p.test(msgLower))) {
+    señales.push({ tipo: 'visita', intensidad: 'muy_alta', keywords: ['visita', 'cita', 'recorrido'] });
+  }
+
+  // Señales de ENGANCHE/APARTADO (muy alta intención)
+  const apartadoPatterns = [
+    /enganche/i, /apartado/i, /apartar/i, /reservar/i,
+    /cuanto (necesito|ocupo) para/i, /pago inicial/i
+  ];
+  if (apartadoPatterns.some(p => p.test(msgLower))) {
+    señales.push({ tipo: 'apartado', intensidad: 'muy_alta', keywords: ['enganche', 'apartado', 'reservar'] });
+  }
+
+  // Señales de URGENCIA (muy alta intención)
+  const urgenciaPatterns = [
+    /urgente/i, /lo mas pronto/i, /cuanto antes/i, /rapido/i,
+    /necesito (ya|pronto|hoy)/i, /de inmediato/i, /esta semana/i
+  ];
+  if (urgenciaPatterns.some(p => p.test(msgLower))) {
+    señales.push({ tipo: 'urgencia', intensidad: 'muy_alta', keywords: ['urgente', 'pronto', 'inmediato'] });
+  }
+
+  // Señales de DECISIÓN (muy alta intención)
+  const decisionPatterns = [
+    /quiero comprar/i, /voy a comprar/i, /me decid/i, /estoy listo/i,
+    /me interesa (mucho|bastante)/i, /es justo lo que busco/i, /perfecto/i,
+    /lo quiero/i, /me lo llevo/i
+  ];
+  if (decisionPatterns.some(p => p.test(msgLower))) {
+    señales.push({ tipo: 'decision', intensidad: 'muy_alta', keywords: ['comprar', 'decidido', 'listo'] });
+  }
+
+  // Señales de DISPONIBILIDAD (media intención)
+  const dispPatterns = [
+    /disponib/i, /hay (casas|lotes|terrenos)/i, /quedan/i,
+    /todavia hay/i, /aun tienen/i
+  ];
+  if (dispPatterns.some(p => p.test(msgLower))) {
+    señales.push({ tipo: 'disponibilidad', intensidad: 'media', keywords: ['disponible', 'quedan'] });
+  }
+
+  return señales;
+}
+
+async function alertarLeadCaliente(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  lead: any,
+  mensaje: string,
+  señales: HotLeadSignal[]
+): Promise<void> {
+  try {
+    if (señales.length === 0) return;
+
+    // Determinar intensidad máxima
+    const intensidadMax = señales.some(s => s.intensidad === 'muy_alta') ? 'muy_alta' :
+                          señales.some(s => s.intensidad === 'alta') ? 'alta' : 'media';
+
+    // Solo alertar si es alta o muy_alta
+    if (intensidadMax === 'media') return;
+
+    // Buscar vendedor asignado
+    const { data: vendedor } = await supabase.client
+      .from('team_members')
+      .select('id, name, phone')
+      .eq('id', lead.assigned_to)
+      .single();
+
+    if (!vendedor?.phone) {
+      console.log(`🔥 Lead caliente ${lead.name} pero vendedor sin teléfono`);
+      return;
+    }
+
+    // Verificar que no se haya enviado alerta en los últimos 30 minutos
+    const notas = typeof lead.notes === 'object' ? lead.notes : {};
+    const ultimaAlerta = (notas as any)?.ultima_alerta_caliente;
+    if (ultimaAlerta) {
+      const hace30min = new Date(Date.now() - 30 * 60 * 1000);
+      if (new Date(ultimaAlerta) > hace30min) {
+        console.log(`🔥 Lead ${lead.name} ya tiene alerta reciente, omitiendo`);
+        return;
+      }
+    }
+
+    // Construir mensaje de alerta
+    const tiposDetectados = señales.map(s => s.tipo).join(', ');
+    const emoji = intensidadMax === 'muy_alta' ? '🔥🔥🔥' : '🔥🔥';
+
+    const alertaMsg = `${emoji} *LEAD CALIENTE - ACTÚA YA*
+
+👤 *${lead.name}*
+📱 ${lead.phone}
+🏠 Interés: ${lead.property_interest || 'No especificado'}
+
+💬 Dijo: "${mensaje.substring(0, 100)}${mensaje.length > 100 ? '...' : ''}"
+
+📊 Señales detectadas: *${tiposDetectados}*
+⚡ Intensidad: *${intensidadMax.toUpperCase()}*
+
+💡 Acción recomendada:
+${señales.some(s => s.tipo === 'visita') ? '→ Agendar visita HOY si es posible\n' : ''}${señales.some(s => s.tipo === 'precio') ? '→ Enviar cotización personalizada\n' : ''}${señales.some(s => s.tipo === 'credito') ? '→ Explicar opciones de crédito\n' : ''}${señales.some(s => s.tipo === 'apartado') ? '→ Explicar proceso de apartado\n' : ''}${señales.some(s => s.tipo === 'urgencia') ? '→ CONTACTAR INMEDIATAMENTE\n' : ''}
+📞 Responde: bridge ${lead.name?.split(' ')[0]}`;
+
+    await meta.sendWhatsAppMessage(vendedor.phone, alertaMsg);
+    console.log(`🔥 Alerta enviada a ${vendedor.name} por lead caliente: ${lead.name} (${tiposDetectados})`);
+
+    // Guardar en notas del lead
+    const notasActualizadas = {
+      ...notas,
+      ultima_alerta_caliente: new Date().toISOString(),
+      historial_señales_calientes: [
+        ...((notas as any)?.historial_señales_calientes || []).slice(-9),
+        {
+          fecha: new Date().toISOString(),
+          señales: señales.map(s => s.tipo),
+          intensidad: intensidadMax,
+          mensaje: mensaje.substring(0, 200)
+        }
+      ]
+    };
+
+    await supabase.client
+      .from('leads')
+      .update({ notes: notasActualizadas })
+      .eq('id', lead.id);
+
+  } catch (e) {
+    console.error('Error en alertarLeadCaliente:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// RECUPERACIÓN DE ABANDONOS EN PROCESO DE CRÉDITO
+// Re-engagement para leads que empezaron crédito pero no continuaron
+// ═══════════════════════════════════════════════════════════
+async function recuperarAbandonosCredito(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace7dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const hace30dias = new Date(ahora.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar leads que:
+    // 1. Tienen credit_flow_context en notes (empezaron proceso de crédito)
+    // 2. No están en status avanzados de crédito
+    // 3. No han tenido actividad en 7+ días
+    // 4. No han recibido recuperación en los últimos 14 días
+    const { data: allLeads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, property_interest, updated_at, assigned_to')
+      .not('notes', 'is', null)
+      .not('phone', 'is', null)
+      .not('status', 'in', '("credit_qualified","pre_approved","approved","sold","closed","delivered","lost","fallen")')
+      .lt('updated_at', hace7dias.toISOString())
+      .gt('updated_at', hace30dias.toISOString())
+      .limit(20);
+
+    if (!allLeads || allLeads.length === 0) {
+      console.log('🏦 No hay leads para recuperación de crédito');
+      return;
+    }
+
+    // Filtrar los que tienen credit_flow_context y no han sido recuperados recientemente
+    const hace14dias = new Date(ahora.getTime() - 14 * 24 * 60 * 60 * 1000);
+    const leadsAbandonados = allLeads.filter(lead => {
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      if (!(notas as any)?.credit_flow_context) return false;
+
+      // Verificar si ya se envió recuperación en los últimos 14 días
+      const ultimaRecuperacion = (notas as any)?.ultimo_intento_recuperacion_credito;
+      if (ultimaRecuperacion && new Date(ultimaRecuperacion) > hace14dias) {
+        return false;
+      }
+      return true;
+    });
+
+    if (leadsAbandonados.length === 0) {
+      console.log('🏦 No hay abandonos de crédito elegibles para recuperación');
+      return;
+    }
+
+    console.log(`🏦 Leads con proceso de crédito abandonado: ${leadsAbandonados.length}`);
+
+    let enviados = 0;
+    const maxEnvios = 5; // Limitar a 5 por ejecución
+
+    for (const lead of leadsAbandonados) {
+      if (enviados >= maxEnvios) break;
+      if (!lead.phone) continue;
+
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      const creditContext = (notas as any)?.credit_flow_context || {};
+      const nombre = lead.name?.split(' ')[0] || 'amigo';
+      const desarrollo = lead.property_interest || 'tu casa ideal';
+
+      // Determinar en qué etapa quedó
+      const etapa = creditContext.step || 'unknown';
+      let mensajePersonalizado = '';
+
+      if (etapa === 'asking_employment' || etapa === 'asking_income') {
+        mensajePersonalizado = `¡Hola ${nombre}! 👋
+
+Vi que empezaste a cotizar un crédito para ${desarrollo} pero no terminamos. ¿Te surgió alguna duda?
+
+Puedo ayudarte a:
+✅ Calcular tu capacidad de crédito en 2 minutos
+✅ Ver opciones con diferentes bancos
+✅ Resolver cualquier duda que tengas
+
+Solo responde "continuar crédito" y retomamos donde lo dejamos 🏡`;
+      } else if (etapa === 'asking_downpayment' || etapa === 'asking_bank') {
+        mensajePersonalizado = `¡Hola ${nombre}! 👋
+
+Ya casi terminabas tu pre-calificación de crédito para ${desarrollo}. Solo nos faltan un par de datos más.
+
+Con lo que ya me compartiste, estás muy cerca de conocer tu capacidad de crédito real.
+
+¿Continuamos? Responde "continuar crédito" 🏠`;
+      } else {
+        mensajePersonalizado = `¡Hola ${nombre}! 👋
+
+Me quedé pensando en ti. Hace unos días mostraste interés en financiar tu casa en ${desarrollo}.
+
+Te recuerdo que:
+🏦 Trabajamos con los mejores bancos
+📊 El trámite es muy sencillo
+💰 Puedo calcular tu crédito en minutos
+
+Si te interesa retomar, solo responde "quiero crédito" 🏡`;
+      }
+
+      try {
+        await meta.sendWhatsAppMessage(lead.phone, mensajePersonalizado);
+        enviados++;
+        console.log(`🏦 Recuperación crédito enviada a: ${lead.name} (etapa: ${etapa})`);
+
+        // Actualizar notas
+        const notasActualizadas = {
+          ...notas,
+          ultimo_intento_recuperacion_credito: hoyStr,
+          historial_recuperacion_credito: [
+            ...((notas as any)?.historial_recuperacion_credito || []).slice(-4),
+            { fecha: hoyStr, etapa: etapa }
+          ]
+        };
+
+        await supabase.client
+          .from('leads')
+          .update({
+            notes: notasActualizadas,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', lead.id);
+
+        // Notificar al vendedor/asesor
+        if (lead.assigned_to) {
+          const { data: vendedor } = await supabase.client
+            .from('team_members')
+            .select('name, phone')
+            .eq('id', lead.assigned_to)
+            .single();
+
+          if (vendedor?.phone) {
+            const notifVendedor = `📬 *Recuperación de crédito enviada*
+
+Lead: ${lead.name}
+Interés: ${desarrollo}
+Etapa abandonada: ${etapa}
+
+💡 Si responde, podrás continuar con: bridge ${nombre}`;
+
+            await meta.sendWhatsAppMessage(vendedor.phone, notifVendedor);
+          }
+        }
+
+        // Pausa entre mensajes
+        await new Promise(r => setTimeout(r, 2000));
+
+      } catch (err) {
+        console.error(`Error enviando recuperación a ${lead.name}:`, err);
+      }
+    }
+
+    console.log(`🏦 Recuperación de crédito completada: ${enviados} mensajes enviados`);
+
+  } catch (e) {
+    console.error('Error en recuperarAbandonosCredito:', e);
   }
 }
