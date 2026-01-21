@@ -468,9 +468,61 @@ GET /test-video-personalizado/{phone}?nombre={nombre}&desarrollo={desarrollo}
 
 ---
 
+## FOLLOW-UPS AUTOMÁTICOS (CRON)
+
+El sistema ejecuta automáticamente estos follow-ups para no perder leads:
+
+### 1. Follow-up 24h Leads Nuevos
+- **Horario**: 10am y 4pm L-V
+- **Target**: Leads con `status='new'` sin respuesta en 24h
+- **Campo de control**: `alerta_enviada_24h` (fecha)
+- **Acción**:
+  - Envía mensaje amigable al lead (3 variantes aleatorias)
+  - Notifica al vendedor asignado
+- **Función**: `followUp24hLeadsNuevos()`
+
+### 2. Reminder Documentos Crédito
+- **Horario**: 11am L-V
+- **Target**: Leads con `credit_status='docs_requested'` por 3+ días
+- **Campo de control**: `notes.docs_reminder_sent` (fecha), `notes.ultimo_docs_reminder`
+- **Cooldown**: 5 días entre recordatorios
+- **Acción**:
+  - Envía recordatorio con lista de documentos requeridos
+  - Notifica al vendedor
+- **Función**: `reminderDocumentosCredito()`
+
+### 3. Video Felicitación Post-Venta (Veo 3)
+- **Horario**: 10am diario
+- **Target**: Leads con `status='sold'` en últimos 7 días sin video
+- **Campo de control**: `notes.video_felicitacion_generado` (fecha)
+- **Acción**:
+  - Genera video personalizado con Veo 3
+  - Avatar felicitando al nuevo propietario dentro de su casa
+  - Se guarda en `pending_videos` para envío automático
+- **Límite**: Máx 15 videos/día (configurable en `system_config`)
+- **Función**: `videoFelicitacionPostVenta()`
+
+### Otros Follow-ups Existentes
+| Función | Horario | Descripción |
+|---------|---------|-------------|
+| `followUpLeadsInactivos` | 11am L-V | Leads 3+ días sin responder |
+| `reengagementDirectoLeads` | 11am/5pm L-S | Día 3, 7, 14 sin actividad |
+| `remarketingLeadsFrios` | Miércoles | Remarketing semanal |
+| `felicitarCumpleañosLeads` | 9am diario | Cumpleaños de leads |
+| `seguimientoCredito` | 12pm L-V | Leads con crédito estancado |
+| `seguimientoPostVenta` | 10am diario | 30, 60, 90 días post-venta |
+
+---
+
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-21
+
+**Sesión 2 (01:00-)**
+- ✅ Implementado follow-up 24h para leads nuevos (campo `alerta_enviada_24h`)
+- ✅ Implementado reminder documentos crédito (3+ días con `credit_status='docs_requested'`)
+- ✅ Implementado video felicitación post-venta automático con Veo 3
+- ✅ Documentación de todos los follow-ups automáticos
 
 **Sesión 1 (19:00-00:00)**
 - ✅ Video personalizado Veo 3 funcionando con avatar

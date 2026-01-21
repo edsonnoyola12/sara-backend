@@ -9779,6 +9779,27 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       await seguimientoCredito(supabase, meta);
     }
 
+    // FOLLOW-UP 24H LEADS NUEVOS: 10am y 4pm L-V
+    // Leads status='new' que no han respondido en 24h (usa campo alerta_enviada_24h)
+    if (isFirstRunOfHour && (mexicoHour === 10 || mexicoHour === 16) && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('⏰ Verificando leads nuevos sin respuesta 24h...');
+      await followUp24hLeadsNuevos(supabase, meta);
+    }
+
+    // REMINDER DOCS CRÉDITO: 11am L-V
+    // Leads con credit_status='docs_requested' por 3+ días sin avanzar
+    if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('📄 Verificando leads pendientes de documentos...');
+      await reminderDocumentosCredito(supabase, meta);
+    }
+
+    // VIDEO FELICITACIÓN POST-VENTA: 10am diario
+    // Genera video personalizado Veo 3 para leads que acaban de comprar (status='sold')
+    if (mexicoHour === 10 && isFirstRunOfHour) {
+      console.log('🎬 Verificando nuevas ventas para video felicitación...');
+      await videoFelicitacionPostVenta(supabase, meta, env);
+    }
+
     // ═══════════════════════════════════════════════════════════
     // BRIDGES - Verificar bridges por expirar (cada 2 min)
     // ═══════════════════════════════════════════════════════════
@@ -17013,5 +17034,359 @@ async function procesarBroadcastQueue(supabase: SupabaseService, meta: MetaWhats
 
   } catch (e) {
     console.error('Error en procesarBroadcastQueue:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// FOLLOW-UP 24H LEADS NUEVOS
+// Envía mensaje a leads status='new' que no respondieron en 24h
+// Usa campo alerta_enviada_24h para no duplicar
+// ═══════════════════════════════════════════════════════════
+async function followUp24hLeadsNuevos(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace24h = new Date(ahora.getTime() - 24 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar leads nuevos sin respuesta en 24h que NO tengan alerta ya enviada
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, property_interest, alerta_enviada_24h, assigned_to, notes, team_members:assigned_to(name, phone)')
+      .eq('status', 'new')
+      .lt('created_at', hace24h.toISOString())
+      .is('alerta_enviada_24h', null)
+      .not('phone', 'is', null)
+      .limit(20);
+
+    if (!leads || leads.length === 0) {
+      console.log('⏰ No hay leads nuevos pendientes de follow-up 24h');
+      return;
+    }
+
+    console.log(`⏰ Leads nuevos sin respuesta 24h: ${leads.length}`);
+
+    let enviados = 0;
+    const mensajes = [
+      '¡Hola {nombre}! 👋 Soy Sara de Grupo Santa Rita. Vi que nos contactaste ayer interesado en nuestras casas. ¿Te gustaría que te cuente más sobre lo que tenemos disponible?',
+      'Hola {nombre}, ¿cómo estás? 🏡 Quedé pendiente de platicarte sobre las opciones que tenemos para ti. ¿Tienes un momento?',
+      '¡Hey {nombre}! 👋 No quiero ser insistente pero vi que no pudimos conectar ayer. ¿Hay algo en particular que busques? Me encantaría ayudarte.'
+    ];
+
+    for (const lead of leads) {
+      if (!lead.phone) continue;
+
+      const phoneLimpio = lead.phone.replace(/\D/g, '');
+      const nombre = lead.name?.split(' ')[0] || 'amigo';
+
+      // Seleccionar mensaje aleatorio
+      const mensajeTemplate = mensajes[Math.floor(Math.random() * mensajes.length)];
+      const mensaje = mensajeTemplate.replace('{nombre}', nombre);
+
+      try {
+        await meta.sendWhatsAppMessage(phoneLimpio, mensaje);
+
+        // Marcar alerta como enviada
+        await supabase.client
+          .from('leads')
+          .update({
+            alerta_enviada_24h: hoyStr,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', lead.id);
+
+        enviados++;
+        console.log(`⏰ Follow-up 24h enviado a: ${lead.name}`);
+
+        // También alertar al vendedor asignado
+        const vendedor = lead.team_members as any;
+        if (vendedor?.phone) {
+          const vendedorPhone = vendedor.phone.replace(/\D/g, '');
+          await meta.sendWhatsAppMessage(vendedorPhone,
+            `📢 *Alerta lead sin respuesta*\n\n` +
+            `${lead.name} lleva +24h sin contestar.\n` +
+            `Le envié un recordatorio automático.\n\n` +
+            `💡 Considera llamarle directamente.`
+          );
+        }
+
+        // Pequeña pausa entre mensajes
+        await new Promise(r => setTimeout(r, 2000));
+      } catch (err) {
+        console.error(`Error enviando follow-up 24h a ${lead.name}:`, err);
+      }
+    }
+
+    console.log(`⏰ Follow-up 24h completado: ${enviados} mensajes enviados`);
+
+  } catch (e) {
+    console.error('Error en followUp24hLeadsNuevos:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// REMINDER DOCUMENTOS CRÉDITO
+// Recuerda a leads con credit_status='docs_requested' por 3+ días
+// ═══════════════════════════════════════════════════════════
+async function reminderDocumentosCredito(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace3dias = new Date(ahora.getTime() - 3 * 24 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar leads que llevan 3+ días con documentos solicitados
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, property_interest, credit_status, team_members:assigned_to(name, phone)')
+      .eq('credit_status', 'docs_requested')
+      .lt('updated_at', hace3dias.toISOString())
+      .not('phone', 'is', null)
+      .limit(15);
+
+    if (!leads || leads.length === 0) {
+      console.log('📄 No hay leads pendientes de documentos para recordar');
+      return;
+    }
+
+    console.log(`📄 Leads pendientes de docs por 3+ días: ${leads.length}`);
+
+    let enviados = 0;
+
+    for (const lead of leads) {
+      if (!lead.phone) continue;
+
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+
+      // No enviar si ya recordamos hoy
+      if ((notas as any)?.docs_reminder_sent === hoyStr) continue;
+
+      // No enviar si ya enviamos en los últimos 5 días
+      const ultimoReminder = (notas as any)?.ultimo_docs_reminder;
+      if (ultimoReminder) {
+        const ultimaFecha = new Date(ultimoReminder);
+        const diasDesdeUltimo = Math.floor((ahora.getTime() - ultimaFecha.getTime()) / (1000 * 60 * 60 * 24));
+        if (diasDesdeUltimo < 5) continue;
+      }
+
+      const phoneLimpio = lead.phone.replace(/\D/g, '');
+      const nombre = lead.name?.split(' ')[0] || 'Hola';
+
+      const mensaje = `¡Hola ${nombre}! 📋\n\n` +
+        `Te recuerdo que estamos esperando tus documentos para continuar con tu trámite de crédito hipotecario.\n\n` +
+        `📄 Los documentos que necesitamos son:\n` +
+        `• INE (frente y vuelta)\n` +
+        `• Comprobante de ingresos\n` +
+        `• Comprobante de domicilio\n\n` +
+        `¿Necesitas ayuda con algo? Estoy aquí para apoyarte. 🏡`;
+
+      try {
+        await meta.sendWhatsAppMessage(phoneLimpio, mensaje);
+
+        // Actualizar notas
+        const notasActualizadas = {
+          ...notas,
+          docs_reminder_sent: hoyStr,
+          ultimo_docs_reminder: ahora.toISOString()
+        };
+
+        await supabase.client
+          .from('leads')
+          .update({
+            notes: notasActualizadas,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', lead.id);
+
+        enviados++;
+        console.log(`📄 Reminder docs enviado a: ${lead.name}`);
+
+        // Notificar al vendedor
+        const vendedor = lead.team_members as any;
+        if (vendedor?.phone) {
+          const vendedorPhone = vendedor.phone.replace(/\D/g, '');
+          await meta.sendWhatsAppMessage(vendedorPhone,
+            `📋 *Lead pendiente de documentos*\n\n` +
+            `${lead.name} lleva 3+ días sin enviar docs.\n` +
+            `Le envié un recordatorio automático.\n\n` +
+            `💡 Quizás una llamada ayude a destrabarlo.`
+          );
+        }
+
+        await new Promise(r => setTimeout(r, 2000));
+      } catch (err) {
+        console.error(`Error enviando reminder docs a ${lead.name}:`, err);
+      }
+    }
+
+    console.log(`📄 Reminder docs completado: ${enviados} mensajes enviados`);
+
+  } catch (e) {
+    console.error('Error en reminderDocumentosCredito:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// VIDEO FELICITACIÓN POST-VENTA (Veo 3)
+// Genera video personalizado cuando lead pasa a status='sold'
+// ═══════════════════════════════════════════════════════════
+async function videoFelicitacionPostVenta(supabase: SupabaseService, meta: MetaWhatsAppService, env: Env): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace7dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar leads que vendieron en los últimos 7 días y no tienen video generado
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, property_interest, notes, updated_at')
+      .eq('status', 'sold')
+      .gt('updated_at', hace7dias.toISOString())
+      .not('phone', 'is', null)
+      .limit(5);
+
+    if (!leads || leads.length === 0) {
+      console.log('🎬 No hay nuevas ventas para video felicitación');
+      return;
+    }
+
+    console.log(`🎬 Ventas recientes sin video: ${leads.length}`);
+
+    // Fotos de fachadas por desarrollo (para el video)
+    const fotosDesarrollo: Record<string, string> = {
+      'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg',
+      'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2021/07/M4215335.jpg',
+      'Andes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg',
+      'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-min-scaled-e1740520053367.jpg',
+      'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
+      'Acacia': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/ACACIA-1-scaled.jpg'
+    };
+
+    let generados = 0;
+
+    for (const lead of leads) {
+      if (!lead.phone) continue;
+
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+
+      // Verificar si ya se generó video de felicitación
+      if ((notas as any)?.video_felicitacion_generado) {
+        continue;
+      }
+
+      const nombre = lead.name?.split(' ')[0] || 'amigo';
+      const desarrollo = lead.property_interest || 'Grupo Santa Rita';
+
+      // Obtener foto del desarrollo
+      let fotoDesarrollo = fotosDesarrollo[desarrollo];
+      if (!fotoDesarrollo) {
+        for (const [key, url] of Object.entries(fotosDesarrollo)) {
+          if (desarrollo.toLowerCase().includes(key.toLowerCase())) {
+            fotoDesarrollo = url;
+            break;
+          }
+        }
+      }
+      fotoDesarrollo = fotoDesarrollo || fotosDesarrollo['Monte Verde'];
+
+      // Prompt para Veo 3 - Avatar felicitando al nuevo propietario
+      const prompt = `A friendly female real estate agent standing inside the property shown in the image. She is positioned naturally in the space, at a comfortable distance from camera. The room and house surroundings are visible around her. She smiles warmly and speaks congratulating in Spanish: "Felicidades ${nombre}, bienvenido a tu nuevo hogar en ${desarrollo}. Estamos muy contentos de tenerte como parte de la familia Grupo Santa Rita". Wide shot showing both agent and interior, cinematic lighting, 4k. No text, no subtitles, no captions, no overlays, clean video only.`;
+
+      try {
+        // Verificar límites de API antes de intentar
+        const { data: configData } = await supabase.client
+          .from('system_config')
+          .select('value')
+          .eq('key', 'veo3_daily_count')
+          .single();
+
+        const dailyCount = configData?.value ? parseInt(configData.value) : 0;
+        if (dailyCount >= 15) {
+          console.log('🎬 Límite diario de videos Veo 3 alcanzado');
+          break;
+        }
+
+        // Llamar a Google Veo 3 API
+        const googleApiKey = env.GOOGLE_AI_API_KEY;
+        if (!googleApiKey) {
+          console.log('🎬 GOOGLE_AI_API_KEY no configurada');
+          break;
+        }
+
+        const veoResponse = await fetch(
+          'https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:predictLongRunning?key=' + googleApiKey,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              instances: [{
+                prompt: prompt,
+                image: { gcsUri: '', httpUri: fotoDesarrollo }
+              }],
+              parameters: {
+                aspectRatio: '16:9',
+                personGeneration: 'allow_adult',
+                sampleCount: 1
+              }
+            })
+          }
+        );
+
+        if (!veoResponse.ok) {
+          const errorText = await veoResponse.text();
+          console.error(`Error Veo 3 para ${lead.name}:`, errorText);
+          continue;
+        }
+
+        const veoData = await veoResponse.json() as any;
+        const operationName = veoData.name;
+
+        if (operationName) {
+          // Guardar operación pendiente
+          await supabase.client.from('pending_videos').insert({
+            lead_id: lead.id,
+            lead_name: lead.name,
+            lead_phone: lead.phone,
+            desarrollo: desarrollo,
+            operation_id: operationName,
+            video_type: 'felicitacion_postventa',
+            status: 'processing',
+            created_at: new Date().toISOString()
+          });
+
+          // Marcar en notas que se generó el video
+          const notasActualizadas = {
+            ...notas,
+            video_felicitacion_generado: hoyStr,
+            video_felicitacion_operation: operationName
+          };
+
+          await supabase.client
+            .from('leads')
+            .update({ notes: notasActualizadas })
+            .eq('id', lead.id);
+
+          // Actualizar contador diario
+          await supabase.client
+            .from('system_config')
+            .upsert({
+              key: 'veo3_daily_count',
+              value: String(dailyCount + 1),
+              updated_at: new Date().toISOString()
+            });
+
+          generados++;
+          console.log(`🎬 Video felicitación iniciado para: ${lead.name} (${desarrollo})`);
+        }
+
+        await new Promise(r => setTimeout(r, 3000)); // Pausa entre llamadas API
+
+      } catch (err) {
+        console.error(`Error generando video para ${lead.name}:`, err);
+      }
+    }
+
+    console.log(`🎬 Videos de felicitación iniciados: ${generados}`);
+
+  } catch (e) {
+    console.error('Error en videoFelicitacionPostVenta:', e);
   }
 }
