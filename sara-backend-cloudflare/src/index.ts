@@ -4314,14 +4314,29 @@ Mensaje: ${mensaje}`;
 
       try {
         const apiKey = env.GEMINI_API_KEY;
+        // Usar thumbnail de YouTube como foto (tamaño pequeño y seguro)
         const testFoto = 'https://img.youtube.com/vi/xzPXJ00yK0A/maxresdefault.jpg';
 
         const imgResponse = await fetch(testFoto);
         const imgBuffer = await imgResponse.arrayBuffer();
-        const imgBase64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
+        // Convertir a base64 sin overflow (chunked)
+        const bytes = new Uint8Array(imgBuffer);
+        let binary = '';
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          const chunk = bytes.subarray(i, i + chunkSize);
+          binary += String.fromCharCode(...chunk);
+        }
+        const imgBase64 = btoa(binary);
 
-        // PROMPT - Tour cinematográfico de la propiedad con audio personalizado
-        const prompt = `Cinematic tour of the luxury residential property shown in the image. Smooth camera movement showcasing the architecture and surroundings. Golden hour lighting, high quality 4K. Audio: A warm professional voice in Spanish saying "Hola ${nombre}, te doy la bienvenida a ${desarrollo}, tu próximo hogar. Agenda tu visita hoy."`;
+        // Detectar género por nombre (nombres terminados en 'a' = femenino, excepto algunos)
+        const nombreLower = nombre.toLowerCase();
+        const excepcionesMasculinas = ['joshua', 'ezra', 'garcia', 'peña', 'borja', 'mejia'];
+        const esFemenino = nombreLower.endsWith('a') && !excepcionesMasculinas.some(e => nombreLower.includes(e));
+        const bienvenida = esFemenino ? 'bienvenida' : 'bienvenido';
+
+        // INTENTO: Presenter style con imagen de fondo
+        const prompt = `Video of a friendly female presenter standing in front of a large screen displaying the property image. She presents the house to the viewer, pointing at it behind her. She speaks in Spanish: "Hola ${nombre}, ${bienvenida} a ti y a tu familia a tu nuevo hogar aquí en ${desarrollo}". Professional real estate presentation style, 4k quality.`;
 
         const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning', {
           method: 'POST',
