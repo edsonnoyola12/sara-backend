@@ -4371,6 +4371,36 @@ Mensaje: ${mensaje}`;
       return corsResponse(JSON.stringify({ message: 'Video bienvenida ejecutado. Revisa /debug-videos para ver el estado.' }));
     }
 
+    if (url.pathname === '/run-lead-scoring') {
+      console.log('📊 Forzando actualización de lead scores...');
+      await actualizarLeadScores(supabase);
+
+      // Mostrar resumen de scores
+      const { data: leads } = await supabase.client
+        .from('leads')
+        .select('name, score, lead_category, status')
+        .not('status', 'in', '("closed","delivered","lost","fallen")')
+        .order('score', { ascending: false })
+        .limit(20);
+
+      return corsResponse(JSON.stringify({
+        message: 'Lead scoring ejecutado',
+        top_leads: leads?.map(l => ({
+          nombre: l.name,
+          score: l.score,
+          categoria: l.lead_category,
+          status: l.status
+        }))
+      }, null, 2));
+    }
+
+    if (url.pathname === '/run-followup-postvisita') {
+      console.log('📍 Forzando follow-up post-visita...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await followUpPostVisita(supabase, meta);
+      return corsResponse(JSON.stringify({ message: 'Follow-up post-visita ejecutado.' }));
+    }
+
     // ═══════════════════════════════════════════════════════════
     // REENVIAR VIDEO: Para videos que tienen URL pero no se enviaron
     // ═══════════════════════════════════════════════════════════
@@ -9984,6 +10014,20 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     if (mexicoHour === 15 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
       console.log('🏦 Verificando abandonos de crédito para recuperación...');
       await recuperarAbandonosCredito(supabase, meta);
+    }
+
+    // LEAD SCORING AUTOMÁTICO: cada 2 horas en horario laboral
+    // Actualiza scores de leads basado en comportamiento y señales
+    if (isFirstRunOfHour && mexicoHour >= 8 && mexicoHour <= 20 && mexicoHour % 2 === 0) {
+      console.log('📊 Actualizando lead scores...');
+      await actualizarLeadScores(supabase);
+    }
+
+    // FOLLOW-UP POST-VISITA: 4pm L-V
+    // Re-engagement para leads que visitaron pero no avanzaron
+    if (mexicoHour === 16 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('📍 Verificando leads post-visita para follow-up...');
+      await followUpPostVisita(supabase, meta);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -17967,10 +18011,21 @@ ${señales.some(s => s.tipo === 'visita') ? '→ Agendar visita HOY si es posibl
       ]
     };
 
+    // Actualizar notas Y recalcular score inmediatamente
+    const leadActualizado = { ...lead, notes: notasActualizadas };
+    const { score, categoria } = calcularLeadScore(leadActualizado);
+
     await supabase.client
       .from('leads')
-      .update({ notes: notasActualizadas })
+      .update({
+        notes: notasActualizadas,
+        score: score,
+        lead_score: score,
+        lead_category: categoria
+      })
       .eq('id', lead.id);
+
+    console.log(`📊 Lead ${lead.name} score actualizado: ${score} (${categoria})`);
 
   } catch (e) {
     console.error('Error en alertarLeadCaliente:', e);
@@ -18133,5 +18188,332 @@ Etapa abandonada: ${etapa}
 
   } catch (e) {
     console.error('Error en recuperarAbandonosCredito:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// LEAD SCORING AUTOMÁTICO
+// Calcula score basado en señales, comportamiento e interacciones
+// ═══════════════════════════════════════════════════════════
+interface LeadScoreFactors {
+  statusScore: number;
+  interactionScore: number;
+  hotSignalsScore: number;
+  recencyScore: number;
+  creditReadyScore: number;
+  engagementScore: number;
+}
+
+function calcularLeadScore(lead: any): { score: number; factors: LeadScoreFactors; categoria: string } {
+  const notas = typeof lead.notes === 'object' ? lead.notes : {};
+  let factors: LeadScoreFactors = {
+    statusScore: 0,
+    interactionScore: 0,
+    hotSignalsScore: 0,
+    recencyScore: 0,
+    creditReadyScore: 0,
+    engagementScore: 0
+  };
+
+  // 1. SCORE POR STATUS (0-30 puntos)
+  const statusScores: Record<string, number> = {
+    'new': 5,
+    'contacted': 10,
+    'qualified': 15,
+    'appointment_scheduled': 20,
+    'visited': 25,
+    'negotiation': 28,
+    'reserved': 30,
+    'credit_qualified': 22,
+    'pre_approved': 25,
+    'approved': 28,
+    'sold': 30,
+    'closed': 30,
+    'delivered': 30,
+    'cold': 2,
+    'lost': 0,
+    'fallen': 0
+  };
+  factors.statusScore = statusScores[lead.status] || 5;
+
+  // 2. SCORE POR INTERACCIONES (0-20 puntos)
+  // Basado en historial de actividades si existe
+  const historialCaliente = (notas as any)?.historial_señales_calientes || [];
+  const numInteracciones = historialCaliente.length;
+  factors.interactionScore = Math.min(numInteracciones * 4, 20);
+
+  // 3. SCORE POR SEÑALES CALIENTES (0-25 puntos)
+  if (historialCaliente.length > 0) {
+    const ultimaSenal = historialCaliente[historialCaliente.length - 1];
+    const intensidadScores: Record<string, number> = {
+      'muy_alta': 25,
+      'alta': 15,
+      'media': 8
+    };
+    factors.hotSignalsScore = intensidadScores[ultimaSenal?.intensidad] || 0;
+
+    // Bonus por múltiples tipos de señales
+    const tiposUnicos = new Set(historialCaliente.flatMap((h: any) => h.señales || []));
+    factors.hotSignalsScore = Math.min(factors.hotSignalsScore + tiposUnicos.size * 2, 25);
+  }
+
+  // 4. SCORE POR RECENCIA (0-15 puntos)
+  const ahora = new Date();
+  const ultimaActualizacion = lead.updated_at ? new Date(lead.updated_at) : new Date(lead.created_at);
+  const diasSinActividad = Math.floor((ahora.getTime() - ultimaActualizacion.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diasSinActividad === 0) factors.recencyScore = 15;
+  else if (diasSinActividad === 1) factors.recencyScore = 12;
+  else if (diasSinActividad <= 3) factors.recencyScore = 10;
+  else if (diasSinActividad <= 7) factors.recencyScore = 6;
+  else if (diasSinActividad <= 14) factors.recencyScore = 3;
+  else factors.recencyScore = 0;
+
+  // 5. SCORE POR PREPARACIÓN DE CRÉDITO (0-10 puntos)
+  const creditContext = (notas as any)?.credit_flow_context;
+  if (creditContext) {
+    if (creditContext.pre_approved || lead.credit_status === 'pre_approved') {
+      factors.creditReadyScore = 10;
+    } else if (creditContext.capacidad_credito) {
+      factors.creditReadyScore = 8;
+    } else if (creditContext.step && creditContext.step !== 'asking_employment') {
+      factors.creditReadyScore = 5;
+    } else {
+      factors.creditReadyScore = 3;
+    }
+  }
+  if (lead.needs_mortgage === false) {
+    factors.creditReadyScore = 10; // Pago de contado = máximo score
+  }
+
+  // 6. SCORE POR ENGAGEMENT (0-10 puntos)
+  // Respuestas a mensajes, citas agendadas, etc.
+  if ((notas as any)?.pending_response_to) factors.engagementScore += 3;
+  if ((notas as any)?.appointment_scheduled) factors.engagementScore += 4;
+  if ((notas as any)?.active_bridge_to_vendedor) factors.engagementScore += 3;
+  if (lead.property_interest) factors.engagementScore += 2;
+  factors.engagementScore = Math.min(factors.engagementScore, 10);
+
+  // CALCULAR SCORE TOTAL (0-100)
+  const totalScore =
+    factors.statusScore +
+    factors.interactionScore +
+    factors.hotSignalsScore +
+    factors.recencyScore +
+    factors.creditReadyScore +
+    factors.engagementScore;
+
+  // DETERMINAR CATEGORÍA
+  let categoria: string;
+  if (totalScore >= 80) categoria = 'HOT';
+  else if (totalScore >= 60) categoria = 'WARM';
+  else if (totalScore >= 40) categoria = 'LUKEWARM';
+  else if (totalScore >= 20) categoria = 'COLD';
+  else categoria = 'FROZEN';
+
+  return { score: Math.min(totalScore, 100), factors, categoria };
+}
+
+async function actualizarLeadScores(supabase: SupabaseService): Promise<void> {
+  try {
+    // Obtener leads activos (no cerrados/perdidos) que necesitan actualización
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, status, notes, updated_at, created_at, property_interest, needs_mortgage, credit_status, score, lead_score')
+      .not('status', 'in', '("closed","delivered","lost","fallen")')
+      .order('updated_at', { ascending: false })
+      .limit(100);
+
+    if (!leads || leads.length === 0) {
+      console.log('📊 No hay leads para actualizar scores');
+      return;
+    }
+
+    let actualizados = 0;
+    let hotLeads = 0;
+    let warmLeads = 0;
+
+    for (const lead of leads) {
+      const { score, factors, categoria } = calcularLeadScore(lead);
+
+      // Solo actualizar si el score cambió significativamente (±5 puntos)
+      const scoreActual = lead.score || lead.lead_score || 0;
+      if (Math.abs(score - scoreActual) >= 5 || !lead.score) {
+        await supabase.client
+          .from('leads')
+          .update({
+            score: score,
+            lead_score: score,
+            lead_category: categoria
+          })
+          .eq('id', lead.id);
+
+        actualizados++;
+      }
+
+      if (categoria === 'HOT') hotLeads++;
+      else if (categoria === 'WARM') warmLeads++;
+    }
+
+    console.log(`📊 Lead scoring completado: ${actualizados} actualizados, ${hotLeads} HOT, ${warmLeads} WARM`);
+
+  } catch (e) {
+    console.error('Error en actualizarLeadScores:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// FOLLOW-UP POST-VISITA
+// Re-engagement para leads que visitaron pero no avanzaron
+// ═══════════════════════════════════════════════════════════
+async function followUpPostVisita(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace2dias = new Date(ahora.getTime() - 2 * 24 * 60 * 60 * 1000);
+    const hace14dias = new Date(ahora.getTime() - 14 * 24 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar leads que:
+    // 1. Tienen status 'visited'
+    // 2. Visitaron hace 2-14 días
+    // 3. No han avanzado a negotiation/reserved/sold
+    // 4. No han recibido follow-up post-visita recientemente
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, property_interest, updated_at, assigned_to')
+      .eq('status', 'visited')
+      .lt('updated_at', hace2dias.toISOString())
+      .gt('updated_at', hace14dias.toISOString())
+      .not('phone', 'is', null)
+      .limit(10);
+
+    if (!leads || leads.length === 0) {
+      console.log('📍 No hay leads post-visita para follow-up');
+      return;
+    }
+
+    // Filtrar los que no han recibido follow-up reciente
+    const hace7dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const leadsElegibles = leads.filter(lead => {
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      const ultimoFollowup = (notas as any)?.ultimo_followup_postvisita;
+      if (ultimoFollowup && new Date(ultimoFollowup) > hace7dias) {
+        return false;
+      }
+      return true;
+    });
+
+    if (leadsElegibles.length === 0) {
+      console.log('📍 Todos los leads post-visita ya tienen follow-up reciente');
+      return;
+    }
+
+    console.log(`📍 Leads post-visita para follow-up: ${leadsElegibles.length}`);
+
+    let enviados = 0;
+    const maxEnvios = 5;
+
+    for (const lead of leadsElegibles) {
+      if (enviados >= maxEnvios) break;
+
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      const nombre = lead.name?.split(' ')[0] || 'amigo';
+      const desarrollo = lead.property_interest || 'nuestros desarrollos';
+
+      // Calcular días desde visita
+      const diasDesdeVisita = Math.floor((ahora.getTime() - new Date(lead.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+
+      // Mensaje personalizado según tiempo transcurrido
+      let mensaje = '';
+      if (diasDesdeVisita <= 3) {
+        mensaje = `¡Hola ${nombre}! 👋
+
+¿Qué te pareció tu visita a ${desarrollo}? Me encantaría saber tu opinión.
+
+Si tienes alguna duda sobre:
+🏠 Las casas que viste
+💰 Precios o formas de pago
+📋 El proceso de compra
+
+¡Estoy aquí para ayudarte! 🙂`;
+      } else if (diasDesdeVisita <= 7) {
+        mensaje = `¡Hola ${nombre}! 👋
+
+Han pasado unos días desde que visitaste ${desarrollo} y quería saber cómo va tu decisión.
+
+¿Hay algo que te gustaría aclarar? Puedo ayudarte con:
+✅ Segunda visita para ver otros modelos
+✅ Cotización detallada
+✅ Opciones de financiamiento
+
+Solo responde y con gusto te atiendo 🏡`;
+      } else {
+        mensaje = `¡Hola ${nombre}! 👋
+
+Te escribo porque recuerdo que visitaste ${desarrollo} y me quedé pensando si encontraste lo que buscabas.
+
+Si aún estás buscando casa, me encantaría:
+🔑 Mostrarte nuevas opciones
+💡 Compartirte promociones actuales
+📊 Revisar tu presupuesto juntos
+
+¿Te interesa? Solo responde "sí" y te contacto 🏠`;
+      }
+
+      try {
+        await meta.sendWhatsAppMessage(lead.phone, mensaje);
+        enviados++;
+        console.log(`📍 Follow-up post-visita enviado a: ${lead.name} (${diasDesdeVisita} días desde visita)`);
+
+        // Actualizar notas
+        const notasActualizadas = {
+          ...notas,
+          ultimo_followup_postvisita: hoyStr,
+          historial_followup_postvisita: [
+            ...((notas as any)?.historial_followup_postvisita || []).slice(-4),
+            { fecha: hoyStr, dias_desde_visita: diasDesdeVisita }
+          ]
+        };
+
+        await supabase.client
+          .from('leads')
+          .update({
+            notes: notasActualizadas,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', lead.id);
+
+        // Notificar al vendedor
+        if (lead.assigned_to) {
+          const { data: vendedor } = await supabase.client
+            .from('team_members')
+            .select('name, phone')
+            .eq('id', lead.assigned_to)
+            .single();
+
+          if (vendedor?.phone) {
+            const notifVendedor = `📍 *Follow-up post-visita enviado*
+
+Lead: ${lead.name}
+Visitó: ${desarrollo}
+Hace: ${diasDesdeVisita} días
+
+💡 Si responde: bridge ${nombre}`;
+
+            await meta.sendWhatsAppMessage(vendedor.phone, notifVendedor);
+          }
+        }
+
+        await new Promise(r => setTimeout(r, 2000));
+
+      } catch (err) {
+        console.error(`Error enviando follow-up post-visita a ${lead.name}:`, err);
+      }
+    }
+
+    console.log(`📍 Follow-up post-visita completado: ${enviados} mensajes enviados`);
+
+  } catch (e) {
+    console.error('Error en followUpPostVisita:', e);
   }
 }

@@ -557,6 +557,15 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 - ✅ Implementado video de bienvenida para leads nuevos con Veo 3
 - ✅ Implementada detección de leads calientes en tiempo real
 - ✅ Implementada recuperación de abandonos en proceso de crédito
+- ✅ **Lead scoring automático** - Score 0-100 basado en:
+  - Status (0-30 pts)
+  - Interacciones (0-20 pts)
+  - Señales calientes (0-25 pts)
+  - Recencia (0-15 pts)
+  - Preparación crédito (0-10 pts)
+  - Engagement (0-10 pts)
+  - Categorías: HOT (80+), WARM (60+), LUKEWARM (40+), COLD (20+), FROZEN (<20)
+- ✅ **Follow-up post-visita** - Re-engagement para leads que visitaron pero no avanzaron (2-14 días)
 - ✅ Documentación actualizada de todos los follow-ups
 
 **Sesión 2 (01:00-)**
