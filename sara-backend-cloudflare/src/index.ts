@@ -6374,10 +6374,18 @@ _Solo responde con el número_ 🙏`;
           return corsResponse(JSON.stringify({ error: 'Error descargando imagen: ' + imgResponse.status }), 500);
         }
         const imgBuffer = await imgResponse.arrayBuffer();
-        const imgBase64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
+        // Convertir a base64 de forma eficiente (evita stack overflow en imágenes grandes)
+        const bytes = new Uint8Array(imgBuffer);
+        let binary = '';
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          const chunk = bytes.subarray(i, i + chunkSize);
+          binary += String.fromCharCode.apply(null, Array.from(chunk));
+        }
+        const imgBase64 = btoa(binary);
         console.log('Imagen descargada:', imgBuffer.byteLength, 'bytes');
 
-        const prompt = 'Cinematic medium shot of a friendly professional Mexican woman real estate agent standing in front of the luxury house shown in the image. She looks at the camera, smiles warmly and gestures welcome. Audio: A clear female voice speaking in Mexican Spanish saying Hola ' + testName + ', bienvenido a tu nuevo hogar aqui en ' + testDesarrollo + '. High quality, photorealistic, 4k resolution, natural lighting.';
+        const prompt = `A friendly female real estate agent standing in front of the house facade shown in the image. The beautiful house exterior is clearly visible behind her. She smiles warmly and speaks congratulating in Spanish: "¡Felicidades ${testName}! Ya eres parte de la familia ${testDesarrollo}. Gracias por confiar en Grupo Santa Rita". Wide shot showing agent and house facade, golden hour lighting, 4k. No text, no subtitles, no captions, no overlays, clean video only.`;
 
         console.log('Llamando Veo 3 API...');
         const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning', {
@@ -17419,8 +17427,8 @@ async function videoFelicitacionPostVenta(supabase: SupabaseService, meta: MetaW
       }
       fotoDesarrollo = fotoDesarrollo || fotosDesarrollo['Monte Verde'];
 
-      // Prompt para Veo 3 - Avatar felicitando al nuevo propietario
-      const prompt = `A friendly female real estate agent standing inside the property shown in the image. She is positioned naturally in the space, at a comfortable distance from camera. The room and house surroundings are visible around her. She smiles warmly and speaks congratulating in Spanish: "Felicidades ${nombre}, bienvenido a tu nuevo hogar en ${desarrollo}. Estamos muy contentos de tenerte como parte de la familia Grupo Santa Rita". Wide shot showing both agent and interior, cinematic lighting, 4k. No text, no subtitles, no captions, no overlays, clean video only.`;
+      // Prompt para Veo 3 - Avatar felicitando al nuevo propietario (FRENTE a la fachada)
+      const prompt = `A friendly female real estate agent standing in front of the house facade shown in the image. The beautiful house exterior is clearly visible behind her. She smiles warmly and speaks congratulating in Spanish: "¡Felicidades ${nombre}! Ya eres parte de la familia ${desarrollo}. Gracias por confiar en Grupo Santa Rita". Wide shot showing agent and house facade, golden hour lighting, 4k. No text, no subtitles, no captions, no overlays, clean video only.`;
 
       try {
         // Verificar límites de API antes de intentar
@@ -17511,7 +17519,7 @@ async function videoFelicitacionPostVenta(supabase: SupabaseService, meta: MetaW
             desarrollo: desarrollo,
             operation_id: operationName,
             video_type: 'felicitacion_postventa',
-            status: 'processing',
+            sent: false,
             created_at: new Date().toISOString()
           });
 
