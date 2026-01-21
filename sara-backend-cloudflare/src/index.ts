@@ -17493,11 +17493,21 @@ async function videoFelicitacionPostVenta(supabase: SupabaseService, meta: MetaW
         const operationName = veoData.name;
 
         if (operationName) {
+          // Normalizar teléfono (agregar código de país México si no lo tiene)
+          let phoneNormalizado = lead.phone?.replace(/\D/g, '') || '';
+          if (phoneNormalizado.length === 10) {
+            phoneNormalizado = '521' + phoneNormalizado;
+          } else if (phoneNormalizado.startsWith('1') && phoneNormalizado.length === 11) {
+            phoneNormalizado = '52' + phoneNormalizado;
+          } else if (!phoneNormalizado.startsWith('52')) {
+            phoneNormalizado = '52' + phoneNormalizado;
+          }
+
           // Guardar operación pendiente
           await supabase.client.from('pending_videos').insert({
             lead_id: lead.id,
             lead_name: lead.name,
-            lead_phone: lead.phone,
+            lead_phone: phoneNormalizado,
             desarrollo: desarrollo,
             operation_id: operationName,
             video_type: 'felicitacion_postventa',
