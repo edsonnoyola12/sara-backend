@@ -4320,8 +4320,8 @@ Mensaje: ${mensaje}`;
         const imgBuffer = await imgResponse.arrayBuffer();
         const imgBase64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
 
-        // PROMPT ORIGINAL que funcionaba - avatar + foto + voz
-        const prompt = `Cinematic medium shot of a friendly professional Mexican woman real estate agent standing in front of the luxury house shown in the image. She looks at the camera, smiles warmly and gestures welcome. Audio: A clear female voice speaking in Mexican Spanish saying "Hola ${nombre}, bienvenido a tu nuevo hogar aquí en ${desarrollo}". High quality, photorealistic, 4k resolution, natural lighting.`;
+        // PROMPT - Tour cinematográfico de la propiedad con audio personalizado
+        const prompt = `Cinematic tour of the luxury residential property shown in the image. Smooth camera movement showcasing the architecture and surroundings. Golden hour lighting, high quality 4K. Audio: A warm professional voice in Spanish saying "Hola ${nombre}, te doy la bienvenida a ${desarrollo}, tu próximo hogar. Agenda tu visita hoy."`;
 
         const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning', {
           method: 'POST',
