@@ -4335,8 +4335,8 @@ Mensaje: ${mensaje}`;
         const esFemenino = nombreLower.endsWith('a') && !excepcionesMasculinas.some(e => nombreLower.includes(e));
         const bienvenida = esFemenino ? 'bienvenida' : 'bienvenido';
 
-        // INTENTO: Presenter style con imagen de fondo
-        const prompt = `Video of a friendly female presenter standing in front of a large screen displaying the property image. She presents the house to the viewer, pointing at it behind her. She speaks in Spanish: "Hola ${nombre}, ${bienvenida} a ti y a tu familia a tu nuevo hogar aquí en ${desarrollo}". Professional real estate presentation style, 4k quality.`;
+        // PROMPT: Avatar DENTRO de la propiedad, no frente a pantalla
+        const prompt = `A friendly female real estate agent standing inside the property shown in the image. She is positioned naturally in the space, at a comfortable distance from camera. The room and house surroundings are visible around her. She smiles and speaks welcomingly in Spanish: "Hola ${nombre}, ${bienvenida} a ti y a tu familia a tu nuevo hogar aquí en ${desarrollo}". Wide shot showing both agent and interior, cinematic lighting, 4k.`;
 
         const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning', {
           method: 'POST',
