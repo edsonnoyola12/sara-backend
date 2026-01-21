@@ -574,6 +574,15 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
   - Miércoles 11am
   - Cooldown 60 días
   - Notifica al vendedor
+- ✅ **Manejo de objeciones** - Detecta 8 tipos de objeciones en tiempo real:
+  - Precio, ubicación, timing, desconfianza, competencia, crédito negado, tamaño, indecisión
+  - Alerta al vendedor con respuestas sugeridas
+  - Cooldown 2 horas
+- ✅ **Encuestas NPS** - Mide satisfacción 0-10:
+  - Target: clientes post-visita y post-venta (7-30 días)
+  - Viernes 10am
+  - Clasifica: Promotor (9-10), Pasivo (7-8), Detractor (0-6)
+  - Alerta inmediata si detractor
 - ✅ Documentación actualizada de todos los follow-ups
 
 **Sesión 2 (01:00-)**

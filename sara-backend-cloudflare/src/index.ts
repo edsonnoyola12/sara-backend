@@ -3681,30 +3681,43 @@ Mensaje: ${mensaje}`;
           }
           // ═══ FIN MANEJO DE IMÁGENES ═══
 
-          // ═══ DETECCIÓN DE LEADS CALIENTES ═══
-          // Detectar señales de compra ANTES de procesar el mensaje
+          // ═══ DETECCIÓN DE LEADS CALIENTES Y OBJECIONES ═══
+          // Detectar señales de compra y objeciones ANTES de procesar el mensaje
           if (text && text.length > 3) {
             try {
-              const señalesCalientes = detectarSeñalesCalientes(text);
-              if (señalesCalientes.length > 0) {
-                // Buscar el lead para obtener info
-                const cleanPhoneHot = from.replace(/\D/g, '');
-                const { data: leadHot } = await supabase.client
-                  .from('leads')
-                  .select('id, name, phone, assigned_to, property_interest, notes')
-                  .or(`phone.eq.${cleanPhoneHot},phone.like.%${cleanPhoneHot.slice(-10)}`)
-                  .single();
+              const cleanPhoneHot = from.replace(/\D/g, '');
+              const { data: leadHot } = await supabase.client
+                .from('leads')
+                .select('id, name, phone, assigned_to, property_interest, notes, status')
+                .or(`phone.eq.${cleanPhoneHot},phone.like.%${cleanPhoneHot.slice(-10)}`)
+                .single();
 
-                if (leadHot && leadHot.assigned_to) {
+              if (leadHot && leadHot.assigned_to) {
+                // Detectar señales calientes
+                const señalesCalientes = detectarSeñalesCalientes(text);
+                if (señalesCalientes.length > 0) {
                   console.log(`🔥 Señales calientes detectadas para ${leadHot.name}: ${señalesCalientes.map(s => s.tipo).join(', ')}`);
                   await alertarLeadCaliente(supabase, meta, leadHot, text, señalesCalientes);
                 }
+
+                // Detectar objeciones
+                const objeciones = detectarObjeciones(text);
+                if (objeciones.length > 0) {
+                  console.log(`⚠️ Objeciones detectadas para ${leadHot.name}: ${objeciones.map(o => o.tipo).join(', ')}`);
+                  await alertarObjecion(supabase, meta, leadHot, text, objeciones);
+                }
+
+                // Procesar respuesta NPS si aplica
+                const npsProcessed = await procesarRespuestaNPS(supabase, meta, leadHot, text);
+                if (npsProcessed) {
+                  console.log(`📊 Respuesta NPS procesada para ${leadHot.name}`);
+                }
               }
             } catch (hotErr) {
-              console.error('Error en detección de leads calientes:', hotErr);
+              console.error('Error en detección de leads calientes/objeciones:', hotErr);
             }
           }
-          // ═══ FIN DETECCIÓN DE LEADS CALIENTES ═══
+          // ═══ FIN DETECCIÓN DE LEADS CALIENTES Y OBJECIONES ═══
 
           await handler.handleIncomingMessage(`whatsapp:+${from}`, text, env);
 
@@ -4413,6 +4426,26 @@ Mensaje: ${mensaje}`;
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       await solicitarReferidos(supabase, meta);
       return corsResponse(JSON.stringify({ message: 'Solicitud de referidos ejecutada.' }));
+    }
+
+    if (url.pathname === '/run-nps') {
+      console.log('📊 Forzando envío de encuestas NPS...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await enviarEncuestaNPS(supabase, meta);
+      return corsResponse(JSON.stringify({ message: 'Encuestas NPS enviadas.' }));
+    }
+
+    if (url.pathname === '/test-objecion') {
+      // Endpoint para probar detección de objeciones
+      const testMsg = url.searchParams.get('msg') || 'está muy caro, no me alcanza';
+      const objeciones = detectarObjeciones(testMsg);
+      return corsResponse(JSON.stringify({
+        mensaje: testMsg,
+        objeciones_detectadas: objeciones.map(o => ({
+          tipo: o.tipo,
+          prioridad: o.prioridad
+        }))
+      }, null, 2));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -10056,6 +10089,13 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek === 3) {
       console.log('🤝 Solicitando referidos a clientes...');
       await solicitarReferidos(supabase, meta);
+    }
+
+    // ENCUESTAS NPS: Viernes 10am
+    // Medir satisfacción de clientes post-visita y post-venta
+    if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek === 5) {
+      console.log('📊 Enviando encuestas NPS...');
+      await enviarEncuestaNPS(supabase, meta);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -18927,4 +18967,388 @@ Hace: ${diasDesdeCompra} días
   } catch (e) {
     console.error('Error en solicitarReferidos:', e);
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// DETECCIÓN Y MANEJO DE OBJECIONES
+// Detecta objeciones comunes y alerta al vendedor con respuestas sugeridas
+// ═══════════════════════════════════════════════════════════
+interface Objecion {
+  tipo: string;
+  patron: RegExp;
+  respuestaSugerida: string;
+  prioridad: 'alta' | 'media' | 'baja';
+}
+
+const OBJECIONES_COMUNES: Objecion[] = [
+  // PRECIO
+  {
+    tipo: 'precio_alto',
+    patron: /muy caro|esta caro|no me alcanza|fuera de (mi )?presupuesto|no tengo (tanto|ese) dinero|es mucho|demasiado caro/i,
+    respuestaSugerida: `💡 *Respuesta sugerida - Precio:*
+→ "Entiendo tu preocupación. ¿Te gustaría que revisemos opciones de financiamiento? Con crédito, la mensualidad puede ser menor a una renta."
+→ "Tenemos diferentes modelos. ¿Cuál es tu presupuesto ideal? Así te muestro opciones que se ajusten."
+→ "También tenemos promociones de enganche diferido. ¿Te interesa conocerlas?"`,
+    prioridad: 'alta'
+  },
+  {
+    tipo: 'ubicacion',
+    patron: /muy lejos|esta lejos|no me gusta la zona|no conozco (esa|la) zona|queda lejos|mal ubicado/i,
+    respuestaSugerida: `💡 *Respuesta sugerida - Ubicación:*
+→ "La zona está en crecimiento y tiene excelente plusvalía. ¿Te gustaría que te muestre los accesos y servicios cercanos?"
+→ "Tenemos desarrollos en diferentes zonas. ¿Cuál ubicación te quedaría mejor?"
+→ "Muchos clientes pensaban igual, pero al visitar cambiaron de opinión. ¿Agendamos un recorrido?"`,
+    prioridad: 'media'
+  },
+  {
+    tipo: 'timing',
+    patron: /no es (buen )?momento|mas adelante|despues|ahorita no|todavia no|en unos meses|el proximo año|cuando tenga|primero tengo que/i,
+    respuestaSugerida: `💡 *Respuesta sugerida - Timing:*
+→ "Entiendo. ¿Puedo preguntarte qué necesitas resolver primero? Quizá podamos ayudarte."
+→ "Los precios suben cada mes. Apartar ahora te garantiza el precio actual con un mínimo de enganche."
+→ "¿Te gustaría que te mantenga informado de promociones? Así cuando estés listo tendrás las mejores opciones."`,
+    prioridad: 'media'
+  },
+  {
+    tipo: 'desconfianza',
+    patron: /no confio|es seguro|de verdad|no se si|sera cierto|me da desconfianza|tienen garantia|estan registrados/i,
+    respuestaSugerida: `💡 *Respuesta sugerida - Confianza:*
+→ "Grupo Santa Rita tiene más de 15 años entregando casas. Te puedo compartir testimoniales de clientes."
+→ "Todas nuestras propiedades tienen escrituras en orden y están registradas. Te muestro la documentación."
+→ "¿Te gustaría visitar un desarrollo terminado y platicar con vecinos actuales?"`,
+    prioridad: 'alta'
+  },
+  {
+    tipo: 'competencia',
+    patron: /vi algo mas barato|en otro lado|otra inmobiliaria|otra constructora|me ofrecieron|cotizando con otros|comparando opciones/i,
+    respuestaSugerida: `💡 *Respuesta sugerida - Competencia:*
+→ "¡Qué bueno que estás comparando! ¿Puedo saber qué opciones viste? Te ayudo a comparar beneficios."
+→ "A veces lo barato sale caro. Nosotros incluimos: escrituración, servicios y garantía. ¿Ellos también?"
+→ "¿Qué es lo que más te gustó de la otra opción? Quiero entender qué es importante para ti."`,
+    prioridad: 'alta'
+  },
+  {
+    tipo: 'credito_negado',
+    patron: /no califico|me rechazaron|no me dan credito|no tengo buro|mal historial|deudas|no paso el credito/i,
+    respuestaSugerida: `💡 *Respuesta sugerida - Crédito:*
+→ "Trabajamos con múltiples bancos y cada uno tiene criterios diferentes. ¿Te gustaría que revisemos otras opciones?"
+→ "También tenemos esquemas de pago directo con la constructora. ¿Te interesa conocerlos?"
+→ "A veces el problema no es el buró, sino cómo se presenta la solicitud. Nuestros asesores de crédito pueden ayudarte."`,
+    prioridad: 'alta'
+  },
+  {
+    tipo: 'tamaño',
+    patron: /muy chica|muy pequeña|necesito mas espacio|es pequeña|no cabe|muy grande|mucho espacio|no necesito tanto/i,
+    respuestaSugerida: `💡 *Respuesta sugerida - Tamaño:*
+→ "Tenemos diferentes modelos. ¿Cuántas recámaras necesitas idealmente?"
+→ "Los metros cuadrados son optimizados. ¿Te gustaría visitar para ver cómo se siente el espacio real?"
+→ "Muchos modelos permiten ampliaciones a futuro. Te explico las opciones."`,
+    prioridad: 'media'
+  },
+  {
+    tipo: 'indecision',
+    patron: /no se|tengo que pensarlo|dejame ver|lo voy a pensar|consultarlo|platicarlo con|mi esposo|mi esposa|mi familia/i,
+    respuestaSugerida: `💡 *Respuesta sugerida - Indecisión:*
+→ "Claro, es una decisión importante. ¿Hay alguna duda específica que pueda resolver para ayudarte a decidir?"
+→ "¿Te gustaría que agende una visita para que tu familia también conozca? Sin compromiso."
+→ "Te puedo enviar información detallada para que la revisen juntos. ¿Qué te gustaría saber?"`,
+    prioridad: 'baja'
+  }
+];
+
+function detectarObjeciones(mensaje: string): Objecion[] {
+  const msgNormalizado = mensaje.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return OBJECIONES_COMUNES.filter(obj => obj.patron.test(msgNormalizado));
+}
+
+async function alertarObjecion(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  lead: any,
+  mensaje: string,
+  objeciones: Objecion[]
+): Promise<void> {
+  try {
+    if (objeciones.length === 0) return;
+
+    // Buscar vendedor asignado
+    const { data: vendedor } = await supabase.client
+      .from('team_members')
+      .select('id, name, phone')
+      .eq('id', lead.assigned_to)
+      .single();
+
+    if (!vendedor?.phone) {
+      console.log(`⚠️ Objeción detectada para ${lead.name} pero vendedor sin teléfono`);
+      return;
+    }
+
+    // Verificar cooldown (no alertar misma objeción en 2 horas)
+    const notas = typeof lead.notes === 'object' ? lead.notes : {};
+    const ultimaObjecion = (notas as any)?.ultima_alerta_objecion;
+    if (ultimaObjecion) {
+      const hace2h = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      if (new Date(ultimaObjecion) > hace2h) {
+        console.log(`⚠️ Lead ${lead.name} ya tiene alerta de objeción reciente`);
+        return;
+      }
+    }
+
+    // Construir mensaje de alerta
+    const tiposObjecion = objeciones.map(o => o.tipo).join(', ');
+    const prioridadMax = objeciones.some(o => o.prioridad === 'alta') ? 'ALTA' :
+                         objeciones.some(o => o.prioridad === 'media') ? 'MEDIA' : 'BAJA';
+
+    let alertaMsg = `⚠️ *OBJECIÓN DETECTADA*
+
+👤 *${lead.name}*
+📱 ${lead.phone}
+🏠 Interés: ${lead.property_interest || 'No especificado'}
+
+💬 Dijo: "${mensaje.substring(0, 150)}${mensaje.length > 150 ? '...' : ''}"
+
+📊 Tipo: *${tiposObjecion}*
+⚡ Prioridad: *${prioridadMax}*
+
+`;
+
+    // Agregar respuestas sugeridas (máximo 2)
+    objeciones.slice(0, 2).forEach(obj => {
+      alertaMsg += `\n${obj.respuestaSugerida}\n`;
+    });
+
+    alertaMsg += `\n📞 Responde: bridge ${lead.name?.split(' ')[0]}`;
+
+    await meta.sendWhatsAppMessage(vendedor.phone, alertaMsg);
+    console.log(`⚠️ Alerta de objeción enviada a ${vendedor.name}: ${lead.name} (${tiposObjecion})`);
+
+    // Guardar en notas
+    const notasActualizadas = {
+      ...notas,
+      ultima_alerta_objecion: new Date().toISOString(),
+      historial_objeciones: [
+        ...((notas as any)?.historial_objeciones || []).slice(-9),
+        {
+          fecha: new Date().toISOString(),
+          tipos: objeciones.map(o => o.tipo),
+          mensaje: mensaje.substring(0, 200)
+        }
+      ]
+    };
+
+    await supabase.client
+      .from('leads')
+      .update({ notes: notasActualizadas })
+      .eq('id', lead.id);
+
+  } catch (e) {
+    console.error('Error en alertarObjecion:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ENCUESTAS NPS (Net Promoter Score)
+// Mide satisfacción en puntos clave del journey
+// ═══════════════════════════════════════════════════════════
+async function enviarEncuestaNPS(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace7dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const hace30dias = new Date(ahora.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar clientes para encuesta:
+    // 1. Status: visited (post-visita), sold/closed (post-venta)
+    // 2. Status cambió hace 7-30 días
+    // 3. No han recibido encuesta NPS
+    const { data: clientes } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, property_interest, status_changed_at')
+      .in('status', ['visited', 'sold', 'closed', 'delivered'])
+      .lt('status_changed_at', hace7dias.toISOString())
+      .gt('status_changed_at', hace30dias.toISOString())
+      .not('phone', 'is', null)
+      .limit(10);
+
+    if (!clientes || clientes.length === 0) {
+      console.log('📊 No hay clientes para encuesta NPS');
+      return;
+    }
+
+    // Filtrar los que no han recibido encuesta
+    const clientesElegibles = clientes.filter(cliente => {
+      const notas = typeof cliente.notes === 'object' ? cliente.notes : {};
+      return !(notas as any)?.encuesta_nps_enviada;
+    });
+
+    if (clientesElegibles.length === 0) {
+      console.log('📊 Todos los clientes ya tienen encuesta NPS');
+      return;
+    }
+
+    console.log(`📊 Clientes para encuesta NPS: ${clientesElegibles.length}`);
+
+    let enviados = 0;
+    const maxEnvios = 5;
+
+    for (const cliente of clientesElegibles) {
+      if (enviados >= maxEnvios) break;
+
+      const notas = typeof cliente.notes === 'object' ? cliente.notes : {};
+      const nombre = cliente.name?.split(' ')[0] || 'amigo';
+
+      // Mensaje según status
+      let contexto = '';
+      let pregunta = '';
+
+      if (cliente.status === 'visited') {
+        contexto = 'tu visita a nuestros desarrollos';
+        pregunta = '¿Qué tan probable es que nos recomiendes a un amigo o familiar?';
+      } else {
+        contexto = 'tu experiencia de compra';
+        pregunta = '¿Qué tan probable es que nos recomiendes a un amigo o familiar que busque casa?';
+      }
+
+      const mensaje = `¡Hola ${nombre}! 👋
+
+Tu opinión es muy importante para nosotros.
+
+Sobre ${contexto}:
+
+${pregunta}
+
+Responde con un número del *0 al 10*:
+0️⃣ = Nada probable
+5️⃣ = Neutral
+🔟 = Muy probable
+
+Tu respuesta nos ayuda a mejorar 🙏`;
+
+      try {
+        await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+        enviados++;
+        console.log(`📊 Encuesta NPS enviada a: ${cliente.name} (${cliente.status})`);
+
+        // Marcar como enviada
+        const notasActualizadas = {
+          ...notas,
+          encuesta_nps_enviada: hoyStr,
+          encuesta_nps_status: cliente.status,
+          esperando_respuesta_nps: true
+        };
+
+        await supabase.client
+          .from('leads')
+          .update({ notes: notasActualizadas })
+          .eq('id', cliente.id);
+
+        await new Promise(r => setTimeout(r, 2000));
+
+      } catch (err) {
+        console.error(`Error enviando encuesta NPS a ${cliente.name}:`, err);
+      }
+    }
+
+    console.log(`📊 Encuestas NPS enviadas: ${enviados}`);
+
+  } catch (e) {
+    console.error('Error en enviarEncuestaNPS:', e);
+  }
+}
+
+// Procesar respuesta NPS
+async function procesarRespuestaNPS(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  lead: any,
+  mensaje: string
+): Promise<boolean> {
+  const notas = typeof lead.notes === 'object' ? lead.notes : {};
+
+  // Verificar si estamos esperando respuesta NPS
+  if (!(notas as any)?.esperando_respuesta_nps) {
+    return false;
+  }
+
+  // Extraer número del mensaje
+  const match = mensaje.match(/\b([0-9]|10)\b/);
+  if (!match) {
+    return false; // No es una respuesta NPS válida
+  }
+
+  const score = parseInt(match[1]);
+  const nombre = lead.name?.split(' ')[0] || 'amigo';
+
+  // Determinar categoría NPS
+  let categoria: string;
+  let respuesta: string;
+
+  if (score >= 9) {
+    categoria = 'promotor';
+    respuesta = `¡Muchas gracias ${nombre}! 🎉
+
+Nos alegra mucho saber que tuviste una gran experiencia.
+
+Si conoces a alguien que busque casa, ¡con gusto lo atendemos! Solo compártenos su nombre y teléfono.
+
+¡Gracias por confiar en Grupo Santa Rita! ⭐`;
+  } else if (score >= 7) {
+    categoria = 'pasivo';
+    respuesta = `¡Gracias por tu respuesta ${nombre}! 😊
+
+Nos da gusto que tu experiencia haya sido buena.
+
+¿Hay algo que podamos mejorar para la próxima vez? Tu opinión nos ayuda mucho.`;
+  } else {
+    categoria = 'detractor';
+    respuesta = `Gracias por tu honestidad ${nombre}.
+
+Lamentamos que tu experiencia no haya sido la mejor. 😔
+
+¿Podrías contarnos qué pasó? Queremos mejorar y, si hay algo que podamos resolver, lo haremos.
+
+Un asesor te contactará pronto.`;
+
+    // Alertar al vendedor sobre detractor
+    if (lead.assigned_to) {
+      const { data: vendedor } = await supabase.client
+        .from('team_members')
+        .select('phone')
+        .eq('id', lead.assigned_to)
+        .single();
+
+      if (vendedor?.phone) {
+        await meta.sendWhatsAppMessage(vendedor.phone,
+          `🚨 *ALERTA NPS BAJO*
+
+Cliente: ${lead.name}
+Score: ${score}/10 (${categoria})
+Status: ${lead.status}
+
+⚠️ Requiere atención inmediata. Contacta al cliente para resolver su experiencia.
+
+📞 bridge ${nombre}`);
+      }
+    }
+  }
+
+  // Enviar respuesta al cliente
+  await meta.sendWhatsAppMessage(lead.phone, respuesta);
+
+  // Guardar en notas
+  const notasActualizadas = {
+    ...notas,
+    esperando_respuesta_nps: false,
+    nps_score: score,
+    nps_categoria: categoria,
+    nps_respondido: new Date().toISOString()
+  };
+
+  await supabase.client
+    .from('leads')
+    .update({ notes: notasActualizadas })
+    .eq('id', lead.id);
+
+  console.log(`📊 NPS procesado: ${lead.name} = ${score} (${categoria})`);
+  return true;
 }
