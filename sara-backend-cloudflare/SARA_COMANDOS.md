@@ -422,11 +422,64 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-20 08:00*
+*Última actualización: 2026-01-21 00:00*
+
+---
+
+## VIDEO PERSONALIZADO DE BIENVENIDA (Veo 3)
+
+### Endpoint
+```
+GET /test-video-personalizado/{phone}?nombre={nombre}&desarrollo={desarrollo}
+```
+
+### Cómo funciona
+1. Recibe nombre del lead y desarrollo de interés
+2. Selecciona foto de fachada real del desarrollo
+3. Detecta género por nombre (termina en 'a' = femenino, excepto excepciones)
+4. Genera video con Veo 3: avatar dentro de la propiedad
+5. Guarda en `pending_videos` para envío automático
+6. CRON verifica cada 2 min y envía cuando está listo
+
+### Fotos de fachada por desarrollo
+| Desarrollo | Foto |
+|------------|------|
+| Monte Verde | EUCALIPTO fachada |
+| Los Encinos | Roble fachada |
+| Andes | Dalia fachada |
+| Miravalle | Fachada desarrollo |
+| Distrito Falco | Chipre fachada |
+| Acacia | ACACIA fachada |
+
+### Prompt actual
+- Avatar (mujer agente) dentro de la propiedad
+- Distancia cómoda de cámara (wide shot)
+- Sin subtítulos ni texto overlay
+- Audio en español: "Hola [nombre], bienvenido/a a ti y a tu familia a tu nuevo hogar aquí en [desarrollo]"
+
+### Límites Veo 3 API
+- ~10-20 videos/minuto
+- ~100-200 videos/día (con facturación)
+- Costo: ~$0.15/segundo (~$1.20 por video de 8 seg)
+
+### Debug endpoints
+- `GET /debug-videos` - Ver estado de videos pendientes
+- `GET /test-videos` - Forzar procesamiento de videos
 
 ---
 
 ## HISTORIAL DE CAMBIOS
+
+### 2026-01-21
+
+**Sesión 1 (19:00-00:00)**
+- ✅ Video personalizado Veo 3 funcionando con avatar
+- ✅ Avatar dentro de la propiedad (no frente a pantalla)
+- ✅ Fotos reales de fachadas por desarrollo
+- ✅ Detección de género (bienvenido/bienvenida)
+- ✅ Sin subtítulos ni texto en video
+- ✅ Chat IA agregado a dashboards CEO, Vendedor y Asesor en CRM
+- ✅ Probado con lead real (Juan - Acacia)
 
 ### 2026-01-20
 
