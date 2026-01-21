@@ -4401,6 +4401,20 @@ Mensaje: ${mensaje}`;
       return corsResponse(JSON.stringify({ message: 'Follow-up post-visita ejecutado.' }));
     }
 
+    if (url.pathname === '/run-nurturing') {
+      console.log('📚 Forzando nurturing educativo...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await nurturingEducativo(supabase, meta);
+      return corsResponse(JSON.stringify({ message: 'Nurturing educativo ejecutado.' }));
+    }
+
+    if (url.pathname === '/run-referidos') {
+      console.log('🤝 Forzando solicitud de referidos...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await solicitarReferidos(supabase, meta);
+      return corsResponse(JSON.stringify({ message: 'Solicitud de referidos ejecutada.' }));
+    }
+
     // ═══════════════════════════════════════════════════════════
     // REENVIAR VIDEO: Para videos que tienen URL pero no se enviaron
     // ═══════════════════════════════════════════════════════════
@@ -10028,6 +10042,20 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     if (mexicoHour === 16 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
       console.log('📍 Verificando leads post-visita para follow-up...');
       await followUpPostVisita(supabase, meta);
+    }
+
+    // NURTURING EDUCATIVO: Martes y Jueves 11am
+    // Contenido educativo sobre crédito y compra de casa
+    if (mexicoHour === 11 && isFirstRunOfHour && (dayOfWeek === 2 || dayOfWeek === 4)) {
+      console.log('📚 Enviando nurturing educativo...');
+      await nurturingEducativo(supabase, meta);
+    }
+
+    // PROGRAMA DE REFERIDOS: Miércoles 11am
+    // Solicitar referidos a clientes satisfechos (30-90 días post-venta)
+    if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek === 3) {
+      console.log('🤝 Solicitando referidos a clientes...');
+      await solicitarReferidos(supabase, meta);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -18515,5 +18543,388 @@ Hace: ${diasDesdeVisita} días
 
   } catch (e) {
     console.error('Error en followUpPostVisita:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// NURTURING EDUCATIVO
+// Envía contenido educativo sobre compra de casa y crédito
+// ═══════════════════════════════════════════════════════════
+const CONTENIDO_EDUCATIVO = [
+  {
+    id: 'tip_credito_1',
+    tema: 'crédito',
+    titulo: '💡 Tip de Crédito #1',
+    mensaje: `¿Sabías que puedes mejorar tu capacidad de crédito?
+
+Aquí te van 3 tips:
+
+1️⃣ *Paga tus deudas a tiempo* - El historial crediticio es clave
+2️⃣ *No uses más del 30%* de tu límite de tarjeta
+3️⃣ *Mantén cuentas antiguas* - La antigüedad suma puntos
+
+Si quieres saber cuánto te prestan los bancos, escríbeme "quiero crédito" y te ayudo a calcularlo 🏠`
+  },
+  {
+    id: 'tip_credito_2',
+    tema: 'crédito',
+    titulo: '💡 Tip de Crédito #2',
+    mensaje: `¿Infonavit, Fovissste o Banco? 🤔
+
+Te explico las diferencias:
+
+🏛️ *Infonavit/Fovissste*
+- Tasa fija en VSM
+- Menor enganche (5-10%)
+- Proceso más largo
+
+🏦 *Banco*
+- Tasa fija en pesos
+- Mayor flexibilidad
+- Proceso más rápido
+
+💡 *Cofinanciamiento*
+- Combina ambos
+- Mayor monto
+- Mejor de los dos mundos
+
+¿Quieres saber cuál te conviene? Responde "opciones de crédito" 📊`
+  },
+  {
+    id: 'tip_compra_1',
+    tema: 'compra',
+    titulo: '🏡 Guía del Comprador #1',
+    mensaje: `¿Primera vez comprando casa? Aquí está el proceso:
+
+1️⃣ *Define tu presupuesto*
+   - Enganche (10-20% del valor)
+   - Gastos de escrituración (5-8%)
+   - Mensualidad cómoda
+
+2️⃣ *Pre-califícate*
+   - Conoce cuánto te prestan
+   - Compara opciones
+
+3️⃣ *Visita opciones*
+   - Ubicación, tamaño, amenidades
+
+4️⃣ *Aparta y firma*
+   - Contrato, escrituras
+
+¿Quieres que te ayude con el paso 1? Escríbeme "calcular presupuesto" 💰`
+  },
+  {
+    id: 'tip_compra_2',
+    tema: 'compra',
+    titulo: '🏡 Guía del Comprador #2',
+    mensaje: `5 cosas que DEBES revisar antes de comprar:
+
+✅ *Escrituras en orden*
+   - Que estén a nombre del vendedor
+   - Sin gravámenes ni adeudos
+
+✅ *Uso de suelo*
+   - Que sea habitacional
+
+✅ *Servicios*
+   - Agua, luz, drenaje
+
+✅ *Accesos*
+   - Calles pavimentadas
+   - Transporte cercano
+
+✅ *Plusvalía*
+   - Desarrollo de la zona
+   - Proyectos futuros
+
+En Grupo Santa Rita todos nuestros desarrollos cumplen con esto ✨
+
+¿Te gustaría conocerlos? Responde "ver desarrollos" 🏘️`
+  },
+  {
+    id: 'tip_enganche_1',
+    tema: 'enganche',
+    titulo: '💰 Cómo juntar tu enganche',
+    mensaje: `El enganche es el primer paso. Aquí te ayudo:
+
+📊 *¿Cuánto necesitas?*
+- Casa de $1.5M → enganche ~$150,000
+- Casa de $2M → enganche ~$200,000
+- Casa de $3M → enganche ~$300,000
+
+💡 *Estrategias para juntarlo:*
+1. Ahorro automático (10-15% de tu sueldo)
+2. Aguinaldo + bonos
+3. Vender algo que no uses
+4. Préstamo familiar (sin intereses)
+5. Caja de ahorro del trabajo
+
+🎁 *Promociones*
+A veces tenemos promociones con enganche diferido o descuentos
+
+¿Quieres saber las promociones actuales? Escribe "promociones" 🎉`
+  },
+  {
+    id: 'testimonial_1',
+    tema: 'testimonial',
+    titulo: '⭐ Historia de Éxito',
+    mensaje: `*"Nunca pensé que podría tener mi casa propia"*
+
+María y Juan buscaban casa hace 2 años. Pensaban que no calificaban para crédito.
+
+Con nuestra ayuda:
+✅ Descubrieron que SÍ calificaban
+✅ Encontraron la casa perfecta en Monte Verde
+✅ Hoy ya tienen las llaves de su hogar
+
+💬 _"El proceso fue más fácil de lo que pensamos. Sara nos guió en cada paso."_
+
+¿Quieres ser nuestra próxima historia de éxito? 🏡
+Escríbeme "quiero mi casa" y empezamos`
+  }
+];
+
+async function nurturingEducativo(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace7dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const hace60dias = new Date(ahora.getTime() - 60 * 24 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar leads que:
+    // 1. Están en etapas tempranas (new, contacted, qualified)
+    // 2. Tienen actividad en los últimos 60 días
+    // 3. No han recibido nurturing en los últimos 7 días
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, property_interest, needs_mortgage, updated_at')
+      .in('status', ['new', 'contacted', 'qualified', 'appointment_scheduled'])
+      .gt('updated_at', hace60dias.toISOString())
+      .not('phone', 'is', null)
+      .limit(20);
+
+    if (!leads || leads.length === 0) {
+      console.log('📚 No hay leads para nurturing educativo');
+      return;
+    }
+
+    // Filtrar los que no han recibido nurturing recientemente
+    const leadsElegibles = leads.filter(lead => {
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      const ultimoNurturing = (notas as any)?.ultimo_nurturing;
+      if (ultimoNurturing && new Date(ultimoNurturing) > hace7dias) {
+        return false;
+      }
+      return true;
+    });
+
+    if (leadsElegibles.length === 0) {
+      console.log('📚 Todos los leads ya tienen nurturing reciente');
+      return;
+    }
+
+    console.log(`📚 Leads para nurturing educativo: ${leadsElegibles.length}`);
+
+    let enviados = 0;
+    const maxEnvios = 10;
+
+    for (const lead of leadsElegibles) {
+      if (enviados >= maxEnvios) break;
+
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      const contenidosEnviados = (notas as any)?.nurturing_enviados || [];
+
+      // Seleccionar contenido que no se haya enviado antes
+      // Priorizar según interés del lead
+      let contenidoSeleccionado = null;
+
+      // Si necesita crédito, priorizar tips de crédito
+      if (lead.needs_mortgage === true || lead.needs_mortgage === null) {
+        contenidoSeleccionado = CONTENIDO_EDUCATIVO.find(c =>
+          c.tema === 'crédito' && !contenidosEnviados.includes(c.id)
+        );
+      }
+
+      // Si no, buscar cualquier contenido no enviado
+      if (!contenidoSeleccionado) {
+        contenidoSeleccionado = CONTENIDO_EDUCATIVO.find(c =>
+          !contenidosEnviados.includes(c.id)
+        );
+      }
+
+      // Si ya se enviaron todos, reiniciar con el primero
+      if (!contenidoSeleccionado) {
+        contenidoSeleccionado = CONTENIDO_EDUCATIVO[0];
+      }
+
+      const nombre = lead.name?.split(' ')[0] || 'amigo';
+
+      try {
+        // Personalizar mensaje
+        const mensajePersonalizado = `¡Hola ${nombre}! 👋\n\n${contenidoSeleccionado.mensaje}`;
+
+        await meta.sendWhatsAppMessage(lead.phone, mensajePersonalizado);
+        enviados++;
+        console.log(`📚 Nurturing enviado a ${lead.name}: ${contenidoSeleccionado.id}`);
+
+        // Actualizar notas
+        const notasActualizadas = {
+          ...notas,
+          ultimo_nurturing: hoyStr,
+          nurturing_enviados: [
+            ...contenidosEnviados.slice(-9),
+            contenidoSeleccionado.id
+          ]
+        };
+
+        await supabase.client
+          .from('leads')
+          .update({ notes: notasActualizadas })
+          .eq('id', lead.id);
+
+        await new Promise(r => setTimeout(r, 2000));
+
+      } catch (err) {
+        console.error(`Error enviando nurturing a ${lead.name}:`, err);
+      }
+    }
+
+    console.log(`📚 Nurturing educativo completado: ${enviados} mensajes enviados`);
+
+  } catch (e) {
+    console.error('Error en nurturingEducativo:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// PROGRAMA DE REFERIDOS
+// Pide referidos a clientes satisfechos post-venta
+// ═══════════════════════════════════════════════════════════
+async function solicitarReferidos(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace30dias = new Date(ahora.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const hace90dias = new Date(ahora.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar clientes que:
+    // 1. Compraron hace 30-90 días (tiempo suficiente para estar satisfechos)
+    // 2. Status: sold, closed o delivered
+    // 3. No se les ha pedido referidos recientemente
+    const { data: clientes } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, property_interest, status_changed_at, assigned_to')
+      .in('status', ['sold', 'closed', 'delivered'])
+      .lt('status_changed_at', hace30dias.toISOString())
+      .gt('status_changed_at', hace90dias.toISOString())
+      .not('phone', 'is', null)
+      .limit(10);
+
+    if (!clientes || clientes.length === 0) {
+      console.log('🤝 No hay clientes para solicitar referidos');
+      return;
+    }
+
+    // Filtrar los que no se les ha pedido referidos en los últimos 60 días
+    const hace60dias = new Date(ahora.getTime() - 60 * 24 * 60 * 60 * 1000);
+    const clientesElegibles = clientes.filter(cliente => {
+      const notas = typeof cliente.notes === 'object' ? cliente.notes : {};
+      const ultimaSolicitud = (notas as any)?.ultimo_pedido_referidos;
+      if (ultimaSolicitud && new Date(ultimaSolicitud) > hace60dias) {
+        return false;
+      }
+      return true;
+    });
+
+    if (clientesElegibles.length === 0) {
+      console.log('🤝 Todos los clientes ya tienen solicitud de referidos reciente');
+      return;
+    }
+
+    console.log(`🤝 Clientes para solicitar referidos: ${clientesElegibles.length}`);
+
+    let enviados = 0;
+    const maxEnvios = 5;
+
+    for (const cliente of clientesElegibles) {
+      if (enviados >= maxEnvios) break;
+
+      const notas = typeof cliente.notes === 'object' ? cliente.notes : {};
+      const nombre = cliente.name?.split(' ')[0] || 'amigo';
+      const desarrollo = cliente.property_interest || 'Grupo Santa Rita';
+
+      // Calcular días desde compra
+      const diasDesdeCompra = Math.floor(
+        (ahora.getTime() - new Date(cliente.status_changed_at).getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      const mensaje = `¡Hola ${nombre}! 🏡
+
+Espero que estés disfrutando tu nuevo hogar en ${desarrollo}.
+
+Quería preguntarte: ¿Conoces a alguien que también esté buscando casa?
+
+👨‍👩‍👧‍👦 Familiares
+👫 Amigos
+💼 Compañeros de trabajo
+
+Si nos recomiendas y tu referido compra, *ambos reciben un regalo especial* de nuestra parte 🎁
+
+Solo responde con el nombre y teléfono de quien creas que le interese, y yo me encargo del resto.
+
+¡Gracias por confiar en nosotros! ⭐`;
+
+      try {
+        await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+        enviados++;
+        console.log(`🤝 Solicitud de referidos enviada a: ${cliente.name} (${diasDesdeCompra} días desde compra)`);
+
+        // Actualizar notas
+        const notasActualizadas = {
+          ...notas,
+          ultimo_pedido_referidos: hoyStr,
+          historial_pedidos_referidos: [
+            ...((notas as any)?.historial_pedidos_referidos || []).slice(-4),
+            { fecha: hoyStr, dias_desde_compra: diasDesdeCompra }
+          ]
+        };
+
+        await supabase.client
+          .from('leads')
+          .update({ notes: notasActualizadas })
+          .eq('id', cliente.id);
+
+        // Notificar al vendedor
+        if (cliente.assigned_to) {
+          const { data: vendedor } = await supabase.client
+            .from('team_members')
+            .select('name, phone')
+            .eq('id', cliente.assigned_to)
+            .single();
+
+          if (vendedor?.phone) {
+            const notifVendedor = `🤝 *Solicitud de referidos enviada*
+
+Cliente: ${cliente.name}
+Compró: ${desarrollo}
+Hace: ${diasDesdeCompra} días
+
+💡 Si responde con un referido, agrégalo al CRM con fuente "referido"`;
+
+            await meta.sendWhatsAppMessage(vendedor.phone, notifVendedor);
+          }
+        }
+
+        await new Promise(r => setTimeout(r, 2000));
+
+      } catch (err) {
+        console.error(`Error enviando solicitud de referidos a ${cliente.name}:`, err);
+      }
+    }
+
+    console.log(`🤝 Solicitud de referidos completada: ${enviados} mensajes enviados`);
+
+  } catch (e) {
+    console.error('Error en solicitarReferidos:', e);
   }
 }

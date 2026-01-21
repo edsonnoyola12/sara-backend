@@ -566,6 +566,14 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
   - Engagement (0-10 pts)
   - Categorías: HOT (80+), WARM (60+), LUKEWARM (40+), COLD (20+), FROZEN (<20)
 - ✅ **Follow-up post-visita** - Re-engagement para leads que visitaron pero no avanzaron (2-14 días)
+- ✅ **Nurturing educativo** - Contenido sobre crédito, compra, enganche y testimoniales
+  - 6 piezas de contenido rotativo
+  - Martes y Jueves 11am
+  - Cooldown 7 días entre envíos
+- ✅ **Programa de referidos** - Solicita referidos a clientes 30-90 días post-venta
+  - Miércoles 11am
+  - Cooldown 60 días
+  - Notifica al vendedor
 - ✅ Documentación actualizada de todos los follow-ups
 
 **Sesión 2 (01:00-)**
