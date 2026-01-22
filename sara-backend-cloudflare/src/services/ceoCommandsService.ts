@@ -104,7 +104,7 @@ export class CEOCommandsService {
 
     // ═══ BRIDGE / CHAT DIRECTO ═══
     // Formato: bridge [nombre] "mensaje opcional"
-    const bridgeMatchConMensaje = message.match(/^(?:bridge|chat\s*directo|directo)\s+(\w+)\s+[""""](.+)[""""]$/i);
+    const bridgeMatchConMensaje = msgLower.match(/^(?:bridge|chat\s*directo|directo)\s+(\w+)\s+[""""](.+)[""""]$/i);
     if (bridgeMatchConMensaje) {
       const nombreLead = bridgeMatchConMensaje[1].trim();
       const mensajeInicial = bridgeMatchConMensaje[2].trim();
