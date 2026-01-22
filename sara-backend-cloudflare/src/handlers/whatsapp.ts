@@ -1254,6 +1254,15 @@ export class WhatsAppHandler {
       }
     }
 
+    // ╔════════════════════════════════════════════════════════════════════════╗
+    // ║  CRÍTICO - NO MODIFICAR SIN CORRER TESTS: npm test                      ║
+    // ║  Test file: src/tests/conversationLogic.test.ts                         ║
+    // ║  Lógica: src/utils/conversationLogic.ts → shouldForwardToLead()         ║
+    // ║                                                                         ║
+    // ║  Bridge = Chat directo CEO/Vendedor ↔ Lead (6 min)                     ║
+    // ║  - NO reenviar comandos (#cerrar, bridge X, etc)                        ║
+    // ║  - SÍ reenviar mensajes normales                                        ║
+    // ╚════════════════════════════════════════════════════════════════════════╝
     // ═══════════════════════════════════════════════════════════
     // BRIDGE ACTIVO - Reenviar mensaje directo al lead
     // Esto debe ir PRIMERO antes de cualquier otro procesamiento
@@ -2985,6 +2994,15 @@ export class WhatsAppHandler {
       return;
     }
 
+    // ╔════════════════════════════════════════════════════════════════════════╗
+    // ║  CRÍTICO - NO MODIFICAR SIN CORRER TESTS: npm test                      ║
+    // ║  Test file: src/tests/conversationLogic.test.ts                         ║
+    // ║  Lógica: src/utils/conversationLogic.ts → shouldForwardToLead()         ║
+    // ║                                                                         ║
+    // ║  Bridge Vendedor = Chat directo Vendedor ↔ Lead (6 min)                ║
+    // ║  - NO reenviar comandos (bridge X, cerrar, #mas, etc)                   ║
+    // ║  - SÍ reenviar mensajes normales al lead                                ║
+    // ╚════════════════════════════════════════════════════════════════════════╝
     // ═══════════════════════════════════════════════════════════
     // 1.5. BRIDGE ACTIVO - Reenviar mensaje al lead
     // ═══════════════════════════════════════════════════════════

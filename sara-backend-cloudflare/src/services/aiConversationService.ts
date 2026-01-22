@@ -3585,6 +3585,14 @@ Tú dime, ¿por dónde empezamos?`;
            claudeResponse.includes('contacte') ||
            claudeResponse.includes('llame'));
         
+        // ╔════════════════════════════════════════════════════════════════════════╗
+        // ║  CRÍTICO - NO MODIFICAR SIN CORRER TESTS: npm test                      ║
+        // ║  Test file: src/tests/conversationLogic.test.ts                         ║
+        // ║  Lógica: src/utils/conversationLogic.ts → shouldSendOnlyGPS()           ║
+        // ║                                                                         ║
+        // ║  Si lead pide SOLO ubicación → enviar SOLO GPS (no video/brochure)     ║
+        // ║  Si lead pide info completa → enviar video + recursos + GPS            ║
+        // ╚════════════════════════════════════════════════════════════════════════╝
         // ═══ SOLO GPS - Si pide ubicación sin video, enviar SOLO el GPS ═══
         const soloQuiereGPS = analysis.send_gps === true && analysis.send_video_desarrollo !== true;
 

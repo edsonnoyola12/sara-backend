@@ -1,0 +1,9 @@
+#!/bin/sh
+echo "🧪 Corriendo tests antes de commit..."
+npm test
+if [ $? -ne 0 ]; then
+  echo "❌ Tests fallaron. Commit bloqueado."
+  echo "Arregla los tests antes de hacer commit."
+  exit 1
+fi
+echo "✅ Tests pasaron. Commit permitido."
