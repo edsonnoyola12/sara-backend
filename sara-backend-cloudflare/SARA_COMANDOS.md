@@ -17,13 +17,18 @@ npx wrangler deploy
 npx wrangler tail --format=pretty
 ```
 
-### Tests Críticos (35 tests)
-| Área | Tests | Protege |
-|------|-------|---------|
-| GPS | 10 | Solo enviar ubicación cuando la piden |
-| Recursos | 12 | Cuándo enviar video/brochure/matterport |
-| Bridge | 8 | Chat directo vendedor ↔ lead |
-| Regresiones | 5 | Bugs que ya arreglamos |
+### Tests Automatizados (168 tests)
+
+| Archivo | Tests | Qué protege |
+|---------|-------|-------------|
+| `ceoCommands.test.ts` | 27 | Comandos CEO: leads, equipo, ventas, bridge, recursos |
+| `vendorCommands.test.ts` | 30 | Comandos Vendedor: citas, leads, agendar, brochure |
+| `asesorCommands.test.ts` | 32 | Comandos Asesor: leads, docs, preaprobado, rechazado |
+| `conversationLogic.test.ts` | 35 | GPS solo, recursos completos, bridge |
+| `vendedorParsers.test.ts` | 22 | Parseo de fechas, horas, días |
+| `leadScoring.test.ts` | 11 | Scoring de leads |
+| `dateParser.test.ts` | 8 | Parseo de fechas en español |
+| `ServiceFactory.test.ts` | 3 | Factory de servicios |
 
 **Si un test falla = NO HACER DEPLOY** hasta arreglarlo.
 
@@ -626,13 +631,15 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
   - Alpes: `https://maps.app.goo.gl/2MMLYqo85279egR39`
   - Villa Campelo: `https://maps.app.goo.gl/z1BbEgFXeCEbh2BA8`
   - Villa Galiano: `https://maps.google.com/?cid=12461047127110483480`
-- ✅ **Tests automatizados** - 35 tests para proteger funcionalidad crítica:
-  - GPS: 10 tests (enviar solo cuando pide ubicación)
-  - Recursos: 12 tests (cuándo enviar video/brochure/matterport)
-  - Bridge: 8 tests (reenvío vendedor ↔ lead)
-  - Regresiones: 5 tests (casos reales que fallaron antes)
-  - Archivos: `src/utils/conversationLogic.ts`, `src/tests/conversationLogic.test.ts`
+- ✅ **Tests automatizados** - 168 tests para proteger funcionalidad crítica:
+  - CEO: 27 tests (leads, equipo, ventas, bridge, recursos, funnel)
+  - Vendedor: 30 tests (citas, leads, agendar, reagendar, brochure, ubicacion)
+  - Asesor: 32 tests (leads, docs, preaprobado, rechazado, dile, citas)
+  - GPS/Recursos: 35 tests (solo GPS, recursos completos, bridge)
+  - Parsers: 22 tests (fechas, horas, días de la semana)
+  - Otros: 22 tests (scoring, fechas, service factory)
   - **Ejecutar antes de deploy:** `npm test`
+  - Fix bug `ceoCommandsService.ts` línea 107 (`message` → `msgLower`)
 - ✅ **Protección contra regresiones:**
   - Git hook pre-commit: bloquea commits si tests fallan
   - Comentarios `CRÍTICO - NO MODIFICAR` en código GPS y Bridge
