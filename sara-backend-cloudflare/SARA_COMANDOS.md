@@ -481,7 +481,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-21 00:00*
+*Última actualización: 2026-01-22 16:45*
 
 ---
 
@@ -608,6 +608,27 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ---
 
 ## HISTORIAL DE CAMBIOS
+
+### 2026-01-22
+
+**Sesión 2 (16:30)**
+- ✅ **Memoria de Acciones en Historial** - Sara ahora recuerda qué recursos envió
+  - Nueva función `guardarAccionEnHistorial()` en aiConversationService.ts
+  - Cada envío de video, GPS, brochure se registra en el historial
+  - Formato: `[ACCIÓN SARA: Envié video y recorrido 3D - Monte Verde]`
+  - Claude puede ver qué recursos se enviaron y responder coherentemente
+  - Cuando lead dice "gracias, lo vi" → Sara sabe a qué se refiere
+- ✅ **Historial aumentado de 8 a 15 mensajes** para mejor contexto
+- ✅ **Contexto de acciones en prompt** - Claude recibe sección "ACCIONES RECIENTES QUE YA HICISTE"
+  - Evita reenviar recursos innecesariamente
+  - Responde coherentemente cuando lead/vendedor menciona algo enviado
+- ✅ Tests: 168 pasando ✅
+
+**Sesión 1 (15:45)**
+- ✅ **Fix `secondary_intents: []`** - Agregado a todos los returns en `aiConversationService.ts` que tenían `intent` pero faltaba `secondary_intents`
+  - 8 returns corregidos en fallbacks (líneas ~1729, 1744, 1815, 1874, 1953, 1971, 2000, 2022)
+  - Garantiza consistencia en respuestas de IA
+  - Tests: 168 pasando ✅
 
 ### 2026-01-21
 

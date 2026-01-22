@@ -52,12 +52,66 @@ export class AIConversationService {
     this.handler = handler;
   }
 
+  /**
+   * Guarda una acción (envío de recursos) en el historial de conversación
+   * Esto permite que Claude sepa qué recursos se enviaron y responda coherentemente
+   */
+  async guardarAccionEnHistorial(leadId: string, accion: string, detalles?: string): Promise<void> {
+    try {
+      const { data: leadData } = await this.supabase.client
+        .from('leads')
+        .select('conversation_history')
+        .eq('id', leadId)
+        .single();
+
+      const historial = leadData?.conversation_history || [];
+
+      // Formato especial para acciones (Claude las reconocerá)
+      const mensajeAccion = detalles
+        ? `[ACCIÓN SARA: ${accion} - ${detalles}]`
+        : `[ACCIÓN SARA: ${accion}]`;
+
+      historial.push({
+        role: 'assistant',
+        content: mensajeAccion,
+        timestamp: new Date().toISOString(),
+        type: 'action' // Marcador para identificar acciones vs mensajes
+      });
+
+      await this.supabase.client
+        .from('leads')
+        .update({ conversation_history: historial.slice(-30) })
+        .eq('id', leadId);
+
+      console.log(`📝 Acción guardada en historial: ${mensajeAccion}`);
+    } catch (e) {
+      console.log('⚠️ Error guardando acción en historial:', e);
+    }
+  }
 
   async analyzeWithAI(message: string, lead: any, properties: any[]): Promise<AIAnalysis> {
-    
+
+    // ═══ EARLY RATE LIMIT CHECK - Evitar doble respuesta ═══
+    const lastResponseTime = lead?.notes?.last_response_time;
+    const ahora = Date.now();
+    if (lastResponseTime && (ahora - lastResponseTime) < 3000) {
+      console.log('🛑 EARLY RATE LIMIT: Ya se respondió hace <3s, saltando procesamiento completo');
+      return {
+        intent: 'skip_duplicate',
+        secondary_intents: [],
+        extracted_data: {},
+        response: '',
+        send_gps: false,
+        send_video_desarrollo: false,
+        send_contactos: false,
+        contactar_vendedor: false
+      };
+    }
+
     // Formatear historial para OpenAI - asegurar que content sea siempre string válido
+    // AUMENTADO de 8 a 15 para mejor contexto (incluye acciones enviadas)
     const historialParaOpenAI = (lead?.conversation_history || [])
-      .slice(-8)
+      .slice(-15)
       .filter((m: any) => m && m.content !== undefined && m.content !== null)
       .map((m: any) => ({
         role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -154,6 +208,27 @@ El cliente está RESPONDIENDO a ese mensaje. Debes:
       console.log('📢 Contexto de broadcast incluido en prompt para IA');
     }
 
+    // ═══ CONTEXTO DE ACCIONES RECIENTES ═══
+    // Extraer acciones del historial para que Claude sepa qué recursos se enviaron
+    const accionesRecientes = (lead?.conversation_history || [])
+      .filter((m: any) => m.type === 'action' || (m.content && m.content.startsWith('[ACCIÓN SARA:')))
+      .slice(-5)
+      .map((m: any) => m.content)
+      .join('\n');
+
+    const accionesContext = accionesRecientes ? `
+━━━━━━━━━━━━━━━━━━━━━━━━
+📦 ACCIONES RECIENTES QUE YA HICISTE (RECURSOS ENVIADOS)
+━━━━━━━━━━━━━━━━━━━━━━━━
+${accionesRecientes}
+
+⚠️ IMPORTANTE: Estas son cosas que YA ENVIASTE al cliente.
+- Si el cliente dice "gracias", "lo vi", "me gustó" → Está respondiendo a estos recursos
+- Si pregunta sobre algo que ya enviaste → NO lo envíes de nuevo, responde con contexto
+- Si dice "no lo veo", "no me llegó" → Puedes reenviarlo
+━━━━━━━━━━━━━━━━━━━━━━━━
+` : '';
+
     const prompt = `
 ⚠️ INSTRUCCIÓN CRÍTICA: Debes responder ÚNICAMENTE con un objeto JSON válido.
 NO escribas texto antes ni después del JSON. Tu respuesta debe empezar con { y terminar con }.
@@ -192,7 +267,7 @@ ANTES de escribir tu respuesta, PIENSA:
 NO seas un bot rígido. PIENSA como vendedora inteligente que quiere ayudar Y vender.
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
-${promocionesContext}${broadcastContext}
+${promocionesContext}${broadcastContext}${accionesContext}
 Eres SARA, una **agente inmobiliaria HUMANA y conversacional** de Grupo Santa Rita en Zacatecas, México.
 
 Tu objetivo:
@@ -778,7 +853,7 @@ SARA: "¡Claro! Te conecto con nuestro asesor de crédito para que te oriente."
 - Confirma: "¡Perfecto! Ya tienes tu cita. ¿Te ayudo con algo más?"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
-RESPUESTAS CORTAS ("SÍ", "OK", "DALE")
+RESPUESTAS CORTAS ("SÍ", "OK", "DALE", NÚMEROS)
 ━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️ CRÍTICO: Interpreta según el CONTEXTO de lo que preguntaste antes.
 
@@ -790,14 +865,35 @@ Si preguntaste sobre CRÉDITO y responde "sí":
 - Conecta directo con asesor: "¡Listo! Te conecto con el asesor de crédito."
 - El sistema automáticamente envía datos del asesor
 
+⚠️⚠️⚠️ NÚMEROS COMO HORA ⚠️⚠️⚠️
+Si preguntaste "¿A qué hora?" y el cliente responde SOLO un número (ej: "12", "3", "10"):
+- INTERPRETA ESE NÚMERO COMO LA HORA
+- "12" = 12:00 PM (mediodía)
+- "3" = 3:00 PM
+- "10" = 10:00 AM
+- NUNCA pidas aclaración si el número está entre 8-20
+- RESPONDE: "¡Perfecto! Te agendo a las [número]:00. ¿Te funciona?"
+
+Ejemplo CORRECTO:
+SARA: "¿A qué hora te funciona?"
+Cliente: "12"
+SARA: "¡Perfecto! Te agendo para mañana a las 12:00 PM"
+
+Ejemplo INCORRECTO:
+SARA: "¿A qué hora te funciona?"
+Cliente: "12"
+SARA: "No me queda claro..." ← ¡ESTO ESTÁ MAL!
+
 ━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️⚠️⚠️ DETECCIÓN DE RESPUESTAS FUERA DE CONTEXTO ⚠️⚠️⚠️
 ━━━━━━━━━━━━━━━━━━━━━━━━
 ERES INTELIGENTE. Si el usuario responde algo que NO corresponde a lo que preguntaste, DEBES:
 
 1) DETECTAR el error amablemente
-2) ACLARAR qué esperabas  
+2) ACLARAR qué esperabas
 3) REPETIR la pregunta correcta
+
+⚠️ PERO: Si preguntaste HORA y responden un NÚMERO → ES LA HORA, no pidas aclaración
 
 
 CUANDO PIDA "UBICACIÓN", "MAPA", "DÓNDE ESTÁ":
@@ -1091,7 +1187,15 @@ ${citaExistenteInfo ? `- Cita: ${citaExistenteInfo}` : '- Cita: ❌ NO TIENE CIT
 
 ${esConversacionNueva && !nombreConfirmado ? '⚠️⚠️⚠️ CONVERSACIÓN NUEVA - DEBES PREGUNTAR NOMBRE EN TU PRIMER MENSAJE ⚠️⚠️⚠️' : ''}
 ${!nombreConfirmado ? '⚠️ CRÍTICO: NO TENGO NOMBRE CONFIRMADO. Pide el nombre antes de continuar.' : ''}
-${nombreConfirmado ? `✅ YA TENGO EL NOMBRE: ${lead.name} - NO vuelvas a pedirlo, úsalo en tu respuesta` : ''}
+${nombreConfirmado ? `
+🚨🚨🚨 NOMBRE YA CONFIRMADO - PROHIBIDO PEDIR 🚨🚨🚨
+✅ YA TENGO SU NOMBRE: "${lead.name}"
+- NUNCA preguntes "¿me compartes tu nombre?" o similar
+- NUNCA preguntes "¿cómo te llamas?"
+- USA el nombre "${lead.name}" en tus respuestas
+- Si dice algo que parece nombre → es SALUDO, no actualización
+🚨🚨🚨 FIN PROHIBICIÓN NOMBRE 🚨🚨🚨
+` : ''}
 ${citaExistenteInfo ? `
 🚫🚫🚫 PROHIBIDO - LEE ESTO 🚫🚫🚫
 EL CLIENTE YA TIENE CITA CONFIRMADA.
@@ -1108,12 +1212,11 @@ EL CLIENTE YA TIENE CITA CONFIRMADA.
 REGLAS DE CITA
 ━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️ Para CONFIRMAR una cita necesitas:
-1) Nombre ✓ ➜ Si no tienes, pídelo: "¿Me compartes tu nombre?"
+${nombreConfirmado ? `1) Nombre ✅ YA LO TENGO: "${lead.name}" - NO PEDIR` : '1) Nombre ❌ NO TENGO - Pídelo: "¿Me compartes tu nombre?"'}
 2) Fecha y hora ✓ ➜ Pregunta: "¿Qué día y hora te funciona?"
 
 ⚠️ SECUENCIA CORRECTA:
-- Cliente dice "sí quiero visitar" ➜ Pide NOMBRE si no lo tienes
-- Cliente da nombre ➜ Pide FECHA/HORA
+${nombreConfirmado ? `- Cliente dice "sí quiero visitar" ➜ YA TENGO NOMBRE, pide FECHA/HORA directo` : '- Cliente dice "sí quiero visitar" ➜ Pide NOMBRE si no lo tienes'}
 - Cliente da fecha/hora ➜ Confirma cita y despide (SIN preguntar crédito)
 
 🚫🚫🚫 PROHIBIDO - DATOS YA PROPORCIONADOS 🚫🚫🚫
@@ -1213,6 +1316,7 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
 
 {
   "intent": "saludo|interes_desarrollo|solicitar_cita|confirmar_cita|cancelar_cita|reagendar_cita|info_cita|info_credito|post_venta|queja|hablar_humano|otro",
+  "secondary_intents": [],
   "extracted_data": {
     "nombre": null,
     "desarrollo": null,
@@ -1242,6 +1346,17 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
   "send_contactos": false,
   "contactar_vendedor": false
 }
+
+⚠️ DETECCIÓN DE MÚLTIPLES INTENCIONES:
+- "intent" es la intención PRINCIPAL (la más importante)
+- "secondary_intents" son intenciones ADICIONALES detectadas (array)
+- Ejemplo: "Quiero ver casas y también necesito crédito"
+  → intent: "interes_desarrollo", secondary_intents: ["info_credito"]
+- Ejemplo: "Hola, me gustaría agendar una cita para mañana"
+  → intent: "solicitar_cita", secondary_intents: ["saludo"]
+- Ejemplo: "Tengo una queja y quiero hablar con alguien"
+  → intent: "queja", secondary_intents: ["hablar_humano"]
+- Si solo hay UNA intención, deja secondary_intents: []
 
 ⚠️ EXTRACCIÓN DE MÚLTIPLES DESARROLLOS Y MODELOS:
 - Si el cliente menciona varios desarrollos (ej. "Los Encinos y Andes"), ponlos en "desarrollos": ["Los Encinos", "Andes"]
@@ -1529,8 +1644,24 @@ RECUERDA:
         console.log('📅 NO forzar cita: tiene fecha/hora pero FALTA desarrollo');
       }
       
+      // Procesar secondary_intents y activar flags correspondientes
+      const secondaryIntents = Array.isArray(parsed.secondary_intents) ? parsed.secondary_intents : [];
+
+      // Si hay info_credito en secondary_intents, marcar necesita_credito
+      if (secondaryIntents.includes('info_credito') && parsed.extracted_data) {
+        parsed.extracted_data.necesita_credito = true;
+        console.log('💳 Multi-intent: info_credito detectado como secundario');
+      }
+
+      // Si hay hablar_humano o queja en secondary_intents, activar contactar_vendedor
+      if (secondaryIntents.some((i: string) => ['hablar_humano', 'queja', 'post_venta'].includes(i))) {
+        parsed.contactar_vendedor = true;
+        console.log('📞 Multi-intent: escalación detectada como secundaria');
+      }
+
       return {
         intent: parsed.intent || 'otro',
+        secondary_intents: secondaryIntents,
         extracted_data: parsed.extracted_data || {},
         response: parsed.response || '¡Hola! ¿En qué puedo ayudarte?',
         send_gps: parsed.send_gps || false,
@@ -1655,6 +1786,7 @@ RECUERDA:
 
           return {
             intent: fallbackIntent,
+            secondary_intents: [],
             extracted_data: { ...fallbackData, desarrollo },
             response: respuestaLimpia,
             send_gps: false,
@@ -1670,6 +1802,7 @@ RECUERDA:
 
         return {
           intent: fallbackIntent,
+          secondary_intents: [],
           extracted_data: fallbackData,
           response: respuestaLimpia,
           send_gps: false,
@@ -1741,6 +1874,7 @@ En Guadalupe: *Andes* es excelente por ubicación y precio, modelos como Aconcag
           // IMPORTANTE: Retornar con send_video_desarrollo: true
           return {
             intent: fallbackIntent,
+            secondary_intents: [],
             extracted_data: { ...fallbackData, desarrollo },
             response: fallbackResponse,
             send_gps: false,
@@ -1800,6 +1934,7 @@ O si prefieres, te conecto con un asesor.`;
 
           return {
             intent: fallbackIntent,
+            secondary_intents: [],
             extracted_data: fallbackData,
             response: fallbackResponse,
             send_gps: false,
@@ -1879,6 +2014,7 @@ O si prefieres, te conecto con un asesor.`;
             const nombreLead = lead.name ? lead.name.split(' ')[0] : '';
             return {
               intent: 'reagendar_cita',
+              secondary_intents: [],
               extracted_data: {
                 ...fallbackData,
                 fecha: fechaExtraida || 'mañana',
@@ -1897,6 +2033,7 @@ O si prefieres, te conecto con un asesor.`;
 
           return {
             intent: 'confirmar_cita',
+            secondary_intents: [],
             extracted_data: {
               ...fallbackData,
               fecha: fechaExtraida,
@@ -1926,6 +2063,7 @@ O si prefieres, te conecto con un asesor.`;
 
           return {
             intent: 'interes_desarrollo',
+            secondary_intents: [],
             extracted_data: { ...fallbackData, desarrollo },
             response: `¡Hola! Con gusto te envío el video de ${desarrollo} 🎬`,
             send_gps: false,
@@ -1948,6 +2086,7 @@ Tú dime, ¿por dónde empezamos?`;
       
       return {
         intent: fallbackIntent,
+        secondary_intents: [],
         extracted_data: fallbackData,  // Usar datos extraídos
         response: fallbackResponse,
         send_gps: false,
@@ -2051,6 +2190,12 @@ Tú dime, ¿por dónde empezamos?`;
     originalMessage: string,
     env: any
   ): Promise<void> {
+
+    // ═══ SKIP DUPLICATE - Evitar doble respuesta ═══
+    if (analysis.intent === 'skip_duplicate') {
+      console.log('🛑 SKIP DUPLICATE: Saltando executeAIDecision completo');
+      return;
+    }
 
     // 👍 DEBUG: Verificar qué recibe executeAIDecision
     console.log('👍 executeAIDecision RECIBE:');
@@ -3512,26 +3657,70 @@ Tú dime, ¿por dónde empezamos?`;
         }
       }
       
-      // 4. Si Claude dice NOTIFICAR VENDEDOR → Ejecutar
+      // 4. Si Claude dice NOTIFICAR VENDEDOR → Validar y Ejecutar
       if (analysis.contactar_vendedor) {
         console.log('🧠 Claude decidió: Notificar vendedor');
-        try {
-          const vendedor = teamMembers.find((t: any) => t.role === 'vendedor' && t.active);
-          if (vendedor?.phone) {
-            const presupuesto = ingresoCliente > 0 ? ingresoCliente * 70 : 0;
-            let notifVend = `🏠 *NUEVO LEAD INTERESADO*\n\n👤 *${nombreCliente}*\n📱 ${lead.phone}`;
-            if (presupuesto > 0) notifVend += `\n💰 Presupuesto: ~$${presupuesto.toLocaleString('es-MX')}`;
-            if (desarrolloInteres) notifVend += `\n🏠 Interés: ${desarrolloInteres}`;
-            notifVend += `\n\n⏰ Contactar pronto`;
-            
-            await this.twilio.sendWhatsAppMessage(
-              'whatsapp:+52' + vendedor.phone.replace(/\D/g, '').slice(-10),
-              notifVend
-            );
-            console.log('✅ Notificación enviada a vendedor:', vendedor.name);
+
+        // ═══════════════════════════════════════════════════════════════
+        // VALIDACIÓN PRE-ESCALACIÓN - Evitar spam a vendedores
+        // ═══════════════════════════════════════════════════════════════
+        const validacionEscalacion = {
+          tieneNombre: nombreCliente && nombreCliente !== 'Sin nombre' && nombreCliente !== 'Cliente' && nombreCliente !== 'amigo' && nombreCliente.length > 2,
+          tieneHistorial: lead.conversation_history && lead.conversation_history.length >= 2,
+          mensajeReciente: true, // El mensaje actual es reciente por definición
+          noNotificadoRecientemente: true // Por defecto true, verificamos abajo
+        };
+
+        // Verificar si ya se notificó en las últimas 4 horas
+        const ultimaNotificacion = lead.last_vendor_notification;
+        if (ultimaNotificacion) {
+          const horasDesdeNotificacion = (Date.now() - new Date(ultimaNotificacion).getTime()) / (1000 * 60 * 60);
+          if (horasDesdeNotificacion < 4) {
+            validacionEscalacion.noNotificadoRecientemente = false;
+            console.log(`⏭️ Ya se notificó hace ${horasDesdeNotificacion.toFixed(1)}h, evitando spam`);
           }
-        } catch (e) {
-          console.log('⚠️ Error notificando vendedor:', e);
+        }
+
+        // Determinar si debe escalar
+        const motivosRechazo: string[] = [];
+        if (!validacionEscalacion.tieneNombre) motivosRechazo.push('sin nombre real');
+        if (!validacionEscalacion.tieneHistorial) motivosRechazo.push('historial muy corto');
+        if (!validacionEscalacion.noNotificadoRecientemente) motivosRechazo.push('notificado recientemente');
+
+        // Excepciones: quejas y post-venta siempre escalan (aunque falte nombre)
+        const esUrgente = ['queja', 'post_venta'].includes(analysis.intent);
+
+        if (motivosRechazo.length > 0 && !esUrgente) {
+          console.log(`⏸️ Escalación en espera: ${motivosRechazo.join(', ')}`);
+          // En lugar de escalar, SARA pedirá más info en su respuesta
+        } else {
+          // Proceder con escalación
+          try {
+            const vendedor = teamMembers.find((t: any) => t.role === 'vendedor' && t.active);
+            if (vendedor?.phone) {
+              const presupuesto = ingresoCliente > 0 ? ingresoCliente * 70 : 0;
+              let notifVend = `🏠 *LEAD SOLICITA ATENCIÓN*\n\n👤 *${nombreCliente || 'Sin nombre'}*\n📱 ${lead.phone}`;
+              if (presupuesto > 0) notifVend += `\n💰 Presupuesto: ~$${presupuesto.toLocaleString('es-MX')}`;
+              if (desarrolloInteres) notifVend += `\n🏠 Interés: ${desarrolloInteres}`;
+              notifVend += `\n📌 Motivo: ${analysis.intent}`;
+              if (esUrgente) notifVend += `\n\n🚨 *URGENTE - ${analysis.intent.toUpperCase()}*`;
+              else notifVend += `\n\n⏰ Contactar pronto`;
+
+              await this.twilio.sendWhatsAppMessage(
+                'whatsapp:+52' + vendedor.phone.replace(/\D/g, '').slice(-10),
+                notifVend
+              );
+              console.log('✅ Notificación enviada a vendedor:', vendedor.name);
+
+              // Marcar que se notificó para evitar spam
+              await this.supabase.client
+                .from('leads')
+                .update({ last_vendor_notification: new Date().toISOString() })
+                .eq('id', lead.id);
+            }
+          } catch (e) {
+            console.log('⚠️ Error notificando vendedor:', e);
+          }
         }
       }
       
@@ -3625,12 +3814,16 @@ Tú dime, ¿por dónde empezamos?`;
                   `${primerNombreGPS ? primerNombreGPS + ', recuerda' : 'Recuerda'} que tu cita es el *${cita.date}* a las *${cita.time}* 📅\n¡Ahí te esperamos! 🏠`
                 );
                 console.log(`✅ GPS enviado (SOLO) con recordatorio de cita: ${devParaGPSSolo}`);
+                // Guardar acción en historial para contexto
+                await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', `${devParaGPSSolo} - con recordatorio de cita ${cita.date} ${cita.time}`);
               } else {
                 await this.twilio.sendWhatsAppMessage(from,
                   `📍 *Ubicación de ${devParaGPSSolo}:*\n${propGPSSolo.gps_link}\n\n` +
                   `${primerNombreGPS ? primerNombreGPS + ', ¿te' : '¿Te'} gustaría agendar una visita? 🏠`
                 );
                 console.log(`✅ GPS enviado (SOLO) con oferta de cita: ${devParaGPSSolo}`);
+                // Guardar acción en historial para contexto
+                await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', `${devParaGPSSolo} - pregunté si quiere agendar visita`);
               }
             } else {
               console.log(`⚠️ ${devParaGPSSolo} no tiene gps_link en DB`);
@@ -3706,13 +3899,20 @@ Tú dime, ¿por dónde empezamos?`;
                     : `Aquí te comparto *${dev}*:`;
                   await this.twilio.sendWhatsAppMessage(from, `${intro}\n\n${recursos.join('\n\n')}`);
                   console.log(`✅ Recursos enviados para: ${dev}`);
+                  // Guardar acción en historial para contexto
+                  const recursosDesc = [];
+                  if (propiedadMatch.youtube_link) recursosDesc.push('video');
+                  if (propiedadMatch.matterport_link) recursosDesc.push('recorrido 3D');
+                  await this.guardarAccionEnHistorial(lead.id, `Envié ${recursosDesc.join(' y ')}`, dev);
                 }
-                
+
                 // GPS del desarrollo - ENVIAR SI EL LEAD LO PIDIÓ EXPLÍCITAMENTE
                 if (analysis.send_gps === true && propiedadMatch.gps_link) {
                   await new Promise(r => setTimeout(r, 400));
                   await this.twilio.sendWhatsAppMessage(from, `📍 *Ubicación de ${dev}:*\n${propiedadMatch.gps_link}\n\n_Ahí te lleva directo en Google Maps_`);
                   console.log(`✅ GPS enviado para: ${dev}`);
+                  // Guardar acción en historial
+                  await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', dev);
                 } else if (!analysis.send_gps) {
                   console.log(`ℹ️ GPS de ${dev} disponible pero no solicitado`);
                 } else {
@@ -3756,6 +3956,8 @@ Tú dime, ¿por dónde empezamos?`;
                     `📋 *Brochure ${dev}:*\n${brochureUrl}\n\n_Modelos, precios y características_`
                   );
                   console.log(`✅ Brochure enviado para ${dev}:`, brochureUrl);
+                  // Guardar acción en historial
+                  await this.guardarAccionEnHistorial(lead.id, 'Envié brochure PDF', dev);
                 }
               }
               if (brochuresEnviados.length === 0) {
@@ -3835,12 +4037,16 @@ Tú dime, ¿por dónde empezamos?`;
                       `${primerNombreGPS ? primerNombreGPS + ', recuerda' : 'Recuerda'} que tu cita es el *${cita.date}* a las *${cita.time}* 📅\n¡Ahí te esperamos! 🏠`;
                     await this.twilio.sendWhatsAppMessage(from, msgGPS);
                     console.log(`✅ GPS enviado con recordatorio de cita: ${devParaGPS}`);
+                    // Guardar acción en historial
+                    await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', `${devParaGPS} - recordatorio cita ${cita.date} ${cita.time}`);
                   } else {
                     // No tiene cita → GPS + ofrecer agendar
                     const msgGPS = `📍 *Ubicación de ${devParaGPS}:*\n${propGPS.gps_link}\n\n` +
                       `${primerNombreGPS ? primerNombreGPS + ', ¿te' : '¿Te'} gustaría agendar una visita para conocerlo? 🏠`;
                     await this.twilio.sendWhatsAppMessage(from, msgGPS);
                     console.log(`✅ GPS enviado con oferta de cita: ${devParaGPS}`);
+                    // Guardar acción en historial
+                    await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', `${devParaGPS} - pregunté si quiere visitar`);
                   }
                 } else {
                   console.log(`⚠️ ${devParaGPS} no tiene gps_link en DB`);
@@ -6349,6 +6555,8 @@ ${brochureUrl}
 Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
             await this.twilio.sendWhatsAppMessage(from, msgBrochure);
             console.log(`✅ Brochure enviado: ${desarrolloParaBrochure} - ${brochureUrl}`);
+            // Guardar acción en historial
+            await this.guardarAccionEnHistorial(lead.id, 'Envié brochure PDF completo', desarrolloParaBrochure);
           } else {
             console.log(`⚠️ ${desarrolloParaBrochure} NO tiene brochure_urls en DB`);
           }
@@ -6369,6 +6577,8 @@ Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
               const msgGPS = `📍 *Ubicación de ${desarrolloParaGPS}:*\n${gpsUrl}\n\n_Ahí te lleva directo en Google Maps_`;
               await this.twilio.sendWhatsAppMessage(from, msgGPS);
               console.log(`✅ GPS enviado: ${desarrolloParaGPS} - ${gpsUrl}`);
+              // Guardar acción en historial
+              await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', desarrolloParaGPS);
             } else {
               console.log(`⚠️ ${desarrolloParaGPS} NO tiene gps_link en DB`);
             }
@@ -6403,6 +6613,8 @@ Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
           const msgGPS = `📍 *Ubicación de ${desarrolloParaGPS}:*\n${gpsUrl}\n\n_Ahí te lleva directo en Google Maps_`;
           await this.twilio.sendWhatsAppMessage(from, msgGPS);
           console.log(`✅ GPS enviado (solo): ${desarrolloParaGPS} - ${gpsUrl}`);
+          // Guardar acción en historial
+          await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', desarrolloParaGPS);
         } else {
           console.log(`⚠️ ${desarrolloParaGPS} NO tiene gps_link en DB`);
           // Enviar mensaje indicando que no tenemos GPS
