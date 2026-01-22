@@ -552,6 +552,27 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 
 ### 2026-01-21
 
+**Sesión 4 (18:00-22:00)**
+- ✅ **GPS se envía cuando lead lo pide** - `send_gps: true` en respuesta de IA
+- ✅ **Si pide SOLO ubicación → manda SOLO el GPS** (no video, brochure, matterport)
+- ✅ **GPS inteligente según cita:**
+  - Con cita agendada → GPS + "Recuerda que tu cita es el [fecha] a las [hora]"
+  - Sin cita → GPS + "¿Te gustaría agendar una visita?"
+- ✅ Agregado endpoint `/debug-gps` para ver links en DB
+- ✅ Agregado endpoint `/reset-lead-resources` para resetear flag de recursos enviados
+- ✅ Fix `detectarYCrearReferido` que causaba error "problema técnico"
+- ✅ Bridge para vendedores - reenvío de mensajes durante sesión activa
+- ✅ Detección de comandos bridge antes de reenviar (evita mandar "bridge juan" al lead)
+- ✅ **Links GPS correctos en Supabase:**
+  - Monte Verde: `https://maps.app.goo.gl/Ets7DQucabeuAG8u9`
+  - Los Encinos: `https://maps.google.com/?cid=12604230232439364433`
+  - Distrito Falco: `https://maps.app.goo.gl/aNu3TML3D2o9HG146`
+  - Andes: `https://maps.app.goo.gl/FQ8Hr6AWDgy5sNkT6`
+  - Miravalle: `https://maps.app.goo.gl/GAuBaQLu2APRwTmq7`
+  - Alpes: `https://maps.app.goo.gl/2MMLYqo85279egR39`
+  - Villa Campelo: `https://maps.app.goo.gl/z1BbEgFXeCEbh2BA8`
+  - Villa Galiano: `https://maps.google.com/?cid=12461047127110483480`
+
 **Sesión 3 (13:00-)**
 - ✅ Corregido prompt de video post-venta (fachada en lugar de interior, "¡Felicidades!" en lugar de "hogar")
 - ✅ Implementado video de bienvenida para leads nuevos con Veo 3
