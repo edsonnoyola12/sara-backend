@@ -4,6 +4,31 @@
 
 ---
 
+## ANTES DE HACER DEPLOY
+
+```bash
+# 1. Correr tests (OBLIGATORIO)
+npm test
+
+# 2. Si pasan todos, hacer deploy
+npx wrangler deploy
+
+# 3. Verificar logs
+npx wrangler tail --format=pretty
+```
+
+### Tests Críticos (35 tests)
+| Área | Tests | Protege |
+|------|-------|---------|
+| GPS | 10 | Solo enviar ubicación cuando la piden |
+| Recursos | 12 | Cuándo enviar video/brochure/matterport |
+| Bridge | 8 | Chat directo vendedor ↔ lead |
+| Regresiones | 5 | Bugs que ya arreglamos |
+
+**Si un test falla = NO HACER DEPLOY** hasta arreglarlo.
+
+---
+
 ## ROLES Y DETECCIÓN
 
 | Rol | Detectado por | Handler |
@@ -572,6 +597,13 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
   - Alpes: `https://maps.app.goo.gl/2MMLYqo85279egR39`
   - Villa Campelo: `https://maps.app.goo.gl/z1BbEgFXeCEbh2BA8`
   - Villa Galiano: `https://maps.google.com/?cid=12461047127110483480`
+- ✅ **Tests automatizados** - 35 tests para proteger funcionalidad crítica:
+  - GPS: 10 tests (enviar solo cuando pide ubicación)
+  - Recursos: 12 tests (cuándo enviar video/brochure/matterport)
+  - Bridge: 8 tests (reenvío vendedor ↔ lead)
+  - Regresiones: 5 tests (casos reales que fallaron antes)
+  - Archivos: `src/utils/conversationLogic.ts`, `src/tests/conversationLogic.test.ts`
+  - **Ejecutar antes de deploy:** `npm test`
 
 **Sesión 3 (13:00-)**
 - ✅ Corregido prompt de video post-venta (fachada en lugar de interior, "¡Felicidades!" en lugar de "hogar")
