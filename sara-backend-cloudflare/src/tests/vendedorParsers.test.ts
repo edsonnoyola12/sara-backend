@@ -58,12 +58,13 @@ describe('vendedorParsers', () => {
       expect(result.ampm).toBe('am');
     });
 
-    // Días de la semana
+    // Días de la semana (normalizados sin acentos)
     it('debe parsear todos los días de la semana', () => {
-      const dias = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
-      for (const dia of dias) {
-        const result = parseReagendarParams(`${dia} 10am`);
-        expect(result.dia).toBe(dia);
+      const diasInput = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
+      const diasExpected = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+      for (let i = 0; i < diasInput.length; i++) {
+        const result = parseReagendarParams(`${diasInput[i]} 10am`);
+        expect(result.dia).toBe(diasExpected[i]);
       }
     });
 

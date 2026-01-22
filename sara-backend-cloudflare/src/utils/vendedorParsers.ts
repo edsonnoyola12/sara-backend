@@ -59,7 +59,7 @@ export function normalizarTexto(input: string): string {
   texto = texto.replace(/miercole?s?|miércole?s?/gi, 'miercoles');
   texto = texto.replace(/jueve?s?(?![\w])/gi, 'jueves');
   texto = texto.replace(/vierne?s?(?![\w])/gi, 'viernes');
-  texto = texto.replace(/sabad?o?|sabádo?/gi, 'sabado');
+  texto = texto.replace(/s[aá]bad?o?|sabádo?/gi, 'sabado');
   texto = texto.replace(/doming?o?(?![\w])/gi, 'domingo');
   // Quitar "a las", "a la", "a kas", "alas", etc.
   texto = texto.replace(/\s+a\s*(las?|kas?|l|k)\s+/gi, ' ');
