@@ -604,6 +604,11 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
   - Regresiones: 5 tests (casos reales que fallaron antes)
   - Archivos: `src/utils/conversationLogic.ts`, `src/tests/conversationLogic.test.ts`
   - **Ejecutar antes de deploy:** `npm test`
+- ✅ **Protección contra regresiones:**
+  - Git hook pre-commit: bloquea commits si tests fallan
+  - Comentarios `CRÍTICO - NO MODIFICAR` en código GPS y Bridge
+  - `CLAUDE.md` actualizado con reglas específicas y secciones protegidas
+  - Fix regex de "sábado" que no capturaba acento en primera 'a'
 
 **Sesión 3 (13:00-)**
 - ✅ Corregido prompt de video post-venta (fachada en lugar de interior, "¡Felicidades!" en lugar de "hogar")
