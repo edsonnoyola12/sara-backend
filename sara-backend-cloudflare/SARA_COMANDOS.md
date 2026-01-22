@@ -27,6 +27,35 @@ npx wrangler tail --format=pretty
 
 **Si un test falla = NO HACER DEPLOY** hasta arreglarlo.
 
+### Smoke Test (después de deploy)
+```bash
+./scripts/smoke-test.sh
+```
+
+### Checklist de Pruebas Manuales (cuando hay cambios grandes)
+
+**Lead (teléfono: 5215610016226)**
+- [ ] Pedir ubicación → recibe SOLO GPS
+- [ ] Pedir información → recibe video + brochure + matterport + GPS
+- [ ] Agendar cita → cita se crea correctamente
+- [ ] Preguntar precio → responde con precio
+
+**CEO (teléfono: 5212224558475)**
+- [ ] `leads` → lista leads
+- [ ] `hoy` → resumen del día
+- [ ] `bridge [nombre]` → activa chat directo
+- [ ] Mensaje durante bridge → llega al lead
+- [ ] `#cerrar` → cierra bridge
+
+**Vendedor**
+- [ ] `citas` → muestra citas del día
+- [ ] `bridge [nombre]` → activa chat directo
+- [ ] `brochure [desarrollo]` → envía brochure al lead
+
+**Asesor**
+- [ ] `leads` → muestra leads asignados
+- [ ] `docs [nombre]` → solicita documentos
+
 ---
 
 ## ROLES Y DETECCIÓN
