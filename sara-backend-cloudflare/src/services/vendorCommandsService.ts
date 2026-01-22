@@ -187,6 +187,39 @@ export class VendorCommandsService {
       return { matched: true, handlerName: 'vendedorLeadsPendientes' };
     }
 
+    // ═══ BRIDGE / CHAT DIRECTO ═══
+    // Formato: bridge [nombre] "mensaje opcional"
+    const bridgeMatchConMensaje = body.match(/^(?:bridge|chat\s*directo|directo)\s+(\w+)\s+[""""](.+)[""""]$/i);
+    if (bridgeMatchConMensaje) {
+      return {
+        matched: true,
+        handlerName: 'bridgeLead',
+        handlerParams: {
+          nombreLead: bridgeMatchConMensaje[1].trim(),
+          mensajeInicial: bridgeMatchConMensaje[2].trim()
+        }
+      };
+    }
+
+    const bridgeMatch = msg.match(/^(?:bridge|chat\s*directo|directo)\s+(.+)$/i);
+    if (bridgeMatch) {
+      return {
+        matched: true,
+        handlerName: 'bridgeLead',
+        handlerParams: { nombreLead: bridgeMatch[1].trim() }
+      };
+    }
+
+    // ═══ EXTENDER BRIDGE ═══
+    if (msg === '#mas' || msg === '#más' || msg === '#continuar') {
+      return { matched: true, handlerName: 'extenderBridge' };
+    }
+
+    // ═══ CERRAR BRIDGE ═══
+    if (msg === '#cerrar' || msg === '#fin') {
+      return { matched: true, handlerName: 'cerrarBridge' };
+    }
+
     return { matched: false };
   }
 

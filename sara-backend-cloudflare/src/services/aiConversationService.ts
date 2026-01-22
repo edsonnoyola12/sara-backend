@@ -3585,8 +3585,51 @@ Tú dime, ¿por dónde empezamos?`;
            claudeResponse.includes('contacte') ||
            claudeResponse.includes('llame'));
         
-        // CORRECCIÓN: Enviar recursos aunque no tenga nombre (solo NO enviar si flujo crédito incompleto o pregunta importante)
-        if (enFlujoCreditoIncompleto && !pidioRecursosExplicito) {
+        // ═══ SOLO GPS - Si pide ubicación sin video, enviar SOLO el GPS ═══
+        const soloQuiereGPS = analysis.send_gps === true && analysis.send_video_desarrollo !== true;
+
+        if (soloQuiereGPS) {
+          console.log('📍 SOLO GPS solicitado (sin video) - enviando ubicación únicamente');
+          const devParaGPSSolo = desarrolloInteres || analysis.extracted_data?.desarrollo || '';
+          if (devParaGPSSolo) {
+            const propGPSSolo = properties.find((p: any) => {
+              const nombreProp = (p.development || p.name || '').toLowerCase().trim();
+              return nombreProp.includes(devParaGPSSolo.toLowerCase()) || devParaGPSSolo.toLowerCase().includes(nombreProp);
+            });
+            if (propGPSSolo?.gps_link) {
+              // Verificar si ya tiene cita
+              const { data: citaParaGPS } = await this.supabase.client
+                .from('appointments')
+                .select('id, date, time')
+                .eq('lead_id', lead.id)
+                .in('status', ['scheduled', 'confirmed', 'pending'])
+                .limit(1);
+
+              const tieneCitaGPS = citaParaGPS && citaParaGPS.length > 0;
+              const primerNombreGPS = nombreCliente ? nombreCliente.split(' ')[0] : '';
+
+              await new Promise(r => setTimeout(r, 400));
+
+              if (tieneCitaGPS) {
+                const cita = citaParaGPS[0];
+                await this.twilio.sendWhatsAppMessage(from,
+                  `📍 *Ubicación de ${devParaGPSSolo}:*\n${propGPSSolo.gps_link}\n\n` +
+                  `${primerNombreGPS ? primerNombreGPS + ', recuerda' : 'Recuerda'} que tu cita es el *${cita.date}* a las *${cita.time}* 📅\n¡Ahí te esperamos! 🏠`
+                );
+                console.log(`✅ GPS enviado (SOLO) con recordatorio de cita: ${devParaGPSSolo}`);
+              } else {
+                await this.twilio.sendWhatsAppMessage(from,
+                  `📍 *Ubicación de ${devParaGPSSolo}:*\n${propGPSSolo.gps_link}\n\n` +
+                  `${primerNombreGPS ? primerNombreGPS + ', ¿te' : '¿Te'} gustaría agendar una visita? 🏠`
+                );
+                console.log(`✅ GPS enviado (SOLO) con oferta de cita: ${devParaGPSSolo}`);
+              }
+            } else {
+              console.log(`⚠️ ${devParaGPSSolo} no tiene gps_link en DB`);
+            }
+          }
+          // NO continuar con el bloque de recursos completos
+        } else if (enFlujoCreditoIncompleto && !pidioRecursosExplicito) {
           console.log('⏸️ Recursos en espera - flujo de crédito en curso');
         } else if (claudeEstaPreguntando) {
           console.log('⏸️ Recursos en espera - Claude está haciendo una pregunta importante');
@@ -3657,9 +3700,16 @@ Tú dime, ¿por dónde empezamos?`;
                   console.log(`✅ Recursos enviados para: ${dev}`);
                 }
                 
-                // GPS del desarrollo - NO enviar automáticamente, solo con cita confirmada
-                // if (propiedadMatch.gps_link) { ... }
-                console.log(`ℹ️ GPS de ${dev} disponible pero reservado para cita confirmada`);
+                // GPS del desarrollo - ENVIAR SI EL LEAD LO PIDIÓ EXPLÍCITAMENTE
+                if (analysis.send_gps === true && propiedadMatch.gps_link) {
+                  await new Promise(r => setTimeout(r, 400));
+                  await this.twilio.sendWhatsAppMessage(from, `📍 *Ubicación de ${dev}:*\n${propiedadMatch.gps_link}\n\n_Ahí te lleva directo en Google Maps_`);
+                  console.log(`✅ GPS enviado para: ${dev}`);
+                } else if (!analysis.send_gps) {
+                  console.log(`ℹ️ GPS de ${dev} disponible pero no solicitado`);
+                } else {
+                  console.log(`⚠️ GPS de ${dev} solicitado pero no disponible en DB`);
+                }
               } else {
                 console.log(`⚠️ No se encontró propiedad para: ${dev}`);
               }
@@ -3746,6 +3796,49 @@ Tú dime, ¿por dónde empezamos?`;
             }
           } else {
             console.log('ℹ️ Recursos ya enviados anteriormente');
+
+            // ═══ GPS INDEPENDIENTE - Enviar aunque recursos ya se enviaron ═══
+            if (analysis.send_gps === true) {
+              console.log('📍 GPS solicitado (recursos ya enviados, enviando GPS solo)');
+              const devParaGPS = desarrolloInteres || desarrollosLista[0] || '';
+              if (devParaGPS) {
+                const propGPS = properties.find((p: any) => {
+                  const nombreProp = (p.development || p.name || '').toLowerCase().trim();
+                  return nombreProp.includes(devParaGPS.toLowerCase()) || devParaGPS.toLowerCase().includes(nombreProp);
+                });
+                if (propGPS?.gps_link) {
+                  await new Promise(r => setTimeout(r, 400));
+
+                  // Verificar si ya tiene cita agendada
+                  const { data: citaExistenteGPS } = await this.supabase.client
+                    .from('appointments')
+                    .select('id, date, time, development')
+                    .eq('lead_id', lead.id)
+                    .in('status', ['scheduled', 'confirmed', 'pending'])
+                    .limit(1);
+
+                  const tieneCitaGPS = citaExistenteGPS && citaExistenteGPS.length > 0;
+                  const primerNombreGPS = nombreCliente ? nombreCliente.split(' ')[0] : '';
+
+                  if (tieneCitaGPS) {
+                    // Ya tiene cita → GPS + recordatorio
+                    const cita = citaExistenteGPS[0];
+                    const msgGPS = `📍 *Ubicación de ${devParaGPS}:*\n${propGPS.gps_link}\n\n` +
+                      `${primerNombreGPS ? primerNombreGPS + ', recuerda' : 'Recuerda'} que tu cita es el *${cita.date}* a las *${cita.time}* 📅\n¡Ahí te esperamos! 🏠`;
+                    await this.twilio.sendWhatsAppMessage(from, msgGPS);
+                    console.log(`✅ GPS enviado con recordatorio de cita: ${devParaGPS}`);
+                  } else {
+                    // No tiene cita → GPS + ofrecer agendar
+                    const msgGPS = `📍 *Ubicación de ${devParaGPS}:*\n${propGPS.gps_link}\n\n` +
+                      `${primerNombreGPS ? primerNombreGPS + ', ¿te' : '¿Te'} gustaría agendar una visita para conocerlo? 🏠`;
+                    await this.twilio.sendWhatsAppMessage(from, msgGPS);
+                    console.log(`✅ GPS enviado con oferta de cita: ${devParaGPS}`);
+                  }
+                } else {
+                  console.log(`⚠️ ${devParaGPS} no tiene gps_link en DB`);
+                }
+              }
+            }
           }
         } // cierre del else (todas las condiciones cumplidas)
       }
@@ -6252,7 +6345,28 @@ Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
             console.log(`⚠️ ${desarrolloParaBrochure} NO tiene brochure_urls en DB`);
           }
         }
-        
+
+        // ═══ ENVIAR GPS SI EL LEAD LO PIDIÓ EXPLÍCITAMENTE ═══
+        if (analysis.send_gps === true) {
+          const desarrolloParaGPS = todosDesarrollos[0] || desarrollo || '';
+          if (desarrolloParaGPS) {
+            const propConGPS = properties.find(p =>
+              p.development?.toLowerCase().includes(desarrolloParaGPS.toLowerCase()) &&
+              p.gps_link
+            );
+            const gpsUrl = propConGPS?.gps_link;
+
+            if (gpsUrl) {
+              await new Promise(resolve => setTimeout(resolve, 400));
+              const msgGPS = `📍 *Ubicación de ${desarrolloParaGPS}:*\n${gpsUrl}\n\n_Ahí te lleva directo en Google Maps_`;
+              await this.twilio.sendWhatsAppMessage(from, msgGPS);
+              console.log(`✅ GPS enviado: ${desarrolloParaGPS} - ${gpsUrl}`);
+            } else {
+              console.log(`⚠️ ${desarrolloParaGPS} NO tiene gps_link en DB`);
+            }
+          }
+        }
+
         // ═══ NO enviar mensaje hardcoded - La IA ya respondió inteligentemente ═══
         // La respuesta de la IA (analysis.response) ya incluye el follow-up natural
         // basado en el contexto de la conversación
@@ -6261,6 +6375,31 @@ Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
         // ═══ PUSH CRÉDITO ELIMINADO DE AQUÍ ═══
         // Se maneja en un solo lugar: después de confirmar cita (líneas 10505-10584)
         // Esto evita duplicados
+      }
+    }
+
+    // ═══ GPS SOLO - Cuando piden ubicación sin pedir video/recursos ═══
+    // Esto cubre el caso cuando alguien solo dice "mándame la ubicación"
+    if (analysis.send_gps === true && !debeEnviarRecursos) {
+      console.log('📍 GPS SOLICITADO (sin recursos)');
+      const desarrolloParaGPS = analysis.extracted_data?.desarrollo || desarrollo || todosDesarrollos[0] || lead.property_interest || '';
+      if (desarrolloParaGPS) {
+        const propConGPS = properties.find(p =>
+          p.development?.toLowerCase().includes(desarrolloParaGPS.toLowerCase()) &&
+          p.gps_link
+        );
+        const gpsUrl = propConGPS?.gps_link;
+
+        if (gpsUrl) {
+          await new Promise(resolve => setTimeout(resolve, 400));
+          const msgGPS = `📍 *Ubicación de ${desarrolloParaGPS}:*\n${gpsUrl}\n\n_Ahí te lleva directo en Google Maps_`;
+          await this.twilio.sendWhatsAppMessage(from, msgGPS);
+          console.log(`✅ GPS enviado (solo): ${desarrolloParaGPS} - ${gpsUrl}`);
+        } else {
+          console.log(`⚠️ ${desarrolloParaGPS} NO tiene gps_link en DB`);
+          // Enviar mensaje indicando que no tenemos GPS
+          await this.twilio.sendWhatsAppMessage(from, `📍 La ubicación exacta de ${desarrolloParaGPS} te la puedo dar cuando agendemos tu visita. ¿Te gustaría agendar una cita? 🏠`);
+        }
       }
     }
 

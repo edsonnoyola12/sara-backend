@@ -249,6 +249,31 @@ export class AsesorCommandsService {
       return { action: 'call_handler', handlerName: 'asesorReporte' };
     }
 
+    // ━━━ BRIDGE / CHAT DIRECTO ━━━
+    // Formato: bridge [nombre] "mensaje opcional"
+    const bridgeMatchConMensaje = bodyOriginal.match(/^(?:bridge|chat\s*directo|directo)\s+(\w+)\s+[""""](.+)[""""]$/i);
+    if (bridgeMatchConMensaje) {
+      const nombreLead = bridgeMatchConMensaje[1].trim();
+      const mensajeInicial = bridgeMatchConMensaje[2].trim();
+      return { action: 'call_handler', handlerName: 'bridgeLead', handlerParams: { nombreLead, mensajeInicial } };
+    }
+
+    const bridgeMatch = msg.match(/^(?:bridge|chat\s*directo|directo)\s+(.+)$/i);
+    if (bridgeMatch) {
+      const nombreLead = bridgeMatch[1].trim();
+      return { action: 'call_handler', handlerName: 'bridgeLead', handlerParams: { nombreLead } };
+    }
+
+    // ━━━ EXTENDER BRIDGE ━━━
+    if (msg === '#mas' || msg === '#más' || msg === '#continuar') {
+      return { action: 'call_handler', handlerName: 'extenderBridge' };
+    }
+
+    // ━━━ CERRAR BRIDGE ━━━
+    if (msg === '#cerrar' || msg === '#fin') {
+      return { action: 'call_handler', handlerName: 'cerrarBridge' };
+    }
+
     // No reconocido
     return { action: 'not_recognized', message: this.getMensajeNoReconocido(nombreAsesor) };
   }

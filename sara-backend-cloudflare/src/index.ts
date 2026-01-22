@@ -4384,6 +4384,63 @@ Mensaje: ${mensaje}`;
       return corsResponse(JSON.stringify({ message: 'Video bienvenida ejecutado. Revisa /debug-videos para ver el estado.' }));
     }
 
+    // Debug GPS links de propiedades
+    if (url.pathname === '/debug-gps') {
+      const { data: props, error } = await supabase.client
+        .from('properties')
+        .select('development, gps_link')
+        .order('development');
+
+      if (error) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+
+      const devs: Record<string, string> = {};
+      props?.forEach((p: any) => {
+        if (p.development && !devs[p.development]) {
+          devs[p.development] = p.gps_link || 'NO TIENE';
+        }
+      });
+
+      return corsResponse(JSON.stringify(devs, null, 2));
+    }
+
+    // Reset recursos para un lead (para reenviar videos)
+    if (url.pathname === '/reset-lead-resources') {
+      const body = await request.json() as any;
+      const phone = body.phone;
+      if (!phone) {
+        return corsResponse(JSON.stringify({ error: 'Se requiere phone' }), 400);
+      }
+
+      const digits = phone.replace(/\D/g, '').slice(-10);
+      const { data: lead, error } = await supabase.client
+        .from('leads')
+        .select('id, name, resources_sent, resources_sent_for')
+        .like('phone', '%' + digits)
+        .single();
+
+      if (error || !lead) {
+        return corsResponse(JSON.stringify({ error: 'Lead no encontrado', phone }), 404);
+      }
+
+      // Resetear las columnas resources_sent
+      await supabase.client
+        .from('leads')
+        .update({
+          resources_sent: false,
+          resources_sent_for: null
+        })
+        .eq('id', lead.id);
+
+      return corsResponse(JSON.stringify({
+        success: true,
+        message: `Recursos reseteados para ${lead.name}`,
+        lead_id: lead.id,
+        antes: { resources_sent: lead.resources_sent, resources_sent_for: lead.resources_sent_for }
+      }));
+    }
+
     if (url.pathname === '/run-lead-scoring') {
       console.log('📊 Forzando actualización de lead scores...');
       await actualizarLeadScores(supabase);
@@ -17561,12 +17618,18 @@ async function videoFelicitacionPostVenta(supabase: SupabaseService, meta: MetaW
     let generados = 0;
 
     for (const lead of leads) {
-      if (!lead.phone) continue;
+      console.log(`🎬 Procesando lead: ${lead.name} | phone: ${lead.phone || 'SIN TELEFONO'}`);
+
+      if (!lead.phone) {
+        console.log(`🎬 SKIP: ${lead.name} no tiene teléfono`);
+        continue;
+      }
 
       const notas = typeof lead.notes === 'object' ? lead.notes : {};
 
       // Verificar si ya se generó video de felicitación
       if ((notas as any)?.video_felicitacion_generado) {
+        console.log(`🎬 SKIP: ${lead.name} ya tiene video_felicitacion_generado`);
         continue;
       }
 

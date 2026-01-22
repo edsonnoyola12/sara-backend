@@ -1565,7 +1565,7 @@ export class WhatsAppHandler {
 
       // ━━━ BRIDGE / CHAT DIRECTO ━━━
       case 'bridgeLead':
-        await this.ceoBridgeLead(from, params?.nombreLead, ceo, nombreCEO);
+        await this.ceoBridgeLead(from, params?.nombreLead, ceo, nombreCEO, params?.mensajeInicial);
         break;
 
       // ━━━ EXTENDER BRIDGE ━━━
@@ -1694,7 +1694,7 @@ export class WhatsAppHandler {
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // CEO BRIDGE - Activar chat directo con lead
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  private async ceoBridgeLead(from: string, nombreLead: string, ceo: any, nombreCEO: string): Promise<void> {
+  private async ceoBridgeLead(from: string, nombreLead: string, ceo: any, nombreCEO: string, mensajeInicial?: string): Promise<void> {
     const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
     console.log(`🔗 CEO ${nombreCEO} quiere bridge con: ${nombreLead}`);
 
@@ -1773,19 +1773,31 @@ export class WhatsAppHandler {
         `_Escribe tu mensaje:_`
       );
 
-      // Notificar al CEO
-      await this.meta.sendWhatsAppMessage(cleanPhone,
-        `🔗 *Bridge activado con ${lead.name}*\n\n` +
-        `Tus mensajes irán directo a ${lead.name} por *6 minutos*.\n\n` +
-        `_Escribe tu mensaje:_`
-      );
+      // Notificar al CEO y enviar mensaje inicial si existe
+      if (mensajeInicial) {
+        // Si hay mensaje inicial, enviarlo directamente al lead
+        await this.meta.sendWhatsAppMessage(leadPhoneFormatted, mensajeInicial);
+
+        await this.meta.sendWhatsAppMessage(cleanPhone,
+          `🔗 *Bridge activado con ${lead.name}*\n\n` +
+          `✅ Tu mensaje ya fue enviado.\n\n` +
+          `El bridge estará activo por *6 minutos*.\n` +
+          `_Puedes seguir escribiendo mensajes._`
+        );
+      } else {
+        await this.meta.sendWhatsAppMessage(cleanPhone,
+          `🔗 *Bridge activado con ${lead.name}*\n\n` +
+          `Tus mensajes irán directo a ${lead.name} por *6 minutos*.\n\n` +
+          `_Escribe tu mensaje:_`
+        );
+      }
 
       // ═══ REGISTRAR ACTIVIDAD EN BITÁCORA ═══
       const { error: activityError } = await this.supabase.client.from('lead_activities').insert({
         lead_id: lead.id,
         team_member_id: ceo.id,
         activity_type: 'whatsapp',
-        notes: `Bridge iniciado con ${lead.name} (6 min)`,
+        notes: mensajeInicial ? `Bridge iniciado con ${lead.name} (6 min) + mensaje inicial` : `Bridge iniciado con ${lead.name} (6 min)`,
         created_at: new Date().toISOString()
       });
       if (activityError) {
@@ -2974,6 +2986,52 @@ export class WhatsAppHandler {
     }
 
     // ═══════════════════════════════════════════════════════════
+    // 1.5. BRIDGE ACTIVO - Reenviar mensaje al lead
+    // ═══════════════════════════════════════════════════════════
+    const activeBridge = notasVendedor?.active_bridge;
+    if (activeBridge && activeBridge.expires_at && new Date(activeBridge.expires_at) > new Date()) {
+      // Si es comando de bridge o cerrar, procesarlo más abajo (no reenviar)
+      const esBridgeCmd = /^(?:bridge|chat\s*directo|directo)\s+/i.test(mensaje);
+      const esCerrarCmd = mensaje === 'cerrar' || mensaje === 'fin' || mensaje === '#cerrar' || mensaje === '#fin' || mensaje === 'salir';
+      const esExtenderCmd = mensaje === '#mas' || mensaje === '#más' || mensaje === '#continuar';
+
+      if (esBridgeCmd || esCerrarCmd || esExtenderCmd) {
+        // Continuar al handler de comandos
+      } else {
+        // Reenviar mensaje al lead
+        console.log('🔗 BRIDGE VENDEDOR activo, reenviando mensaje a:', activeBridge.lead_name);
+
+        const leadPhone = activeBridge.lead_phone;
+        if (leadPhone) {
+          const msgFormateado = `💬 *${nombreVendedor}:*\n${body}`;
+          await this.meta.sendWhatsAppMessage(leadPhone, msgFormateado);
+
+          // Actualizar last_activity
+          notasVendedor.active_bridge.last_activity = new Date().toISOString();
+          await this.supabase.client
+            .from('team_members')
+            .update({ notes: notasVendedor })
+            .eq('id', vendedor.id);
+
+          // Registrar actividad
+          if (activeBridge.lead_id) {
+            await this.supabase.client.from('lead_activities').insert({
+              lead_id: activeBridge.lead_id,
+              team_member_id: vendedor.id,
+              activity_type: 'whatsapp',
+              notes: `Bridge: ${nombreVendedor} → ${activeBridge.lead_name}`,
+              created_at: new Date().toISOString()
+            });
+          }
+
+          // Confirmar al vendedor (mensaje corto)
+          await this.meta.sendWhatsAppMessage(from, `✓ Enviado a ${activeBridge.lead_name}`);
+          return;
+        }
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // 2. INTERCEPCIÓN TEMPRANA DE COMANDOS CRÍTICOS
     // ═══════════════════════════════════════════════════════════
 
@@ -4090,6 +4148,15 @@ export class WhatsAppHandler {
       // ━━━ BRIDGE Y MENSAJES ━━━
       case 'enviarMensajeLead':
         await this.enviarMensajeLead(from, params.nombre, vendedor);
+        break;
+      case 'bridgeLead':
+        await this.ceoBridgeLead(from, params.nombreLead, vendedor, nombreVendedor, params.mensajeInicial);
+        break;
+      case 'extenderBridge':
+        await this.ceoExtenderBridge(from, vendedor, nombreVendedor);
+        break;
+      case 'cerrarBridge':
+        await this.ceoCerrarBridge(from, vendedor, nombreVendedor);
         break;
 
       // ━━━ MATERIAL Y MEDIA ━━━
