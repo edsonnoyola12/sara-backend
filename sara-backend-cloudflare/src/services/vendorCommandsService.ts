@@ -187,6 +187,16 @@ export class VendorCommandsService {
       return { matched: true, handlerName: 'vendedorLeadsPendientes' };
     }
 
+    // ═══ COACHING - Consejos para un lead específico ═══
+    const coachMatch = msg.match(/^coach(?:ing)?\s+(.+)$/i);
+    if (coachMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorCoaching',
+        handlerParams: { nombre: coachMatch[1].trim() }
+      };
+    }
+
     // ═══ BRIDGE / CHAT DIRECTO ═══
     // Formato: bridge [nombre] "mensaje opcional"
     const bridgeMatchConMensaje = body.match(/^(?:bridge|chat\s*directo|directo)\s+(\w+)\s+[""""](.+)[""""]$/i);

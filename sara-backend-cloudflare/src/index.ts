@@ -12,6 +12,7 @@ import { NotificationService } from './services/notificationService';
 import { BroadcastQueueService } from './services/broadcastQueueService';
 import { IACoachingService } from './services/iaCoachingService';
 import { CEOCommandsService } from './services/ceoCommandsService';
+import { VendorCommandsService } from './services/vendorCommandsService';
 
 export interface Env {
   SUPABASE_URL: string;
@@ -243,6 +244,34 @@ export default {
         ok: true,
         comando: cmd,
         detected
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // TEST COMANDO VENDEDOR - Probar comandos de vendedor
+    // USO: /test-comando-vendedor?cmd=coach%20Juan
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/test-comando-vendedor" && request.method === "GET") {
+      const cmd = url.searchParams.get('cmd') || 'ayuda';
+      const vendorService = new VendorCommandsService(supabase);
+
+      // Detectar comando (body y mensaje son iguales para el test)
+      const detected = vendorService.detectRouteCommand(cmd, cmd);
+      if (!detected.matched) {
+        return corsResponse(JSON.stringify({
+          ok: false,
+          comando: cmd,
+          error: 'Comando no reconocido',
+          detected
+        }));
+      }
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        comando: cmd,
+        handlerName: detected.handlerName,
+        params: detected.handlerParams,
+        nota: 'Para ejecutar completamente, usa WhatsApp'
       }));
     }
 
