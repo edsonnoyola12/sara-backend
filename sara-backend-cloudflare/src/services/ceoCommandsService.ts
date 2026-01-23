@@ -80,6 +80,21 @@ export class CEOCommandsService {
       return { action: 'call_handler', handlerName: 'verPendientes' };
     }
 
+    // ═══ NUEVO LEAD ═══
+    // Formato: "nuevo lead Juan Pérez 5551234567 Los Encinos"
+    const matchNuevoLead = msgLower.match(/^(?:nuevo\s+lead|agregar\s+lead|crear\s+lead)\s+([a-záéíóúñü\s]+?)\s+(\d{10,15})(?:\s+(.+))?$/i);
+    if (matchNuevoLead) {
+      return {
+        action: 'call_handler',
+        handlerName: 'ceoNuevoLead',
+        handlerParams: {
+          nombre: matchNuevoLead[1].trim(),
+          telefono: matchNuevoLead[2].trim(),
+          desarrollo: matchNuevoLead[3]?.trim() || null
+        }
+      };
+    }
+
     // ═══ BROADCAST ═══
     if (msgLower.startsWith('broadcast') || msgLower.startsWith('enviar')) {
       return { action: 'call_handler', handlerName: 'iniciarBroadcast' };
@@ -245,12 +260,87 @@ export class CEOCommandsService {
     ceoPhone: string,
     sendMessage: (phone: string, message: string) => Promise<any>
   ): Promise<CEOCommandResult> {
-    const mensaje = `📈 *Reporte de Ventas*\n\n` +
-      `Funcionalidad en desarrollo.\n` +
-      `Pronto podrás ver métricas de ventas aquí.`;
+    try {
+      const ahora = new Date();
+      const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
+      const inicioMesPasado = new Date(ahora.getFullYear(), ahora.getMonth() - 1, 1);
+      const finMesPasado = new Date(ahora.getFullYear(), ahora.getMonth(), 0);
 
-    await sendMessage(ceoPhone, mensaje);
-    return { handled: true, action: 'reporte_ventas' };
+      // Ventas este mes
+      const { data: ventasMes, count: countMes } = await this.supabase.client
+        .from('leads')
+        .select('id, name, assigned_to, updated_at', { count: 'exact' })
+        .eq('status', 'sold')
+        .gte('updated_at', inicioMes.toISOString());
+
+      // Ventas mes pasado
+      const { count: countMesPasado } = await this.supabase.client
+        .from('leads')
+        .select('id', { count: 'exact' })
+        .eq('status', 'sold')
+        .gte('updated_at', inicioMesPasado.toISOString())
+        .lte('updated_at', finMesPasado.toISOString());
+
+      // Total leads este mes (para conversión)
+      const { count: totalLeadsMes } = await this.supabase.client
+        .from('leads')
+        .select('id', { count: 'exact' })
+        .gte('created_at', inicioMes.toISOString());
+
+      // Ventas por vendedor
+      const { data: vendedores } = await this.supabase.client
+        .from('team_members')
+        .select('id, name')
+        .eq('active', true)
+        .eq('role', 'vendedor');
+
+      // Contar ventas por vendedor
+      const ventasPorVendedor: { nombre: string; ventas: number }[] = [];
+      for (const v of vendedores || []) {
+        const count = (ventasMes || []).filter((l: any) => l.assigned_to === v.id).length;
+        if (count > 0) {
+          ventasPorVendedor.push({ nombre: v.name, ventas: count });
+        }
+      }
+      ventasPorVendedor.sort((a, b) => b.ventas - a.ventas);
+
+      // Calcular métricas
+      const ventasActual = countMes || 0;
+      const ventasPasado = countMesPasado || 0;
+      const diferencia = ventasActual - ventasPasado;
+      const porcentajeCambio = ventasPasado > 0 ? Math.round((diferencia / ventasPasado) * 100) : 0;
+      const conversion = totalLeadsMes && totalLeadsMes > 0
+        ? Math.round((ventasActual / totalLeadsMes) * 100)
+        : 0;
+
+      // Emoji de tendencia
+      const tendencia = diferencia > 0 ? '📈' : diferencia < 0 ? '📉' : '➡️';
+      const signo = diferencia > 0 ? '+' : '';
+
+      // Construir mensaje
+      let mensaje = `📊 *REPORTE DE VENTAS*\n\n`;
+      mensaje += `*Este mes:* ${ventasActual} ventas ${tendencia}\n`;
+      mensaje += `*Mes pasado:* ${ventasPasado} ventas\n`;
+      mensaje += `*Cambio:* ${signo}${diferencia} (${signo}${porcentajeCambio}%)\n\n`;
+      mensaje += `📈 *Conversión:* ${conversion}% (${ventasActual}/${totalLeadsMes || 0} leads)\n\n`;
+
+      if (ventasPorVendedor.length > 0) {
+        mensaje += `🏆 *Top Vendedores:*\n`;
+        ventasPorVendedor.slice(0, 5).forEach((v, i) => {
+          const medalla = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '•';
+          mensaje += `${medalla} ${v.nombre}: ${v.ventas}\n`;
+        });
+      } else {
+        mensaje += `_Sin ventas registradas este mes_`;
+      }
+
+      await sendMessage(ceoPhone, mensaje);
+      return { handled: true, action: 'reporte_ventas' };
+    } catch (e: any) {
+      console.error('Error en reporteVentas:', e);
+      await sendMessage(ceoPhone, `❌ Error al obtener reporte de ventas.`);
+      return { handled: true, action: 'reporte_ventas_error' };
+    }
   }
 
   private async reporteEquipo(
@@ -336,11 +426,76 @@ export class CEOCommandsService {
         }
 
         case 'reporteVentas': {
-          return {
-            message: `📈 *Reporte de Ventas*\n\n` +
-              `Funcionalidad en desarrollo.\n` +
-              `Pronto disponible.`
-          };
+          const ahora = new Date();
+          const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
+          const inicioMesPasado = new Date(ahora.getFullYear(), ahora.getMonth() - 1, 1);
+          const finMesPasado = new Date(ahora.getFullYear(), ahora.getMonth(), 0);
+
+          // Ventas este mes
+          const { data: ventasMesData, count: countMes } = await this.supabase.client
+            .from('leads')
+            .select('id, name, assigned_to, updated_at', { count: 'exact' })
+            .eq('status', 'sold')
+            .gte('updated_at', inicioMes.toISOString());
+
+          // Ventas mes pasado
+          const { count: countMesPasado } = await this.supabase.client
+            .from('leads')
+            .select('id', { count: 'exact' })
+            .eq('status', 'sold')
+            .gte('updated_at', inicioMesPasado.toISOString())
+            .lte('updated_at', finMesPasado.toISOString());
+
+          // Total leads este mes
+          const { count: totalLeadsMes } = await this.supabase.client
+            .from('leads')
+            .select('id', { count: 'exact' })
+            .gte('created_at', inicioMes.toISOString());
+
+          // Ventas por vendedor
+          const { data: vendedoresData } = await this.supabase.client
+            .from('team_members')
+            .select('id, name')
+            .eq('active', true)
+            .eq('role', 'vendedor');
+
+          const ventasPorVendedor: { nombre: string; ventas: number }[] = [];
+          for (const v of vendedoresData || []) {
+            const cnt = (ventasMesData || []).filter((l: any) => l.assigned_to === v.id).length;
+            if (cnt > 0) {
+              ventasPorVendedor.push({ nombre: v.name, ventas: cnt });
+            }
+          }
+          ventasPorVendedor.sort((a, b) => b.ventas - a.ventas);
+
+          const ventasActual = countMes || 0;
+          const ventasPasado = countMesPasado || 0;
+          const diferencia = ventasActual - ventasPasado;
+          const porcentajeCambio = ventasPasado > 0 ? Math.round((diferencia / ventasPasado) * 100) : 0;
+          const conversion = totalLeadsMes && totalLeadsMes > 0
+            ? Math.round((ventasActual / totalLeadsMes) * 100)
+            : 0;
+
+          const tendencia = diferencia > 0 ? '📈' : diferencia < 0 ? '📉' : '➡️';
+          const signo = diferencia > 0 ? '+' : '';
+
+          let msgVentas = `📊 *REPORTE DE VENTAS*\n\n`;
+          msgVentas += `*Este mes:* ${ventasActual} ventas ${tendencia}\n`;
+          msgVentas += `*Mes pasado:* ${ventasPasado} ventas\n`;
+          msgVentas += `*Cambio:* ${signo}${diferencia} (${signo}${porcentajeCambio}%)\n\n`;
+          msgVentas += `📈 *Conversión:* ${conversion}% (${ventasActual}/${totalLeadsMes || 0} leads)\n\n`;
+
+          if (ventasPorVendedor.length > 0) {
+            msgVentas += `🏆 *Top Vendedores:*\n`;
+            ventasPorVendedor.slice(0, 5).forEach((v, i) => {
+              const medalla = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '•';
+              msgVentas += `${medalla} ${v.nombre}: ${v.ventas}\n`;
+            });
+          } else {
+            msgVentas += `_Sin ventas registradas este mes_`;
+          }
+
+          return { message: msgVentas };
         }
 
         case 'resumenHoy': {

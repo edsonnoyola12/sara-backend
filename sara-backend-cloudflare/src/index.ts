@@ -11,6 +11,7 @@ import { FollowupApprovalService } from './services/followupApprovalService';
 import { NotificationService } from './services/notificationService';
 import { BroadcastQueueService } from './services/broadcastQueueService';
 import { IACoachingService } from './services/iaCoachingService';
+import { CEOCommandsService } from './services/ceoCommandsService';
 
 export interface Env {
   SUPABASE_URL: string;
@@ -198,6 +199,51 @@ export default {
         return corsResponse(JSON.stringify({ ok: true, message: "Briefing enviado a " + yo.name }));
       }
       return corsResponse(JSON.stringify({ ok: false, message: "Usuario no encontrado" }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // TEST COMANDO CEO - Probar comandos sin enviar WhatsApp
+    // USO: /test-comando-ceo?cmd=ventas
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/test-comando-ceo" && request.method === "GET") {
+      const cmd = url.searchParams.get('cmd') || 'ayuda';
+      const ceoService = new CEOCommandsService(supabase);
+
+      // Detectar comando
+      const detected = ceoService.detectCommand(cmd);
+      if (!detected.action || detected.action === 'unknown') {
+        return corsResponse(JSON.stringify({
+          ok: false,
+          comando: cmd,
+          error: 'Comando no reconocido',
+          detected
+        }));
+      }
+
+      // Si requiere handler externo, mostrar info
+      if (detected.action === 'call_handler' && detected.handlerName) {
+        try {
+          const result = await ceoService.executeHandler(detected.handlerName, 'Test CEO', detected.handlerParams);
+          return corsResponse(JSON.stringify({
+            ok: true,
+            comando: cmd,
+            handlerName: detected.handlerName,
+            resultado: result.message || result
+          }));
+        } catch (e: any) {
+          return corsResponse(JSON.stringify({
+            ok: false,
+            comando: cmd,
+            error: e.message
+          }));
+        }
+      }
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        comando: cmd,
+        detected
+      }));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -9825,6 +9871,81 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         );
       } catch (e) {
         console.error('❌ Error reseteando onboarding:', e);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🎓 ONE-TIME: Capacitación SARA 23-ene-2026 8am
+    // Enseñar a los vendedores los comandos principales de SARA
+    // ═══════════════════════════════════════════════════════════
+    if (fechaHoy === '2026-01-23' && mexicoHour === 8 && mexicoMinute >= 0 && mexicoMinute <= 4) {
+      console.log('🎓 ONE-TIME: Enviando capacitación de SARA a vendedores...');
+      try {
+        const { data: todosVendedores } = await supabase.client
+          .from('team_members')
+          .select('id, name, phone, role, notes')
+          .eq('active', true);
+
+        const vendedoresActivos = todosVendedores?.filter((v: any) =>
+          v.phone && (v.role === 'vendedor' || v.role === 'coordinador' || v.role === 'ceo' || v.role === 'admin')
+        ) || [];
+
+        const mensajeCapacitacion = `🎓 *CAPACITACIÓN SARA - Comandos Esenciales*
+
+¡Buenos días! Hoy aprenderás a usar SARA como un pro. 💪
+
+*📱 COMANDOS QUE DEBES CONOCER:*
+
+1️⃣ *citas* - Ver tus citas de hoy
+2️⃣ *leads* - Ver tus leads activos
+3️⃣ *hoy* - Resumen del día (citas + leads)
+
+*🔗 PARA CONTACTAR LEADS:*
+
+4️⃣ *bridge [nombre]* - Chat directo con el lead por 6 min
+   Ejemplo: _bridge Juan_
+
+5️⃣ *brochure [desarrollo]* - Enviar info al lead
+   Ejemplo: _brochure Monte Verde_
+
+6️⃣ *ubicacion [desarrollo]* - Enviar GPS al lead
+   Ejemplo: _ubicacion Los Encinos_
+
+*📅 PARA AGENDAR:*
+
+7️⃣ *agendar cita con [nombre] [día] [hora]*
+   Ejemplo: _agendar cita con María mañana 10am_
+
+8️⃣ *reagendar [nombre] [día] [hora]*
+   Ejemplo: _reagendar Juan viernes 3pm_
+
+*💡 TIP PRO:*
+Usa *bridge* para hablar directo con el lead sin que SARA intervenga. Tienes 6 minutos. Si necesitas más, escribe *#mas*. Para terminar: *#cerrar*
+
+¿Dudas? Escribe *ayuda* 📚`;
+
+        let enviados = 0;
+        for (const v of vendedoresActivos) {
+          try {
+            await meta.sendWhatsAppMessage(v.phone, mensajeCapacitacion);
+            enviados++;
+            console.log(`   ✅ Capacitación enviada a: ${v.name}`);
+            // Pequeña pausa para no saturar la API
+            await new Promise(resolve => setTimeout(resolve, 500));
+          } catch (err) {
+            console.log(`   ⚠️ Error enviando a ${v.name}:`, err);
+          }
+        }
+
+        console.log(`🎓 CAPACITACIÓN ENVIADA: ${enviados}/${vendedoresActivos.length} vendedores`);
+
+        // Notificar al admin
+        await meta.sendWhatsAppMessage('5212224558475',
+          `🎓 *CAPACITACIÓN ENVIADA*\n\n` +
+          `Se envió el tutorial de comandos SARA a ${enviados} personas del equipo.`
+        );
+      } catch (e) {
+        console.error('❌ Error enviando capacitación:', e);
       }
     }
 

@@ -406,6 +406,11 @@ Total: 8 actividades
 | `brochure [desarrollo/modelo]` | ✅ Probado 2026-01-20 |
 | `ubicacion [desarrollo/modelo]` | ✅ Probado 2026-01-20 |
 | `video [desarrollo/modelo]` | ✅ Probado 2026-01-20 |
+| `equipo` | ✅ Verificado 2026-01-22 (lista team activo) |
+| `ventas` | ✅ Implementado 2026-01-22 (métricas reales) |
+| `broadcast` | ✅ Verificado 2026-01-22 (muestra ayuda broadcast) |
+| `segmentos` | ✅ Verificado 2026-01-22 (lista segmentos) |
+| `eventos` | ✅ Verificado 2026-01-22 (lista eventos) |
 
 ### Asesor Hipotecario
 | Comando | Estado |
@@ -441,6 +446,11 @@ Total: 8 actividades
 | `video [desarrollo/modelo]` | ✅ Probado 2026-01-20 |
 | Selección `1`, `2` en múltiples leads | ✅ Probado 2026-01-19 |
 | Responder `1` para notificar lead (reagendar) | ✅ Probado 2026-01-19 |
+| `meta` | ✅ Verificado 2026-01-22 (avance meta mensual) |
+| `briefing` | ✅ Verificado 2026-01-22 (resumen matutino) |
+| `credito [nombre]` | ✅ Verificado 2026-01-22 (pasa lead a asesor) |
+| `nuevo lead [nombre] [tel] [desarrollo]` | ✅ Verificado 2026-01-22 (registra lead directo) |
+| `bridge [nombre]` | ✅ Verificado 2026-01-22 (chat directo 6 min) |
 
 ### Bugs arreglados en pruebas
 10. ✅ JSON parsing en `asesorCommandsService.ts` - algunos leads tenían `notes` como texto plano, agregado `safeParseNotes()` helper
@@ -486,7 +496,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-22 18:10*
+*Última actualización: 2026-01-22 22:38*
 
 ---
 
@@ -615,6 +625,24 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-22
+
+**Sesión 4 (21:50)**
+- ✅ **Capacitación SARA programada para 23-ene 8am**
+  - Mensaje automático a todos los vendedores, coordinadores y admins
+  - Contenido: Comandos esenciales (citas, leads, hoy, bridge, brochure, ubicacion, agendar, reagendar)
+  - One-time task en `src/index.ts` línea ~9830
+  - Se ejecutará junto con el briefing matutino
+- ✅ **Comando `ventas` implementado** (antes era stub)
+  - Muestra ventas este mes vs mes pasado
+  - Porcentaje de cambio con tendencia (📈/📉)
+  - Tasa de conversión (ventas/leads)
+  - Top 5 vendedores con medallas 🥇🥈🥉
+  - Archivo: `src/services/ceoCommandsService.ts`
+- ✅ **Verificación de comandos faltantes:**
+  - CEO: equipo, broadcast, segmentos, eventos ✅
+  - Vendedor: meta, briefing, credito, nuevo lead, bridge ✅
+- ✅ Tests: 168 pasando ✅
+- ✅ Deploy exitoso
 
 **Sesión 3 - Auditoría CRM (18:00)**
 - ✅ **Auditoría completa del CRM** - Detectados y corregidos 5 bugs críticos:
