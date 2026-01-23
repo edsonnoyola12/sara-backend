@@ -378,6 +378,11 @@ Total: 8 actividades
 7. ✅ Bridge duraba 10 min sin aviso - Ahora 6 min con aviso antes de expirar
 8. ✅ Comando `cerrar` podía confundirse con conversación - Cambiado a `#cerrar`
 9. ✅ Actividades de bridge no se guardaban - DB constraint solo permite `whatsapp`, cambiado tipo
+27. ✅ Leads sin vendedor (`assigned_to = NULL`) - Fallbacks + CRON reasignación cada 2 min
+28. ✅ `asignarAsesorHipotecario()` era stub - Implementado completo con notificaciones
+29. ✅ `MortgageService` vacío - Implementado `finalizeCreditFlow()`, `getCreditsForVendor()`, etc.
+30. ✅ Video no enviado si falta desarrollo - Agregado fallback a primer desarrollo con video
+31. ✅ DNC no excluido de broadcasts - Excluir `do_not_contact=true` en queries
 
 ---
 
@@ -481,7 +486,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-22 16:45*
+*Última actualización: 2026-01-22 18:10*
 
 ---
 
@@ -610,6 +615,53 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-22
+
+**Sesión 3 - Auditoría CRM (18:00)**
+- ✅ **Auditoría completa del CRM** - Detectados y corregidos 5 bugs críticos:
+
+**Bug #1: Leads sin vendedor asignado (`assigned_to = NULL`)**
+- Problema: 30-40% de leads perdidos por no tener vendedor
+- Solución:
+  - Fallbacks en `getAvailableVendor()`: coordinadores → admins → cualquier activo
+  - CRON cada 2 min para reasignar leads huérfanos
+  - Alerta al CEO cuando lead se crea sin vendedor
+- Archivo: `src/index.ts`
+
+**Bug #2: `asignarAsesorHipotecario()` era un stub**
+- Problema: Comando "asignar asesor [nombre]" no funcionaba
+- Solución:
+  - Implementación completa: busca lead, valida, asigna asesor, crea mortgage_application
+  - Agregados métodos de formato: `formatMensajeAsesorNuevoLead()`, `formatConfirmacionAsesorAsignado()`
+  - Implementado `preguntarAsesorCredito()` para consultas de estado
+- Archivo: `src/services/vendorCommandsService.ts`
+
+**Bug #3: `MortgageService` vacío**
+- Problema: Todo el flujo de crédito hipotecario roto
+- Solución: Implementación completa con:
+  - `finalizeCreditFlow()` - Asigna asesor al completar flujo
+  - `getCreditsForVendor()` - Lista créditos de un vendedor
+  - `crearOActualizarConNotificacion()` - Gestión de mortgage_applications
+  - `formatMensajeNuevoLead()`, `formatMensajeActualizacion()` - Mensajes para asesor
+  - `getCreditDetailByLead()` - Detalle de crédito por lead
+- Archivo: `src/services/mortgageService.ts` (de 4 líneas a 479)
+
+**Bug #4: Video no enviado si falta desarrollo**
+- Problema: Si lead no especificaba desarrollo, no recibía video
+- Solución:
+  - CASO 3 fallback: si `todosDesarrollos` vacío, usar primer desarrollo con video
+  - Actualiza `property_interest` con desarrollo usado
+- Archivo: `src/services/aiConversationService.ts`
+
+**Bug #5: DNC no sincronizado a broadcasts**
+- Problema: Leads marcados como "No molestar" seguían recibiendo broadcasts
+- Solución:
+  - Excluir `do_not_contact=true` en query de `broadcastQueueService.ts`
+  - Verificación adicional en loop de envío
+  - Excluir DNC en `getLeadsParaEnvio()` de agenciaReportingService.ts
+- Archivos: `src/services/broadcastQueueService.ts`, `src/services/agenciaReportingService.ts`
+
+- ✅ Tests: 168 pasando ✅
+- ✅ Deploy exitoso
 
 **Sesión 2 (16:30)**
 - ✅ **Memoria de Acciones en Historial** - Sara ahora recuerda qué recursos envió
