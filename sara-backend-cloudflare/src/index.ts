@@ -6624,9 +6624,9 @@ _Solo responde con el número_ 🙏`;
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/test-veo3') {
       console.log('TEST: Probando generacion de video Veo 3...');
-      const testPhone = '5214921234567';
-      const testName = 'Test';
-      const testDesarrollo = 'Los Encinos';
+      const testPhone = url.searchParams.get('phone') || '5212224558475';
+      const testName = url.searchParams.get('name') || 'Jefe';
+      const testDesarrollo = url.searchParams.get('desarrollo') || 'Los Encinos';
       const testFoto = 'https://img.youtube.com/vi/xzPXJ00yK0A/maxresdefault.jpg';
 
       try {
@@ -6698,6 +6698,90 @@ _Solo responde con el número_ 🙏`;
     }
 
     // ═══════════════════════════════════════════════════════════
+    // Crear tabla sara_logs
+    if (url.pathname === '/create-logs-table') {
+      const sql = `CREATE TABLE IF NOT EXISTS sara_logs (id uuid DEFAULT gen_random_uuid() PRIMARY KEY, tipo text NOT NULL, mensaje text NOT NULL, datos jsonb DEFAULT '{}', created_at timestamptz DEFAULT now()); CREATE INDEX IF NOT EXISTS idx_sara_logs_created_at ON sara_logs(created_at DESC); CREATE INDEX IF NOT EXISTS idx_sara_logs_tipo ON sara_logs(tipo);`;
+      return corsResponse(JSON.stringify({
+        instruccion: 'Copia y pega este SQL en Supabase Dashboard > SQL Editor > New Query > Run',
+        sql: sql,
+        url_supabase: 'https://supabase.com/dashboard/project/_/sql/new'
+      }));
+    }
+
+    // Ver logs de SARA
+    if (url.pathname === '/logs') {
+      const horas = parseInt(url.searchParams.get('horas') || '24');
+      const tipo = url.searchParams.get('tipo');
+      const desde = new Date(Date.now() - horas * 60 * 60 * 1000).toISOString();
+      let query = supabase.client.from('sara_logs').select('*').gte('created_at', desde).order('created_at', { ascending: false }).limit(100);
+      if (tipo) query = query.eq('tipo', tipo);
+      const { data: logs, error } = await query;
+      if (error) return corsResponse(JSON.stringify({ error: error.message }), 500);
+      return corsResponse(JSON.stringify({ total: logs?.length || 0, desde, logs: logs || [] }));
+    }
+
+    // Enviar TEMPLATE a un teléfono (para fuera de ventana 24h)
+    if (url.pathname === '/send-template') {
+      const phone = url.searchParams.get('phone');
+      const template = url.searchParams.get('template') || 'reactivar_equipo';
+      const nombre = url.searchParams.get('nombre') || 'amigo';
+      if (!phone) {
+        return corsResponse(JSON.stringify({ error: 'Falta phone' }), 400);
+      }
+      try {
+        const response = await fetch(`https://graph.facebook.com/v18.0/${env.META_PHONE_NUMBER_ID}/messages`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${env.META_ACCESS_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            to: phone,
+            type: 'template',
+            template: {
+              name: template,
+              language: { code: 'es_MX' },
+              components: [{ type: 'body', parameters: [{ type: 'text', text: nombre }] }]
+            }
+          })
+        });
+        const result = await response.json();
+        return corsResponse(JSON.stringify({ ok: response.ok, status: response.status, phone, template, meta_response: result }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message, phone }), 500);
+      }
+    }
+
+    // Enviar mensaje directo a un teléfono (con debug)
+    if (url.pathname === '/send-message') {
+      const phone = url.searchParams.get('phone');
+      const msg = url.searchParams.get('msg');
+      if (!phone || !msg) {
+        return corsResponse(JSON.stringify({ error: 'Falta phone o msg' }), 400);
+      }
+      try {
+        // Llamar directamente a Meta API para ver respuesta completa
+        const response = await fetch(`https://graph.facebook.com/v18.0/${env.META_PHONE_NUMBER_ID}/messages`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${env.META_ACCESS_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            to: phone,
+            type: 'text',
+            text: { body: msg }
+          })
+        });
+        const result = await response.json();
+        return corsResponse(JSON.stringify({ ok: response.ok, status: response.status, phone, meta_response: result }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message, phone }), 500);
+      }
+    }
+
     // TEST: Generar video semanal manualmente
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/test-video-semanal') {
@@ -9715,6 +9799,11 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     console.log(`   Cron trigger: ${event.cron}`);
     console.log(`═══════════════════════════════════════════════════════════`);
 
+    // Log CRON execution (solo cada hora para no saturar)
+    if (isFirstRunOfHour) {
+      await logEvento(supabase, 'cron', `CRON horario: ${mexicoHour}:00 (${mexicoWeekday})`, { hora: mexicoHour, dia: dayOfWeek });
+    }
+
     // Obtener vendedores activos
     const { data: vendedores, error: vendedoresError } = await supabase.client
       .from('team_members')
@@ -9903,78 +9992,64 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       }
     }
 
-    // ═══════════════════════════════════════════════════════════
-    // 🎓 ONE-TIME: Capacitación SARA 23-ene-2026 8am
-    // Enseñar a los vendedores los comandos principales de SARA
-    // ═══════════════════════════════════════════════════════════
-    if (fechaHoy === '2026-01-23' && mexicoHour === 8 && mexicoMinute >= 0 && mexicoMinute <= 4) {
-      console.log('🎓 ONE-TIME: Enviando capacitación de SARA a vendedores...');
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 7:55am L-V: REACTIVAR VENTANAS 24H - Enviar templates a quienes no han
+    // interactuado en 24h para que les lleguen los briefings
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (mexicoHour === 7 && mexicoMinute >= 55 && mexicoMinute <= 59 && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('🔄 REACTIVACIÓN 24H - Checando ventanas de WhatsApp...');
       try {
-        const { data: todosVendedores } = await supabase.client
+        const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const hoyReactivacion = new Date().toISOString().split('T')[0];
+
+        // Obtener team members activos que reciben briefings
+        const { data: miembros } = await supabase.client
           .from('team_members')
-          .select('id, name, phone, role, notes')
-          .eq('active', true);
+          .select('id, name, phone, notes')
+          .eq('active', true)
+          .eq('recibe_briefing', true);
 
-        const vendedoresActivos = todosVendedores?.filter((v: any) =>
-          v.phone && (v.role === 'vendedor' || v.role === 'coordinador' || v.role === 'ceo' || v.role === 'admin')
-        ) || [];
+        let reactivados = 0;
+        for (const m of miembros || []) {
+          if (!m.phone) continue;
 
-        const mensajeCapacitacion = `🎓 *CAPACITACIÓN SARA - Comandos Esenciales*
+          const notas = typeof m.notes === 'object' ? m.notes : {};
+          const lastInteraction = notas?.last_sara_interaction;
+          const yaReactivadoHoy = notas?.reactivacion_enviada === hoyReactivacion;
 
-¡Buenos días! Hoy aprenderás a usar SARA como un pro. 💪
+          // Si nunca ha interactuado O hace más de 24h Y no se le reactivó hoy
+          const necesitaReactivar = (!lastInteraction || lastInteraction < hace24h) && !yaReactivadoHoy;
 
-*📱 COMANDOS QUE DEBES CONOCER:*
+          if (necesitaReactivar) {
+            console.log(`   📤 Reactivando ventana para ${m.name}...`);
+            try {
+              // Enviar template de reactivación
+              const response = await fetch(`https://sara-backend.edson-633.workers.dev/send-template?phone=${m.phone}&template=reactivar_equipo&nombre=${encodeURIComponent(m.name.split(' ')[0])}`);
 
-1️⃣ *citas* - Ver tus citas de hoy
-2️⃣ *leads* - Ver tus leads activos
-3️⃣ *hoy* - Resumen del día (citas + leads)
-
-*🔗 PARA CONTACTAR LEADS:*
-
-4️⃣ *bridge [nombre]* - Chat directo con el lead por 6 min
-   Ejemplo: _bridge Juan_
-
-5️⃣ *brochure [desarrollo]* - Enviar info al lead
-   Ejemplo: _brochure Monte Verde_
-
-6️⃣ *ubicacion [desarrollo]* - Enviar GPS al lead
-   Ejemplo: _ubicacion Los Encinos_
-
-*📅 PARA AGENDAR:*
-
-7️⃣ *agendar cita con [nombre] [día] [hora]*
-   Ejemplo: _agendar cita con María mañana 10am_
-
-8️⃣ *reagendar [nombre] [día] [hora]*
-   Ejemplo: _reagendar Juan viernes 3pm_
-
-*💡 TIP PRO:*
-Usa *bridge* para hablar directo con el lead sin que SARA intervenga. Tienes 6 minutos. Si necesitas más, escribe *#mas*. Para terminar: *#cerrar*
-
-¿Dudas? Escribe *ayuda* 📚`;
-
-        let enviados = 0;
-        for (const v of vendedoresActivos) {
-          try {
-            await meta.sendWhatsAppMessage(v.phone, mensajeCapacitacion);
-            enviados++;
-            console.log(`   ✅ Capacitación enviada a: ${v.name}`);
-            // Pequeña pausa para no saturar la API
-            await new Promise(resolve => setTimeout(resolve, 500));
-          } catch (err) {
-            console.log(`   ⚠️ Error enviando a ${v.name}:`, err);
+              if (response.ok) {
+                // Marcar como reactivado hoy para no repetir
+                const updatedNotes = { ...notas, reactivacion_enviada: hoyReactivacion };
+                await supabase.client
+                  .from('team_members')
+                  .update({ notes: updatedNotes })
+                  .eq('id', m.id);
+                reactivados++;
+                console.log(`   ✅ ${m.name} reactivado`);
+              }
+            } catch (e) {
+              console.log(`   ⚠️ Error reactivando ${m.name}:`, e);
+            }
           }
         }
 
-        console.log(`🎓 CAPACITACIÓN ENVIADA: ${enviados}/${vendedoresActivos.length} vendedores`);
-
-        // Notificar al admin
-        await meta.sendWhatsAppMessage('5212224558475',
-          `🎓 *CAPACITACIÓN ENVIADA*\n\n` +
-          `Se envió el tutorial de comandos SARA a ${enviados} personas del equipo.`
-        );
+        if (reactivados > 0) {
+          console.log(`🔄 REACTIVACIÓN COMPLETADA: ${reactivados} ventanas reactivadas`);
+          await logEvento(supabase, 'reactivacion_24h', `Reactivadas ${reactivados} ventanas de WhatsApp`, { reactivados });
+        } else {
+          console.log('✅ REACTIVACIÓN - Todos dentro de ventana 24h');
+        }
       } catch (e) {
-        console.error('❌ Error enviando capacitación:', e);
+        console.error('❌ Error en reactivación 24h:', e);
       }
     }
 
@@ -10008,6 +10083,7 @@ Usa *bridge* para hablar directo con el lead sin que SARA intervenga. Tienes 6 m
 
         const restantes = pendientes.length - enviados;
         console.log(`📊 BRIEFING RESULTADO: ${enviados} enviados, ${restantes > 0 ? restantes + ' pendientes para siguiente CRON' : 'todos completados'}`);
+        await logEvento(supabase, 'briefing', `Briefing matutino: ${enviados} enviados, ${restantes} pendientes`, { enviados, restantes, total: vendedores.length });
       } else {
         console.log(`✅ BRIEFING - Todos los ${vendedores.length} vendedores ya recibieron su briefing hoy`);
       }
@@ -10134,10 +10210,13 @@ Usa *bridge* para hablar directo con el lead sin que SARA intervenga. Tienes 6 m
     // 7pm L-V: Recap del dia (solo primer ejecucion de la hora)
     if (mexicoHour === 19 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5 && vendedores) {
       console.log('Enviando recap del dia...');
+      let recapEnviados = 0;
       for (const v of vendedores) {
         if (!v.phone || !v.recibe_recap) continue;
         await enviarRecapDiario(supabase, meta, v);
+        recapEnviados++;
       }
+      await logEvento(supabase, 'recap', `Recap diario: ${recapEnviados} enviados`, { enviados: recapEnviados });
     }
 
     // 7pm L-V: Reporte diario individual a vendedores
@@ -10207,6 +10286,7 @@ Usa *bridge* para hablar directo con el lead sin que SARA intervenga. Tienes 6 m
     const followupPostCitaResult = await notificationService.enviarFollowupPostCita();
     if (followupPostCitaResult.enviados > 0) {
       console.log(`✅ ${followupPostCitaResult.enviados} follow-ups post-cita enviados`);
+      await logEvento(supabase, 'followup', `Follow-ups post-cita: ${followupPostCitaResult.enviados} enviados`, { enviados: followupPostCitaResult.enviados });
     }
 
     // NO-SHOWS - detectar citas donde no se presentó el lead (cada 2 min)
@@ -13047,7 +13127,67 @@ async function enviarFelicitaciones(supabase: SupabaseService, meta: MetaWhatsAp
     if (!persona.phone) continue;
     const mensaje = `🎂 *¡Feliz Cumpleaños ${persona.name}!* 🎉\n\nTodo el equipo de Santa Rita te desea un día increíble. ¡Que se cumplan todos tus sueños! 🌟`;
     await meta.sendWhatsAppMessage(persona.phone, mensaje);
+    await logEvento(supabase, 'cumpleanos', `Felicitación enviada a ${persona.name}`, { phone: persona.phone });
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Helper: Loggear eventos importantes a Supabase
+// ═══════════════════════════════════════════════════════════
+async function logEvento(
+  supabase: SupabaseService,
+  tipo: string,
+  mensaje: string,
+  datos?: any
+): Promise<void> {
+  try {
+    await supabase.client.from('sara_logs').insert({
+      tipo,
+      mensaje,
+      datos: datos || {},
+      created_at: new Date().toISOString()
+    });
+  } catch (e) {
+    console.error('Error logging evento:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Helper: Ejecutar tarea one-time sin duplicados
+// Usa system_config para trackear si ya se ejecutó
+// ═══════════════════════════════════════════════════════════
+async function ejecutarTareaOneTime(
+  supabase: SupabaseService,
+  taskId: string,
+  tarea: () => Promise<void>
+): Promise<boolean> {
+  const key = `onetime_${taskId}_done`;
+
+  // Verificar si ya se ejecutó
+  const { data: yaEjecutado } = await supabase.client
+    .from('system_config')
+    .select('value')
+    .eq('key', key)
+    .single();
+
+  if (yaEjecutado) {
+    console.log(`⏭️ Tarea one-time "${taskId}" ya fue ejecutada, saltando...`);
+    return false;
+  }
+
+  // Marcar como ejecutada ANTES de ejecutar (evita race condition con CRON cada 2 min)
+  await supabase.client.from('system_config').upsert({
+    key: key,
+    value: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  });
+
+  // Ejecutar la tarea
+  console.log(`🚀 Ejecutando tarea one-time: ${taskId}`);
+  await tarea();
+  console.log(`✅ Tarea one-time "${taskId}" completada`);
+
+  return true;
 }
 
 async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhatsAppService, vendedor: any): Promise<void> {
@@ -18352,6 +18492,9 @@ async function videoFelicitacionPostVenta(supabase: SupabaseService, meta: MetaW
     }
 
     console.log(`🎬 Videos de felicitación iniciados: ${generados}`);
+    if (generados > 0) {
+      await logEvento(supabase, 'video', `Videos felicitación postventa: ${generados} iniciados`, { generados, tipo: 'felicitacion' });
+    }
 
   } catch (e) {
     console.error('Error en videoFelicitacionPostVenta:', e);
@@ -18552,6 +18695,9 @@ async function videoBienvenidaLeadNuevo(supabase: SupabaseService, meta: MetaWha
     }
 
     console.log(`🎬 Videos de bienvenida iniciados: ${generados}`);
+    if (generados > 0) {
+      await logEvento(supabase, 'video', `Videos bienvenida leads nuevos: ${generados} iniciados`, { generados, tipo: 'bienvenida' });
+    }
 
   } catch (e) {
     console.error('Error en videoBienvenidaLeadNuevo:', e);

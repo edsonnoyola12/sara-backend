@@ -827,11 +827,14 @@ export class WhatsAppHandler {
 
       if (vendedor) {
         // ═══ ACTUALIZAR última interacción PRIMERO (antes de cualquier return) ═══
+        // Guardamos en notes.last_sara_interaction para trackear la ventana de 24h de WhatsApp
         try {
           const now = new Date().toISOString();
+          const vendedorNotes = typeof vendedor.notes === 'object' ? vendedor.notes : {};
+          const updatedNotes = { ...vendedorNotes, last_sara_interaction: now };
           await this.supabase.client
             .from('team_members')
-            .update({ last_sara_interaction: now })
+            .update({ notes: updatedNotes })
             .eq('id', vendedor.id);
           console.log(`✅ last_sara_interaction actualizado para ${vendedor.name}: ${now}`);
         } catch (e) {
@@ -3046,6 +3049,36 @@ export class WhatsAppHandler {
     // 1. OBTENER NOTAS Y PROCESAR ESTADOS PENDIENTES
     // ═══════════════════════════════════════════════════════════
     const { notes, notasVendedor } = await vendorService.getVendedorNotes(vendedor.id);
+
+    // ═══════════════════════════════════════════════════════════
+    // PRIMERO: Verificar pending_show_confirmation (pregunta ¿LLEGÓ?)
+    // Esto debe procesarse ANTES del onboarding para no perder respuestas
+    // ═══════════════════════════════════════════════════════════
+    const showConfirmResult = await this.procesarRespuestaShowConfirmation(vendedor.id, mensaje);
+    if (showConfirmResult.handled) {
+      await this.meta.sendWhatsAppMessage(from, showConfirmResult.mensajeVendedor!);
+
+      // Si el lead SÍ llegó, enviar encuesta de satisfacción
+      if (showConfirmResult.siLlego && showConfirmResult.leadPhone) {
+        await this.enviarEncuestaSatisfaccion(showConfirmResult.leadPhone, showConfirmResult.leadName, showConfirmResult.property);
+      }
+
+      // Si NO llegó, ofrecer reagendar
+      if (showConfirmResult.noLlego && showConfirmResult.leadPhone) {
+        const nombreCliente = showConfirmResult.leadName?.split(' ')[0] || 'Hola';
+        try {
+          await this.meta.sendWhatsAppMessage(showConfirmResult.leadPhone,
+            `Hola ${nombreCliente}, notamos que no pudiste asistir a tu cita. 😊\n\n` +
+            `¿Te gustaría reagendar para otro día?\n` +
+            `Escríbenos cuando gustes y con gusto te ayudamos.`
+          );
+        } catch (err) {
+          console.error('Error enviando mensaje reagenda:', err);
+        }
+      }
+
+      return;
+    }
 
     // ═══════════════════════════════════════════════════════════
     // 🎓 ONBOARDING - Tutorial para vendedores nuevos
