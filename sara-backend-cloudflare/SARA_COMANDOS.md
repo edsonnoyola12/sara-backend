@@ -451,6 +451,7 @@ Total: 8 actividades
 | `credito [nombre]` | ✅ Verificado 2026-01-22 (pasa lead a asesor) |
 | `nuevo lead [nombre] [tel] [desarrollo]` | ✅ Verificado 2026-01-22 (registra lead directo) |
 | `bridge [nombre]` | ✅ Verificado 2026-01-22 (chat directo 6 min) |
+| `coach [nombre]` | ✅ Implementado 2026-01-22 (coaching personalizado por lead) |
 
 ### Bugs arreglados en pruebas
 10. ✅ JSON parsing en `asesorCommandsService.ts` - algunos leads tenían `notes` como texto plano, agregado `safeParseNotes()` helper
@@ -496,7 +497,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-22 22:38*
+*Última actualización: 2026-01-22 23:18*
 
 ---
 
@@ -625,6 +626,36 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-22
+
+**Sesión 5 (23:15)**
+- ✅ **Fix 4 gaps críticos del Vendor Journey:**
+
+  **1. Notificación a asesor habilitada**
+  - Antes: Comentada/deshabilitada
+  - Ahora: Asesor recibe notificación cuando le pasan un lead a crédito
+  - Archivo: `src/handlers/whatsapp.ts` línea ~7003
+
+  **2. Round-robin inteligente para asesores**
+  - Antes: Siempre `asesores[0]` (el primero)
+  - Ahora: Selecciona el asesor con menos carga activa
+  - Cuenta mortgage_applications en status: pending, docs_requested, in_review, preapproved
+  - Archivo: `src/services/mortgageService.ts` líneas 57-85, 292-315
+
+  **3. Meta mensual configurable**
+  - Antes: Hardcoded `const metaMensual = 5`
+  - Ahora: 1) `team_member.meta_mensual`, 2) `system_config.meta_mensual_default`, 3) default 5
+  - Archivo: `src/handlers/whatsapp.ts` línea ~6773
+
+  **4. Coaching expandido**
+  - Antes: `getCoaching()` no existía (error)
+  - Ahora: Comando `coach [nombre]` funcional con:
+    - Análisis del lead (status, score, días inactivo)
+    - Recomendaciones personalizadas por etapa
+    - Acciones inmediatas sugeridas
+  - Archivo: `src/services/iaCoachingService.ts` líneas 338-430
+
+- ✅ Tests: 168 pasando ✅
+- ✅ Deploy exitoso
 
 **Sesión 4 (21:50)**
 - ✅ **Capacitación SARA programada para 23-ene 8am**

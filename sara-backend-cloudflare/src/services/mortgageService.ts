@@ -59,9 +59,37 @@ export class MortgageService {
         return { success: false, error: 'No hay asesores disponibles' };
       }
 
-      // Elegir asesor (round-robin simple por ahora)
-      const asesor = asesores[0];
-      console.log(`✅ Asesor seleccionado: ${asesor.name}`);
+      // Round-robin inteligente: elegir asesor con menos leads activos
+      let asesor = asesores[0];
+      if (asesores.length > 1) {
+        // Contar mortgage_applications activas por asesor
+        const { data: counts } = await this.supabase.client
+          .from('mortgage_applications')
+          .select('asesor_id')
+          .in('status', ['pending', 'docs_requested', 'in_review', 'preapproved']);
+
+        const countByAsesor: Record<string, number> = {};
+        asesores.forEach((a: any) => countByAsesor[a.id] = 0);
+        (counts || []).forEach((c: any) => {
+          if (countByAsesor[c.asesor_id] !== undefined) {
+            countByAsesor[c.asesor_id]++;
+          }
+        });
+
+        // Elegir el que tiene menos carga
+        let minCount = Infinity;
+        for (const a of asesores) {
+          const count = countByAsesor[a.id] || 0;
+          if (count < minCount) {
+            minCount = count;
+            asesor = a;
+          }
+        }
+        console.log(`📊 Carga asesores:`, Object.entries(countByAsesor).map(([id, c]) =>
+          `${asesores.find((a: any) => a.id === id)?.name || id}: ${c}`
+        ).join(', '));
+      }
+      console.log(`✅ Asesor seleccionado: ${asesor.name} (menor carga)`);
 
       // 2. Verificar si ya existe mortgage_application
       const { data: existingMortgage } = await this.supabase.client
@@ -261,7 +289,31 @@ export class MortgageService {
         (m.role === 'asesor' || m.role?.includes('hipoteca') || m.role?.includes('credito'))
       );
 
-      const asesor = asesores[0] || null;
+      // Round-robin: elegir asesor con menos carga
+      let asesor = asesores[0] || null;
+      if (asesores.length > 1) {
+        const { data: counts } = await this.supabase.client
+          .from('mortgage_applications')
+          .select('asesor_id')
+          .in('status', ['pending', 'docs_requested', 'in_review', 'preapproved']);
+
+        const countByAsesor: Record<string, number> = {};
+        asesores.forEach((a: any) => countByAsesor[a.id] = 0);
+        (counts || []).forEach((c: any) => {
+          if (countByAsesor[c.asesor_id] !== undefined) {
+            countByAsesor[c.asesor_id]++;
+          }
+        });
+
+        let minCount = Infinity;
+        for (const a of asesores) {
+          const count = countByAsesor[a.id] || 0;
+          if (count < minCount) {
+            minCount = count;
+            asesor = a;
+          }
+        }
+      }
 
       // Verificar si ya existe mortgage_application
       const { data: existingMortgage } = await this.supabase.client

@@ -336,6 +336,107 @@ export class IACoachingService {
   }
 
   /**
+   * Obtiene coaching para un lead específico (comando: coach [nombre])
+   */
+  async getCoaching(nombreLead: string, vendedor: any): Promise<{ success: boolean; mensaje?: string; error?: string }> {
+    try {
+      // 1. Buscar el lead
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('*')
+        .eq('assigned_to', vendedor.id)
+        .ilike('name', `%${nombreLead}%`)
+        .limit(5);
+
+      if (!leads || leads.length === 0) {
+        return { success: false, error: `No encontré a "${nombreLead}" en tus leads.\n\n💡 Escribe *leads* para ver tu lista.` };
+      }
+
+      const lead = leads[0];
+
+      // 2. Analizar el lead y dar consejos
+      let mensaje = `🎯 *COACHING: ${lead.name}*\n\n`;
+
+      // Información del lead
+      mensaje += `📊 *Estado actual:*\n`;
+      mensaje += `• Status: ${lead.status || 'nuevo'}\n`;
+      mensaje += `• Interés: ${lead.property_interest || 'No definido'}\n`;
+      mensaje += `• Score: ${lead.score || 0}/100\n\n`;
+
+      // Calcular días desde última actividad
+      const diasInactivo = lead.updated_at
+        ? Math.floor((Date.now() - new Date(lead.updated_at).getTime()) / (1000 * 60 * 60 * 24))
+        : 999;
+
+      // 3. Generar consejos basados en status y comportamiento
+      mensaje += `💡 *Recomendaciones:*\n\n`;
+
+      if (lead.status === 'new') {
+        mensaje += `1️⃣ *Contacto inicial:* Este lead es NUEVO.\n`;
+        mensaje += `   → Llámalo en los próximos 5 minutos\n`;
+        mensaje += `   → Pregunta: "¿Qué buscas en tu próximo hogar?"\n`;
+        mensaje += `   → Meta: Agendar visita HOY\n\n`;
+      } else if (lead.status === 'contacted' && diasInactivo > 3) {
+        mensaje += `1️⃣ *Re-engagement:* ${diasInactivo} días sin contacto.\n`;
+        mensaje += `   → Envía info nueva (video, promo)\n`;
+        mensaje += `   → Pregunta: "¿Sigues buscando casa?"\n`;
+        mensaje += `   → Ofrece incentivo: "Tengo algo especial para ti"\n\n`;
+      } else if (lead.status === 'qualified') {
+        mensaje += `1️⃣ *Cierre:* Este lead está CALIFICADO.\n`;
+        mensaje += `   → Es momento de agendar visita\n`;
+        mensaje += `   → Crea urgencia: "Solo quedan 2 unidades"\n`;
+        mensaje += `   → Pregunta directa: "¿Cuándo visitamos?"\n\n`;
+      } else if (lead.status === 'visited') {
+        mensaje += `1️⃣ *Post-visita:* Ya visitó la propiedad.\n`;
+        mensaje += `   → Pregunta: "¿Qué te pareció?"\n`;
+        mensaje += `   → Resuelve dudas de financiamiento\n`;
+        mensaje += `   → Ofrece separar: "Con $X lo apartamos"\n\n`;
+      }
+
+      // Consejo según score
+      if (lead.score && lead.score >= 80) {
+        mensaje += `2️⃣ *Lead CALIENTE 🔥* - Score ${lead.score}\n`;
+        mensaje += `   → Prioridad MÁXIMA - Actúa HOY\n`;
+        mensaje += `   → Escribe: *bridge ${lead.name.split(' ')[0]}*\n\n`;
+      } else if (lead.score && lead.score < 40) {
+        mensaje += `2️⃣ *Lead FRÍO ❄️* - Score ${lead.score}\n`;
+        mensaje += `   → Necesita nurturing antes de vender\n`;
+        mensaje += `   → Envía contenido educativo\n`;
+        mensaje += `   → No presiones, construye confianza\n\n`;
+      }
+
+      // Acción inmediata
+      mensaje += `✅ *Acción ahora:*\n`;
+      if (diasInactivo > 7) {
+        mensaje += `Escribe: *bridge ${lead.name.split(' ')[0]}* para reconectar`;
+      } else if (lead.status === 'new') {
+        mensaje += `Escribe: *bridge ${lead.name.split(' ')[0]}* para presentarte`;
+      } else {
+        mensaje += `Escribe: *bridge ${lead.name.split(' ')[0]}* para dar seguimiento`;
+      }
+
+      return { success: true, mensaje };
+
+    } catch (e) {
+      console.error('Error en getCoaching:', e);
+      return { success: false, error: 'Error al analizar el lead. Intenta de nuevo.' };
+    }
+  }
+
+  /**
+   * Mensaje de ayuda para el comando coaching
+   */
+  getMensajeAyudaCoaching(): string {
+    return `🎯 *COACHING DE VENTAS*\n\n` +
+      `Analizo un lead y te doy consejos personalizados.\n\n` +
+      `*Uso:* coach [nombre del lead]\n\n` +
+      `*Ejemplos:*\n` +
+      `• coach Juan\n` +
+      `• coach María López\n\n` +
+      `💡 Escribe *leads* para ver tu lista de leads.`;
+  }
+
+  /**
    * Genera reporte de coaching para admin/CEO
    */
   async generarReporteCoaching(): Promise<string> {
