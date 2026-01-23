@@ -14060,6 +14060,34 @@ async function verificarConsistenciaCalendario(
 }
 
 // ═══════════════════════════════════════════════════════════════
+// HELPER: Verificar si vendedor tiene interacción pendiente
+// Solo permite UNA pregunta a la vez para evitar confusión
+// ═══════════════════════════════════════════════════════════════
+function tieneInteraccionPendiente(notas: any): { tiene: boolean; tipo: string | null } {
+  if (!notas) return { tiene: false, tipo: null };
+
+  // Lista de TODOS los tipos de interacciones pendientes
+  const tiposPendientes = [
+    'pending_show_confirmation',      // ¿Llegó el cliente?
+    'pending_post_visit_feedback',    // Feedback post-visita
+    'pending_client_survey',          // Encuesta de satisfacción
+    'pending_noshow_followup',        // Seguimiento no-show
+    'pending_reschedule',             // Esperando reagendar
+    'pending_bridge_appointment',     // Bridge pendiente
+    'pending_event_registration',     // Registro evento pendiente
+    'pending_lead_response',          // Esperando respuesta de lead
+  ];
+
+  for (const tipo of tiposPendientes) {
+    if (notas[tipo]) {
+      return { tiene: true, tipo };
+    }
+  }
+
+  return { tiene: false, tipo: null };
+}
+
+// ═══════════════════════════════════════════════════════════════
 // NO-SHOW DETECTION & RESCHEDULE
 // Pregunta al vendedor si el cliente se presentó a la cita
 // ═══════════════════════════════════════════════════════════════
@@ -14170,9 +14198,10 @@ async function detectarNoShows(supabase: SupabaseService, meta: MetaWhatsAppServ
         notasActuales = {};
       }
 
-      // Si ya tiene CUALQUIER confirmación pendiente o feedback pendiente, saltar (no saturar al vendedor)
-      if (notasActuales?.pending_show_confirmation || notasActuales?.pending_post_visit_feedback) {
-        console.log(`⏭️ Vendedor ${vendedor.name} ya tiene confirmación/feedback pendiente, saltando cita ${cita.id}`);
+      // Si ya tiene CUALQUIER interacción pendiente, saltar (evitar confusión de respuestas)
+      const pendiente = tieneInteraccionPendiente(notasActuales);
+      if (pendiente.tiene) {
+        console.log(`⏭️ Vendedor ${vendedor.name} ya tiene ${pendiente.tipo} pendiente, saltando cita ${cita.id}`);
         continue;
       }
 
