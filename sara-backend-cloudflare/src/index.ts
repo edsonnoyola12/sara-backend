@@ -18830,9 +18830,12 @@ async function alertarLeadCaliente(
     const tiposDetectados = señales.map(s => s.tipo).join(', ');
     const emoji = intensidadMax === 'muy_alta' ? '🔥🔥🔥' : '🔥🔥';
 
+    const nombreLead = lead.name || 'Sin nombre';
+    const nombreCorto = lead.name ? lead.name.split(' ')[0] : 'lead';
+
     const alertaMsg = `${emoji} *LEAD CALIENTE - ACTÚA YA*
 
-👤 *${lead.name}*
+👤 *${nombreLead}*
 📱 ${lead.phone}
 🏠 Interés: ${lead.property_interest || 'No especificado'}
 
@@ -18843,7 +18846,7 @@ async function alertarLeadCaliente(
 
 💡 Acción recomendada:
 ${señales.some(s => s.tipo === 'visita') ? '→ Agendar visita HOY si es posible\n' : ''}${señales.some(s => s.tipo === 'precio') ? '→ Enviar cotización personalizada\n' : ''}${señales.some(s => s.tipo === 'credito') ? '→ Explicar opciones de crédito\n' : ''}${señales.some(s => s.tipo === 'apartado') ? '→ Explicar proceso de apartado\n' : ''}${señales.some(s => s.tipo === 'urgencia') ? '→ CONTACTAR INMEDIATAMENTE\n' : ''}
-📞 Responde: bridge ${lead.name?.split(' ')[0]}`;
+📞 Responde: bridge ${nombreCorto}`;
 
     await meta.sendWhatsAppMessage(vendedor.phone, alertaMsg);
     console.log(`🔥 Alerta enviada a ${vendedor.name} por lead caliente: ${lead.name} (${tiposDetectados})`);
@@ -19905,10 +19908,12 @@ async function alertarObjecion(
     const tiposObjecion = objeciones.map(o => o.tipo).join(', ');
     const prioridadMax = objeciones.some(o => o.prioridad === 'alta') ? 'ALTA' :
                          objeciones.some(o => o.prioridad === 'media') ? 'MEDIA' : 'BAJA';
+    const nombreLeadObj = lead.name || 'Sin nombre';
+    const nombreCortoObj = lead.name ? lead.name.split(' ')[0] : 'lead';
 
     let alertaMsg = `⚠️ *OBJECIÓN DETECTADA*
 
-👤 *${lead.name}*
+👤 *${nombreLeadObj}*
 📱 ${lead.phone}
 🏠 Interés: ${lead.property_interest || 'No especificado'}
 
@@ -19924,7 +19929,7 @@ async function alertarObjecion(
       alertaMsg += `\n${obj.respuestaSugerida}\n`;
     });
 
-    alertaMsg += `\n📞 Responde: bridge ${lead.name?.split(' ')[0]}`;
+    alertaMsg += `\n📞 Responde: bridge ${nombreCortoObj}`;
 
     await meta.sendWhatsAppMessage(vendedor.phone, alertaMsg);
     console.log(`⚠️ Alerta de objeción enviada a ${vendedor.name}: ${lead.name} (${tiposObjecion})`);
