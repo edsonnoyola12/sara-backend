@@ -4,7 +4,9 @@
  * El movimiento en el funnel es lo más importante,
  * las acciones individuales son bonificaciones menores.
  *
- * Actualizado: 7 Enero 2026
+ * Actualizado: 22 Enero 2026
+ * - Agregado: Decay temporal (leads inactivos pierden puntos)
+ * - Agregado: Velocity bonus (leads que avanzan rápido ganan puntos)
  */
 
 export type LeadTemperature = 'HOT' | 'WARM' | 'COLD';
@@ -18,6 +20,8 @@ export interface FunnelScoreResult {
   breakdown: {
     base: number;
     bonuses: number;
+    decay: number;
+    velocity: number;
     details: string[];
   };
 }
@@ -36,6 +40,62 @@ const SCORE_FUNNEL: Record<LeadStatus, { min: number; max: number }> = {
 export class LeadScoringService {
 
   /**
+   * Calcula el decay (penalización) por inactividad
+   * -2 puntos por cada 7 días sin actividad, máximo -15
+   */
+  private calculateDecay(lastActivityDate?: string | Date): { decay: number; detail: string | null } {
+    if (!lastActivityDate) return { decay: 0, detail: null };
+
+    const lastActivity = typeof lastActivityDate === 'string' ? new Date(lastActivityDate) : lastActivityDate;
+    const daysSinceActivity = Math.floor((Date.now() - lastActivity.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysSinceActivity <= 3) {
+      return { decay: 0, detail: null }; // Sin penalización si actividad reciente
+    }
+
+    // -2 puntos por cada 7 días, máximo -15
+    const decay = Math.min(15, Math.floor(daysSinceActivity / 7) * 2);
+
+    if (decay > 0) {
+      return { decay: -decay, detail: `-${decay} inactivo ${daysSinceActivity}d` };
+    }
+
+    return { decay: 0, detail: null };
+  }
+
+  /**
+   * Calcula el bonus por velocidad de avance en el funnel
+   * Leads que avanzan rápido son más valiosos
+   */
+  private calculateVelocityBonus(
+    createdAt?: string | Date,
+    statusChangedAt?: string | Date,
+    currentStatus?: string
+  ): { velocity: number; detail: string | null } {
+    // Solo aplica si el lead ha avanzado del status inicial
+    if (!createdAt || !statusChangedAt || currentStatus === 'new') {
+      return { velocity: 0, detail: null };
+    }
+
+    const created = typeof createdAt === 'string' ? new Date(createdAt) : createdAt;
+    const changed = typeof statusChangedAt === 'string' ? new Date(statusChangedAt) : statusChangedAt;
+    const daysToAdvance = Math.floor((changed.getTime() - created.getTime()) / (1000 * 60 * 60 * 24));
+
+    // Bonus por avance rápido
+    if (daysToAdvance <= 1) {
+      return { velocity: 10, detail: '+10 avanzó en 1 día' };
+    } else if (daysToAdvance <= 3) {
+      return { velocity: 7, detail: '+7 avanzó en 3 días' };
+    } else if (daysToAdvance <= 7) {
+      return { velocity: 4, detail: '+4 avanzó en 1 semana' };
+    } else if (daysToAdvance <= 14) {
+      return { velocity: 2, detail: '+2 avanzó en 2 semanas' };
+    }
+
+    return { velocity: 0, detail: null };
+  }
+
+  /**
    * Calcula el score de un lead basado en su posición en el funnel
    */
   calculateFunnelScore(
@@ -46,6 +106,9 @@ export class LeadScoringService {
       needs_mortgage?: boolean;
       enganche_disponible?: number;
       mortgage_data?: { ingreso_mensual?: number };
+      updated_at?: string | Date;
+      created_at?: string | Date;
+      status_changed_at?: string | Date;
     },
     hasActiveAppointment: boolean = false,
     intent?: string
@@ -116,10 +179,23 @@ export class LeadScoringService {
       details.push('+3 proporcionó enganche');
     }
 
-    // 4. Calcular score final (no exceder máximo del rango)
-    const finalScore = Math.min(range.max, baseScore + bonuses);
+    // 4. Calcular decay por inactividad
+    const { decay, detail: decayDetail } = this.calculateDecay(lead.updated_at);
+    if (decayDetail) details.push(decayDetail);
 
-    // 5. Determinar temperatura (umbrales unificados)
+    // 5. Calcular bonus por velocidad de avance
+    const { velocity, detail: velocityDetail } = this.calculateVelocityBonus(
+      lead.created_at,
+      lead.status_changed_at,
+      effectiveStatus
+    );
+    if (velocityDetail) details.push(velocityDetail);
+
+    // 6. Calcular score final (no exceder máximo del rango, mínimo 0)
+    const rawScore = baseScore + bonuses + decay + velocity;
+    const finalScore = Math.max(0, Math.min(range.max + velocity, rawScore)); // velocity puede exceder rango
+
+    // 7. Determinar temperatura (umbrales unificados)
     let temperature: LeadTemperature = 'COLD';
     if (finalScore >= 70) temperature = 'HOT';
     else if (finalScore >= 40) temperature = 'WARM';
@@ -132,6 +208,8 @@ export class LeadScoringService {
       breakdown: {
         base: baseScore,
         bonuses,
+        decay,
+        velocity,
         details
       }
     };

@@ -88,7 +88,7 @@ export class NotificationService {
             const desarrollo = cita.property_name || 'nuestro desarrollo';
             await this.meta.sendWhatsAppMessage(
               cita.lead_phone,
-              `📅 ¡Hola ${nombreCorto}! Te recordamos tu cita mañana a las ${cita.scheduled_time || ''}. 🏠 ${desarrollo}. ¡Te esperamos!`
+              `📅 ¡Hola ${nombreCorto}! Te recordamos tu cita mañana a las ${(cita.scheduled_time || '').substring(0, 5)}. 🏠 ${desarrollo}. ¡Te esperamos!`
             );
             await this.supabase.client
               .from('appointments')
@@ -109,7 +109,7 @@ export class NotificationService {
       // Traer todas y filtrar en JS
       const { data: allCitas2h, error: error2h } = await this.supabase.client
         .from('appointments')
-        .select('id, lead_id, lead_name, lead_phone, scheduled_date, scheduled_time, property_name, reminder_2h_sent')
+        .select('id, lead_id, lead_name, lead_phone, scheduled_date, scheduled_time, property_name, reminder_2h_sent, reminder_vendor_2h_sent, vendedor_id')
         .gte('scheduled_date', hoyStr)
         .lte('scheduled_date', en2hStr)
         .eq('status', 'scheduled');
@@ -140,6 +140,52 @@ export class NotificationService {
           }
         } else {
           console.log(`⚠️ Cita ${cita.id?.slice(0,8)} sin teléfono de lead`);
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // RECORDATORIO 2H AL VENDEDOR (NUEVO)
+      // ═══════════════════════════════════════════════════════════════════════
+      const citasVendedor2h = allCitas2h?.filter(c => c.reminder_vendor_2h_sent !== true && c.vendedor_id) || [];
+      console.log(`👔 DEBUG: Citas para recordatorio vendedor: ${citasVendedor2h.length}`);
+
+      for (const cita of citasVendedor2h) {
+        try {
+          // Obtener datos del vendedor
+          const { data: vendedor } = await this.supabase.client
+            .from('team_members')
+            .select('id, name, phone')
+            .eq('id', cita.vendedor_id)
+            .single();
+
+          if (vendedor?.phone) {
+            const nombreLead = cita.lead_name || 'Cliente';
+            const desarrollo = cita.property_name || 'oficina';
+            const hora = (cita.scheduled_time || '').substring(0, 5);
+            const telefonoLead = cita.lead_phone || 'No disponible';
+
+            const mensaje = `⏰ *RECORDATORIO DE CITA*\n\n` +
+              `Tu cita es en ~2 horas:\n\n` +
+              `👤 *Lead:* ${nombreLead}\n` +
+              `📱 *Tel:* ${telefonoLead}\n` +
+              `🏠 *Lugar:* ${desarrollo}\n` +
+              `🕐 *Hora:* ${hora}\n\n` +
+              `💡 Tip: Confirma que el cliente viene en camino`;
+
+            await this.meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+
+            // Marcar como enviado
+            await this.supabase.client
+              .from('appointments')
+              .update({ reminder_vendor_2h_sent: true })
+              .eq('id', cita.id);
+
+            enviados++;
+            console.log(`👔 Recordatorio 2h enviado a vendedor ${vendedor.name} para cita con ${nombreLead}`);
+          }
+        } catch (e) {
+          errores++;
+          console.error(`❌ Error enviando recordatorio 2h a vendedor:`, e);
         }
       }
 

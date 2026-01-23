@@ -723,9 +723,11 @@ export class AgenciaReportingService {
     filtroDescripcion: string;
     totalCount?: number;
   }> {
+    // 🚫 Excluir leads DNC (do_not_contact) desde la query
     const { data: leads, error: leadsError } = await this.supabase.client
       .from('leads')
-      .select('id, name, phone, status, lead_score, score, property_interest, assigned_to, created_at, last_interaction');
+      .select('id, name, phone, status, lead_score, score, property_interest, assigned_to, created_at, last_interaction, do_not_contact')
+      .neq('do_not_contact', true);
 
     if (leadsError) {
       console.error('❌ Error al obtener leads:', leadsError);

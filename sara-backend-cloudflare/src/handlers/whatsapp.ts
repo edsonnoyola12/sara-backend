@@ -2942,6 +2942,48 @@ export class WhatsAppHandler {
     const { notes, notasVendedor } = await vendorService.getVendedorNotes(vendedor.id);
 
     // ═══════════════════════════════════════════════════════════
+    // 🎓 ONBOARDING - Tutorial para vendedores nuevos
+    // ═══════════════════════════════════════════════════════════
+    if (!notasVendedor?.onboarding_completed) {
+      console.log(`🎓 ONBOARDING: ${nombreVendedor} es nuevo, enviando tutorial`);
+
+      // Mensaje de bienvenida y tutorial
+      const mensajeOnboarding = `¡Hola ${nombreVendedor}! 👋\n\n` +
+        `Soy *SARA*, tu asistente de ventas. Te ayudo a:\n\n` +
+        `📱 *Comunicarte con leads*\n` +
+        `→ Escribe *bridge Juan* para hablar directo\n\n` +
+        `📅 *Agendar citas*\n` +
+        `→ Escribe *cita María mañana 10am*\n\n` +
+        `📊 *Ver tus pendientes*\n` +
+        `→ Escribe *mis leads* o *resumen*\n\n` +
+        `📍 *Enviar recursos*\n` +
+        `→ Escribe *enviar video a Pedro*\n\n` +
+        `💡 *Tip:* Escribe *#ayuda* para ver todos los comandos.\n\n` +
+        `¿Listo para empezar? Responde *sí* o pregúntame lo que necesites.`;
+
+      await this.meta.sendWhatsAppMessage(from, mensajeOnboarding);
+
+      // Marcar onboarding como completado
+      const notasActualizadas = {
+        ...notasVendedor,
+        onboarding_completed: true,
+        onboarding_date: new Date().toISOString()
+      };
+
+      await this.supabase.client.from('team_members').update({
+        notes: notasActualizadas
+      }).eq('id', vendedor.id);
+
+      // Si respondieron "sí" o similar, continuar normalmente
+      if (['si', 'sí', 'ok', 'listo', 'va', 'dale'].includes(mensaje)) {
+        const confirmacion = `¡Perfecto! 🚀\n\nYa estás listo. Cada mañana a las 8am te enviaré tu briefing con pendientes.\n\n¿En qué te ayudo?`;
+        await this.meta.sendWhatsAppMessage(from, confirmacion);
+      }
+
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // RESPUESTA A FELICITACIÓN DE CUMPLEAÑOS DEL EQUIPO (ANTES de comandos)
     // ═══════════════════════════════════════════════════════════
     const pendingBirthdayResponse = notasVendedor?.pending_birthday_response;
@@ -2973,6 +3015,111 @@ export class WhatsAppHandler {
         }).eq('id', vendedor.id);
 
         return;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ENVIAR BRIEFING/RECAP PENDIENTE (cuando responden al template)
+    // ═══════════════════════════════════════════════════════════
+    const pendingBriefing = notasVendedor?.pending_briefing;
+    const pendingRecap = notasVendedor?.pending_recap;
+
+    // Verificar si hay briefing pendiente (últimas 12 horas)
+    if (pendingBriefing?.sent_at && pendingBriefing?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingBriefing.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 12) {
+        console.log(`📋 Vendedor ${nombreVendedor} respondió - enviando briefing completo`);
+
+        // Enviar briefing completo
+        await this.meta.sendWhatsAppMessage(from, pendingBriefing.mensaje_completo);
+
+        // Limpiar pending_briefing, guardar como last_briefing_context
+        const { pending_briefing, ...notasSinPending } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPending,
+            last_briefing_context: {
+              sent_at: new Date().toISOString(),
+              citas: pendingBriefing.citas || 0,
+              delivered: true
+            }
+          }
+        }).eq('id', vendedor.id);
+        return;
+      }
+    }
+
+    // Verificar si hay recap pendiente (últimas 12 horas)
+    if (pendingRecap?.sent_at && pendingRecap?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingRecap.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 12) {
+        console.log(`📋 Vendedor ${nombreVendedor} respondió - enviando recap completo`);
+
+        // Enviar recap completo
+        await this.meta.sendWhatsAppMessage(from, pendingRecap.mensaje_completo);
+
+        // Limpiar pending_recap
+        const { pending_recap, ...notasSinPending } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPending,
+            last_recap_context: {
+              sent_at: new Date().toISOString(),
+              tipo: pendingRecap.tipo,
+              delivered: true
+            }
+          }
+        }).eq('id', vendedor.id);
+        return;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // RESPUESTA A BRIEFING/RECAP YA ENTREGADO (feedback simple)
+    // ═══════════════════════════════════════════════════════════
+    const briefingContext = notasVendedor?.last_briefing_context;
+    const recapContext = notasVendedor?.last_recap_context;
+
+    // Detectar si es una respuesta simple tipo "ok", "gracias", "sí", "va", "perfecto", etc.
+    const esRespuestaSimple = /^(ok|okey|okay|va|sí|si|gracias|grax|perfecto|listo|entendido|claro|sale|de acuerdo|recibido|👍|✅|💪|🙏)$/i.test(mensaje);
+
+    if (esRespuestaSimple) {
+      // Verificar si hay contexto de briefing reciente YA ENTREGADO (últimas 4 horas)
+      if (briefingContext?.sent_at && briefingContext?.delivered) {
+        const horasDesde = (Date.now() - new Date(briefingContext.sent_at).getTime()) / (1000 * 60 * 60);
+        if (horasDesde <= 4) {
+          console.log(`📋 Respuesta a briefing de ${nombreVendedor}: "${body}"`);
+          const respuestasBriefing = [
+            `¡Éxito hoy ${nombreVendedor}! 💪 Si necesitas algo, escríbeme.`,
+            `¡A darle ${nombreVendedor}! 🎯 Recuerda que puedes escribir "citas" o "leads" para más info.`,
+            `¡Vamos por esas ${briefingContext.citas || 0} citas! 💪 Estoy aquí si me necesitas.`
+          ];
+          await this.meta.sendWhatsAppMessage(from, respuestasBriefing[Math.floor(Math.random() * respuestasBriefing.length)]);
+
+          // Limpiar contexto
+          const { last_briefing_context, ...notasSinBriefing } = notasVendedor;
+          await this.supabase.client.from('team_members').update({ notes: notasSinBriefing }).eq('id', vendedor.id);
+          return;
+        }
+      }
+
+      // Verificar si hay contexto de recap reciente YA ENTREGADO (últimas 4 horas)
+      if (recapContext?.sent_at && recapContext?.delivered) {
+        const horasDesde = (Date.now() - new Date(recapContext.sent_at).getTime()) / (1000 * 60 * 60);
+        if (horasDesde <= 4) {
+          console.log(`📋 Respuesta a recap de ${nombreVendedor}: "${body}"`);
+          const respuestasRecap = [
+            `¡Descansa bien ${nombreVendedor}! 🌙 Mañana con todo.`,
+            `¡Buen trabajo hoy! 🎉 Nos vemos mañana.`,
+            `¡Gracias por tu esfuerzo ${nombreVendedor}! 💪 Recarga energías.`
+          ];
+          await this.meta.sendWhatsAppMessage(from, respuestasRecap[Math.floor(Math.random() * respuestasRecap.length)]);
+
+          // Limpiar contexto
+          const { last_recap_context, ...notasSinRecap } = notasVendedor;
+          await this.supabase.client.from('team_members').update({ notes: notasSinRecap }).eq('id', vendedor.id);
+          return;
+        }
       }
     }
 

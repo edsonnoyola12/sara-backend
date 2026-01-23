@@ -155,10 +155,12 @@ export class BroadcastQueueService {
     }
 
     // Obtener datos de los leads (incluir assigned_to para notificar vendedores)
+    // 🚫 Excluir leads DNC desde la query
     const { data: leads } = await this.supabase.client
       .from('leads')
-      .select('id, phone, name, property_interest, assigned_to, notes')
-      .in('id', pendingIds);
+      .select('id, phone, name, property_interest, assigned_to, notes, do_not_contact')
+      .in('id', pendingIds)
+      .neq('do_not_contact', true); // Excluir DNC
 
     if (!leads || leads.length === 0) {
       return { sent: 0, errors: 0, completed: false };
@@ -175,6 +177,15 @@ export class BroadcastQueueService {
       if (!lead.phone) {
         failedIds.push(lead.id);
         errors++;
+        continue;
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // 🚫 VERIFICACIÓN DNC - NO enviar si el lead pidió no ser contactado
+      // ═══════════════════════════════════════════════════════════════════════
+      if ((lead as any).do_not_contact === true) {
+        console.log(`🚫 SKIP DNC ${lead.phone}: Lead pidió no ser contactado`);
+        sentIds.push(lead.id); // Marcarlo como "enviado" para no reintentarlo
         continue;
       }
 

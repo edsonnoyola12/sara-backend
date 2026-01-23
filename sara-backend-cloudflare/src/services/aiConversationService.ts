@@ -6507,7 +6507,55 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
           }
         }
       }
-      
+
+      // CASO 3: FALLBACK - Si no hay desarrollo detectado pero se pidieron recursos
+      // Enviar el primer desarrollo disponible que tenga video
+      if (videosEnviados.size === 0 && matterportsEnviados.size === 0 && recursosEnviados < MAX_RECURSOS) {
+        console.log('⚠️ No hay desarrollo detectado, buscando fallback...');
+
+        // Buscar la primera propiedad que tenga youtube_link
+        const propConVideo = properties.find(p => p.youtube_link);
+
+        if (propConVideo) {
+          const nombreDesarrollo = propConVideo.development || 'nuestro desarrollo';
+
+          // Enviar video
+          if (propConVideo.youtube_link) {
+            const saludo = clientName !== 'Cliente' ? `*${clientName}*, mira` : 'Mira';
+            const msgVideo = `🎬 ${saludo} este video de *${nombreDesarrollo}*:\n${propConVideo.youtube_link}`;
+            await this.twilio.sendWhatsAppMessage(from, msgVideo);
+            videosEnviados.add(propConVideo.youtube_link);
+            recursosEnviados++;
+            console.log(`✅ Video FALLBACK enviado: ${nombreDesarrollo}`);
+
+            // Guardar el desarrollo como property_interest
+            if (!lead.property_interest || lead.property_interest === 'Por definir') {
+              try {
+                await this.supabase.client
+                  .from('leads')
+                  .update({ property_interest: nombreDesarrollo })
+                  .eq('id', lead.id);
+                console.log('✅ property_interest actualizado con fallback:', nombreDesarrollo);
+              } catch (e) {
+                console.log('⚠️ Error actualizando property_interest');
+              }
+            }
+          }
+
+          // Enviar matterport si existe
+          if (propConVideo.matterport_link && recursosEnviados < MAX_RECURSOS) {
+            const saludo = clientName !== 'Cliente' ? `*${clientName}*, recorre` : 'Recorre';
+            const msgMatterport = `🏠 ${saludo} este desarrollo en 3D:\n${propConVideo.matterport_link}`;
+            await this.twilio.sendWhatsAppMessage(from, msgMatterport);
+            matterportsEnviados.add(propConVideo.matterport_link);
+            recursosEnviados++;
+            console.log(`✅ Matterport FALLBACK enviado: ${nombreDesarrollo}`);
+          }
+        } else {
+          console.log('⚠️ No hay propiedades con video en la DB');
+        }
+      }
+
       console.log(`📊 Resumen: ${videosEnviados.size} videos, ${matterportsEnviados.size} matterports (GPS solo con cita)`);
       
       // Marcar en el lead que ya se enviaron recursos (para evitar duplicados)

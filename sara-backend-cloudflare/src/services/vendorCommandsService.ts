@@ -241,8 +241,202 @@ export class VendorCommandsService {
   }
 
   async asignarAsesorHipotecario(nombreLead: string, vendedor: any, teamMembers: any[], telefonoLead?: string | null): Promise<any> {
-    return { success: false };
+    try {
+      console.log(`🏦 ASIGNAR ASESOR: Buscando lead "${nombreLead}" para vendedor ${vendedor.name}`);
+
+      // 1. Buscar el lead por nombre o teléfono
+      let lead = null;
+      if (telefonoLead) {
+        const { data } = await this.supabase.client
+          .from('leads')
+          .select('*')
+          .eq('phone', telefonoLead)
+          .single();
+        lead = data;
+      }
+
+      if (!lead) {
+        // Buscar por nombre (normalizado)
+        const nombreNorm = nombreLead.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const { data: leads } = await this.supabase.client
+          .from('leads')
+          .select('*')
+          .eq('assigned_to', vendedor.id);
+
+        lead = leads?.find((l: any) => {
+          const leadNombre = (l.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          return leadNombre.includes(nombreNorm) || nombreNorm.includes(leadNombre);
+        });
+      }
+
+      if (!lead) {
+        console.log(`❌ Lead "${nombreLead}" no encontrado`);
+        return { success: false, message: `No encontré ningún lead con el nombre "${nombreLead}". Verifica el nombre o usa el teléfono.` };
+      }
+
+      console.log(`✅ Lead encontrado: ${lead.name} (${lead.phone})`);
+
+      // 2. Buscar asesor hipotecario disponible
+      const asesores = teamMembers.filter((m: any) =>
+        m.active &&
+        (m.role === 'asesor' || m.role?.includes('hipoteca') || m.role?.includes('credito'))
+      );
+
+      if (asesores.length === 0) {
+        console.log('❌ No hay asesores hipotecarios activos');
+        return { success: false, message: 'No hay asesores hipotecarios disponibles en este momento. Intenta más tarde.' };
+      }
+
+      // Elegir el asesor con menos leads asignados (round-robin simple)
+      const asesor = asesores[0]; // TODO: Implementar round-robin real
+      console.log(`✅ Asesor seleccionado: ${asesor.name} (${asesor.phone})`);
+
+      // 3. Verificar si ya existe mortgage_application
+      const { data: existingApp } = await this.supabase.client
+        .from('mortgage_applications')
+        .select('id')
+        .eq('lead_id', lead.id)
+        .single();
+
+      if (!existingApp) {
+        // Crear mortgage_application
+        const { error: maError } = await this.supabase.client
+          .from('mortgage_applications')
+          .insert({
+            lead_id: lead.id,
+            asesor_id: asesor.id,
+            status: 'assigned',
+            assigned_at: new Date().toISOString(),
+            assigned_by: vendedor.id,
+            notes: {
+              desarrollo_interes: lead.property_interest,
+              asignado_por: vendedor.name
+            }
+          });
+
+        if (maError) {
+          console.log('⚠️ Error creando mortgage_application:', maError);
+        } else {
+          console.log('✅ mortgage_application creada');
+        }
+      }
+
+      // 4. Actualizar lead con asesor asignado
+      const leadNotes = typeof lead.notes === 'string' ? JSON.parse(lead.notes) : (lead.notes || {});
+      leadNotes.asesor_id = asesor.id;
+      leadNotes.asesor_name = asesor.name;
+      leadNotes.asesor_asignado_at = new Date().toISOString();
+      leadNotes.asesor_asignado_por = vendedor.name;
+
+      await this.supabase.client
+        .from('leads')
+        .update({
+          credit_status: 'asesor_assigned',
+          notes: leadNotes
+        })
+        .eq('id', lead.id);
+
+      console.log('✅ Lead actualizado con asesor');
+
+      // 5. Preparar datos para respuesta
+      const resultado = {
+        success: true,
+        lead: {
+          id: lead.id,
+          name: lead.name,
+          phone: lead.phone,
+          property_interest: lead.property_interest
+        },
+        asesor: {
+          id: asesor.id,
+          name: asesor.name,
+          phone: asesor.phone,
+          is_active: asesor.active
+        },
+        vendedor: {
+          id: vendedor.id,
+          name: vendedor.name,
+          phone: vendedor.phone
+        },
+        message: `✅ *${lead.name}* asignado al asesor *${asesor.name}*\n\nEl asesor recibirá una notificación para contactar al cliente.`
+      };
+
+      console.log('✅ Asignación completada:', resultado);
+      return resultado;
+
+    } catch (e) {
+      console.error('❌ Error en asignarAsesorHipotecario:', e);
+      return { success: false, message: 'Error interno al asignar asesor. Intenta de nuevo.' };
+    }
   }
+
+  async preguntarAsesorCredito(nombreLead: string, vendedor: any, teamMembers: any[]): Promise<any> {
+    try {
+      console.log(`💬 PREGUNTAR ASESOR: Buscando lead "${nombreLead}" para vendedor ${vendedor.name}`);
+
+      // 1. Buscar el lead por nombre
+      const nombreNorm = nombreLead.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('*')
+        .eq('assigned_to', vendedor.id);
+
+      const lead = leads?.find((l: any) => {
+        const leadNombre = (l.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return leadNombre.includes(nombreNorm) || nombreNorm.includes(leadNombre);
+      });
+
+      if (!lead) {
+        return { success: false, error: `❌ No encontré a "${nombreLead}" en tus leads.` };
+      }
+
+      // 2. Buscar la mortgage_application del lead
+      const { data: solicitud } = await this.supabase.client
+        .from('mortgage_applications')
+        .select('*, asesor:asesor_id(*)')
+        .eq('lead_id', lead.id)
+        .single();
+
+      if (!solicitud || !solicitud.asesor_id) {
+        return { success: false, error: `❌ ${lead.name} no tiene asesor hipotecario asignado.\n\n💡 Usa: *asignar asesor ${lead.name}*` };
+      }
+
+      // 3. Obtener datos del asesor
+      const asesor = teamMembers.find((m: any) => m.id === solicitud.asesor_id);
+      if (!asesor) {
+        return { success: false, error: `❌ El asesor asignado ya no está activo.` };
+      }
+
+      return {
+        success: true,
+        lead: {
+          id: lead.id,
+          name: lead.name,
+          phone: lead.phone
+        },
+        asesor: {
+          id: asesor.id,
+          name: asesor.name,
+          phone: asesor.phone,
+          is_active: asesor.active
+        },
+        solicitud: {
+          id: solicitud.id,
+          status: solicitud.status,
+          assigned_at: solicitud.assigned_at
+        },
+        vendedor: {
+          id: vendedor.id,
+          name: vendedor.name
+        }
+      };
+
+    } catch (e) {
+      console.error('❌ Error en preguntarAsesorCredito:', e);
+      return { success: false, error: 'Error interno. Intenta de nuevo.' };
+    }
+  }
+
   async asignarLeadAVendedor(nombreLead: string, targetVendedor: string): Promise<any> {
     return { success: false };
   }
@@ -612,6 +806,52 @@ export class VendorCommandsService {
     }
 
     return msg;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // FORMATOS PARA ASESOR HIPOTECARIO
+  // ═══════════════════════════════════════════════════════════════════
+
+  formatMensajeAsesorNuevoLead(lead: any, vendedor: any): string {
+    const desarrollo = lead.property_interest || 'No especificado';
+    return `🏦 *NUEVO LEAD ASIGNADO*\n\n` +
+      `👤 *Cliente:* ${lead.name}\n` +
+      `📱 *Teléfono:* ${lead.phone}\n` +
+      `🏠 *Interés:* ${desarrollo}\n` +
+      `👨‍💼 *Asignado por:* ${vendedor.name}\n\n` +
+      `📋 Por favor contacta al cliente para iniciar el proceso de crédito.`;
+  }
+
+  formatConfirmacionAsesorAsignado(lead: any, asesor: any): string {
+    return `✅ *Asesor Asignado*\n\n` +
+      `👤 Lead: ${lead.name}\n` +
+      `🏦 Asesor: ${asesor.name}\n` +
+      `📱 Tel asesor: ${asesor.phone}\n\n` +
+      `El asesor ha sido notificado y contactará al cliente.`;
+  }
+
+  formatMultipleLeadsAsesor(leads: any[], nombreBuscado: string): string {
+    let msg = `⚠️ Encontré ${leads.length} leads con "${nombreBuscado}":\n\n`;
+    leads.slice(0, 5).forEach((l, i) => {
+      msg += `${i + 1}. ${l.name} - ${l.phone}\n`;
+    });
+    msg += `\n💡 Usa: *asignar asesor [nombre completo]*`;
+    return msg;
+  }
+
+  formatMensajeAsesorPregunta(lead: any, solicitud: any, vendedor: any): string {
+    return `💬 *CONSULTA DE VENDEDOR*\n\n` +
+      `👨‍💼 *De:* ${vendedor.name}\n` +
+      `👤 *Sobre lead:* ${lead.name}\n` +
+      `📱 *Tel:* ${lead.phone}\n\n` +
+      `📋 *Status actual:* ${solicitud?.status || 'Sin solicitud'}\n\n` +
+      `Por favor responde con el estado del crédito de este cliente.`;
+  }
+
+  formatConfirmacionPreguntaEnviada(asesor: any, lead: any): string {
+    return `✅ *Pregunta enviada*\n\n` +
+      `Se notificó al asesor ${asesor.name} sobre el lead ${lead.name}.\n` +
+      `Te responderá pronto con el status del crédito.`;
   }
 
   // ═══════════════════════════════════════════════════════════════════

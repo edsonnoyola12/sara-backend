@@ -10,6 +10,7 @@ import { FollowupService } from './services/followupService';
 import { FollowupApprovalService } from './services/followupApprovalService';
 import { NotificationService } from './services/notificationService';
 import { BroadcastQueueService } from './services/broadcastQueueService';
+import { IACoachingService } from './services/iaCoachingService';
 
 export interface Env {
   SUPABASE_URL: string;
@@ -68,7 +69,28 @@ function getAvailableVendor(vendedores: TeamMemberAvailability[]): TeamMemberAva
   const activos = vendedores.filter(v => v.active && v.role === 'vendedor');
 
   if (activos.length === 0) {
-    console.log('⚠️ No hay vendedores activos');
+    console.log('⚠️ No hay vendedores activos, buscando fallback...');
+
+    // FALLBACK 1: Buscar coordinadores o admins activos
+    const coordinadores = vendedores.filter(v =>
+      v.active && (v.role === 'coordinador' || v.role === 'admin' || v.role === 'ceo' || v.role === 'director')
+    );
+    if (coordinadores.length > 0) {
+      const elegido = coordinadores[0];
+      console.log(`🔄 FALLBACK: Asignando a coordinador/admin ${elegido.name} (no hay vendedores)`);
+      return elegido;
+    }
+
+    // FALLBACK 2: Cualquier team member activo
+    const cualquiera = vendedores.filter(v => v.active);
+    if (cualquiera.length > 0) {
+      const elegido = cualquiera[0];
+      console.log(`🚨 FALLBACK CRÍTICO: Asignando a ${elegido.name} (${elegido.role}) - NO HAY VENDEDORES`);
+      return elegido;
+    }
+
+    // FALLBACK 3: NADIE disponible - LOG CRÍTICO
+    console.error('🚨🚨🚨 CRÍTICO: NO HAY NINGÚN TEAM MEMBER ACTIVO - LEAD SE PERDERÁ');
     return null;
   }
 
@@ -1300,6 +1322,11 @@ ${asesor.phone ? `📱 *Tel:* ${asesor.phone}` : ''}
         vendedorAsignado = getAvailableVendor(todosVendedores || []);
         if (vendedorAsignado) {
           body.assigned_to = vendedorAsignado.id;
+        } else {
+          // 🚨 ALERTA: No hay vendedor disponible - notificar admin
+          console.error('🚨 CRÍTICO: Lead creado SIN VENDEDOR - phone:', body.phone);
+          // Guardar en notes para tracking
+          body.notes = { ...(body.notes || {}), sin_vendedor: true, alerta_enviada: new Date().toISOString() };
         }
       } else {
         const { data: v } = await supabase.client
@@ -9625,8 +9652,81 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
     if (vendedores) {
       vendedores.forEach((v: any) => {
-        console.log(`   - ${v.name}: phone=${v.phone ? '✅' : '❌'}, recibe_briefing=${v.recibe_briefing ? '✅' : '❌'}, last_briefing=${v.last_briefing_sent || 'nunca'}`);
+        console.log(`   - ${v.name} (${v.role}): phone=${v.phone ? '✅' : '❌'}, recibe_briefing=${v.recibe_briefing ? '✅' : '❌'}, last_briefing=${v.last_briefing_sent || 'nunca'}`);
       });
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // REASIGNAR LEADS SIN VENDEDOR - Cada 2 minutos
+    // ═══════════════════════════════════════════════════════════
+    if (event.cron === '*/2 * * * *') {
+      console.log('🔍 Buscando leads sin vendedor asignado...');
+      try {
+        // Buscar leads con assigned_to = null creados en las últimas 24h
+        const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { data: leadsSinVendedor, error: lsvError } = await supabase.client
+          .from('leads')
+          .select('id, name, phone, property_interest, created_at')
+          .is('assigned_to', null)
+          .gte('created_at', hace24h)
+          .limit(10);
+
+        if (lsvError) {
+          console.error('❌ Error buscando leads sin vendedor:', lsvError);
+        } else if (leadsSinVendedor && leadsSinVendedor.length > 0) {
+          console.log(`🚨 ENCONTRADOS ${leadsSinVendedor.length} leads SIN VENDEDOR:`);
+
+          for (const lead of leadsSinVendedor) {
+            console.log(`   - ${lead.name || 'Sin nombre'} (${lead.phone}) - ${lead.property_interest || 'Sin desarrollo'}`);
+
+            // Intentar asignar vendedor
+            const vendedorDisponible = getAvailableVendor(vendedores || []);
+            if (vendedorDisponible) {
+              const { error: updateError } = await supabase.client
+                .from('leads')
+                .update({
+                  assigned_to: vendedorDisponible.id,
+                  notes: {
+                    reasignado_automaticamente: true,
+                    reasignado_at: new Date().toISOString(),
+                    reasignado_a: vendedorDisponible.name
+                  }
+                })
+                .eq('id', lead.id);
+
+              if (!updateError) {
+                console.log(`   ✅ REASIGNADO a ${vendedorDisponible.name}`);
+
+                // Notificar al vendedor
+                if (vendedorDisponible.phone) {
+                  try {
+                    await meta.sendWhatsAppMessage(vendedorDisponible.phone,
+                      `🚨 *LEAD REASIGNADO*\n\n` +
+                      `Se te asignó un lead que estaba sin vendedor:\n\n` +
+                      `👤 *${lead.name || 'Sin nombre'}*\n` +
+                      `📱 ${lead.phone}\n` +
+                      `🏠 ${lead.property_interest || 'Sin desarrollo definido'}\n\n` +
+                      `⚠️ Este lead estuvo sin atención, contáctalo lo antes posible.\n\n` +
+                      `Escribe *leads* para ver tu lista completa.`
+                    );
+                    console.log(`   📤 Notificación enviada a ${vendedorDisponible.name}`);
+                  } catch (notifError) {
+                    console.log(`   ⚠️ Error enviando notificación:`, notifError);
+                  }
+                }
+              } else {
+                console.log(`   ❌ Error reasignando:`, updateError);
+              }
+            } else {
+              console.log(`   ⚠️ No hay vendedor disponible para reasignar`);
+            }
+          }
+        } else {
+          console.log('✅ No hay leads sin vendedor en las últimas 24h');
+        }
+      } catch (e) {
+        console.error('❌ Error en reasignación de leads:', e);
+      }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -9691,34 +9791,78 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
 
     // (Cumpleaños movido más abajo para incluir leads + equipo)
 
+    // ═══════════════════════════════════════════════════════════
+    // 🎓 ONE-TIME: Reset onboarding 23-ene-2026 7:56am (antes del briefing)
+    // Para que todos los vendedores vean el tutorial de SARA
+    // ═══════════════════════════════════════════════════════════
+    const fechaHoy = now.toISOString().split('T')[0];
+    if (fechaHoy === '2026-01-23' && mexicoHour === 7 && mexicoMinute >= 54 && mexicoMinute <= 58) {
+      console.log('🎓 ONE-TIME: Reseteando onboarding de todos los vendedores...');
+      try {
+        const { data: todosVendedores } = await supabase.client
+          .from('team_members')
+          .select('id, name, notes')
+          .eq('active', true);
+
+        let reseteados = 0;
+        for (const v of todosVendedores || []) {
+          const notas = typeof v.notes === 'string' ? JSON.parse(v.notes || '{}') : (v.notes || {});
+          if (notas.onboarding_completed) {
+            delete notas.onboarding_completed;
+            delete notas.onboarding_date;
+            await supabase.client.from('team_members').update({ notes: notas }).eq('id', v.id);
+            reseteados++;
+            console.log(`   ✅ Reset onboarding: ${v.name}`);
+          }
+        }
+        console.log(`🎓 ONBOARDING RESET COMPLETADO: ${reseteados} vendedores`);
+
+        // Notificar al admin
+        await meta.sendWhatsAppMessage('5212224558475',
+          `🎓 *ONBOARDING RESET*\n\n` +
+          `Se reseteó el tutorial de ${reseteados} vendedores.\n\n` +
+          `La próxima vez que escriban a SARA, verán el tutorial completo con comandos.`
+        );
+      } catch (e) {
+        console.error('❌ Error reseteando onboarding:', e);
+      }
+    }
+
     // 8am L-V: Briefing matutino (solo primer ejecucion de la hora)
     console.log(`📋 BRIEFING CHECK: hora=${mexicoHour}===8? ${mexicoHour === 8}, isFirst=${isFirstRunOfHour}, dia=${dayOfWeek} (1-5)? ${dayOfWeek >= 1 && dayOfWeek <= 5}, vendedores=${!!vendedores}`);
-    if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5 && vendedores) {
-      console.log('✅ CONDICIONES CUMPLIDAS - Enviando briefing matutino...');
-      let enviados = 0;
-      let saltados = 0;
-      for (const v of vendedores) {
-        if (!v.phone) {
-          console.log(`   ⏭️ ${v.name}: SIN TELÉFONO`);
-          saltados++;
-          continue;
+    // 8am-8:30am L-V: Briefing matutino (procesa en lotes para evitar timeout)
+    const hoyStrBriefing = new Date().toISOString().split('T')[0];
+    if (mexicoHour === 8 && dayOfWeek >= 1 && dayOfWeek <= 5 && vendedores) {
+      // Filtrar solo los que NO han recibido briefing hoy
+      const pendientes = vendedores.filter((v: any) =>
+        v.phone && v.recibe_briefing && v.last_briefing_sent !== hoyStrBriefing
+      );
+
+      if (pendientes.length > 0) {
+        console.log(`✅ BRIEFING - ${pendientes.length} vendedores pendientes de ${vendedores.length} totales`);
+
+        // Procesar máximo 5 por CRON para evitar timeout
+        const BATCH_SIZE = 5;
+        const lote = pendientes.slice(0, BATCH_SIZE);
+        let enviados = 0;
+
+        for (const v of lote) {
+          console.log(`   📤 Enviando briefing a ${v.name} (${v.phone})...`);
+          try {
+            await enviarBriefingMatutino(supabase, meta, v);
+            enviados++;
+          } catch (err) {
+            console.error(`   ❌ Error enviando briefing a ${v.name}:`, err);
+          }
         }
-        if (!v.recibe_briefing) {
-          console.log(`   ⏭️ ${v.name}: recibe_briefing=false`);
-          saltados++;
-          continue;
-        }
-        console.log(`   📤 Enviando briefing a ${v.name} (${v.phone})...`);
-        try {
-          await enviarBriefingMatutino(supabase, meta, v);
-          enviados++;
-        } catch (err) {
-          console.error(`   ❌ Error enviando briefing a ${v.name}:`, err);
-        }
+
+        const restantes = pendientes.length - enviados;
+        console.log(`📊 BRIEFING RESULTADO: ${enviados} enviados, ${restantes > 0 ? restantes + ' pendientes para siguiente CRON' : 'todos completados'}`);
+      } else {
+        console.log(`✅ BRIEFING - Todos los ${vendedores.length} vendedores ya recibieron su briefing hoy`);
       }
-      console.log(`📊 BRIEFING RESULTADO: ${enviados} enviados, ${saltados} saltados`);
-    } else {
-      console.log(`⏭️ BRIEFING NO EJECUTADO - condiciones no cumplidas`);
+    } else if (mexicoHour !== 8) {
+      console.log(`⏭️ BRIEFING NO EJECUTADO - hora=${mexicoHour} (solo a las 8am)`);
     }
 
     // 8am L-V: Briefing de supervisión para admins
@@ -9755,6 +9899,13 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     if (mexicoHour === 9 && isFirstRunOfHour && dayOfWeek === 1) {
       console.log('📊 Enviando reporte semanal a marketing...');
       await enviarReporteSemanalMarketing(supabase, meta);
+    }
+
+    // 10am MARTES: Coaching automático personalizado a vendedores
+    if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek === 2) {
+      console.log('🎓 Enviando coaching personalizado a vendedores...');
+      const coachingService = new IACoachingService(supabase, meta);
+      await coachingService.enviarCoachingEquipo(7); // Solo si no recibió en 7 días
     }
 
     // 8am DÍA 1 DE CADA MES: Reporte mensual CEO/Admin
@@ -10042,6 +10193,12 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     if (mexicoHour === 17 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
       console.log('⏰ Enviando recordatorio final del día...');
       await recordatorioFinalDia(supabase, meta);
+    }
+
+    // 11am y 3pm L-V: Alerta de inactividad de vendedores a admins
+    if (isFirstRunOfHour && (mexicoHour === 11 || mexicoHour === 15) && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('👔 Verificando inactividad de vendedores...');
+      await alertaInactividadVendedor(supabase, meta);
     }
 
     // MARTES y JUEVES 8am: Seguimiento hipotecas estancadas (alerta adicional a asesores)
@@ -12750,6 +12907,23 @@ async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhats
   const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
   const fechaFormato = `${dias[hoy.getDay()]} ${hoy.getDate()} de ${meses[hoy.getMonth()]}`;
 
+  // Tips de uso de SARA para el briefing
+  const TIPS_SARA = [
+    '💡 *Tip:* Escribe *bridge Juan* para chatear directo con tu lead sin que SARA intervenga.',
+    '💡 *Tip:* Escribe *mis leads* para ver todos tus prospectos y su estado actual.',
+    '💡 *Tip:* Escribe *cita María mañana 4pm* para agendar una visita rápidamente.',
+    '💡 *Tip:* Escribe *enviar video a Pedro* para mandarle el video del desarrollo.',
+    '💡 *Tip:* Escribe *resumen* para ver un reporte rápido de tu día.',
+    '💡 *Tip:* Escribe *#ayuda* para ver todos los comandos disponibles.',
+    '💡 *Tip:* Usa *confirmar cita* cuando tu lead confirme asistencia.',
+    '💡 *Tip:* Escribe *status Juan compró* para actualizar el estado de tu lead.',
+    '💡 *Tip:* SARA te avisa 2h antes de cada cita. ¡No olvides confirmar!',
+    '💡 *Tip:* Responde rápido a leads nuevos - cada minuto cuenta para la conversión.',
+    '💡 *Tip:* Escribe *enviar GPS a María* para compartir la ubicación del desarrollo.',
+    '💡 *Tip:* Si un lead no responde, escribe *seguimiento Juan* para reactivarlo.',
+  ];
+  const tipDelDia = TIPS_SARA[hoy.getDate() % TIPS_SARA.length]; // Tip diferente cada día
+
   // PROTECCIÓN ANTI-DUPLICADOS
   if (vendedor.last_briefing_sent === hoyStr) {
     console.log(`⏭️ Briefing ya enviado hoy a ${vendedor.name}, saltando...`);
@@ -12892,15 +13066,60 @@ async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhats
     });
   }
 
-  mensaje += `\n_Éxito hoy!_ 💪`;
+  // Tip del día
+  mensaje += `\n${tipDelDia}\n`;
+  mensaje += `\n_¡Éxito hoy!_ 💪`;
 
-  await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+  // ═══════════════════════════════════════════════════════════
+  // ENVIAR VÍA TEMPLATE (para que llegue aunque no hayan escrito en 24h)
+  // Estrategia: Template llega, vendedor responde "Sí", ENTONCES enviamos briefing
+  // ═══════════════════════════════════════════════════════════
+  try {
+    const nombreCorto = vendedor.name?.split(' ')[0] || 'Hola';
 
-  // Marcar como enviado
-  await supabase.client
-    .from('team_members')
-    .update({ last_briefing_sent: hoyStr })
-    .eq('id', vendedor.id);
+    // 1. Guardar briefing completo en notes ANTES de enviar template
+    const notasActuales = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
+    notasActuales.pending_briefing = {
+      sent_at: new Date().toISOString(),
+      fecha: fechaFormato,
+      citas: citasHoy?.length || 0,
+      acciones_pendientes: totalAcciones,
+      mensaje_completo: mensaje  // Guardar el briefing completo para enviar cuando respondan
+    };
+    await supabase.client
+      .from('team_members')
+      .update({
+        last_briefing_sent: hoyStr,
+        notes: JSON.stringify(notasActuales)
+      })
+      .eq('id', vendedor.id);
+
+    // 2. Enviar template (el briefing se envía cuando respondan)
+    const templateComponents = [
+      {
+        type: 'body',
+        parameters: [
+          { type: 'text', text: nombreCorto },
+          { type: 'text', text: 'tu briefing del día' }
+        ]
+      }
+    ];
+    await meta.sendTemplate(vendedor.phone, 'seguimiento_lead', 'es_MX', templateComponents);
+    console.log(`📤 Template briefing enviado a ${vendedor.name} (briefing completo pendiente hasta que responda)`);
+  } catch (error) {
+    console.error(`❌ Error enviando briefing a ${vendedor.name}:`, error);
+    // Fallback: intentar enviar solo mensaje normal (para vendedores que SÍ han escrito en 24h)
+    try {
+      await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+      const notasActuales = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
+      notasActuales.last_briefing_context = { sent_at: new Date().toISOString(), citas: citasHoy?.length || 0 };
+      await supabase.client.from('team_members').update({ last_briefing_sent: hoyStr, notes: JSON.stringify(notasActuales) }).eq('id', vendedor.id);
+      console.log(`📋 Briefing enviado directo a ${vendedor.name} (fallback)`);
+    } catch (e2) {
+      console.error(`❌ Fallback también falló para ${vendedor.name}`);
+    }
+  }
+
   console.log(`✅ Briefing consolidado enviado a ${vendedor.name}`);
 }
 
@@ -12913,17 +13132,54 @@ async function enviarRecapDiario(supabase: SupabaseService, meta: MetaWhatsAppSe
     return;
   }
 
+  const nombreCorto = vendedor.name?.split(' ')[0] || 'Hola';
   const mensaje = `*Resumen del dia, ${vendedor.name}*\n\n` +
     `Gracias por tu esfuerzo hoy. Recuerda actualizar el status de tus leads en el CRM.\n\n` +
     `Descansa y manana con todo!`;
 
-  await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+  // ═══════════════════════════════════════════════════════════
+  // ENVIAR VÍA TEMPLATE (para que llegue aunque no hayan escrito en 24h)
+  // Estrategia: Template llega, vendedor responde, ENTONCES enviamos recap
+  // ═══════════════════════════════════════════════════════════
+  try {
+    // 1. Guardar recap en notes ANTES de enviar template
+    const notasActuales = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
+    notasActuales.pending_recap = {
+      sent_at: new Date().toISOString(),
+      tipo: 'diario',
+      mensaje_completo: mensaje
+    };
+    await supabase.client
+      .from('team_members')
+      .update({
+        last_recap_sent: hoy,
+        notes: JSON.stringify(notasActuales)
+      })
+      .eq('id', vendedor.id);
 
-  // Marcar como enviado para evitar duplicados
-  await supabase.client
-    .from('team_members')
-    .update({ last_recap_sent: hoy })
-    .eq('id', vendedor.id);
+    // 2. Enviar template (recap se envía cuando respondan)
+    const templateComponents = [
+      {
+        type: 'body',
+        parameters: [
+          { type: 'text', text: nombreCorto },
+          { type: 'text', text: 'tu resumen del día' }
+        ]
+      }
+    ];
+    await meta.sendTemplate(vendedor.phone, 'seguimiento_lead', 'es_MX', templateComponents);
+    console.log(`📤 Template recap enviado a ${vendedor.name} (recap completo pendiente hasta que responda)`);
+  } catch (error) {
+    console.error(`❌ Error enviando recap a ${vendedor.name}:`, error);
+    // Fallback: enviar directo si la ventana está abierta
+    try {
+      await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+      await supabase.client.from('team_members').update({ last_recap_sent: hoy }).eq('id', vendedor.id);
+      console.log(`📋 Recap enviado directo a ${vendedor.name} (fallback)`);
+    } catch (e2) {
+      console.error(`❌ Fallback recap también falló para ${vendedor.name}`);
+    }
+  }
   console.log(`✅ Recap diario enviado a ${vendedor.name}`);
 }
 
@@ -12936,17 +13192,54 @@ async function enviarRecapSemanal(supabase: SupabaseService, meta: MetaWhatsAppS
     return;
   }
 
+  const nombreCorto = vendedor.name?.split(' ')[0] || 'Hola';
   const mensaje = `*Resumen semanal, ${vendedor.name}*\n\n` +
     `Esta semana trabajaste duro. Revisa tus metricas en el CRM.\n\n` +
     `Disfruta tu fin de semana!`;
 
-  await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+  // ═══════════════════════════════════════════════════════════
+  // ENVIAR VÍA TEMPLATE (para que llegue aunque no hayan escrito en 24h)
+  // Estrategia: Template llega, vendedor responde, ENTONCES enviamos recap
+  // ═══════════════════════════════════════════════════════════
+  try {
+    // 1. Guardar recap en notes ANTES de enviar template
+    const notasActuales = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
+    notasActuales.pending_recap = {
+      sent_at: new Date().toISOString(),
+      tipo: 'semanal',
+      mensaje_completo: mensaje
+    };
+    await supabase.client
+      .from('team_members')
+      .update({
+        last_recap_semanal_sent: hoy,
+        notes: JSON.stringify(notasActuales)
+      })
+      .eq('id', vendedor.id);
 
-  // Marcar como enviado para evitar duplicados
-  await supabase.client
-    .from('team_members')
-    .update({ last_recap_semanal_sent: hoy })
-    .eq('id', vendedor.id);
+    // 2. Enviar template (recap se envía cuando respondan)
+    const templateComponents = [
+      {
+        type: 'body',
+        parameters: [
+          { type: 'text', text: nombreCorto },
+          { type: 'text', text: 'tu resumen semanal' }
+        ]
+      }
+    ];
+    await meta.sendTemplate(vendedor.phone, 'seguimiento_lead', 'es_MX', templateComponents);
+    console.log(`📤 Template recap semanal enviado a ${vendedor.name} (recap completo pendiente hasta que responda)`);
+  } catch (error) {
+    console.error(`❌ Error enviando recap semanal a ${vendedor.name}:`, error);
+    // Fallback
+    try {
+      await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+      await supabase.client.from('team_members').update({ last_recap_semanal_sent: hoy }).eq('id', vendedor.id);
+      console.log(`📋 Recap semanal enviado directo a ${vendedor.name} (fallback)`);
+    } catch (e2) {
+      console.error(`❌ Fallback recap semanal también falló para ${vendedor.name}`);
+    }
+  }
   console.log(`✅ Recap semanal enviado a ${vendedor.name}`);
 }
 
@@ -14121,6 +14414,138 @@ async function enviarAlertasProactivasCEO(supabase: SupabaseService, meta: MetaW
     }
   } catch (e) {
     console.log('Error en alertas proactivas:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ALERTA INACTIVIDAD VENDEDOR - Notifica a admins cuando vendedores no actúan
+// ═══════════════════════════════════════════════════════════════════════════
+async function alertaInactividadVendedor(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    // Obtener admins para notificar
+    const { data: admins } = await supabase.client
+      .from('team_members')
+      .select('id, name, phone')
+      .in('role', ['admin', 'coordinador', 'ceo', 'director'])
+      .eq('active', true);
+
+    if (!admins || admins.length === 0) {
+      console.log('⚠️ No hay admins para notificar');
+      return;
+    }
+
+    // Obtener vendedores activos
+    const { data: vendedores } = await supabase.client
+      .from('team_members')
+      .select('id, name, phone, last_sara_interaction')
+      .eq('role', 'vendedor')
+      .eq('active', true);
+
+    if (!vendedores || vendedores.length === 0) {
+      console.log('⚠️ No hay vendedores activos');
+      return;
+    }
+
+    const ahora = new Date();
+    const hace4h = new Date(ahora.getTime() - 4 * 60 * 60 * 1000).toISOString();
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    const vendedoresInactivos: Array<{ nombre: string; motivo: string; leadsAfectados: number }> = [];
+
+    for (const vendedor of vendedores) {
+      const motivos: string[] = [];
+      let leadsAfectados = 0;
+
+      // 1. Verificar si tiene leads asignados sin actualizar en 4h+
+      const { data: leadsEstancados } = await supabase.client
+        .from('leads')
+        .select('id, name, status')
+        .eq('assigned_to', vendedor.id)
+        .in('status', ['new', 'contacted', 'scheduled'])
+        .lt('updated_at', hace4h);
+
+      if (leadsEstancados && leadsEstancados.length >= 2) {
+        motivos.push(`${leadsEstancados.length} leads sin actualizar (+4h)`);
+        leadsAfectados += leadsEstancados.length;
+      }
+
+      // 2. Verificar si tiene citas de hoy sin confirmar
+      const { data: citasSinConfirmar } = await supabase.client
+        .from('appointments')
+        .select('id, lead_name')
+        .eq('vendedor_id', vendedor.id)
+        .eq('scheduled_date', hoyStr)
+        .eq('status', 'scheduled');
+
+      if (citasSinConfirmar && citasSinConfirmar.length > 0 && ahora.getHours() >= 10) {
+        motivos.push(`${citasSinConfirmar.length} cita(s) hoy sin confirmar`);
+      }
+
+      // 3. Verificar última interacción con SARA
+      if (vendedor.last_sara_interaction) {
+        const ultimaInteraccion = new Date(vendedor.last_sara_interaction);
+        const horasSinInteraccion = (ahora.getTime() - ultimaInteraccion.getTime()) / (1000 * 60 * 60);
+        if (horasSinInteraccion > 24) {
+          motivos.push(`Sin contactar SARA en ${Math.floor(horasSinInteraccion)}h`);
+        }
+      } else {
+        motivos.push('Nunca ha interactuado con SARA');
+      }
+
+      // Si hay 2+ motivos de inactividad, agregar a la lista
+      if (motivos.length >= 2) {
+        vendedoresInactivos.push({
+          nombre: vendedor.name || 'Sin nombre',
+          motivo: motivos.join(', '),
+          leadsAfectados
+        });
+      }
+    }
+
+    // Si no hay vendedores inactivos, no enviar nada
+    if (vendedoresInactivos.length === 0) {
+      console.log('✅ Todos los vendedores están activos');
+      return;
+    }
+
+    // Construir mensaje de alerta
+    let msg = `👔 *ALERTA: VENDEDORES INACTIVOS*\n\n`;
+    msg += `Se detectaron ${vendedoresInactivos.length} vendedor(es) con baja actividad:\n\n`;
+
+    for (const v of vendedoresInactivos.slice(0, 5)) {
+      msg += `• *${v.nombre}*\n`;
+      msg += `  ${v.motivo}\n`;
+      if (v.leadsAfectados > 0) {
+        msg += `  📊 ${v.leadsAfectados} leads afectados\n`;
+      }
+      msg += '\n';
+    }
+
+    if (vendedoresInactivos.length > 5) {
+      msg += `...y ${vendedoresInactivos.length - 5} más\n\n`;
+    }
+
+    msg += '💡 _Considera contactarlos para verificar su disponibilidad_';
+
+    // Enviar a admins (evitar duplicados)
+    const telefonosEnviados = new Set<string>();
+    for (const admin of admins) {
+      if (!admin.phone) continue;
+      const tel = admin.phone.replace(/\D/g, '');
+      if (telefonosEnviados.has(tel)) continue;
+      telefonosEnviados.add(tel);
+
+      try {
+        await meta.sendWhatsAppMessage(admin.phone, msg);
+        console.log(`👔 Alerta inactividad enviada a ${admin.name}`);
+      } catch (e) {
+        console.log(`Error enviando alerta inactividad a ${admin.name}:`, e);
+      }
+    }
+
+    console.log(`👔 ALERTA INACTIVIDAD: ${vendedoresInactivos.length} vendedores reportados`);
+  } catch (e) {
+    console.error('Error en alertaInactividadVendedor:', e);
   }
 }
 
@@ -18794,10 +19219,17 @@ async function nurturingEducativo(supabase: SupabaseService, meta: MetaWhatsAppS
     const hace60dias = new Date(ahora.getTime() - 60 * 24 * 60 * 60 * 1000);
     const hoyStr = ahora.toISOString().split('T')[0];
 
+    // Obtener teléfonos de team_members para excluirlos del nurturing
+    const { data: teamMembers } = await supabase.client
+      .from('team_members')
+      .select('phone');
+    const telefonosEquipo = new Set((teamMembers || []).map(t => t.phone).filter(Boolean));
+
     // Buscar leads que:
     // 1. Están en etapas tempranas (new, contacted, qualified)
     // 2. Tienen actividad en los últimos 60 días
     // 3. No han recibido nurturing en los últimos 7 días
+    // 4. NO son team_members
     const { data: leads } = await supabase.client
       .from('leads')
       .select('id, name, phone, status, notes, property_interest, needs_mortgage, updated_at')
@@ -18811,8 +19243,14 @@ async function nurturingEducativo(supabase: SupabaseService, meta: MetaWhatsAppS
       return;
     }
 
-    // Filtrar los que no han recibido nurturing recientemente
+    // Filtrar los que no han recibido nurturing recientemente Y no son del equipo
     const leadsElegibles = leads.filter(lead => {
+      // Excluir team_members
+      if (telefonosEquipo.has(lead.phone)) {
+        console.log(`📚 Excluido (es team_member): ${lead.phone}`);
+        return false;
+      }
+
       const notas = typeof lead.notes === 'object' ? lead.notes : {};
       const ultimoNurturing = (notas as any)?.ultimo_nurturing;
       if (ultimoNurturing && new Date(ultimoNurturing) > hace7dias) {
@@ -18861,14 +19299,24 @@ async function nurturingEducativo(supabase: SupabaseService, meta: MetaWhatsAppS
       }
 
       const nombre = lead.name?.split(' ')[0] || 'amigo';
+      const desarrollo = lead.property_interest || 'nuestras casas';
 
       try {
-        // Personalizar mensaje
-        const mensajePersonalizado = `¡Hola ${nombre}! 👋\n\n${contenidoSeleccionado.mensaje}`;
+        // Usar template para que llegue aunque no hayan escrito en 24h
+        // Template seguimiento_lead: "¡Hola {{1}}! 👋 Hace unos días platicamos sobre *{{2}}*..."
+        const templateComponents = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: nombre },
+              { type: 'text', text: desarrollo }
+            ]
+          }
+        ];
 
-        await meta.sendWhatsAppMessage(lead.phone, mensajePersonalizado);
+        await meta.sendTemplate(lead.phone, 'seguimiento_lead', 'es_MX', templateComponents);
         enviados++;
-        console.log(`📚 Nurturing enviado a ${lead.name}: ${contenidoSeleccionado.id}`);
+        console.log(`📚 Nurturing (template) enviado a ${lead.name}: ${contenidoSeleccionado.id}`);
 
         // Actualizar notas
         const notasActualizadas = {
