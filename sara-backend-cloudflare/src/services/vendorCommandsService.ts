@@ -25,19 +25,36 @@ export class VendorCommandsService {
 
   async getVendedorNotes(vendedorId: string): Promise<{ notes: any; notasVendedor: any }> {
     try {
-      const { data: vendedor } = await this.supabase.client
+      const { data: vendedor, error } = await this.supabase.client
         .from('team_members')
         .select('notes')
         .eq('id', vendedorId)
         .single();
 
+      if (error) {
+        console.log(`❌ getVendedorNotes ERROR: ${error.message}`);
+        return { notes: {}, notasVendedor: {} };
+      }
+
       let notas: any = {};
       if (vendedor?.notes) {
-        if (typeof vendedor.notes === 'string') {
-          try { notas = JSON.parse(vendedor.notes); } catch (e) { notas = {}; }
-        } else if (typeof vendedor.notes === 'object') {
+        const notesType = typeof vendedor.notes;
+        console.log(`📋 getVendedorNotes: type=${notesType}, preview=${String(vendedor.notes).substring(0, 100)}`);
+
+        if (notesType === 'string') {
+          try {
+            notas = JSON.parse(vendedor.notes);
+            console.log(`📋 getVendedorNotes: parsed keys=[${Object.keys(notas).join(',')}]`);
+          } catch (e) {
+            console.log(`❌ getVendedorNotes: JSON parse error`);
+            notas = {};
+          }
+        } else if (notesType === 'object') {
           notas = vendedor.notes;
+          console.log(`📋 getVendedorNotes: object keys=[${Object.keys(notas).join(',')}]`);
         }
+      } else {
+        console.log(`📋 getVendedorNotes: notes is empty/null`);
       }
 
       // SIEMPRE sanitizar notas para prevenir corrupción
@@ -56,6 +73,7 @@ export class VendorCommandsService {
 
       return { notes: notasSanitizadas, notasVendedor: notasSanitizadas };
     } catch (e) {
+      console.log(`❌ getVendedorNotes EXCEPTION: ${e}`);
       return { notes: {}, notasVendedor: {} };
     }
   }

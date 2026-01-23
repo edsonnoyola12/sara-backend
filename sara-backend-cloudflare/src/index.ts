@@ -5677,35 +5677,69 @@ Mensaje: ${mensaje}`;
 
     // Test post-visita: simula que SARA preguntó si llegó el cliente
     if (url.pathname === '/test-post-visita-setup') {
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6';
       const leadName = url.searchParams.get('lead_name') || 'María García Test';
       const leadPhone = url.searchParams.get('lead_phone') || '5215510001234';
       const property = url.searchParams.get('property') || 'Distrito Falco';
 
-      // Simular que hay una confirmación pendiente
-      const notesTest = JSON.stringify({
+      // Obtener notas existentes para NO borrarlas
+      const { data: vendedorData } = await supabase.client
+        .from('team_members')
+        .select('notes')
+        .eq('id', vendedorId)
+        .single();
+
+      let notasExistentes: any = {};
+      if (vendedorData?.notes) {
+        notasExistentes = typeof vendedorData.notes === 'string'
+          ? JSON.parse(vendedorData.notes)
+          : vendedorData.notes;
+      }
+
+      // MERGE con notas existentes en vez de sobrescribir
+      const testAptId = 'test-apt-' + Date.now();
+      const citasPrevias = notasExistentes.citas_preguntadas || [];
+      const notasActualizadas = {
+        ...notasExistentes,
         pending_show_confirmation: {
-          appointment_id: 'test-apt-' + Date.now(),
+          appointment_id: testAptId,
           lead_id: 'test-lead-' + Date.now(),
           lead_name: leadName,
           lead_phone: leadPhone,
           property: property,
           hora: '3:00 pm',
           asked_at: new Date().toISOString()
-        }
-      });
+        },
+        // Agregar test apt a citas_preguntadas para evitar conflictos
+        citas_preguntadas: [...citasPrevias, testAptId]
+      };
 
       await supabase.client
         .from('team_members')
-        .update({ notes: notesTest })
+        .update({ notes: notasActualizadas })
         .eq('id', vendedorId);
+
+      // Obtener teléfono del vendedor para mandarle el mensaje
+      const { data: vendedorInfo } = await supabase.client
+        .from('team_members')
+        .select('phone, name')
+        .eq('id', vendedorId)
+        .single();
+
+      // Enviar mensaje "¿LLEGÓ?" al vendedor
+      if (vendedorInfo?.phone) {
+        const mensajeLlego = `📋 *¿LLEGÓ ${leadName.toUpperCase()}?*\n\nCita de las 3:00 pm\n🏠 ${property}\n\nResponde para *${leadName}*:\n1️⃣ Sí llegó\n2️⃣ No llegó`;
+        await meta.sendWhatsAppMessage(vendedorInfo.phone, mensajeLlego);
+      }
 
       return corsResponse(JSON.stringify({
         ok: true,
-        message: `Setup completado. Ahora el vendedor puede responder "sí llegó" o "1" para probar el flujo post-visita.`,
+        message: `Setup completado. Mensaje "¿LLEGÓ ${leadName}?" enviado al vendedor.`,
         vendedor_id: vendedorId,
+        vendedor_phone: vendedorInfo?.phone,
         lead_name: leadName,
-        instructions: 'Envía "1" o "sí llegó" desde el WhatsApp del vendedor para activar el flujo post-visita'
+        instructions: 'Responde "1" o "2" al mensaje que te llegó'
       }));
     }
 
@@ -5936,6 +5970,32 @@ Mensaje: ${mensaje}`;
         ok: true,
         message: `Cita ${citaId} agregada a historial de ${vendedorData?.name}`,
         citas_preguntadas: notasActuales.citas_preguntadas
+      }));
+    }
+
+    // Test: Cancelar todas las citas de un vendedor
+    if (url.pathname === '/test-cancel-vendor-appointments') {
+      const vendedorId = url.searchParams.get('vendedor_id') || '7bb05214-826c-4d1b-a418-228b8d77bd64';
+
+      // Cancelar todas las citas del vendedor
+      const { data: citasCanceladas, error } = await supabase.client
+        .from('appointments')
+        .update({ status: 'cancelled' })
+        .eq('vendedor_id', vendedorId)
+        .neq('status', 'cancelled')
+        .select('id, lead_id, status');
+
+      // Limpiar notas del vendedor
+      await supabase.client
+        .from('team_members')
+        .update({ notes: null })
+        .eq('id', vendedorId);
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        message: `${citasCanceladas?.length || 0} citas canceladas y notas limpiadas`,
+        vendedor_id: vendedorId,
+        citas_canceladas: citasCanceladas?.length || 0
       }));
     }
 

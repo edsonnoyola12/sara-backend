@@ -830,7 +830,15 @@ export class WhatsAppHandler {
         // Guardamos en notes.last_sara_interaction para trackear la ventana de 24h de WhatsApp
         try {
           const now = new Date().toISOString();
-          const vendedorNotes = typeof vendedor.notes === 'object' ? vendedor.notes : {};
+          // FIX: Parsear correctamente las notas (pueden ser string JSON o objeto)
+          let vendedorNotes: any = {};
+          if (vendedor.notes) {
+            if (typeof vendedor.notes === 'string') {
+              try { vendedorNotes = JSON.parse(vendedor.notes); } catch { vendedorNotes = {}; }
+            } else if (typeof vendedor.notes === 'object') {
+              vendedorNotes = vendedor.notes;
+            }
+          }
           const updatedNotes = { ...vendedorNotes, last_sara_interaction: now };
           await this.supabase.client
             .from('team_members')
@@ -843,7 +851,15 @@ export class WhatsAppHandler {
 
         // ═══ VERIFICAR SI HAY NOTIFICACIÓN PENDIENTE ═══
         try {
-          const vendedorNotes = typeof vendedor.notes === 'object' ? vendedor.notes : {};
+          // FIX: Parsear correctamente las notas
+          let vendedorNotes: any = {};
+          if (vendedor.notes) {
+            if (typeof vendedor.notes === 'string') {
+              try { vendedorNotes = JSON.parse(vendedor.notes); } catch { vendedorNotes = {}; }
+            } else if (typeof vendedor.notes === 'object') {
+              vendedorNotes = vendedor.notes;
+            }
+          }
           if (vendedorNotes?.pending_notification?.message) {
             console.log(`📬 Enviando notificación pendiente a ${vendedor.name}`);
             await this.meta.sendWhatsAppMessage(cleanPhone, vendedorNotes.pending_notification.message);
