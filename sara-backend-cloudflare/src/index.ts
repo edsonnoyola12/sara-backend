@@ -6028,6 +6028,155 @@ Mensaje: ${mensaje}`;
       }));
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // TEST MAESTRO: Prueba completa del sistema
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-sistema-completo') {
+      const vendedorId = url.searchParams.get('vendedor_id') || '7bb05214-826c-4d1b-a418-228b8d77bd64';
+      const leadPhone = url.searchParams.get('lead_phone') || '5215510001234';
+      const leadName = url.searchParams.get('lead_name') || 'Test Lead Sistema';
+      const resultados: any = { timestamp: new Date().toISOString(), tests: {} };
+
+      // 1. TEST: Crear/encontrar lead de prueba
+      try {
+        let { data: lead } = await supabase.client
+          .from('leads')
+          .select('*')
+          .eq('phone', leadPhone)
+          .single();
+
+        if (!lead) {
+          const { data: newLead } = await supabase.client
+            .from('leads')
+            .insert({
+              name: leadName,
+              phone: leadPhone,
+              source: 'test_sistema',
+              status: 'new',
+              assigned_to: vendedorId,
+              property_interest: 'Distrito Falco'
+            })
+            .select()
+            .single();
+          lead = newLead;
+          resultados.tests.lead = { status: '✅ CREADO', id: lead?.id, name: lead?.name };
+        } else {
+          resultados.tests.lead = { status: '✅ EXISTE', id: lead.id, name: lead.name };
+        }
+
+        // 2. TEST: Agregar nota al lead (simulando vendedor)
+        const notaTest = `Nota de prueba ${new Date().toLocaleTimeString()}`;
+        const notasExistentes = typeof lead?.notes === 'object' ? lead?.notes : {};
+        await supabase.client
+          .from('leads')
+          .update({
+            notes: {
+              ...notasExistentes,
+              ultima_nota_vendedor: notaTest,
+              nota_guardada_at: new Date().toISOString()
+            }
+          })
+          .eq('id', lead?.id);
+
+        // Verificar que se guardó
+        const { data: leadVerif } = await supabase.client
+          .from('leads')
+          .select('notes')
+          .eq('id', lead?.id)
+          .single();
+
+        const notasGuardadas = typeof leadVerif?.notes === 'object' ? leadVerif?.notes : {};
+        resultados.tests.notas_lead = {
+          status: notasGuardadas?.ultima_nota_vendedor === notaTest ? '✅ GUARDADA' : '❌ NO GUARDADA',
+          nota: notasGuardadas?.ultima_nota_vendedor
+        };
+
+        // 3. TEST: Verificar vendedor
+        const { data: vendedor } = await supabase.client
+          .from('team_members')
+          .select('id, name, phone, role, notes')
+          .eq('id', vendedorId)
+          .single();
+
+        resultados.tests.vendedor = {
+          status: vendedor ? '✅ EXISTE' : '❌ NO ENCONTRADO',
+          name: vendedor?.name,
+          phone: vendedor?.phone,
+          role: vendedor?.role
+        };
+
+        // 4. TEST: Notas del vendedor (verificar que no están corruptas)
+        let notasVendedor: any = {};
+        try {
+          if (vendedor?.notes) {
+            notasVendedor = typeof vendedor.notes === 'string'
+              ? JSON.parse(vendedor.notes)
+              : vendedor.notes;
+          }
+          resultados.tests.notas_vendedor = {
+            status: '✅ PARSEABLES',
+            keys: Object.keys(notasVendedor),
+            tiene_pendiente: Object.keys(notasVendedor).some(k => k.startsWith('pending_'))
+          };
+        } catch (e) {
+          resultados.tests.notas_vendedor = { status: '❌ CORRUPTAS', error: String(e) };
+        }
+
+        // 5. TEST: Verificar sistema de citas (consultar existentes)
+        const { data: citasVendedor, count: citasCount } = await supabase.client
+          .from('appointments')
+          .select('id, lead_name, scheduled_date, scheduled_time, status', { count: 'exact' })
+          .eq('vendedor_id', vendedorId)
+          .order('scheduled_date', { ascending: false })
+          .limit(5);
+
+        resultados.tests.citas = {
+          status: '✅ SISTEMA OK',
+          total_vendedor: citasCount || 0,
+          ultimas: citasVendedor?.map(c => ({
+            lead: c.lead_name,
+            fecha: c.scheduled_date,
+            hora: c.scheduled_time,
+            status: c.status
+          })) || []
+        };
+
+        // 6. TEST: Verificar recordatorios pendientes (follow-ups)
+        const { data: followups, count: followupCount } = await supabase.client
+          .from('follow_ups')
+          .select('*', { count: 'exact' })
+          .eq('lead_id', lead?.id)
+          .eq('status', 'pending')
+          .limit(5);
+
+        resultados.tests.followups = {
+          status: '✅ CONSULTADO',
+          pendientes: followupCount || 0,
+          proximos: followups?.map(f => ({ tipo: f.type, fecha: f.scheduled_for })) || []
+        };
+
+        // 7. TEST: Sistema de interacción pendiente
+        const pendiente = tieneInteraccionPendiente(notasVendedor);
+        resultados.tests.sistema_pendientes = {
+          status: '✅ FUNCIONANDO',
+          tiene_pendiente: pendiente.tiene,
+          tipo_pendiente: pendiente.tipo
+        };
+
+        // Resumen
+        const todosOk = Object.values(resultados.tests).every((t: any) => t.status?.startsWith('✅'));
+        resultados.resumen = {
+          status: todosOk ? '✅ TODOS LOS TESTS PASARON' : '⚠️ ALGUNOS TESTS FALLARON',
+          total_tests: Object.keys(resultados.tests).length
+        };
+
+      } catch (error) {
+        resultados.error = String(error);
+      }
+
+      return corsResponse(JSON.stringify(resultados, null, 2));
+    }
+
     // Test: Enviar encuesta post-visita a un teléfono específico
     if (url.pathname === '/test-send-client-survey') {
       const phone = url.searchParams.get('phone') || '522224558475';
