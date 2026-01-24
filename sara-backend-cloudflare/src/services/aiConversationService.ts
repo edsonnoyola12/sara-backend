@@ -2127,6 +2127,19 @@ Tú dime, ¿por dónde empezamos?`;
       }
     });
 
+    // SIEMPRE: Tabla compacta de TODOS los modelos con precios (para consulta rápida)
+    catalogo += '\n═══ PRECIOS POR MODELO (REFERENCIA RÁPIDA) ═══\n';
+    porDesarrollo.forEach((props, dev) => {
+      const modelosConPrecio = props
+        .filter((p: any) => p.price && Number(p.price) > 0 && p.name)
+        .map((p: any) => `${p.name}:$${(Number(p.price)/1000000).toFixed(2)}M`)
+        .join(' | ');
+      if (modelosConPrecio) {
+        catalogo += `${dev}: ${modelosConPrecio}\n`;
+      }
+    });
+    catalogo += '(USA ESTOS PRECIOS EXACTOS, NO INVENTES)\n';
+
     // SOLO si hay interés específico: Mostrar detalle de ESE desarrollo
     if (interesNormalizado) {
       let desarrolloEncontrado = false;
