@@ -4868,8 +4868,14 @@ Mensaje: ${mensaje}`;
         const esFemenino = nombreLower.endsWith('a') && !excepcionesMasculinas.some(e => nombreLower.includes(e));
         const bienvenida = esFemenino ? 'bienvenida' : 'bienvenido';
 
-        // PROMPT: Avatar DENTRO de la propiedad, SIN subtítulos ni texto
-        const prompt = `A friendly female real estate agent standing inside the property shown in the image. She is positioned naturally in the space, at a comfortable distance from camera. The room and house surroundings are visible around her. She smiles and speaks welcomingly in Spanish: "Hola ${nombre}, ${bienvenida} a ti y a tu familia a tu nuevo hogar aquí en ${desarrollo}". Wide shot showing both agent and interior, cinematic lighting, 4k. No text, no subtitles, no captions, no overlays, clean video only.`;
+        // PROMPT: Fachada de la imagen EXACTA, sin generar otras casas
+        const prompt = `IMPORTANT: Use ONLY the exact house facade shown in the input image. Do NOT generate or show any other houses, buildings, or locations.
+
+Slow cinematic zoom towards the exact house facade in the image. The camera slowly approaches the front of this specific house, showing its real architectural details. Gentle camera movement, golden hour lighting. The house facade remains the main focus throughout the entire video.
+
+At the end, a female real estate agent appears briefly in front of this same house and says in Spanish: "Hola ${nombre}, ${bienvenida} a tu nuevo hogar en ${desarrollo}".
+
+8 seconds, 4K quality. No text overlays, no subtitles, no captions. Keep focus on the REAL house from the input image only.`;
 
         const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning', {
           method: 'POST',
@@ -5109,8 +5115,10 @@ Mensaje: ${mensaje}`;
         const imgBase64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
 
         const desarrollo = failedVideo.desarrollo?.split(',')[0]?.trim() || 'Los Encinos';
-        // Prompt optimizado para evitar filtros de seguridad de Google
-        const prompt = `A welcoming real estate video tour. Cinematic drone shot slowly approaching the beautiful house in the image. Smooth camera movement reveals the home's exterior details. Warm golden hour lighting. Professional real estate marketing video style. Text overlay appears: "Bienvenido ${failedVideo.lead_name} - ${desarrollo}". High quality, 4K resolution.`;
+        // Prompt: SOLO la fachada de la imagen, sin generar otras casas
+        const prompt = `IMPORTANT: Use ONLY the exact house facade from the input image. Do NOT generate any other buildings.
+
+Slow cinematic camera movement towards this specific house facade. Show only the real architectural details from the image. Golden hour lighting, professional real estate style. Keep the camera focused on this exact house throughout. 6 seconds, 4K. No text overlays.`;
 
         const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning', {
           method: 'POST',
@@ -7059,7 +7067,11 @@ _Solo responde con el número_ 🙏`;
         const imgBase64 = btoa(binary);
         console.log('Imagen descargada:', imgBuffer.byteLength, 'bytes');
 
-        const prompt = `A friendly female real estate agent standing in front of the house facade shown in the image. The beautiful house exterior is clearly visible behind her. She smiles warmly and speaks congratulating in Spanish: "¡Felicidades ${testName}! Ya eres parte de la familia ${testDesarrollo}. Gracias por confiar en Grupo Santa Rita". Wide shot showing agent and house facade, golden hour lighting, 4k. No text, no subtitles, no captions, no overlays, clean video only.`;
+        const prompt = `IMPORTANT: Use ONLY the exact house facade from the input image. Do NOT show any other buildings or locations.
+
+Slow zoom towards the exact house in the image. Then a female real estate agent appears in front of this same house and says in Spanish: "¡Felicidades ${testName}! Ya eres parte de la familia ${testDesarrollo}. Gracias por confiar en Grupo Santa Rita".
+
+Keep the camera focused on this specific house facade. Golden hour lighting, 4k. No text, no subtitles, no overlays.`;
 
         console.log('Llamando Veo 3 API...');
         const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning', {
@@ -18834,8 +18846,12 @@ async function videoFelicitacionPostVenta(supabase: SupabaseService, meta: MetaW
       }
       fotoDesarrollo = fotoDesarrollo || fotosDesarrollo['Monte Verde'];
 
-      // Prompt para Veo 3 - Avatar felicitando al nuevo propietario (FRENTE a la fachada)
-      const prompt = `A friendly female real estate agent standing in front of the house facade shown in the image. The beautiful house exterior is clearly visible behind her. She smiles warmly and speaks congratulating in Spanish: "¡Felicidades ${nombre}! Ya eres parte de la familia ${desarrollo}. Gracias por confiar en Grupo Santa Rita". Wide shot showing agent and house facade, golden hour lighting, 4k. No text, no subtitles, no captions, no overlays, clean video only.`;
+      // Prompt para Veo 3 - SOLO la fachada de la imagen, sin generar otras casas
+      const prompt = `IMPORTANT: Use ONLY the exact house facade from the input image. Do NOT show any other buildings or locations.
+
+Slow cinematic zoom towards the exact house in the image. A female real estate agent appears briefly in front of this same house and says in Spanish: "¡Felicidades ${nombre}! Ya eres parte de la familia ${desarrollo}. Gracias por confiar en Grupo Santa Rita".
+
+Keep focus on this specific house facade throughout. Golden hour lighting, 4k. No text, no subtitles, no overlays.`;
 
       try {
         // Verificar límites de API antes de intentar
@@ -19040,8 +19056,12 @@ async function videoBienvenidaLeadNuevo(supabase: SupabaseService, meta: MetaWha
       }
       fotoDesarrollo = fotoDesarrollo || fotosDesarrollo['Monte Verde'];
 
-      // Prompt para video de bienvenida - Avatar dando la bienvenida
-      const prompt = `A friendly female real estate agent standing in front of the beautiful house facade shown in the image. She smiles warmly and speaks welcoming in Spanish: "¡Hola ${nombre}! Soy Sara de Grupo Santa Rita. Me da mucho gusto que te interese ${desarrollo}. Estoy aquí para ayudarte a encontrar tu casa ideal. ¿Te gustaría agendar una visita?". Wide shot showing agent and house facade, warm daylight, 4k. No text, no subtitles, no captions, no overlays, clean video only.`;
+      // Prompt para video de bienvenida - SOLO la fachada de la imagen
+      const prompt = `IMPORTANT: Use ONLY the exact house facade from the input image. Do NOT generate any other buildings or locations.
+
+Slow cinematic zoom towards the exact house in the image. A female real estate agent appears in front of this same house and says in Spanish: "¡Hola ${nombre}! Soy Sara de Grupo Santa Rita. Me da mucho gusto que te interese ${desarrollo}. Estoy aquí para ayudarte. ¿Te gustaría agendar una visita?".
+
+Keep focus on this specific house facade. Warm daylight, 4k. No text, no subtitles, no overlays.`;
 
       try {
         // Verificar límites de API
