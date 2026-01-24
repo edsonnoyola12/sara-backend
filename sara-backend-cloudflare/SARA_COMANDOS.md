@@ -497,7 +497,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-23 21:40*
+*Última actualización: 2026-01-23 23:00*
 
 ---
 
@@ -626,6 +626,38 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-23
+
+**Sesión 9 (22:55) - Video Veo 3 + Test Real**
+- ✅ **Fix prompts de video Veo 3:**
+  - Problema: Videos generaban casas/lugares ficticios en vez de usar la fachada real
+  - Solución: Agregar instrucción explícita en todos los prompts:
+    ```
+    IMPORTANT: Use ONLY the exact house facade from the input image.
+    Do NOT generate or show any other houses, buildings, or locations.
+    ```
+  - 5 prompts actualizados:
+    - Video personalizado de bienvenida
+    - Video de retry para fallidos
+    - Video felicitación post-venta (test)
+    - Video felicitación post-venta (CRON)
+    - Video bienvenida lead nuevo (CRON)
+  - Archivo: `src/index.ts` líneas ~4872, 5119, 7070, 18850, 19060
+
+- ✅ **Endpoint `/test-real` para pruebas con envío real:**
+  - Envía mensajes REALES a WhatsApp (no solo detecta comandos)
+  - Tests disponibles:
+    - `?test=mensaje` - Mensaje simple
+    - `?test=briefing` - Briefing matutino
+    - `?test=reporte` - Reporte diario CEO
+    - `?test=alerta` - Alerta lead caliente
+    - `?test=comando` - Ejecuta comando ventas
+    - `?test=video` - Genera video Veo 3
+    - `?test=all` - Ejecuta 3 tests seguidos
+  - Archivo: `src/index.ts` línea ~278
+
+- ✅ Tests: 168 pasando ✅
+- ✅ Deploy exitoso
+- ✅ Probado en WhatsApp: mensajes, alertas, videos llegan correctamente
 
 **Sesión 8 (21:30) - Performance Check**
 - ✅ **STUBS IMPLEMENTADOS:**
