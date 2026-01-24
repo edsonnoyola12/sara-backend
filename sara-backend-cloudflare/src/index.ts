@@ -10311,7 +10311,10 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       }
 
       // ═══════════════════════════════════════════════════════════
-      // 🚨 ALERTA: Leads nuevos NO contactados en 10 minutos
+      // 🚨 ALERTA INTELIGENTE: Leads sin seguimiento del vendedor
+      // - Espera a que SARA haya respondido y extraído datos
+      // - Muestra contexto completo (qué dijo lead, qué respondió SARA)
+      // - Sugiere mensaje de seguimiento para aprobar/editar
       // ═══════════════════════════════════════════════════════════
       console.log('🔍 Verificando leads nuevos sin contactar...');
       try {
@@ -10321,7 +10324,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         // Buscar leads: creados hace 10-120 min, con vendedor, sin actividad registrada
         const { data: leadsNuevosSinContactar } = await supabase.client
           .from('leads')
-          .select('id, name, phone, property_interest, assigned_to, created_at, notes')
+          .select('id, name, phone, property_interest, assigned_to, created_at, notes, conversation_history')
           .not('assigned_to', 'is', null)
           .lt('created_at', hace10min)      // Creado hace más de 10 min
           .gt('created_at', hace2h)         // Pero menos de 2h (no muy viejos)
@@ -10333,6 +10336,17 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
             const notas = typeof lead.notes === 'object' ? lead.notes : {};
             const yaAlertado = notas.alerta_sin_contactar_enviada;
             if (yaAlertado) continue;
+
+            // NUEVO: Esperar a que SARA haya extraído al menos nombre O desarrollo
+            // Si no hay ninguno, SARA aún no ha procesado bien → esperar
+            const tieneNombre = lead.name && lead.name.trim().length > 0 && !['lead', 'nuevo', 'sin nombre'].includes(lead.name.toLowerCase().trim());
+            const tieneDesarrollo = lead.property_interest && lead.property_interest.trim().length > 0;
+
+            // Si no tiene ni nombre ni desarrollo, esperar un poco más
+            if (!tieneNombre && !tieneDesarrollo) {
+              console.log(`⏳ Lead ${lead.phone} sin datos extraídos aún, esperando...`);
+              continue;
+            }
 
             // Verificar si hay actividad del vendedor en lead_activities
             const { data: actividades } = await supabase.client
@@ -10354,20 +10368,65 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
 
             if (vendedor?.phone) {
               const minutosSinContactar = Math.round((Date.now() - new Date(lead.created_at).getTime()) / 60000);
-              await meta.sendWhatsAppMessage(vendedor.phone,
-                `⏰ *LEAD SIN CONTACTAR*\n\n` +
-                `👤 *${lead.name || 'Nuevo lead'}*\n` +
-                `📱 ${lead.phone}\n` +
-                `🏠 ${lead.property_interest || 'Sin desarrollo'}\n` +
-                `⏱️ Hace ${minutosSinContactar} min que llegó\n\n` +
-                `💡 Los leads contactados en <5 min tienen 9x más probabilidad de cerrar.\n\n` +
-                `Escribe *bridge ${lead.name?.split(' ')[0] || 'lead'}* para contactarlo.`
-              );
-              console.log(`⏰ ALERTA enviada a ${vendedor.name}: Lead ${lead.name} sin contactar (${minutosSinContactar} min)`);
 
-              // Marcar como alertado para no repetir
+              // Extraer último mensaje del lead y respuesta de SARA del historial
+              const historial = Array.isArray(lead.conversation_history) ? lead.conversation_history : [];
+              const mensajesLead = historial.filter((m: any) => m.role === 'user' || m.from === 'lead');
+              const mensajesSara = historial.filter((m: any) => m.role === 'assistant' || m.from === 'sara');
+
+              const ultimoMensajeLead = mensajesLead.length > 0
+                ? (mensajesLead[mensajesLead.length - 1].content || mensajesLead[mensajesLead.length - 1].message || '').substring(0, 100)
+                : '';
+              const ultimaRespuestaSara = mensajesSara.length > 0
+                ? (mensajesSara[mensajesSara.length - 1].content || mensajesSara[mensajesSara.length - 1].message || '').substring(0, 120)
+                : '';
+
+              // Identificador del lead: nombre si existe, si no teléfono formateado
+              const telefonoCorto = lead.phone.replace(/^521/, '').replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
+              const identificadorLead = tieneNombre ? lead.name : `Lead ${telefonoCorto}`;
+              const primerNombre = tieneNombre ? lead.name.split(' ')[0] : 'cliente';
+
+              // Generar sugerencia de mensaje basada en contexto
+              let sugerenciaMensaje = '';
+              if (tieneDesarrollo) {
+                sugerenciaMensaje = `Hola${tieneNombre ? ' ' + primerNombre : ''}, soy ${vendedor.name} de Grupo Santa Rita. Vi tu interés en ${lead.property_interest}. ¿Te gustaría que te cuente más o agendamos una visita?`;
+              } else {
+                sugerenciaMensaje = `Hola${tieneNombre ? ' ' + primerNombre : ''}, soy ${vendedor.name} de Grupo Santa Rita. ¿En qué puedo ayudarte? Tenemos casas desde $1.5M con excelentes ubicaciones.`;
+              }
+
+              // Construir mensaje de alerta completo
+              let alertaMsg = `⏰ *SEGUIMIENTO PENDIENTE*\n\n`;
+              alertaMsg += `👤 *${identificadorLead}*\n`;
+              alertaMsg += `📱 ${telefonoCorto}\n`;
+              alertaMsg += `🏠 ${lead.property_interest || 'Sin desarrollo aún'}\n`;
+              alertaMsg += `⏱️ Hace ${minutosSinContactar} min\n\n`;
+
+              if (ultimoMensajeLead) {
+                alertaMsg += `💬 *Lead dijo:*\n"${ultimoMensajeLead}${ultimoMensajeLead.length >= 100 ? '...' : ''}"\n\n`;
+              }
+
+              if (ultimaRespuestaSara) {
+                alertaMsg += `🤖 *SARA respondió:*\n"${ultimaRespuestaSara}${ultimaRespuestaSara.length >= 120 ? '...' : ''}"\n\n`;
+              }
+
+              alertaMsg += `📝 *Sugerencia:*\n"${sugerenciaMensaje}"\n\n`;
+              alertaMsg += `→ *ok* - Enviar sugerencia\n`;
+              alertaMsg += `→ *bridge ${primerNombre}* - Chat directo\n`;
+              alertaMsg += `→ Escribe tu mensaje para enviarlo`;
+
+              await meta.sendWhatsAppMessage(vendedor.phone, alertaMsg);
+              console.log(`⏰ ALERTA INTELIGENTE enviada a ${vendedor.name}: ${identificadorLead} sin contactar (${minutosSinContactar} min)`);
+
+              // Marcar como alertado y guardar sugerencia para cuando responda "ok"
               await supabase.client.from('leads')
-                .update({ notes: { ...notas, alerta_sin_contactar_enviada: new Date().toISOString() } })
+                .update({
+                  notes: {
+                    ...notas,
+                    alerta_sin_contactar_enviada: new Date().toISOString(),
+                    sugerencia_pendiente: sugerenciaMensaje,
+                    alerta_vendedor_id: vendedor.id
+                  }
+                })
                 .eq('id', lead.id);
             }
           }

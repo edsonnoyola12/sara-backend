@@ -4497,8 +4497,105 @@ export class WhatsAppHandler {
     nombreVendedor: string,
     teamMembers: any[]
   ): Promise<boolean> {
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 🆕 APROBAR SUGERENCIA: Si vendedor responde "ok" a una alerta
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    const mensajeLimpio = body.trim().toLowerCase();
+    if (['ok', 'si', 'sí', 'enviar', 'dale', 'va'].includes(mensajeLimpio)) {
+      // Buscar si hay un lead con sugerencia pendiente para este vendedor
+      const { data: leadConSugerencia } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone, notes')
+        .eq('notes->>alerta_vendedor_id', vendedor.id)
+        .not('notes->>sugerencia_pendiente', 'is', null)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (leadConSugerencia?.notes?.sugerencia_pendiente) {
+        const sugerencia = leadConSugerencia.notes.sugerencia_pendiente;
+        const notasActuales = leadConSugerencia.notes || {};
+
+        // Enviar el mensaje sugerido al lead
+        await this.meta.sendWhatsAppMessage(leadConSugerencia.phone, sugerencia);
+
+        // Limpiar la sugerencia pendiente
+        delete notasActuales.sugerencia_pendiente;
+        delete notasActuales.alerta_vendedor_id;
+        await this.supabase.client.from('leads')
+          .update({ notes: notasActuales })
+          .eq('id', leadConSugerencia.id);
+
+        // Registrar actividad del vendedor
+        await this.supabase.client.from('lead_activities').insert({
+          lead_id: leadConSugerencia.id,
+          team_member_id: vendedor.id,
+          activity_type: 'message_sent',
+          description: `Mensaje de seguimiento enviado (sugerencia aprobada)`,
+          metadata: { mensaje: sugerencia.substring(0, 100) }
+        });
+
+        // Confirmar al vendedor
+        const nombreLead = leadConSugerencia.name || 'lead';
+        await this.twilio.sendWhatsAppMessage(from,
+          `✅ *Mensaje enviado a ${nombreLead}*\n\n` +
+          `"${sugerencia.substring(0, 80)}..."\n\n` +
+          `💡 Usa *bridge ${nombreLead.split(' ')[0]}* si responde y quieres continuar la conversación.`
+        );
+
+        console.log(`✅ Vendedor ${nombreVendedor} aprobó sugerencia para lead ${leadConSugerencia.phone}`);
+        return true;
+      }
+    }
+
+    // Si el vendedor escribe un mensaje personalizado (no es comando conocido),
+    // verificar si hay sugerencia pendiente y usarlo como mensaje
+    const { data: leadPendiente } = await this.supabase.client
+      .from('leads')
+      .select('id, name, phone, notes')
+      .eq('notes->>alerta_vendedor_id', vendedor.id)
+      .not('notes->>sugerencia_pendiente', 'is', null)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single();
+
     const vendorService = new VendorCommandsService(this.supabase);
     const result = vendorService.detectRouteCommand(body, mensaje);
+
+    // Si hay sugerencia pendiente y el mensaje NO es un comando conocido,
+    // tratarlo como mensaje personalizado para enviar al lead
+    if (leadPendiente?.notes?.sugerencia_pendiente && !result.matched) {
+      const notasActuales = leadPendiente.notes || {};
+
+      // Enviar el mensaje personalizado del vendedor al lead
+      await this.meta.sendWhatsAppMessage(leadPendiente.phone, body);
+
+      // Limpiar la sugerencia pendiente
+      delete notasActuales.sugerencia_pendiente;
+      delete notasActuales.alerta_vendedor_id;
+      await this.supabase.client.from('leads')
+        .update({ notes: notasActuales })
+        .eq('id', leadPendiente.id);
+
+      // Registrar actividad del vendedor
+      await this.supabase.client.from('lead_activities').insert({
+        lead_id: leadPendiente.id,
+        team_member_id: vendedor.id,
+        activity_type: 'message_sent',
+        description: `Mensaje personalizado de seguimiento`,
+        metadata: { mensaje: body.substring(0, 100) }
+      });
+
+      // Confirmar al vendedor
+      const nombreLead = leadPendiente.name || 'lead';
+      await this.twilio.sendWhatsAppMessage(from,
+        `✅ *Tu mensaje fue enviado a ${nombreLead}*\n\n` +
+        `💡 Usa *bridge ${nombreLead.split(' ')[0]}* para continuar la conversación.`
+      );
+
+      console.log(`✅ Vendedor ${nombreVendedor} envió mensaje personalizado a lead ${leadPendiente.phone}`);
+      return true;
+    }
 
     if (!result.matched) {
       return false;
