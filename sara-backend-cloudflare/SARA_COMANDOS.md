@@ -659,6 +659,37 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 - ✅ Deploy exitoso
 - ✅ Probado en WhatsApp: mensajes, alertas, videos llegan correctamente
 
+**Sesión 10 (23:15) - Automatizaciones Vendedor**
+- ✅ **4 Automatizaciones Críticas Implementadas:**
+
+  **1. Notificación en tiempo real cuando lead responde** (whatsapp.ts:500-550)
+  - Alerta inmediata al vendedor asignado cuando un lead envía mensaje
+  - Anti-spam: cooldown 5 min entre notificaciones
+  - No notifica respuestas cortas ("ok", "si") ni durante bridge activo
+  - Vendedor puede desactivar con `notificaciones_lead_responde: false` en notes
+
+  **2. Alerta cuando lead "se calienta"** (aiConversationService.ts:4193-4220)
+  - Notifica al vendedor cuando score sube +20 puntos
+  - Muestra: nombre, score anterior → nuevo, temperatura, desarrollo
+  - Sugiere comando `info [nombre]` para ver detalles
+
+  **3. Alerta lead sin contactar 10+ min** (index.ts:10312-10375)
+  - CRON cada 2 min verifica leads nuevos (10-120 min)
+  - Alerta al vendedor si no hay actividad registrada
+  - Incluye: "Leads contactados en <5 min tienen 9x más probabilidad de cerrar"
+  - Sugiere `bridge [nombre]` para contactar
+  - Solo alerta una vez por lead (flag `alerta_sin_contactar_enviada`)
+
+  **4. Pre-No-Show Alert** (index.ts:10843-10902)
+  - CRON cada 2 min verifica citas en 2-3 horas
+  - Alerta al vendedor si lead NO ha confirmado
+  - Sugiere `bridge [nombre]` para confirmar
+  - Solo alerta una vez por cita (flag `pre_noshow_alert_sent`)
+
+- ✅ **Resumen: 40+ automatizaciones activas para vendedores**
+- ✅ Tests: 168 pasando ✅
+- ✅ Deploy exitoso
+
 **Sesión 8 (21:30) - Performance Check**
 - ✅ **STUBS IMPLEMENTADOS:**
 
@@ -972,47 +1003,3 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 **Sesión 1 (ayer)**
 - ✅ Sistema bridge CEO funcionando
 - ✅ Sistema mensaje intermediado funcionando
-
-### 2026-01-23
-
-**Sesión 10 (23:00-)**
-- ✅ **Automatizaciones Vendedor Implementadas:**
-  1. **Notificación en tiempo real cuando lead responde** (whatsapp.ts:500-550)
-     - Alerta inmediata al vendedor asignado cuando un lead envía mensaje
-     - Anti-spam: cooldown 5 min entre notificaciones
-     - No notifica respuestas cortas ("ok", "si") ni durante bridge activo
-     - Vendedor puede desactivar con `notificaciones_lead_responde: false` en notes
-  
-  2. **Alerta cuando lead "se calienta"** (aiConversationService.ts:4193-4220)
-     - Notifica al vendedor cuando score sube +20 puntos
-     - Muestra: nombre, score anterior → nuevo, temperatura, desarrollo
-     - Sugiere comando `info [nombre]` para ver detalles
-  
-  3. **Alerta lead sin contactar 10+ min** (index.ts:10312-10375)
-     - CRON cada 2 min verifica leads nuevos (10-120 min)
-     - Alerta al vendedor si no hay actividad registrada
-     - Incluye estadística: "Leads contactados en <5 min tienen 9x más probabilidad de cerrar"
-     - Sugiere comando `bridge [nombre]` para contactar
-     - Solo alerta una vez por lead (flag `alerta_sin_contactar_enviada`)
-  
-  4. **Pre-No-Show Alert** (index.ts:10843-10902)
-     - CRON cada 2 min verifica citas en 2-3 horas
-     - Alerta al vendedor si lead NO ha confirmado
-     - Sugiere comando `bridge [nombre]` para confirmar
-     - Solo alerta una vez por cita (flag `pre_noshow_alert_sent`)
-
-- ✅ **Resumen de 40+ automatizaciones activas para vendedores:**
-  - Briefing matutino (8am L-V)
-  - Notificación cuando lead responde (tiempo real)
-  - Alerta cuando lead se calienta (+20 pts)
-  - Alerta lead nuevo sin contactar (10 min)
-  - Pre-no-show alert (2h antes de cita sin confirmar)
-  - Recordatorio cita 24h
-  - Recordatorio cita 2h
-  - Alerta leads fríos (10am L-V)
-  - Recap diario (7pm L-V)
-  - Reporte semanal individual (lunes 9am)
-  - Coaching IA personalizado (martes 10am)
-  - Propuestas de follow-up con aprobación
-  - Notificación post-visita
-  - Y más...
