@@ -497,7 +497,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-23 19:10*
+*Última actualización: 2026-01-23 21:40*
 
 ---
 
@@ -626,6 +626,44 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-23
+
+**Sesión 8 (21:30) - Performance Check**
+- ✅ **STUBS IMPLEMENTADOS:**
+
+  **1. `parseAgendarCita()` en asesorCommandsService.ts**
+  - Antes: `return null; // TODO`
+  - Ahora: Parsea formato completo "cita Juan mañana 10am en oficina"
+  - Soporta: hoy/mañana/días de semana/fechas específicas
+  - Soporta: horas con am/pm, lugar opcional
+
+  **2. `crearCitaHipoteca()` en asesorCommandsService.ts**
+  - Antes: `return { error: 'No implementado' }`
+  - Ahora: Crea cita, notifica al lead, actualiza mortgage_application
+  - Archivo: líneas 1276-1340
+
+  **3. Round-robin en vendorCommandsService.ts**
+  - Antes: `asesores[0]` (siempre el primero)
+  - Ahora: Selecciona asesor con menor carga activa
+  - Cuenta mortgage_applications en status activos
+  - Archivo: línea 319
+
+- ✅ **MÉTRICAS CORREGIDAS (iaCoachingService.ts):**
+  - `tiempoPromedioRespuesta`: Antes 0 hardcodeado, ahora calcula desde `first_contacted_at - assigned_at`
+  - `mensajesEnviados`: Antes 0 hardcodeado, ahora cuenta `lead_activities` tipo whatsapp
+
+- ✅ **LOOPS PARALELIZADOS (Promise.allSettled):**
+  - `enviarReporteDiarioCEO` - Antes secuencial, ahora paralelo
+  - `enviarReporteSemanalCEO` - Antes secuencial, ahora paralelo
+  - `enviarReporteMensualCEO` - Antes secuencial, ahora paralelo
+  - Video semanal a equipo - Antes secuencial, ahora paralelo
+  - **Impacto**: Si hay 10 admins y cada mensaje toma 2s: antes 20s, ahora 2s
+
+- ✅ **ERROR HANDLING AGREGADO (whatsapp.ts):**
+  - try/catch en update `leads.notes` (línea 1025)
+  - try/catch en insert `lead_activities` (línea 1042)
+
+- ✅ Tests: 168 pasando ✅
+- ✅ Deploy exitoso
 
 **Sesión 7 (19:00)**
 - ✅ **Video semanal sin texto overlay**
