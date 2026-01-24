@@ -10309,6 +10309,72 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       } catch (e) {
         console.error('❌ Error en reasignación de leads:', e);
       }
+
+      // ═══════════════════════════════════════════════════════════
+      // 🚨 ALERTA: Leads nuevos NO contactados en 10 minutos
+      // ═══════════════════════════════════════════════════════════
+      console.log('🔍 Verificando leads nuevos sin contactar...');
+      try {
+        const hace10min = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+        const hace2h = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+        // Buscar leads: creados hace 10-120 min, con vendedor, sin actividad registrada
+        const { data: leadsNuevosSinContactar } = await supabase.client
+          .from('leads')
+          .select('id, name, phone, property_interest, assigned_to, created_at, notes')
+          .not('assigned_to', 'is', null)
+          .lt('created_at', hace10min)      // Creado hace más de 10 min
+          .gt('created_at', hace2h)         // Pero menos de 2h (no muy viejos)
+          .limit(10);
+
+        if (leadsNuevosSinContactar && leadsNuevosSinContactar.length > 0) {
+          // Filtrar los que realmente no han sido contactados
+          for (const lead of leadsNuevosSinContactar) {
+            const notas = typeof lead.notes === 'object' ? lead.notes : {};
+            const yaAlertado = notas.alerta_sin_contactar_enviada;
+            if (yaAlertado) continue;
+
+            // Verificar si hay actividad del vendedor en lead_activities
+            const { data: actividades } = await supabase.client
+              .from('lead_activities')
+              .select('id')
+              .eq('lead_id', lead.id)
+              .eq('team_member_id', lead.assigned_to)
+              .limit(1);
+
+            const tieneActividad = actividades && actividades.length > 0;
+            if (tieneActividad) continue;
+
+            // Este lead NO ha sido contactado - alertar al vendedor
+            const { data: vendedor } = await supabase.client
+              .from('team_members')
+              .select('id, name, phone')
+              .eq('id', lead.assigned_to)
+              .single();
+
+            if (vendedor?.phone) {
+              const minutosSinContactar = Math.round((Date.now() - new Date(lead.created_at).getTime()) / 60000);
+              await meta.sendWhatsAppMessage(vendedor.phone,
+                `⏰ *LEAD SIN CONTACTAR*\n\n` +
+                `👤 *${lead.name || 'Nuevo lead'}*\n` +
+                `📱 ${lead.phone}\n` +
+                `🏠 ${lead.property_interest || 'Sin desarrollo'}\n` +
+                `⏱️ Hace ${minutosSinContactar} min que llegó\n\n` +
+                `💡 Los leads contactados en <5 min tienen 9x más probabilidad de cerrar.\n\n` +
+                `Escribe *bridge ${lead.name?.split(' ')[0] || 'lead'}* para contactarlo.`
+              );
+              console.log(`⏰ ALERTA enviada a ${vendedor.name}: Lead ${lead.name} sin contactar (${minutosSinContactar} min)`);
+
+              // Marcar como alertado para no repetir
+              await supabase.client.from('leads')
+                .update({ notes: { ...notas, alerta_sin_contactar_enviada: new Date().toISOString() } })
+                .eq('id', lead.id);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('❌ Error verificando leads sin contactar:', e);
+      }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -10710,6 +10776,74 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     // NO-SHOWS - detectar citas donde no se presentó el lead (cada 2 min)
     console.log('👻 Verificando no-shows...');
     await detectarNoShows(supabase, meta);
+
+    // ═══════════════════════════════════════════════════════════
+    // 🚨 PRE-NO-SHOW ALERT: Citas en 2h sin confirmación
+    // Alerta al vendedor para que contacte al lead antes de la cita
+    // ═══════════════════════════════════════════════════════════
+    console.log('⚠️ Verificando citas próximas sin confirmación...');
+    try {
+      const ahora = new Date();
+      const en2horas = new Date(ahora.getTime() + 2 * 60 * 60 * 1000);
+      const en3horas = new Date(ahora.getTime() + 3 * 60 * 60 * 1000);
+
+      // Buscar citas: programadas entre 2-3 horas, sin confirmar, no alertadas
+      const { data: citasSinConfirmar } = await supabase.client
+        .from('appointments')
+        .select('id, lead_id, lead_phone, scheduled_date, scheduled_time, development, team_member_id, notes, client_responded')
+        .eq('status', 'scheduled')
+        .is('client_responded', null)  // No ha confirmado
+        .gte('scheduled_date', ahora.toISOString().split('T')[0])
+        .limit(10);
+
+      if (citasSinConfirmar && citasSinConfirmar.length > 0) {
+        for (const cita of citasSinConfirmar) {
+          // Calcular hora de la cita
+          const citaDate = new Date(`${cita.scheduled_date}T${cita.scheduled_time || '10:00'}:00`);
+          const horasFaltantes = (citaDate.getTime() - ahora.getTime()) / (1000 * 60 * 60);
+
+          // Solo alertar si faltan 2-3 horas
+          if (horasFaltantes >= 2 && horasFaltantes <= 3) {
+            const notas = typeof cita.notes === 'object' ? cita.notes : {};
+            if (notas.pre_noshow_alert_sent) continue;
+
+            // Obtener vendedor
+            const { data: vendedor } = await supabase.client
+              .from('team_members')
+              .select('id, name, phone')
+              .eq('id', cita.team_member_id)
+              .single();
+
+            // Obtener lead
+            const { data: lead } = await supabase.client
+              .from('leads')
+              .select('name, phone')
+              .eq('id', cita.lead_id)
+              .single();
+
+            if (vendedor?.phone && lead) {
+              await meta.sendWhatsAppMessage(vendedor.phone,
+                `⚠️ *CITA EN 2 HORAS - SIN CONFIRMAR*\n\n` +
+                `👤 *${lead.name || 'Lead'}*\n` +
+                `📱 ${lead.phone}\n` +
+                `🏠 ${cita.development || 'Sin desarrollo'}\n` +
+                `🕐 ${cita.scheduled_time} hoy\n\n` +
+                `💡 El cliente NO ha confirmado.\n` +
+                `Escribe *bridge ${lead.name?.split(' ')[0] || 'lead'}* para contactarlo y confirmar.`
+              );
+              console.log(`⚠️ PRE-NO-SHOW ALERT enviada a ${vendedor.name}: Cita con ${lead.name} en 2h sin confirmar`);
+
+              // Marcar como alertado
+              await supabase.client.from('appointments')
+                .update({ notes: { ...notas, pre_noshow_alert_sent: new Date().toISOString() } })
+                .eq('id', cita.id);
+            }
+          }
+        }
+      }
+    } catch (preNoShowErr) {
+      console.error('❌ Error verificando pre-no-shows:', preNoShowErr);
+    }
 
     // TIMEOUT VENDEDOR - si no responde en 2hrs, enviar encuesta al lead
     console.log('⏰ Verificando timeouts de confirmación...');

@@ -500,6 +500,59 @@ export class WhatsAppHandler {
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // 📲 NOTIFICACIÓN EN TIEMPO REAL AL VENDEDOR (lead respondió)
+      // Solo si: tiene vendedor asignado, no es mensaje corto/automatizado
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      if (lead?.assigned_to && trimmedBody.length >= 3) {
+        // No notificar si es respuesta corta tipo "ok", "si", números solos
+        const esRespuestaCorta = /^(ok|si|sí|no|1|2|3|4|5|hola|gracias)$/i.test(trimmedBody);
+        const leadNotes = typeof lead.notes === 'object' ? lead.notes : {};
+        const tieneContextoActivo = leadNotes.active_bridge_to_vendedor || leadNotes.pending_response_to;
+
+        // Solo notificar si NO hay bridge/contexto activo (evita duplicados)
+        if (!esRespuestaCorta && !tieneContextoActivo) {
+          try {
+            const { data: vendedorAsignado } = await this.supabase.client
+              .from('team_members')
+              .select('id, name, phone, notes')
+              .eq('id', lead.assigned_to)
+              .single();
+
+            if (vendedorAsignado?.phone) {
+              // Verificar si vendedor tiene activadas las notificaciones en tiempo real
+              const vendedorNotes = typeof vendedorAsignado.notes === 'object' ? vendedorAsignado.notes : {};
+              const notificacionesActivas = vendedorNotes.notificaciones_lead_responde !== false; // default: true
+
+              if (notificacionesActivas) {
+                // Verificar que no hayamos notificado hace menos de 5 minutos (anti-spam)
+                const ultimaNotif = vendedorNotes.ultima_notif_lead_responde;
+                const hace5min = Date.now() - 5 * 60 * 1000;
+                const puedeNotificar = !ultimaNotif || new Date(ultimaNotif).getTime() < hace5min;
+
+                if (puedeNotificar) {
+                  const scoreTemp = lead.lead_score >= 70 ? '🔥' : lead.lead_score >= 40 ? '🟡' : '🔵';
+                  await this.meta.sendWhatsAppMessage(vendedorAsignado.phone,
+                    `📲 *${lead.name || 'Lead'} respondió*\n\n` +
+                    `💬 "${trimmedBody.substring(0, 80)}${trimmedBody.length > 80 ? '...' : ''}"\n\n` +
+                    `${scoreTemp} Score: ${lead.lead_score || 0} | 🏠 ${lead.property_interest || 'Sin desarrollo'}\n\n` +
+                    `💡 *bridge ${lead.name?.split(' ')[0] || 'lead'}* para chat directo`
+                  );
+                  console.log(`📲 Notificación en tiempo real enviada a ${vendedorAsignado.name}`);
+
+                  // Actualizar timestamp de última notificación
+                  await this.supabase.client.from('team_members')
+                    .update({ notes: { ...vendedorNotes, ultima_notif_lead_responde: new Date().toISOString() } })
+                    .eq('id', vendedorAsignado.id);
+                }
+              }
+            }
+          } catch (notifErr) {
+            console.log('⚠️ Error notificando vendedor:', notifErr);
+          }
+        }
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // VERIFICAR SI ES RESPUESTA A ENCUESTA
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       try {

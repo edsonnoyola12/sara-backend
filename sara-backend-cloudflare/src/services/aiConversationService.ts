@@ -4196,6 +4196,36 @@ Tú dime, ¿por dónde empezamos?`;
           .eq('id', lead.id);
 
         console.log(`✅ Score y status actualizados en DB`);
+
+        // ═══════════════════════════════════════════════════════════════
+        // 🔥 ALERTA: Notificar vendedor si lead "se calienta" (+20 puntos)
+        // ═══════════════════════════════════════════════════════════════
+        const scoreJump = nuevoScore - scoreAnterior;
+        if (scoreJump >= 20 && lead.assigned_to) {
+          try {
+            const { data: vendedorAsignado } = await this.supabase.client
+              .from('team_members')
+              .select('id, name, phone')
+              .eq('id', lead.assigned_to)
+              .single();
+
+            if (vendedorAsignado?.phone) {
+              const tempEmoji = temperatura === 'HOT' ? '🔥' : temperatura === 'WARM' ? '🟡' : '🔵';
+              await this.meta.sendWhatsAppMessage(vendedorAsignado.phone,
+                `🔥 *LEAD SE CALENTÓ*\n\n` +
+                `👤 *${lead.name || 'Sin nombre'}*\n` +
+                `📊 Score: ${scoreAnterior} → ${nuevoScore} (+${scoreJump})\n` +
+                `🌡️ ${tempEmoji} ${temperatura}\n` +
+                `🏠 ${lead.property_interest || 'Sin desarrollo'}\n\n` +
+                `💡 Este lead mostró señales de interés fuerte.\n` +
+                `Responde *info ${lead.name?.split(' ')[0]}* para ver detalles.`
+              );
+              console.log(`🔥 ALERTA enviada a ${vendedorAsignado.name}: Lead ${lead.name} subió ${scoreJump} puntos`);
+            }
+          } catch (alertErr) {
+            console.log('⚠️ Error enviando alerta de score:', alertErr);
+          }
+        }
       }
 
       // 4. Actualizar needs_mortgage si mostró interés en crédito
