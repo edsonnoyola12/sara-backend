@@ -11156,21 +11156,24 @@ ${rendimientoAyer.length > 0 ? `\n━━━━━━━━━━━━━━━�
 
 _Escribe *resumen* para más detalles_`;
 
-  // Enviar a cada admin (evitar duplicados por teléfono)
+  // Enviar a cada admin (evitar duplicados por teléfono) - EN PARALELO
   const telefonosEnviados = new Set<string>();
-  for (const admin of admins) {
-    if (!admin.phone) continue;
+  const adminsUnicos = admins.filter(admin => {
+    if (!admin.phone) return false;
     const tel = admin.phone.replace(/\D/g, '');
-    if (telefonosEnviados.has(tel)) continue;
+    if (telefonosEnviados.has(tel)) return false;
     telefonosEnviados.add(tel);
+    return true;
+  });
 
+  await Promise.allSettled(adminsUnicos.map(async (admin) => {
     try {
       await meta.sendWhatsAppMessage(admin.phone, msg);
       console.log(`📊 Reporte diario enviado a ${admin.name}`);
     } catch (e) {
       console.log(`Error enviando reporte a ${admin.name}:`, e);
     }
-  }
+  }));
 }
 
 async function enviarReporteSemanalCEO(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
@@ -11332,21 +11335,24 @@ ${insights.join('\n')}
 
 _Escribe *resumen* para más detalles_`;
 
-  // Enviar a cada admin
+  // Enviar a cada admin - EN PARALELO
   const telefonosEnviados = new Set<string>();
-  for (const admin of admins) {
-    if (!admin.phone) continue;
+  const adminsUnicos = admins.filter(admin => {
+    if (!admin.phone) return false;
     const tel = admin.phone.replace(/\D/g, '');
-    if (telefonosEnviados.has(tel)) continue;
+    if (telefonosEnviados.has(tel)) return false;
     telefonosEnviados.add(tel);
+    return true;
+  });
 
+  await Promise.allSettled(adminsUnicos.map(async (admin) => {
     try {
       await meta.sendWhatsAppMessage(admin.phone, msg);
       console.log(`📈 Reporte semanal enviado a ${admin.name}`);
     } catch (e) {
       console.log(`Error enviando reporte semanal a ${admin.name}:`, e);
     }
-  }
+  }));
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -11657,21 +11663,24 @@ ${insightsText}
 
 _Generado por SARA_`;
 
-    // Enviar a cada admin (mensaje único)
+    // Enviar a cada admin (mensaje único) - EN PARALELO
     const telefonosEnviados = new Set<string>();
-    for (const admin of admins) {
-      if (!admin.phone) continue;
+    const adminsUnicos = admins.filter(admin => {
+      if (!admin.phone) return false;
       const tel = admin.phone.replace(/\D/g, '');
-      if (telefonosEnviados.has(tel)) continue;
+      if (telefonosEnviados.has(tel)) return false;
       telefonosEnviados.add(tel);
+      return true;
+    });
 
+    await Promise.allSettled(adminsUnicos.map(async (admin) => {
       try {
         await meta.sendWhatsAppMessage(admin.phone, msg);
         console.log(`📊 Reporte mensual enviado a ${admin.name}`);
       } catch (e) {
         console.log(`Error enviando reporte mensual a ${admin.name}:`, e);
       }
-    }
+    }));
   } catch (e) {
     console.log('Error en reporte mensual:', e);
   }
@@ -14707,16 +14716,19 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
                 console.log('⚠️ No se pudo parsear stats, usando caption default');
               }
 
-              for (const miembro of equipo || []) {
-                if (!miembro.phone) continue;
-                try {
-                  await meta.sendWhatsAppVideoById(miembro.phone, mediaId, caption);
-                  console.log(`✅ Video semanal enviado a ${miembro.name}`);
-                  enviadoExitoso = true;
-                } catch (e: any) {
-                  console.log(`⚠️ Error enviando video a ${miembro.name}: ${e.message}`);
+              // Enviar video a equipo EN PARALELO
+              const miembrosConPhone = (equipo || []).filter((m: any) => m.phone);
+              const resultados = await Promise.allSettled(miembrosConPhone.map(async (miembro: any) => {
+                await meta.sendWhatsAppVideoById(miembro.phone, mediaId, caption);
+                console.log(`✅ Video semanal enviado a ${miembro.name}`);
+                return true;
+              }));
+              enviadoExitoso = resultados.some(r => r.status === 'fulfilled');
+              resultados.forEach((r, i) => {
+                if (r.status === 'rejected') {
+                  console.log(`⚠️ Error enviando video a ${miembrosConPhone[i]?.name}: ${r.reason?.message || r.reason}`);
                 }
-              }
+              });
             } else {
               // Video individual (bienvenida)
               await meta.sendWhatsAppVideoById(video.lead_phone, mediaId,

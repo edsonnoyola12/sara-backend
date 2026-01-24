@@ -315,9 +315,34 @@ export class VendorCommandsService {
         return { success: false, message: 'No hay asesores hipotecarios disponibles en este momento. Intenta más tarde.' };
       }
 
-      // Elegir el asesor con menos leads asignados (round-robin simple)
-      const asesor = asesores[0]; // TODO: Implementar round-robin real
-      console.log(`✅ Asesor seleccionado: ${asesor.name} (${asesor.phone})`);
+      // Round-robin: elegir asesor con menos carga activa
+      let asesor = asesores[0];
+      if (asesores.length > 1) {
+        // Contar mortgage_applications activas por asesor
+        const { data: cargaAsesores } = await this.supabase.client
+          .from('mortgage_applications')
+          .select('asesor_id')
+          .in('status', ['assigned', 'pending', 'docs_requested', 'in_review', 'preapproved'])
+          .in('asesor_id', asesores.map((a: any) => a.id));
+
+        const conteo: Record<string, number> = {};
+        asesores.forEach((a: any) => conteo[a.id] = 0);
+        (cargaAsesores || []).forEach((app: any) => {
+          if (conteo[app.asesor_id] !== undefined) conteo[app.asesor_id]++;
+        });
+
+        // Seleccionar el que tiene menos carga
+        let minCarga = Infinity;
+        for (const a of asesores) {
+          const carga = conteo[a.id] || 0;
+          if (carga < minCarga) {
+            minCarga = carga;
+            asesor = a;
+          }
+        }
+        console.log(`📊 Carga asesores:`, Object.entries(conteo).map(([id, c]) => `${asesores.find((a: any) => a.id === id)?.name}: ${c}`).join(', '));
+      }
+      console.log(`✅ Asesor seleccionado: ${asesor.name} (${asesor.phone}) - menor carga`);
 
       // 3. Verificar si ya existe mortgage_application
       const { data: existingApp } = await this.supabase.client

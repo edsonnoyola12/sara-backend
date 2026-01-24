@@ -1244,9 +1244,82 @@ O sin vendedor (se asigna automáticamente):
     return `⚠️ *Lead ya existe*\n\n👤 ${lead.name}\n📱 ${lead.phone}\n📌 Status: ${lead.status}`;
   }
 
-  parseAgendarCita(body: string): any {
+  parseAgendarCita(body: string): { nombre: string; fecha: string; hora: string; lugar?: string } | null {
+    // Formatos soportados:
     // cita Juan Garcia mañana 10am en oficina
-    return null; // TODO: implementar
+    // cita Maria Lopez 25 enero 3pm
+    // agendar Pedro Ramirez lunes 11:00
+
+    const msg = body.toLowerCase().trim();
+
+    // Regex para extraer partes
+    const match = msg.match(/^(?:cita|agendar)\s+([a-záéíóúñ\s]+?)\s+(hoy|mañana|pasado\s*mañana|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo|\d{1,2}(?:\s+de)?\s*(?:ene(?:ro)?|feb(?:rero)?|mar(?:zo)?|abr(?:il)?|may(?:o)?|jun(?:io)?|jul(?:io)?|ago(?:sto)?|sep(?:tiembre)?|oct(?:ubre)?|nov(?:iembre)?|dic(?:iembre)?|\d{1,2}))\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:en\s+(.+))?$/i);
+
+    if (!match) return null;
+
+    const [, nombreRaw, fechaRaw, horaRaw, lugarRaw] = match;
+
+    // Capitalizar nombre
+    const nombre = nombreRaw.trim().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+    // Parsear fecha
+    const hoy = new Date();
+    let fecha: Date;
+
+    const fechaLower = fechaRaw.toLowerCase().trim();
+    if (fechaLower === 'hoy') {
+      fecha = hoy;
+    } else if (fechaLower === 'mañana') {
+      fecha = new Date(hoy.getTime() + 24 * 60 * 60 * 1000);
+    } else if (fechaLower.includes('pasado')) {
+      fecha = new Date(hoy.getTime() + 48 * 60 * 60 * 1000);
+    } else {
+      // Día de la semana o fecha específica
+      const dias: Record<string, number> = { domingo: 0, lunes: 1, martes: 2, miércoles: 3, miercoles: 3, jueves: 4, viernes: 5, sábado: 6, sabado: 6 };
+      if (dias[fechaLower] !== undefined) {
+        const targetDay = dias[fechaLower];
+        const currentDay = hoy.getDay();
+        let daysToAdd = targetDay - currentDay;
+        if (daysToAdd <= 0) daysToAdd += 7;
+        fecha = new Date(hoy.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
+      } else {
+        // Intenta parsear fecha específica
+        fecha = new Date(fechaRaw);
+        if (isNaN(fecha.getTime())) fecha = hoy;
+      }
+    }
+
+    // Parsear hora
+    let hora = horaRaw.toLowerCase().replace(/\s/g, '');
+    const pmMatch = hora.match(/(\d{1,2})(?::(\d{2}))?pm/);
+    const amMatch = hora.match(/(\d{1,2})(?::(\d{2}))?am/);
+
+    let hours = 10, minutes = 0;
+    if (pmMatch) {
+      hours = parseInt(pmMatch[1]);
+      if (hours !== 12) hours += 12;
+      minutes = pmMatch[2] ? parseInt(pmMatch[2]) : 0;
+    } else if (amMatch) {
+      hours = parseInt(amMatch[1]);
+      if (hours === 12) hours = 0;
+      minutes = amMatch[2] ? parseInt(amMatch[2]) : 0;
+    } else {
+      const numMatch = hora.match(/(\d{1,2})(?::(\d{2}))?/);
+      if (numMatch) {
+        hours = parseInt(numMatch[1]);
+        minutes = numMatch[2] ? parseInt(numMatch[2]) : 0;
+      }
+    }
+
+    const horaFormateada = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+    const fechaFormateada = fecha.toISOString().split('T')[0];
+
+    return {
+      nombre,
+      fecha: fechaFormateada,
+      hora: horaFormateada,
+      lugar: lugarRaw?.trim()
+    };
   }
 
   getMensajeAyudaAgendarCita(): string {
@@ -1273,8 +1346,77 @@ Ejemplo:
     return { leadId: newLead.id, leadName: newLead.name, leadPhone: newLead.phone };
   }
 
-  async crearCitaHipoteca(datos: any, asesorId: string, asesorName: string, leadId: string, leadName: string, leadPhone: string): Promise<{ error?: string }> {
-    // TODO: implementar
-    return { error: 'No implementado aún' };
+  async crearCitaHipoteca(
+    datos: { fecha: string; hora: string; lugar?: string },
+    asesorId: string,
+    asesorName: string,
+    leadId: string,
+    leadName: string,
+    leadPhone: string
+  ): Promise<{ error?: string; appointmentId?: string }> {
+    try {
+      // Crear la cita
+      const { data: appointment, error: aptError } = await this.supabase.client
+        .from('appointments')
+        .insert({
+          lead_id: leadId,
+          team_member_id: asesorId,
+          scheduled_date: datos.fecha,
+          scheduled_time: datos.hora,
+          location: datos.lugar || 'Por definir',
+          status: 'scheduled',
+          appointment_type: 'hipoteca',
+          notes: `Cita de crédito hipotecario con ${leadName}`,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (aptError) {
+        console.error('Error creando cita hipoteca:', aptError);
+        return { error: 'No se pudo crear la cita' };
+      }
+
+      // Notificar al lead
+      const fechaDisplay = new Date(datos.fecha).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+      const mensajeLead = `📅 *Cita agendada*\n\n` +
+        `Tu cita de crédito hipotecario ha sido programada:\n\n` +
+        `📆 ${fechaDisplay}\n` +
+        `🕐 ${datos.hora}\n` +
+        `📍 ${datos.lugar || 'Por confirmar'}\n` +
+        `👤 Asesor: ${asesorName}\n\n` +
+        `¡Te esperamos! 🏠`;
+
+      try {
+        await this.meta.sendWhatsAppMessage(leadPhone, mensajeLead);
+      } catch (e) {
+        console.log('⚠️ No se pudo notificar al lead sobre la cita');
+      }
+
+      // Actualizar mortgage_application si existe
+      const { data: mortgageApp } = await this.supabase.client
+        .from('mortgage_applications')
+        .select('id')
+        .eq('lead_id', leadId)
+        .eq('asesor_id', asesorId)
+        .single();
+
+      if (mortgageApp) {
+        await this.supabase.client
+          .from('mortgage_applications')
+          .update({
+            status: 'appointment_scheduled',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', mortgageApp.id);
+      }
+
+      console.log(`✅ Cita hipoteca creada: ${appointment.id} para ${leadName}`);
+      return { appointmentId: appointment.id };
+
+    } catch (e: any) {
+      console.error('Error en crearCitaHipoteca:', e);
+      return { error: e.message || 'Error desconocido' };
+    }
   }
 }

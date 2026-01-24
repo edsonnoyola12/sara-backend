@@ -94,7 +94,7 @@ export class IACoachingService {
       // Leads asignados en el período
       const { data: leadsAsignados } = await this.supabase.client
         .from('leads')
-        .select('id, status, created_at, updated_at')
+        .select('id, status, created_at, updated_at, first_contacted_at, assigned_at')
         .eq('assigned_to', vendedorId)
         .gte('created_at', fechaInicioStr);
 
@@ -132,6 +132,28 @@ export class IACoachingService {
         diasSinCerrar = dias; // Si nunca ha vendido, usar el período completo
       }
 
+      // Calcular mensajes enviados (actividades tipo whatsapp)
+      const { data: actividades } = await this.supabase.client
+        .from('lead_activities')
+        .select('id')
+        .eq('team_member_id', vendedorId)
+        .eq('activity_type', 'whatsapp')
+        .gte('created_at', fechaInicioStr);
+
+      const mensajesEnviados = actividades?.length || 0;
+
+      // Calcular tiempo promedio de respuesta (minutos desde asignación hasta primer contacto)
+      let tiempoPromedioRespuesta = 0;
+      const leadsConPrimerContacto = leadsAsignados?.filter(l => l.first_contacted_at && l.assigned_at) || [];
+      if (leadsConPrimerContacto.length > 0) {
+        const tiempos = leadsConPrimerContacto.map(l => {
+          const asignado = new Date(l.assigned_at).getTime();
+          const contactado = new Date(l.first_contacted_at).getTime();
+          return Math.max(0, (contactado - asignado) / (1000 * 60)); // minutos
+        });
+        tiempoPromedioRespuesta = Math.round(tiempos.reduce((a, b) => a + b, 0) / tiempos.length);
+      }
+
       return {
         id: vendedor.id,
         name: vendedor.name || 'Sin nombre',
@@ -142,9 +164,9 @@ export class IACoachingService {
         citasAgendadas,
         citasCompletadas,
         citasCanceladas,
-        tiempoPromedioRespuesta: 0, // TODO: calcular desde conversaciones
+        tiempoPromedioRespuesta,
         diasSinCerrar,
-        mensajesEnviados: 0, // TODO: calcular desde conversations
+        mensajesEnviados,
         seguimientosHechos: leadsContactados,
       };
     } catch (e) {

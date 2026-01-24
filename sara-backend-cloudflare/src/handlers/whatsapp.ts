@@ -1022,7 +1022,11 @@ export class WhatsAppHandler {
           // Limpiar pending_response_to si existe (ya no aplica)
           if (leadNotes.pending_response_to) {
             delete leadNotes.pending_response_to;
-            await this.supabase.client.from('leads').update({ notes: leadNotes }).eq('id', lead.id);
+            try {
+              await this.supabase.client.from('leads').update({ notes: leadNotes }).eq('id', lead.id);
+            } catch (e) {
+              console.log('⚠️ Error limpiando pending_response_to:', e);
+            }
           }
 
           console.log(`📞 Lead ${lead.name} recibió contacto de ${vendedorAsignado.name}`);
@@ -1039,13 +1043,17 @@ export class WhatsAppHandler {
 
         // ═══ REGISTRAR ACTIVIDAD EN BITÁCORA (cuenta para el vendedor) ═══
         if (activeBridge.vendedor_id) {
-          await this.supabase.client.from('lead_activities').insert({
-            lead_id: lead.id,
-            team_member_id: activeBridge.vendedor_id,
-            activity_type: 'whatsapp',
-            notes: `Mensaje recibido de ${lead.name}: "${body.substring(0, 50)}${body.length > 50 ? '...' : ''}"`,
-            created_at: new Date().toISOString()
-          });
+          try {
+            await this.supabase.client.from('lead_activities').insert({
+              lead_id: lead.id,
+              team_member_id: activeBridge.vendedor_id,
+              activity_type: 'whatsapp',
+              notes: `Mensaje recibido de ${lead.name}: "${body.substring(0, 50)}${body.length > 50 ? '...' : ''}"`,
+              created_at: new Date().toISOString()
+            });
+          } catch (e) {
+            console.log('⚠️ Error registrando actividad bridge:', e);
+          }
         }
 
         return;
