@@ -276,6 +276,52 @@ export default {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // DEBUG LEAD - Buscar lead por teléfono para debug
+    // USO: /debug-lead?phone=4921375548
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/debug-lead" && request.method === "GET") {
+      const phone = url.searchParams.get('phone') || '';
+      const phoneLimpio = phone.replace(/[-\s]/g, '');
+
+      // Buscar lead
+      const { data: leads, error } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, assigned_to, lead_score, status')
+        .or(`phone.ilike.%${phoneLimpio}%,phone.ilike.%${phoneLimpio.slice(-10)}%`)
+        .limit(5);
+
+      // Buscar team member (CEO)
+      const { data: teamMembers } = await supabase.client
+        .from('team_members')
+        .select('id, name, phone, role, active')
+        .ilike('phone', '%2224558475%')
+        .limit(1);
+
+      // Test query exacta como en vendedorVerHistorial
+      const ceoId = teamMembers?.[0]?.id;
+      const { data: leadsConAssigned, error: err2 } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, assigned_to')
+        .eq('assigned_to', ceoId || '')
+        .ilike('phone', `%${phoneLimpio}%`)
+        .limit(5);
+
+      return corsResponse(JSON.stringify({
+        buscando: phoneLimpio,
+        encontrados: leads?.length || 0,
+        leads: leads || [],
+        ceo: teamMembers?.[0] || null,
+        queryConAssigned: {
+          ceoId,
+          encontrados: leadsConAssigned?.length || 0,
+          leads: leadsConAssigned || [],
+          error: err2?.message
+        },
+        error: error?.message
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // 🧪 TEST REAL - Envía mensajes de prueba REALES a tu teléfono
     // USO: /test-real?test=briefing|video|comando|alerta
     // ═══════════════════════════════════════════════════════════════════════

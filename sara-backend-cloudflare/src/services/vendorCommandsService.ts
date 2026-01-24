@@ -164,7 +164,8 @@ export class VendorCommandsService {
     }
 
     // ═══ VIDEO [desarrollo] ═══
-    const matchVideo = msg.match(/^(?:video|ver|tour)\s+(.+)$/i);
+    // NOTA: "ver" removido de aquí porque conflictuaba con "ver historial"
+    const matchVideo = msg.match(/^(?:video|tour)\s+(.+)$/i);
     if (matchVideo) {
       return { matched: true, handlerName: 'vendedorVideo', handlerParams: { desarrollo: matchVideo[1].trim() } };
     }
