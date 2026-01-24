@@ -506,14 +506,16 @@ export class WhatsAppHandler {
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // CANCELAR FOLLOW-UPS PENDIENTES (el lead respondió)
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      try {
-        const followupService = new FollowupService(this.supabase);
-        const cancelados = await followupService.cancelarPorRespuesta(lead.id, cleanPhone);
-        if (cancelados > 0) {
-          console.log(`📭 ${cancelados} follow-ups cancelados - lead respondió`);
+      if (lead?.id) {
+        try {
+          const followupService = new FollowupService(this.supabase);
+          const cancelados = await followupService.cancelarPorRespuesta(lead.id, cleanPhone);
+          if (cancelados > 0) {
+            console.log(`📭 ${cancelados} follow-ups cancelados - lead respondió`);
+          }
+        } catch (e) {
+          console.log('⚠️ Error cancelando follow-ups:', e);
         }
-      } catch (e) {
-        console.log('⚠️ Error cancelando follow-ups:', e);
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -746,9 +748,9 @@ export class WhatsAppHandler {
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // DETECTAR RESPUESTA A TEMPLATE (activar SARA)
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      console.log('🔍 DEBUG Lead:', lead.name, '| template_sent:', lead.template_sent);
+      console.log('🔍 DEBUG Lead:', lead?.name || 'NULL', '| template_sent:', lead?.template_sent || 'N/A');
 
-      if (lead.template_sent) {
+      if (lead?.template_sent) {
         console.log('🔓 Cliente respondió a template:', lead.name, '- Mensaje:', body);
         const templateType = lead.template_sent;
 
@@ -811,7 +813,7 @@ export class WhatsAppHandler {
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // DETECTAR REFERIDOS DE CLIENTES QUE YA COMPRARON
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      if (lead.status === 'sold') {
+      if (lead?.status === 'sold') {
         const referidoResult = await this.detectarYCrearReferido(lead, body, cleanPhone, from);
         if (referidoResult) {
           return; // Ya se procesó el referido
@@ -822,7 +824,7 @@ export class WhatsAppHandler {
       // IMPORTANTE: Verificar si el LEAD tiene una encuesta pendiente ANTES de routing
       // Esto evita que leads con teléfonos similares a team_members sean mal-ruteados
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      const notasLead = typeof lead.notes === 'object' && lead.notes ? lead.notes : {};
+      const notasLead = typeof lead?.notes === 'object' && lead?.notes ? lead.notes : {};
       if (notasLead.pending_satisfaction_survey) {
         const respuesta = trimmedBody.trim();
         const ratings: { [key: string]: { label: string; emoji: string } } = {
