@@ -6827,6 +6827,80 @@ _Solo responde con el número_ 🙏`;
       }
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // ENVIAR VIDEO SEMANAL A ROLES ESPECÍFICOS
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/send-video-to-role') {
+      const videoId = url.searchParams.get('video_id') || '5db9803f-a8e0-4bde-a2e4-e44ac2b236d2';
+      const role = url.searchParams.get('role') || 'coordinador';
+
+      console.log(`📤 Enviando video ${videoId} a rol: ${role}`);
+
+      const { data: video } = await supabase.client
+        .from('pending_videos')
+        .select('*')
+        .eq('id', videoId)
+        .single();
+
+      if (!video || !video.video_url) {
+        return corsResponse(JSON.stringify({ error: 'Video no encontrado o sin URL' }), 404);
+      }
+
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      try {
+        // Descargar video
+        console.log('📥 Descargando video...');
+        const videoResponse = await fetch(video.video_url, {
+          headers: { 'x-goog-api-key': env.GEMINI_API_KEY }
+        });
+
+        if (!videoResponse.ok) {
+          return corsResponse(JSON.stringify({ error: `Error descargando: ${videoResponse.status}` }), 500);
+        }
+
+        const videoBuffer = await videoResponse.arrayBuffer();
+        console.log(`✅ Descargado: ${videoBuffer.byteLength} bytes`);
+
+        // Subir a Meta
+        console.log('📤 Subiendo a Meta...');
+        const mediaId = await meta.uploadVideoFromBuffer(videoBuffer);
+        console.log(`✅ Media ID: ${mediaId}`);
+
+        // Obtener miembros del rol
+        const { data: equipo } = await supabase.client
+          .from('team_members')
+          .select('phone, name')
+          .eq('role', role)
+          .eq('active', true);
+
+        const enviados: string[] = [];
+        const errores: string[] = [];
+
+        for (const miembro of equipo || []) {
+          if (!miembro.phone) continue;
+          try {
+            await meta.sendWhatsAppVideoById(miembro.phone, mediaId,
+              `🎬 *¡Video de la semana!*\n\n🏠 ${video.desarrollo}\n\n¡Excelente trabajo equipo! 👪🔥`);
+            console.log(`✅ Video enviado a ${miembro.name}`);
+            enviados.push(miembro.name);
+          } catch (e: any) {
+            console.log(`❌ Error enviando a ${miembro.name}: ${e.message}`);
+            errores.push(`${miembro.name}: ${e.message}`);
+          }
+        }
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          message: `Video enviado a ${enviados.length} ${role}s`,
+          enviados,
+          errores
+        }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
 
     // ═══════════════════════════════════════════════════════════
     // TEST: Generar video Veo 3 personalizado
@@ -14614,7 +14688,7 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
               const { data: equipo } = await supabase.client
                 .from('team_members')
                 .select('phone, name')
-                .in('role', ['vendedor', 'admin'])
+                .in('role', ['vendedor', 'admin', 'coordinador'])
                 .eq('active', true);
 
               for (const miembro of equipo || []) {

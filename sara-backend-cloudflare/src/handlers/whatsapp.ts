@@ -1368,19 +1368,53 @@ export class WhatsAppHandler {
         await this.enviarEncuestaSatisfaccion(showConfirmResult.leadPhone, showConfirmResult.leadName, showConfirmResult.property);
       }
 
-      // Si NO llegó, ofrecer reagendar
+      // Si NO llegó, ofrecer reagendar y guardar contexto para seguimiento
+      console.log(`👻 NO-SHOW DEBUG: noLlego=${showConfirmResult.noLlego}, leadPhone=${showConfirmResult.leadPhone}, leadName=${showConfirmResult.leadName}`);
       if (showConfirmResult.noLlego && showConfirmResult.leadPhone) {
         const nombreCliente = showConfirmResult.leadName?.split(' ')[0] || 'Hola';
+        console.log(`📅 Enviando mensaje de reagenda a ${showConfirmResult.leadPhone}...`);
         try {
+          // Enviar mensaje al lead
           await this.meta.sendWhatsAppMessage(showConfirmResult.leadPhone,
             `Hola ${nombreCliente}, notamos que no pudiste asistir a tu cita. 😊\n\n` +
             `¿Te gustaría reagendar para otro día?\n` +
             `Escríbenos cuando gustes y con gusto te ayudamos.`
           );
-          console.log(`📅 Mensaje de reagenda enviado a ${showConfirmResult.leadName}`);
+          console.log(`✅ Mensaje de reagenda enviado exitosamente a ${showConfirmResult.leadName} (${showConfirmResult.leadPhone})`);
+
+          // Guardar contexto en el lead para seguimiento de respuesta
+          const phoneSuffix = showConfirmResult.leadPhone.replace(/\D/g, '').slice(-10);
+          const { data: leadData } = await this.supabase.client
+            .from('leads')
+            .select('id, notes, assigned_to')
+            .or(`phone.ilike.%${phoneSuffix},whatsapp_phone.ilike.%${phoneSuffix}`)
+            .single();
+
+          if (leadData) {
+            const notasLead = typeof leadData.notes === 'object' ? leadData.notes : {};
+            await this.supabase.client
+              .from('leads')
+              .update({
+                status: 'no_show',
+                notes: {
+                  ...notasLead,
+                  pending_noshow_response: {
+                    vendedor_id: vendedor.id,
+                    vendedor_name: nombreVendedor,
+                    vendedor_phone: from,
+                    property: showConfirmResult.property,
+                    asked_at: new Date().toISOString()
+                  }
+                }
+              })
+              .eq('id', leadData.id);
+            console.log(`📋 Contexto no-show guardado en lead ${leadData.id}`);
+          }
         } catch (err) {
-          console.error('Error enviando mensaje reagenda:', err);
+          console.error('❌ Error enviando mensaje reagenda:', err);
         }
+      } else {
+        console.log(`⚠️ NO se envió mensaje de reagenda: noLlego=${showConfirmResult.noLlego}, leadPhone=${showConfirmResult.leadPhone || 'NULL'}`);
       }
 
       return;
@@ -3931,19 +3965,53 @@ export class WhatsAppHandler {
         await this.enviarEncuestaSatisfaccion(showConfirmResult.leadPhone, showConfirmResult.leadName, showConfirmResult.property);
       }
 
-      // Si NO llegó, ofrecer reagendar
+      // Si NO llegó, ofrecer reagendar y guardar contexto para seguimiento
+      console.log(`👻 NO-SHOW DEBUG: noLlego=${showConfirmResult.noLlego}, leadPhone=${showConfirmResult.leadPhone}, leadName=${showConfirmResult.leadName}`);
       if (showConfirmResult.noLlego && showConfirmResult.leadPhone) {
         const nombreCliente = showConfirmResult.leadName?.split(' ')[0] || 'Hola';
+        console.log(`📅 Enviando mensaje de reagenda a ${showConfirmResult.leadPhone}...`);
         try {
+          // Enviar mensaje al lead
           await this.meta.sendWhatsAppMessage(showConfirmResult.leadPhone,
             `Hola ${nombreCliente}, notamos que no pudiste asistir a tu cita. 😊\n\n` +
             `¿Te gustaría reagendar para otro día?\n` +
             `Escríbenos cuando gustes y con gusto te ayudamos.`
           );
-          console.log(`📅 Mensaje de reagenda enviado a ${showConfirmResult.leadName}`);
+          console.log(`✅ Mensaje de reagenda enviado exitosamente a ${showConfirmResult.leadName} (${showConfirmResult.leadPhone})`);
+
+          // Guardar contexto en el lead para seguimiento de respuesta
+          const phoneSuffix = showConfirmResult.leadPhone.replace(/\D/g, '').slice(-10);
+          const { data: leadData } = await this.supabase.client
+            .from('leads')
+            .select('id, notes, assigned_to')
+            .or(`phone.ilike.%${phoneSuffix},whatsapp_phone.ilike.%${phoneSuffix}`)
+            .single();
+
+          if (leadData) {
+            const notasLead = typeof leadData.notes === 'object' ? leadData.notes : {};
+            await this.supabase.client
+              .from('leads')
+              .update({
+                status: 'no_show',
+                notes: {
+                  ...notasLead,
+                  pending_noshow_response: {
+                    vendedor_id: vendedor.id,
+                    vendedor_name: nombreVendedor,
+                    vendedor_phone: from,
+                    property: showConfirmResult.property,
+                    asked_at: new Date().toISOString()
+                  }
+                }
+              })
+              .eq('id', leadData.id);
+            console.log(`📋 Contexto no-show guardado en lead ${leadData.id}`);
+          }
         } catch (err) {
-          console.error('Error enviando mensaje reagenda:', err);
+          console.error('❌ Error enviando mensaje reagenda:', err);
         }
+      } else {
+        console.log(`⚠️ NO se envió mensaje de reagenda: noLlego=${showConfirmResult.noLlego}, leadPhone=${showConfirmResult.leadPhone || 'NULL'}`);
       }
 
       return true;
@@ -4136,6 +4204,36 @@ export class WhatsAppHandler {
       console.log(`📋 Encuesta post-visita enviada a ${leadName}`);
     } catch (err) {
       console.error('Error enviando encuesta post-visita:', err);
+    }
+  }
+
+  /**
+   * Busca un lead que tenga pending_noshow_response (esperando respuesta a mensaje de reagendar)
+   */
+  private async buscarLeadConNoShowPendiente(phone: string): Promise<any | null> {
+    try {
+      const phoneSuffix = phone.replace(/\D/g, '').slice(-10);
+
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone, notes, assigned_to')
+        .or(`phone.ilike.%${phoneSuffix},whatsapp_phone.ilike.%${phoneSuffix}`);
+
+      if (!leads || leads.length === 0) return null;
+
+      // Buscar el que tenga pending_noshow_response
+      for (const lead of leads) {
+        const notas = typeof lead.notes === 'object' ? lead.notes : {};
+        if (notas.pending_noshow_response) {
+          console.log(`📋 Encontrado lead con no-show pendiente: ${lead.name}`);
+          return lead;
+        }
+      }
+
+      return null;
+    } catch (err) {
+      console.error('Error buscando lead con no-show pendiente:', err);
+      return null;
     }
   }
 
@@ -8531,6 +8629,52 @@ Responde con fecha y hora:
 
         // SIEMPRE retornar la respuesta al lead
         return respuestaParaLead;
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // CHECK: Respuesta a mensaje de NO-SHOW (reagendar)
+      // ═══════════════════════════════════════════════════════════
+      const leadConNoShow = await this.buscarLeadConNoShowPendiente(phone);
+      if (leadConNoShow) {
+        const notas = typeof leadConNoShow.notes === 'object' ? leadConNoShow.notes : {};
+        const noShowContext = notas.pending_noshow_response;
+
+        console.log(`📋 NO-SHOW RESPONSE: Lead ${leadConNoShow.name} respondió a mensaje de reagendar`);
+
+        // Notificar al vendedor
+        if (noShowContext?.vendedor_phone) {
+          const nombreLead = leadConNoShow.name?.split(' ')[0] || 'El cliente';
+          await this.meta.sendWhatsAppMessage(noShowContext.vendedor_phone,
+            `📬 *${nombreLead}* respondió a tu mensaje de reagendar:\n\n` +
+            `"${mensaje}"\n\n` +
+            `📱 ${leadConNoShow.phone}\n` +
+            `🏠 ${noShowContext.property || 'Sin propiedad'}`
+          );
+          console.log(`✅ Vendedor ${noShowContext.vendedor_name} notificado de respuesta no-show`);
+        }
+
+        // Guardar respuesta en el lead y limpiar contexto
+        const { pending_noshow_response, ...restNotas } = notas;
+        await this.supabase.client
+          .from('leads')
+          .update({
+            status: 'contacted',
+            notes: {
+              ...restNotas,
+              noshow_response: {
+                mensaje: mensaje,
+                responded_at: new Date().toISOString(),
+                original_context: noShowContext
+              }
+            }
+          })
+          .eq('id', leadConNoShow.id);
+
+        console.log(`💾 Respuesta no-show guardada en lead ${leadConNoShow.id}`);
+
+        // Responder al lead
+        const nombreCorto = leadConNoShow.name?.split(' ')[0] || 'Hola';
+        return `¡Gracias ${nombreCorto}! 😊\n\nTu asesor ${noShowContext?.vendedor_name || ''} te contactará pronto para coordinar una nueva fecha.\n\n¿Hay algún día u horario que te funcione mejor?`;
       }
 
       // ═══════════════════════════════════════════════════════════
