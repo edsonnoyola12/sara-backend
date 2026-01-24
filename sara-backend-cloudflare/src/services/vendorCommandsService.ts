@@ -215,6 +215,17 @@ export class VendorCommandsService {
       };
     }
 
+    // ═══ VER / HISTORIAL - Ver conversación completa con un lead ═══
+    // Formato: "ver Juan", "historial 4921375548", "chat Juan"
+    const verMatch = msg.match(/^(?:ver|historial|chat|conversacion|conversación)\s+(.+)$/i);
+    if (verMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorVerHistorial',
+        handlerParams: { identificador: verMatch[1].trim() }
+      };
+    }
+
     // ═══ BRIDGE / CHAT DIRECTO ═══
     // Formato: bridge [nombre] "mensaje opcional"
     const bridgeMatchConMensaje = body.match(/^(?:bridge|chat\s*directo|directo)\s+(\w+)\s+[""""](.+)[""""]$/i);

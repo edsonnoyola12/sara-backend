@@ -4753,6 +4753,9 @@ export class WhatsAppHandler {
       case 'vendedorCoaching':
         await this.vendedorCoaching(from, params.nombre, vendedor, nombreVendedor);
         break;
+      case 'vendedorVerHistorial':
+        await this.vendedorVerHistorial(from, params.identificador, vendedor);
+        break;
 
       // ━━━ CONSULTAS ESPECIALES (no en servicio aún) ━━━
       case 'vendedorMisHot':
@@ -6892,6 +6895,105 @@ Responde con fecha y hora:
       console.error('❌ Error en coaching:', error);
       await this.twilio.sendWhatsAppMessage(from,
         `❌ Error al analizar el lead. Intenta de nuevo.\n\nUso: *coach [nombre del lead]*`
+      );
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // VER HISTORIAL - Muestra conversación completa con un lead
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  private async vendedorVerHistorial(from: string, identificador: string, vendedor: any): Promise<void> {
+    try {
+      // Buscar lead por nombre o teléfono
+      const idLimpio = identificador.replace(/[-\s]/g, '');
+      const esTelefono = /^\d{10,15}$/.test(idLimpio);
+
+      let query = this.supabase.client
+        .from('leads')
+        .select('id, name, phone, property_interest, lead_score, stage, status, conversation_history, created_at, notes')
+        .eq('assigned_to', vendedor.id);
+
+      if (esTelefono) {
+        // Buscar por teléfono (puede tener 521 prefijo o no)
+        query = query.or(`phone.ilike.%${idLimpio}%,phone.ilike.%${idLimpio.replace(/^521/, '')}%`);
+      } else {
+        // Buscar por nombre
+        query = query.ilike('name', `%${identificador}%`);
+      }
+
+      const { data: leads } = await query.limit(1);
+
+      if (!leads || leads.length === 0) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `❌ No encontré un lead con "${identificador}".\n\n` +
+          `Uso:\n` +
+          `→ *ver Juan* - busca por nombre\n` +
+          `→ *ver 4921234567* - busca por teléfono`
+        );
+        return;
+      }
+
+      const lead = leads[0];
+      const historial = Array.isArray(lead.conversation_history) ? lead.conversation_history : [];
+
+      // Formatear teléfono para mostrar
+      const telefonoCorto = lead.phone.replace(/^521/, '').replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
+      const scoreEmoji = lead.lead_score >= 70 ? '🔥' : lead.lead_score >= 40 ? '🟡' : '🔵';
+
+      // Construir mensaje de historial
+      let msg = `📋 *Historial con ${lead.name || 'Lead'}*\n`;
+      msg += `📱 ${telefonoCorto} | ${scoreEmoji} Score: ${lead.lead_score || 0}\n`;
+      msg += `🏠 ${lead.property_interest || 'Sin desarrollo'} | ${lead.stage || 'new'}\n`;
+      msg += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+      if (historial.length === 0) {
+        msg += `_No hay mensajes registrados aún._\n\n`;
+      } else {
+        // Mostrar últimos 10 mensajes (para no exceder límite de WhatsApp)
+        const ultimosMensajes = historial.slice(-10);
+
+        for (const m of ultimosMensajes) {
+          const esLead = m.role === 'user' || m.from === 'lead' || m.from === 'user';
+          const contenido = (m.content || m.message || '').substring(0, 150);
+          const hora = m.timestamp ? new Date(m.timestamp).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '';
+
+          if (esLead) {
+            msg += `💬 *Lead* ${hora ? `(${hora})` : ''}:\n"${contenido}${contenido.length >= 150 ? '...' : ''}"\n\n`;
+          } else {
+            msg += `🤖 *SARA* ${hora ? `(${hora})` : ''}:\n"${contenido}${contenido.length >= 150 ? '...' : ''}"\n\n`;
+          }
+        }
+
+        if (historial.length > 10) {
+          msg += `_...y ${historial.length - 10} mensajes anteriores_\n\n`;
+        }
+      }
+
+      msg += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+      msg += `📝 *Responde aquí* para enviarle mensaje\n`;
+      msg += `→ *bridge ${lead.name?.split(' ')[0] || 'lead'}* para chat directo`;
+
+      // Guardar contexto de que estamos viendo este lead (para envío directo)
+      const notasActuales = typeof lead.notes === 'object' ? lead.notes : {};
+      await this.supabase.client.from('leads')
+        .update({
+          notes: {
+            ...notasActuales,
+            alerta_vendedor_id: vendedor.id,
+            sugerencia_pendiente: null, // No hay sugerencia, pero permite envío directo
+            viendo_historial: new Date().toISOString()
+          }
+        })
+        .eq('id', lead.id);
+
+      await this.twilio.sendWhatsAppMessage(from, msg);
+      console.log(`📋 Historial mostrado a ${vendedor.name} para lead ${lead.phone}`);
+
+    } catch (error) {
+      console.error('❌ Error en verHistorial:', error);
+      await this.twilio.sendWhatsAppMessage(from,
+        `❌ Error al buscar historial. Intenta de nuevo.\n\nUso: *ver [nombre o teléfono]*`
       );
     }
   }
