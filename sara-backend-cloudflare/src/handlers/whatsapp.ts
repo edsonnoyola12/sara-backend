@@ -8152,17 +8152,8 @@ Responde con fecha y hora:
     }
   }
 
-  // [CÓDIGO MIGRADO A AppointmentService - 11-ENE-2026]
-  // Todo el manejo de Calendar, mensajes a vendedor/asesor/cliente, cumpleaños y video
-  // ahora se hace vía AppointmentService.crearCitaCompleta()
-
-  // [FIN CÓDIGO MIGRADO - Las ~380 líneas de código viejo fueron eliminadas]
-  // Ahora AppointmentService maneja: DB, Calendar, mensajes vendedor/asesor/cliente, score
-
-  // TODO: Eliminar este bloque en limpieza posterior
-  // El código viejo de Calendar (~380 líneas) fue eliminado
-  // Ahora se maneja en AppointmentService.crearCitaCompleta()
-
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NOTA: Código de Calendar migrado a AppointmentService.crearCitaCompleta()
   // ═══════════════════════════════════════════════════════════════════════════
   // MÉTODO: Crear o Actualizar mortgage_applications + Notificar asesor
   // Migrado a MortgageService el 12-ENE-2026

@@ -109,8 +109,9 @@ npx wrangler tail --format=pretty
 |---------|--------|
 | `ayuda` | Ver comandos |
 | `mis leads` / `leads` | Ver leads asignados |
-| `status [nombre]` | Ver detalle de un lead |
+| `status [nombre]` / `info [nombre]` | Ver detalle de un lead |
 | `docs [nombre]` | Pedir documentos al lead |
+| `docs pendientes` / `pendientes` | Ver leads esperando documentos |
 | `preaprobado [nombre]` | Notificar pre-aprobación |
 | `rechazado [nombre] [motivo]` | Notificar rechazo |
 | `dile [nombre] que [msg]` | Enviar mensaje vía Sara |
@@ -143,8 +144,14 @@ npx wrangler tail --format=pretty
 | `video [desarrollo/modelo]` | Enviar video del desarrollo | `vendedorEnviarVideo` |
 | `credito [nombre]` | Pasar lead a asesor hipotecario | `vendedorPasarACredito` |
 | `nuevo lead [nombre] [tel] [desarrollo]` | Registrar lead directo (se queda con el vendedor) | `vendedorNuevoLead` |
-| `#mas` / `#continuar` | Extender bridge 6 min más | - |
-| `#cerrar` / `#fin` | Terminar conexiones activas | - |
+| `hot` / `leads hot` | Ver leads calientes (score >= 70) | `vendedorLeadsHot` |
+| `pendientes` | Ver leads pendientes de contactar | `vendedorLeadsPendientes` |
+| `coach [nombre]` | Coaching personalizado para un lead | `vendedorCoaching` |
+| `quien es [nombre]` / `info [nombre]` | Ver información completa del lead | `vendedorQuienEs` |
+| `mover [nombre] a [etapa]` | Mover lead a otra etapa del funnel | `vendedorMoverEtapa` |
+| `bridge [nombre]` | Chat directo con lead (10 min) | `bridgeLead` |
+| `#mas` / `#continuar` | Extender bridge 6 min más | `extenderBridge` |
+| `#cerrar` / `#fin` | Terminar conexiones activas | `cerrarBridge` |
 | Números `1`, `2`, `3`, `4` | Responder a opciones pendientes | - |
 
 > **NOTA**: Los comandos brochure/ubicacion/video buscan por nombre de desarrollo (ej: "Monte Verde") O por nombre de modelo (ej: "Acacia", "Fresno").
@@ -687,6 +694,53 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
   - Solo alerta una vez por cita (flag `pre_noshow_alert_sent`)
 
 - ✅ **Resumen: 40+ automatizaciones activas para vendedores**
+- ✅ Tests: 168 pasando ✅
+- ✅ Deploy exitoso
+
+**Sesión 11 (23:40) - Fixes Completos**
+- ✅ **8 Fixes implementados:**
+
+  **1. Rate limiting Veo 3** (index.ts:14853-14880)
+  - Máximo 100 videos/día
+  - Procesa máximo 3 por CRON (cada 2 min)
+  - Evita sobrecargar API de Google
+
+  **2. Round-robin con disponibilidad** (mortgageService.ts:51-90)
+  - Verifica vacaciones (notas.en_vacaciones/on_vacation)
+  - Verifica horario personalizado (notas.horario_inicio/fin)
+  - No asigna leads a asesores de vacaciones
+
+  **3. Registrar abandonos de crédito** (creditFlowService.ts:85-165)
+  - Guarda historial en notas.credit_flow_abandonos
+  - Registra: fecha, estado, razón, banco, ingreso
+  - Crea actividad en lead_activities
+
+  **4. Comando docs pendientes** (asesorCommandsService.ts:148, 875-930)
+  - `docs pendientes` / `pendientes` / `esperando docs`
+  - Muestra leads esperando documentos
+  - Incluye: días esperando, documentos faltantes
+  - Colores: 🔴 >3 días, 🟡 >1 día, 🟢 reciente
+
+  **5. Comandos vendedor documentados** (SARA_COMANDOS.md)
+  - `hot` / `leads hot` - Ver leads calientes
+  - `pendientes` - Leads sin contactar
+  - `coach [nombre]` - Coaching personalizado
+  - `quien es [nombre]` / `info [nombre]` - Info del lead
+  - `mover [nombre] a [etapa]` - Cambiar etapa
+  - `bridge [nombre]` - Chat directo
+
+  **6. Limpieza código** (whatsapp.ts:8155-8165)
+  - Removido bloque TODO obsoleto
+  - Simplificado comentarios de migración
+
+  **7. Notificaciones a vendedor** (ya existente)
+  - Sistema pending_notification + template reactivar_equipo
+  - Funciona correctamente para ventana 24h
+
+  **8. Broadcast completo** (ya existente)
+  - Flujo: `broadcast` → `segmentos` → `enviar a [seg]: [msg]`
+  - Cola automática para >15 leads
+
 - ✅ Tests: 168 pasando ✅
 - ✅ Deploy exitoso
 

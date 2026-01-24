@@ -14851,18 +14851,36 @@ async function verificarTimeoutConfirmaciones(supabase: SupabaseService, meta: M
 }
 
 async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWhatsAppService, env: any): Promise<void> {
+  // ═══════════════════════════════════════════════════════════
+  // RATE LIMITING: Máximo 100 videos/día para evitar sobrecargar API
+  // ═══════════════════════════════════════════════════════════
+  const hoyStr = new Date().toISOString().split('T')[0];
+  const { count: videosHoy } = await supabase.client
+    .from('pending_videos')
+    .select('id', { count: 'exact', head: true })
+    .gte('created_at', `${hoyStr}T00:00:00Z`)
+    .lt('created_at', `${hoyStr}T23:59:59Z`);
+
+  const MAX_VIDEOS_DIA = 100;
+  if ((videosHoy || 0) >= MAX_VIDEOS_DIA) {
+    console.log(`⚠️ RATE LIMIT: Ya se generaron ${videosHoy} videos hoy (máx ${MAX_VIDEOS_DIA})`);
+    return;
+  }
+
+  // Limitar a 3 por CRON (cada 2 min = 90/hora máximo teórico, pero conservador)
   const { data: pendientes } = await supabase.client
     .from('pending_videos')
     .select('*')
     .eq('sent', false)
-    .limit(5);
+    .order('created_at', { ascending: true })
+    .limit(3);
 
   if (!pendientes || pendientes.length === 0) {
     console.log('📭 No hay videos pendientes');
     return;
   }
 
-  console.log(`🎬 Procesando ${pendientes.length} videos pendientes`);
+  console.log(`🎬 Procesando ${pendientes.length} videos pendientes (${videosHoy || 0}/${MAX_VIDEOS_DIA} hoy)`);
 
   for (const video of pendientes) {
     console.log(`🔍 Verificando video: ${video.id} - ${video.lead_name}`);

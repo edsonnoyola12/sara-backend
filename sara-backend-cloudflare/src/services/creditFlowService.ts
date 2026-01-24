@@ -82,12 +82,12 @@ export class CreditFlowService {
   // ═══════════════════════════════════════════════════════════════════
   // CANCELAR FLUJO DE CRÉDITO (cuando el lead cambia de tema)
   // ═══════════════════════════════════════════════════════════════════
-  async cancelarFlujo(leadId: string): Promise<void> {
+  async cancelarFlujo(leadId: string, razon?: string): Promise<void> {
     try {
       // Obtener notas actuales
       const { data: lead } = await this.supabase.client
         .from('leads')
-        .select('notes, status')
+        .select('notes, status, name, assigned_to')
         .eq('id', leadId)
         .single();
 
@@ -101,6 +101,17 @@ export class CreditFlowService {
           }
         }
 
+        // Guardar historial de abandono antes de eliminar contexto
+        const contextoAnterior = notas.credit_flow_context;
+        if (!notas.credit_flow_abandonos) notas.credit_flow_abandonos = [];
+        notas.credit_flow_abandonos.push({
+          fecha: new Date().toISOString(),
+          estado_abandonado: contextoAnterior?.state || 'desconocido',
+          razon: razon || 'cambio_tema',
+          banco_preferido: contextoAnterior?.banco_preferido,
+          ingreso_mensual: contextoAnterior?.ingreso_mensual
+        });
+
         // Eliminar contexto de flujo de crédito
         delete notas.credit_flow_context;
 
@@ -113,7 +124,37 @@ export class CreditFlowService {
           })
           .eq('id', leadId);
 
-        console.log(`🏦 Flujo de crédito CANCELADO para lead ${leadId}`);
+        // Registrar en lead_activities
+        try {
+          await this.supabase.client.from('lead_activities').insert({
+            lead_id: leadId,
+            activity_type: 'credit_flow_abandoned',
+            notes: `Flujo de crédito abandonado en estado: ${contextoAnterior?.state || 'desconocido'}. Razón: ${razon || 'cambio_tema'}`,
+            created_at: new Date().toISOString()
+          });
+        } catch (actErr) {
+          console.log('⚠️ Error registrando actividad abandono:', actErr);
+        }
+
+        // Notificar al asesor si había uno asignado
+        if (contextoAnterior?.asesor_id) {
+          try {
+            const { data: asesor } = await this.supabase.client
+              .from('team_members')
+              .select('phone, name')
+              .eq('id', contextoAnterior.asesor_id)
+              .single();
+
+            if (asesor?.phone) {
+              // Se notificará externamente
+              console.log(`📤 Asesor ${asesor.name} debería ser notificado del abandono`);
+            }
+          } catch (asesorErr) {
+            console.log('⚠️ Error obteniendo asesor para notificar:', asesorErr);
+          }
+        }
+
+        console.log(`🏦 Flujo de crédito CANCELADO para lead ${leadId} (razón: ${razon || 'cambio_tema'})`);
       }
     } catch (e) {
       console.log('⚠️ Error cancelando flujo de crédito:', e);

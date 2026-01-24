@@ -144,6 +144,11 @@ export class AsesorCommandsService {
       return { action: 'call_handler', handlerName: 'asesorStatusLead', handlerParams: { query: statusMatch[1] } };
     }
 
+    // ━━━ DOCS PENDIENTES - Ver leads esperando documentos ━━━
+    if (msg === 'docs pendientes' || msg === 'documentos pendientes' || msg === 'pendientes' || msg === 'esperando docs') {
+      return { action: 'call_handler', handlerName: 'asesorDocsPendientes' };
+    }
+
     // ━━━ DOCS [lead] ━━━
     const docsMatch = msg.match(/^docs?\s+(.+)$/i) || msg.match(/^documentos?\s+(.+)$/i) || msg.match(/^pedir docs?\s+(.+)$/i);
     if (docsMatch) {
@@ -334,6 +339,9 @@ export class AsesorCommandsService {
 
       case 'asesorReporte':
         return await this.getReporte(asesor.id, nombreAsesor);
+
+      case 'asesorDocsPendientes':
+        return await this.getDocsPendientes(asesor.id, nombreAsesor, esAdmin);
 
       default:
         return { needsExternalHandler: true };
@@ -864,6 +872,74 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
     msg += `📈 Conversión: ${stats.total > 0 ? Math.round((stats.aprobados / stats.total) * 100) : 0}%`;
 
     return { message: msg };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // DOCS PENDIENTES - Ver leads esperando documentos
+  // ═══════════════════════════════════════════════════════════════════
+  private async getDocsPendientes(asesorId: string, nombreAsesor: string, esAdmin: boolean = false): Promise<HandlerResult> {
+    try {
+      // Buscar mortgage_applications con status docs_requested
+      const { data: solicitudes } = await this.supabase.client
+        .from('mortgage_applications')
+        .select('id, lead_id, lead_name, lead_phone, status, docs_requested_at, documents_received, created_at')
+        .eq('status', 'docs_requested')
+        .eq(esAdmin ? 'status' : 'asesor_id', esAdmin ? 'docs_requested' : asesorId)
+        .order('docs_requested_at', { ascending: true });
+
+      if (!solicitudes || solicitudes.length === 0) {
+        return { message: `📄 *Documentos Pendientes, ${nombreAsesor}*\n\nNo hay leads esperando documentos.\n\n💡 Usa *DOCS [nombre]* para solicitar documentos a un lead.` };
+      }
+
+      let msg = `📄 *Documentos Pendientes, ${nombreAsesor}*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+      for (const sol of solicitudes) {
+        const diasEsperando = sol.docs_requested_at
+          ? Math.floor((Date.now() - new Date(sol.docs_requested_at).getTime()) / (1000 * 60 * 60 * 24))
+          : 0;
+
+        const docsRecibidos = sol.documents_received || [];
+        const docsFaltantes = this.getDocumentosFaltantes(docsRecibidos);
+
+        const emoji = diasEsperando > 3 ? '🔴' : diasEsperando > 1 ? '🟡' : '🟢';
+
+        msg += `${emoji} *${sol.lead_name || 'Sin nombre'}*\n`;
+        msg += `   📱 ${sol.lead_phone}\n`;
+        msg += `   ⏱️ Esperando hace ${diasEsperando} día${diasEsperando !== 1 ? 's' : ''}\n`;
+
+        if (docsFaltantes.length > 0) {
+          msg += `   📋 Faltan: ${docsFaltantes.slice(0, 3).join(', ')}${docsFaltantes.length > 3 ? '...' : ''}\n`;
+        }
+        msg += `\n`;
+      }
+
+      msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+      msg += `📊 Total: ${solicitudes.length} lead${solicitudes.length !== 1 ? 's' : ''} esperando docs\n\n`;
+      msg += `💡 *Acciones:*\n`;
+      msg += `• *llamar [nombre]* - Ver teléfono\n`;
+      msg += `• *dile [nombre] que...* - Enviar recordatorio`;
+
+      return { message: msg };
+    } catch (e) {
+      console.error('Error getDocsPendientes:', e);
+      return { error: '❌ Error al obtener documentos pendientes' };
+    }
+  }
+
+  private getDocumentosFaltantes(recibidos: string[]): string[] {
+    const todosLosDocumentos = [
+      'INE/IFE',
+      'Comprobante domicilio',
+      'Últimos 3 recibos nómina',
+      'Estados cuenta (3 meses)',
+      'Constancia situación fiscal',
+      'CURP',
+      'Acta nacimiento'
+    ];
+
+    return todosLosDocumentos.filter(doc =>
+      !recibidos.some(r => r.toLowerCase().includes(doc.toLowerCase().split('/')[0]))
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════════

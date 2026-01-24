@@ -48,11 +48,38 @@ export class MortgageService {
     try {
       console.log(`🏦 Finalizando flujo crédito para ${lead.name || lead.phone}...`);
 
-      // 1. Buscar asesor hipotecario disponible
-      const asesores = teamMembers.filter((m: any) =>
-        m.active &&
-        (m.role === 'asesor' || m.role?.includes('hipoteca') || m.role?.includes('credito'))
-      );
+      // 1. Buscar asesor hipotecario disponible (activo, no en vacaciones, en horario)
+      const ahora = new Date();
+      const horaActual = ahora.getHours();
+      const diaActual = ahora.getDay(); // 0=Dom, 1=Lun...
+      const esHorarioLaboral = horaActual >= 9 && horaActual < 19 && diaActual >= 1 && diaActual <= 5;
+
+      const asesores = teamMembers.filter((m: any) => {
+        if (!m.active) return false;
+        if (!(m.role === 'asesor' || m.role?.includes('hipoteca') || m.role?.includes('credito'))) return false;
+
+        // Verificar vacaciones
+        const notas = typeof m.notes === 'object' ? m.notes : {};
+        if (notas.en_vacaciones || notas.on_vacation) {
+          const finVacaciones = notas.vacaciones_hasta || notas.vacation_until;
+          if (finVacaciones && new Date(finVacaciones) > ahora) {
+            console.log(`⏸️ Asesor ${m.name} en vacaciones hasta ${finVacaciones}`);
+            return false;
+          }
+        }
+
+        // Verificar horario personalizado (si existe)
+        if (notas.horario_inicio && notas.horario_fin) {
+          const horaInicio = parseInt(notas.horario_inicio);
+          const horaFin = parseInt(notas.horario_fin);
+          if (horaActual < horaInicio || horaActual >= horaFin) {
+            console.log(`⏰ Asesor ${m.name} fuera de horario (${notas.horario_inicio}-${notas.horario_fin})`);
+            return false;
+          }
+        }
+
+        return true;
+      });
 
       if (asesores.length === 0) {
         console.log('⚠️ No hay asesores hipotecarios activos');
