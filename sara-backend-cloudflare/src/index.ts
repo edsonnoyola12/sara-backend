@@ -276,6 +276,129 @@ export default {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // 🧪 TEST REAL - Envía mensajes de prueba REALES a tu teléfono
+    // USO: /test-real?test=briefing|video|comando|alerta
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/test-real" && request.method === "GET") {
+      const TEST_PHONE = '5212224558475'; // Tu teléfono CEO
+      const testType = url.searchParams.get('test') || 'menu';
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      const resultados: any = { test: testType, timestamp: new Date().toISOString() };
+
+      try {
+        switch (testType) {
+          case 'menu':
+            return corsResponse(JSON.stringify({
+              mensaje: '🧪 Tests disponibles - usa ?test=X',
+              tests: {
+                'mensaje': 'Envía un mensaje simple de prueba',
+                'briefing': 'Envía el briefing matutino',
+                'reporte': 'Envía el reporte diario CEO',
+                'alerta': 'Simula alerta de lead caliente',
+                'comando': 'Prueba comando ventas y envía resultado',
+                'video': 'Genera y envía video de prueba (tarda ~2min)',
+                'all': 'Ejecuta TODOS los tests'
+              },
+              uso: '/test-real?test=mensaje'
+            }));
+
+          case 'mensaje':
+            await meta.sendWhatsAppMessage(TEST_PHONE,
+              `🧪 *TEST SARA*\n\n` +
+              `Este es un mensaje de prueba.\n` +
+              `Timestamp: ${new Date().toLocaleString('es-MX')}\n\n` +
+              `Si ves esto, el envío de WhatsApp funciona ✅`
+            );
+            resultados.mensaje = '✅ Mensaje enviado';
+            break;
+
+          case 'briefing':
+            const { data: vendedor } = await supabase.client
+              .from('team_members')
+              .select('*')
+              .eq('phone', TEST_PHONE)
+              .single();
+            if (vendedor) {
+              await enviarBriefingMatutino(supabase, meta, vendedor);
+              resultados.briefing = '✅ Briefing enviado';
+            } else {
+              resultados.briefing = '❌ Vendedor no encontrado';
+            }
+            break;
+
+          case 'reporte':
+            await enviarReporteDiarioCEO(supabase, meta);
+            resultados.reporte = '✅ Reporte diario enviado';
+            break;
+
+          case 'alerta':
+            await meta.sendWhatsAppMessage(TEST_PHONE,
+              `🔥 *ALERTA TEST: Lead Caliente*\n\n` +
+              `👤 Juan Pérez (Test)\n` +
+              `📱 5551234567\n` +
+              `🎯 Señal: "Quiero apartar hoy"\n` +
+              `🏠 Interés: Monte Verde\n\n` +
+              `_Esto es una prueba del sistema de alertas_`
+            );
+            resultados.alerta = '✅ Alerta enviada';
+            break;
+
+          case 'comando':
+            const ceoService = new CEOCommandsService(supabase);
+            const result = await ceoService.executeHandler('reporteVentas', 'Test', {});
+            await meta.sendWhatsAppMessage(TEST_PHONE, result.message || 'Sin resultado');
+            resultados.comando = '✅ Comando ventas ejecutado y enviado';
+            break;
+
+          case 'video':
+            resultados.video = '⏳ Video en cola - revisa /debug-videos en 2 min';
+            // Insertar en pending_videos para que el CRON lo procese
+            await supabase.client.from('pending_videos').insert({
+              operation_id: 'TEST_' + Date.now(),
+              lead_phone: TEST_PHONE,
+              lead_name: 'Test Video',
+              desarrollo: 'Monte Verde',
+              sent: false
+            });
+            break;
+
+          case 'all':
+            // Mensaje
+            await meta.sendWhatsAppMessage(TEST_PHONE, `🧪 *INICIANDO TESTS COMPLETOS*\n\nTimestamp: ${new Date().toLocaleString('es-MX')}`);
+            resultados.mensaje = '✅';
+
+            // Pequeña pausa entre mensajes
+            await new Promise(r => setTimeout(r, 1000));
+
+            // Alerta
+            await meta.sendWhatsAppMessage(TEST_PHONE, `🔥 *TEST: Alerta Lead Caliente*\n\n👤 Test Lead\n📱 5551234567\n🎯 "Quiero apartar"`);
+            resultados.alerta = '✅';
+
+            await new Promise(r => setTimeout(r, 1000));
+
+            // Comando
+            const ceoSvc = new CEOCommandsService(supabase);
+            const ventasResult = await ceoSvc.executeHandler('reporteVentas', 'Test', {});
+            await meta.sendWhatsAppMessage(TEST_PHONE, ventasResult.message || 'Error en ventas');
+            resultados.comando = '✅';
+
+            resultados.resumen = '✅ 3 tests ejecutados - revisa tu WhatsApp';
+            break;
+
+          default:
+            return corsResponse(JSON.stringify({ error: 'Test no válido', tests_disponibles: ['mensaje', 'briefing', 'reporte', 'alerta', 'comando', 'video', 'all'] }));
+        }
+
+        return corsResponse(JSON.stringify({ ok: true, ...resultados }));
+
+      } catch (e: any) {
+        console.error('❌ Error en test-real:', e);
+        return corsResponse(JSON.stringify({ ok: false, error: e.message, stack: e.stack }));
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // 🚨 EMERGENCY STOP - Detener TODOS los broadcasts inmediatamente
     // ═══════════════════════════════════════════════════════════════════════
     if (url.pathname === "/api/emergency-stop" && request.method === "POST") {
