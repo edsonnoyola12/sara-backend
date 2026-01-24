@@ -416,8 +416,25 @@ export class WhatsAppHandler {
         this.getAllTeamMembers()
       ]);
 
-      const lead = leadResult.lead;
-      const isNewLead = leadResult.isNew;
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // 🛡️ PRIORIDAD TEAM MEMBER: Si el teléfono es de un vendedor/admin,
+      // NO procesar como lead - saltar directo a lógica de vendedor
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const phoneCleanForTeamCheck = cleanPhone.replace(/\D/g, '').slice(-10);
+      const esTeamMember = teamMembers.some((tm: any) => {
+        if (!tm.phone) return false;
+        const tmPhone = tm.phone.replace(/\D/g, '').slice(-10);
+        return tmPhone === phoneCleanForTeamCheck;
+      });
+
+      if (esTeamMember) {
+        console.log(`🛡️ TEAM MEMBER DETECTADO TEMPRANO: ${cleanPhone} - saltando procesamiento de lead`);
+        // Saltar todo el procesamiento de lead y ir directo a la sección de vendedor (línea ~860)
+        // El código de vendedor está más abajo, así que continuamos pero marcamos que NO es lead
+      }
+
+      const lead = esTeamMember ? null : leadResult.lead;  // Si es team member, no tratar como lead
+      const isNewLead = esTeamMember ? false : leadResult.isNew;
 
       if (isNewLead) {
         console.log('🆕 LEAD NUEVO detectado - se generará video de bienvenida cuando tenga nombre + desarrollo');
