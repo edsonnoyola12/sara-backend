@@ -497,7 +497,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-22 23:18*
+*Última actualización: 2026-01-23 19:10*
 
 ---
 
@@ -624,6 +624,45 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ---
 
 ## HISTORIAL DE CAMBIOS
+
+### 2026-01-23
+
+**Sesión 7 (19:00)**
+- ✅ **Video semanal sin texto overlay**
+  - Antes: Veo 3 intentaba renderizar texto "SEMANA EXITOSA" y stats (salía corrupto)
+  - Ahora: Video solo muestra escena de celebración (sin texto)
+  - Stats se envían en caption de WhatsApp formateado
+- ✅ **Caption mejorado del video semanal:**
+  ```
+  🎬 *¡RESUMEN SEMANAL!*
+
+  📊 *Resultados del equipo:*
+     📥 11 leads nuevos
+     📅 2 citas agendadas
+     🏆 0 cierres
+
+  🥇 *MVP de la semana:*
+     Juan Pérez (3 cierres)
+
+  ¡Vamos por más! 💪🔥
+  ```
+- ✅ **Cleanup del repositorio:**
+  - Agregado `.gitignore` (node_modules, .wrangler, *.png, .DS_Store)
+  - Removidos 12,084 archivos innecesarios del repo
+- ✅ Archivo: `src/index.ts` líneas ~14862-14913
+
+**Sesión 6 (18:00)**
+- ✅ **Flujo no-show mejorado:**
+  - Cuando lead responde al mensaje de reagendar → notifica al vendedor
+  - Guarda respuesta en CRM y actualiza status a 'contacted'
+  - Vendedor recibe: "📱 *[Lead] respondió a tu mensaje de reagendar:* [mensaje]"
+- ✅ **Video semanal ahora incluye coordinadores:**
+  - Antes: Solo vendedores y admins
+  - Ahora: vendedores + admins + coordinadores
+- ✅ **Nuevo endpoint `/send-video-to-role`:**
+  - Permite enviar video manualmente a roles específicos
+  - Útil para pruebas y envíos ad-hoc
+- ✅ Archivo: `src/handlers/whatsapp.ts`, `src/index.ts`
 
 ### 2026-01-22
 
