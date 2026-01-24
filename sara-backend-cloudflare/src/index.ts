@@ -14691,11 +14691,26 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
                 .in('role', ['vendedor', 'admin', 'coordinador'])
                 .eq('active', true);
 
+              // Parsear stats del campo desarrollo (JSON)
+              let caption = '🎬 *¡Resumen de la semana!*\n\n¡Excelente trabajo equipo! 🔥';
+              try {
+                const stats = JSON.parse(video.desarrollo);
+                caption = `🎬 *¡RESUMEN SEMANAL!*\n\n` +
+                  `📊 *Resultados del equipo:*\n` +
+                  `   📥 ${stats.leads} leads nuevos\n` +
+                  `   📅 ${stats.citas} citas agendadas\n` +
+                  `   🏆 ${stats.cierres} cierres\n\n` +
+                  `🥇 *MVP de la semana:*\n` +
+                  `   ${stats.topName} (${stats.topCierres} cierres)\n\n` +
+                  `¡Vamos por más! 💪🔥`;
+              } catch (e) {
+                console.log('⚠️ No se pudo parsear stats, usando caption default');
+              }
+
               for (const miembro of equipo || []) {
                 if (!miembro.phone) continue;
                 try {
-                  await meta.sendWhatsAppVideoById(miembro.phone, mediaId,
-                    `🎬 *¡Video de la semana!*\n\n🏠 ${video.desarrollo}\n\n¡Excelente trabajo equipo! 👪🔥`);
+                  await meta.sendWhatsAppVideoById(miembro.phone, mediaId, caption);
                   console.log(`✅ Video semanal enviado a ${miembro.name}`);
                   enviadoExitoso = true;
                 } catch (e: any) {
@@ -14858,12 +14873,12 @@ async function generarVideoSemanalLogros(supabase: SupabaseService, meta: MetaWh
       }
     }
 
-    // Generar video con Veo 3
-    const promptVideo = `Celebratory office scene with Mexican real estate team. 
-Text overlay appears: "SEMANA EXITOSA" then "${numLeads} LEADS | ${numCitas} CITAS | ${numCierres} CIERRES".
-Then "TOP: ${topPerformer.name}" with trophy emoji.
-Team clapping and celebrating. Professional, modern office background.
-Upbeat motivational feeling. 8 seconds. No audio needed.`;
+    // Generar video con Veo 3 (SIN texto - AI no genera texto legible)
+    const promptVideo = `Celebratory office scene with happy Mexican real estate team.
+Professional team of 5-6 people in business casual attire clapping and celebrating.
+Modern bright office with glass windows, natural lighting.
+Slow motion confetti falling. High fives and genuine smiles.
+Cinematic, warm color grading. 8 seconds. No text, no overlays, no captions - clean video only.`;
 
     console.log('🎬 Generando video semanal con Veo 3...');
 
@@ -14902,13 +14917,22 @@ Upbeat motivational feeling. 8 seconds. No audio needed.`;
 
     // Guardar para que el CRON lo procese y envíe
     // Usamos un teléfono especial "TEAM_WEEKLY" para identificar que es video grupal
+    // desarrollo contiene JSON con stats para el caption
+    const statsJson = JSON.stringify({
+      leads: numLeads,
+      citas: numCitas,
+      cierres: numCierres,
+      topName: topPerformer.name,
+      topCierres: topPerformer.cierres
+    });
+
     await supabase.client
       .from('pending_videos')
       .insert({
         operation_id: operationName,
         lead_phone: 'TEAM_WEEKLY',
         lead_name: 'Equipo Santa Rita',
-        desarrollo: `Semana: ${numLeads}L/${numCitas}C/${numCierres}V`,
+        desarrollo: statsJson,
         sent: false
       });
 
