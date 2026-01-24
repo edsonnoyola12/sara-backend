@@ -3181,6 +3181,47 @@ export class WhatsAppHandler {
     const { notes, notasVendedor } = await vendorService.getVendedorNotes(vendedor.id);
 
     // ═══════════════════════════════════════════════════════════
+    // MENSAJE PENDIENTE A LEAD (después de comando "ver")
+    // ═══════════════════════════════════════════════════════════
+    const pendingMsgToLead = notasVendedor?.pending_message_to_lead;
+    if (pendingMsgToLead && pendingMsgToLead.lead_phone) {
+      const sentAt = pendingMsgToLead.timestamp ? new Date(pendingMsgToLead.timestamp) : null;
+      const minutosTranscurridos = sentAt ? (Date.now() - sentAt.getTime()) / (1000 * 60) : 999;
+
+      // Solo válido por 10 minutos
+      if (minutosTranscurridos <= 10) {
+        // Enviar mensaje al lead
+        const leadPhone = pendingMsgToLead.lead_phone.startsWith('521')
+          ? pendingMsgToLead.lead_phone
+          : '521' + pendingMsgToLead.lead_phone.replace(/\D/g, '').slice(-10);
+
+        try {
+          await this.meta.sendWhatsAppMessage(leadPhone,
+            `💬 *Mensaje de ${vendedor.name?.split(' ')[0] || 'tu asesor'}:*\n\n${body}`
+          );
+
+          // Limpiar pending y confirmar
+          delete notasVendedor.pending_message_to_lead;
+          await this.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+
+          await this.meta.sendWhatsAppMessage(from,
+            `✅ *Mensaje enviado a ${pendingMsgToLead.lead_name}*\n\n` +
+            `"${body.substring(0, 100)}${body.length > 100 ? '...' : ''}"\n\n` +
+            `💡 Para hablar directo: *bridge ${pendingMsgToLead.lead_name?.split(' ')[0] || 'lead'}*`
+          );
+          return;
+        } catch (err) {
+          console.error('Error enviando mensaje pendiente:', err);
+          // Continuar con el flujo normal
+        }
+      } else {
+        // Expirado, limpiar
+        delete notasVendedor.pending_message_to_lead;
+        await this.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // PRIMERO: Verificar pending_show_confirmation (pregunta ¿LLEGÓ?)
     // Esto debe procesarse ANTES del onboarding para no perder respuestas
     // ═══════════════════════════════════════════════════════════
@@ -6928,27 +6969,57 @@ Responde con fecha y hora:
       const idLimpio = identificador.replace(/[-\s]/g, '');
       const esTelefono = /^\d{10,15}$/.test(idLimpio);
 
-      let query = this.supabase.client
-        .from('leads')
-        .select('id, name, phone, property_interest, lead_score, stage, status, conversation_history, created_at, notes')
-        .eq('assigned_to', vendedor.id);
+      console.log(`🔍 VER HISTORIAL: idLimpio="${idLimpio}" esTelefono=${esTelefono} vendedor.id="${vendedor.id}"`);
+
+      let leads: any[] = [];
+
+      // Variable para debug
+      let queryDebug = '';
 
       if (esTelefono) {
-        // Buscar por teléfono (puede tener 521 prefijo o no)
-        query = query.or(`phone.ilike.%${idLimpio}%,phone.ilike.%${idLimpio.replace(/^521/, '')}%`);
+        queryDebug += `esTel=true, idLimpio=${idLimpio}`;
+
+        // Buscar por teléfono
+        const { data: foundLeads, error: err1 } = await this.supabase.client
+          .from('leads')
+          .select('id, name, phone, property_interest, lead_score, status, conversation_history, created_at, notes, assigned_to')
+          .ilike('phone', `%${idLimpio}%`)
+          .limit(1);
+
+        queryDebug += `, Q1=${foundLeads?.length || 0}/${err1?.message || 'ok'}`;
+
+        if (foundLeads && foundLeads.length > 0) {
+          leads = foundLeads;
+        }
       } else {
+        queryDebug += `esTel=false`;
         // Buscar por nombre
-        query = query.ilike('name', `%${identificador}%`);
+        const { data } = await this.supabase.client
+          .from('leads')
+          .select('id, name, phone, property_interest, lead_score, status, conversation_history, created_at, notes, assigned_to')
+          .ilike('name', `%${identificador}%`)
+          .eq('assigned_to', vendedor.id)
+          .limit(1);
+
+        leads = data || [];
       }
 
-      const { data: leads } = await query.limit(1);
+      console.log(`🔍 VER HISTORIAL FINAL: encontrados=${leads?.length || 0}`);
 
       if (!leads || leads.length === 0) {
+        // DEBUG: Enviar info de diagnóstico
+        const { data: debugLeads } = await this.supabase.client
+          .from('leads')
+          .select('id, phone, assigned_to')
+          .ilike('phone', `%${idLimpio}%`)
+          .limit(1);
+
+        const debugInfo = debugLeads?.[0]
+          ? `\n\n🔧 DEBUG: ${queryDebug}\n📍 Lead existe: phone=${debugLeads[0].phone}`
+          : `\n\n🔧 DEBUG: ${queryDebug}\n📍 No existe lead`;
+
         await this.twilio.sendWhatsAppMessage(from,
-          `❌ No encontré un lead con "${identificador}".\n\n` +
-          `Uso:\n` +
-          `→ *ver Juan* - busca por nombre\n` +
-          `→ *ver 4921234567* - busca por teléfono`
+          `❌ No encontré un lead con "${identificador}".${debugInfo}`
         );
         return;
       }
@@ -6963,7 +7034,7 @@ Responde con fecha y hora:
       // Construir mensaje de historial
       let msg = `📋 *Historial con ${lead.name || 'Lead'}*\n`;
       msg += `📱 ${telefonoCorto} | ${scoreEmoji} Score: ${lead.lead_score || 0}\n`;
-      msg += `🏠 ${lead.property_interest || 'Sin desarrollo'} | ${lead.stage || 'new'}\n`;
+      msg += `🏠 ${lead.property_interest || 'Sin desarrollo'} | ${lead.status || 'new'}\n`;
       msg += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
       if (historial.length === 0) {
@@ -6993,21 +7064,25 @@ Responde con fecha y hora:
       msg += `📝 *Responde aquí* para enviarle mensaje\n`;
       msg += `→ *bridge ${lead.name?.split(' ')[0] || 'lead'}* para chat directo`;
 
-      // Guardar contexto de que estamos viendo este lead (para envío directo)
-      const notasActuales = typeof lead.notes === 'object' ? lead.notes : {};
-      await this.supabase.client.from('leads')
+      // Guardar pending_message_to_lead en el vendedor para que el siguiente mensaje se envíe al lead
+      const vendedorNotes = typeof vendedor.notes === 'object' ? vendedor.notes : {};
+      await this.supabase.client.from('team_members')
         .update({
           notes: {
-            ...notasActuales,
-            alerta_vendedor_id: vendedor.id,
-            sugerencia_pendiente: null, // No hay sugerencia, pero permite envío directo
-            viendo_historial: new Date().toISOString()
+            ...vendedorNotes,
+            pending_message_to_lead: {
+              lead_id: lead.id,
+              lead_name: lead.name || 'Lead',
+              lead_phone: lead.phone,
+              timestamp: new Date().toISOString(),
+              expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() // 10 minutos
+            }
           }
         })
-        .eq('id', lead.id);
+        .eq('id', vendedor.id);
 
       await this.twilio.sendWhatsAppMessage(from, msg);
-      console.log(`📋 Historial mostrado a ${vendedor.name} para lead ${lead.phone}`);
+      console.log(`📋 Historial mostrado a ${vendedor.name} para lead ${lead.phone} - pending_message activado`);
 
     } catch (error) {
       console.error('❌ Error en verHistorial:', error);

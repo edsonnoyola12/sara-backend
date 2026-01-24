@@ -148,6 +148,7 @@ npx wrangler tail --format=pretty
 | `pendientes` | Ver leads pendientes de contactar | `vendedorLeadsPendientes` |
 | `coach [nombre]` | Coaching personalizado para un lead | `vendedorCoaching` |
 | `quien es [nombre]` / `info [nombre]` | Ver información completa del lead | `vendedorQuienEs` |
+| `ver [nombre/teléfono]` | Ver historial de conversación con lead | `vendedorVerHistorial` |
 | `mover [nombre] a [etapa]` | Mover lead a otra etapa del funnel | `vendedorMoverEtapa` |
 | `bridge [nombre]` | Chat directo con lead (10 min) | `bridgeLead` |
 | `#mas` / `#continuar` | Extender bridge 6 min más | `extenderBridge` |
@@ -162,6 +163,20 @@ Pasa un lead a un asesor hipotecario:
 - `credito a María` - También funciona con "a"
 - `hipoteca Pedro` - Alias
 - `pasar Juan a credito` - Formato alternativo
+
+### Comando: ver [nombre/teléfono]
+Muestra el historial de conversación con un lead:
+- `ver Juan` - Busca por nombre
+- `ver 4921375548` - Busca por teléfono (con o sin guiones)
+- `ver 492-137-5548` - También funciona con guiones
+
+**Muestra:**
+- Nombre, teléfono, score, desarrollo de interés
+- Últimos 10 mensajes de la conversación
+- Quién escribió cada mensaje (Lead o SARA)
+- Sugerencia para responder o activar bridge
+
+**Nota:** CEO/Admin pueden ver cualquier lead. Vendedores solo ven sus leads asignados.
 
 ### Comando: nuevo lead
 Registra un lead que se queda asignado al vendedor (NO entra a round robin):
@@ -390,6 +405,8 @@ Total: 8 actividades
 29. ✅ `MortgageService` vacío - Implementado `finalizeCreditFlow()`, `getCreditsForVendor()`, etc.
 30. ✅ Video no enviado si falta desarrollo - Agregado fallback a primer desarrollo con video
 31. ✅ DNC no excluido de broadcasts - Excluir `do_not_contact=true` en queries
+32. ✅ Comando `ver` fallaba con columna `stage` inexistente - Removida de queries (2026-01-24)
+33. ✅ Team members tratados como leads - Prioridad team_member sobre lead (2026-01-24)
 
 ---
 
@@ -459,6 +476,7 @@ Total: 8 actividades
 | `nuevo lead [nombre] [tel] [desarrollo]` | ✅ Verificado 2026-01-22 (registra lead directo) |
 | `bridge [nombre]` | ✅ Verificado 2026-01-22 (chat directo 6 min) |
 | `coach [nombre]` | ✅ Implementado 2026-01-22 (coaching personalizado por lead) |
+| `ver [nombre/teléfono]` | ✅ Probado 2026-01-24 (historial de conversación) |
 
 ### Bugs arreglados en pruebas
 10. ✅ JSON parsing en `asesorCommandsService.ts` - algunos leads tenían `notes` como texto plano, agregado `safeParseNotes()` helper
@@ -504,7 +522,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-23 23:00*
+*Última actualización: 2026-01-24 16:45*
 
 ---
 
