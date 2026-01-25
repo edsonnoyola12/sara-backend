@@ -10,12 +10,34 @@
 # 1. Correr tests (OBLIGATORIO)
 npm test
 
-# 2. Si pasan todos, hacer deploy
+# 2. Si pasan todos, hacer deploy a STAGING primero
+npx wrangler deploy --env staging
+
+# 3. Verificar en staging
+./scripts/smoke-test.sh https://sara-backend-staging.edson-633.workers.dev $API_SECRET
+
+# 4. Si todo OK, deploy a PRODUCCIÓN
 npx wrangler deploy
 
-# 3. Verificar logs
+# 5. Verificar en producción
+./scripts/smoke-test.sh https://sara-backend.edson-633.workers.dev $API_SECRET
+
+# 6. Ver logs
 npx wrangler tail --format=pretty
 ```
+
+### Environments
+
+| Environment | URL | Comando Deploy | Crons |
+|-------------|-----|----------------|-------|
+| **Production** | `sara-backend.edson-633.workers.dev` | `npx wrangler deploy` | ✅ Activos |
+| **Staging** | `sara-backend-staging.edson-633.workers.dev` | `npx wrangler deploy --env staging` | ❌ Desactivados |
+
+**Staging sirve para:**
+- Probar cambios antes de producción
+- Sin crons (no envía mensajes automáticos)
+- KV Cache separado
+- Mismos secrets que producción
 
 ### Tests Automatizados (211 tests)
 
@@ -774,6 +796,33 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-25
+
+**Sesión 6 (09:00) - Infraestructura Enterprise**
+
+- ✅ **KV Cache para reducir carga de DB:**
+  - `CacheService` nuevo en `src/services/cacheService.ts`
+  - Cache de `team_members` (TTL: 5 min)
+  - Cache de `properties` (TTL: 10 min)
+  - Endpoint `/debug-cache` para monitoreo
+  - Si KV no disponible → fallback a DB (fail-safe)
+
+- ✅ **Quick Wins de Seguridad:**
+  - **CORS Whitelist**: Solo dominios autorizados (sara-crm.vercel.app, gruposantarita.com, localhost)
+  - **Rate Limiting**: 100 req/min por IP usando KV
+  - **Structured Logging**: JSON con timestamp, level, requestId, path, ip
+  - **Root endpoint**: `/` devuelve info del sistema
+  - **Smoke Tests**: `./scripts/smoke-test.sh` (7 tests automáticos)
+
+- ✅ **Staging Environment:**
+  - URL: `https://sara-backend-staging.edson-633.workers.dev`
+  - Deploy: `npx wrangler deploy --env staging`
+  - KV namespace separado (no comparte cache con producción)
+  - Sin CRONs (evita mensajes automáticos en staging)
+  - Script setup: `./scripts/setup-staging.sh`
+
+- ⏸️ **CI/CD con GitHub Actions:**
+  - Workflow creado pero pendiente de token con scope `workflow`
+  - Archivo: `.github/workflows/ci-cd.yml` (en repo root)
 
 **Sesión 5 (22:45) - Análisis completo y mejoras de código**
 
