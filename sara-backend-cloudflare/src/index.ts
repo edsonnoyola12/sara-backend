@@ -406,6 +406,234 @@ export default {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // 🧪 DEBUG PENDING FOLLOWUP - Ver estado del pending_followup de un lead
+    // USO: /debug-followup?phone=5610016226
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/debug-followup" && request.method === "GET") {
+      const phone = url.searchParams.get('phone') || '';
+      const phoneLimpio = phone.replace(/[-\s]/g, '');
+
+      const { data: lead } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, notes, assigned_to')
+        .or(`phone.ilike.%${phoneLimpio}%,phone.ilike.%${phoneLimpio.slice(-10)}%`)
+        .single();
+
+      if (!lead) {
+        return corsResponse(JSON.stringify({ error: 'Lead no encontrado', phone: phoneLimpio }), 404);
+      }
+
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      const pending = notas.pending_followup;
+
+      return corsResponse(JSON.stringify({
+        lead_id: lead.id,
+        lead_name: lead.name,
+        lead_phone: lead.phone,
+        assigned_to: lead.assigned_to,
+        pending_followup: pending || null,
+        has_pending: !!pending,
+        status: pending?.status || 'none'
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🧪 TEST CONTEXTO IA - Ver qué info recibe la IA sobre un lead
+    // USO: /test-contexto?phone=5610016226
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/test-contexto" && request.method === "GET") {
+      const phone = url.searchParams.get('phone') || '5215610016226';
+      const phoneLimpio = phone.replace(/\D/g, '');
+
+      // Buscar lead
+      const { data: lead } = await supabase.client
+        .from('leads')
+        .select('*')
+        .or(`phone.ilike.%${phoneLimpio}%,phone.ilike.%${phoneLimpio.slice(-10)}%`)
+        .single();
+
+      if (!lead) {
+        return corsResponse(JSON.stringify({ error: 'Lead no encontrado' }), 404);
+      }
+
+      // Verificar cita existente (igual que hace el AI service)
+      const { data: citaExistente } = await supabase.client
+        .from('appointments')
+        .select('scheduled_date, scheduled_time, property_name, status')
+        .eq('lead_id', lead.id)
+        .in('status', ['scheduled', 'confirmed'])
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const tieneCita = citaExistente && citaExistente.length > 0;
+      const citaInfo = tieneCita
+        ? `✅ YA TIENE CITA CONFIRMADA: ${citaExistente[0].scheduled_date} a las ${citaExistente[0].scheduled_time} en ${citaExistente[0].property_name}`
+        : '❌ NO TIENE CITA AÚN';
+
+      // Historial reciente
+      const historial = lead.conversation_history || [];
+      const ultimos3 = historial.slice(-3);
+
+      return corsResponse(JSON.stringify({
+        lead: {
+          id: lead.id,
+          name: lead.name,
+          phone: lead.phone,
+          status: lead.status,
+          property_interest: lead.property_interest,
+          lead_score: lead.lead_score
+        },
+        cita_info_para_IA: citaInfo,
+        tiene_cita_real: tieneCita,
+        cita_detalles: citaExistente?.[0] || null,
+        datos_que_ve_IA: {
+          nombre: lead.name ? `✅ ${lead.name}` : '❌ NO TENGO - DEBES PEDIRLO',
+          interes: lead.property_interest || 'No definido',
+          cita: citaInfo
+        },
+        ultimos_mensajes: ultimos3,
+        regla_aplicable: tieneCita
+          ? 'IA puede mencionar la cita existente'
+          : '🚨 IA NO DEBE inventar citas - debe PREGUNTAR si quiere agendar'
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🧪 DEBUG CITAS - Ver citas de un lead
+    // USO: /debug-citas?phone=5610016226
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/debug-citas" && request.method === "GET") {
+      const phone = url.searchParams.get('phone') || '';
+      const phoneLimpio = phone.replace(/[-\s]/g, '');
+
+      // Buscar lead
+      const { data: lead } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, status, property_interest, conversation_history')
+        .or(`phone.ilike.%${phoneLimpio}%,phone.ilike.%${phoneLimpio.slice(-10)}%`)
+        .single();
+
+      if (!lead) {
+        return corsResponse(JSON.stringify({ error: 'Lead no encontrado' }), 404);
+      }
+
+      // Buscar citas del lead
+      const { data: citas } = await supabase.client
+        .from('appointments')
+        .select('*')
+        .eq('lead_id', lead.id)
+        .order('date', { ascending: false });
+
+      // Últimos 5 mensajes del historial
+      const historial = lead.conversation_history || [];
+      const ultimos5 = historial.slice(-5);
+
+      return corsResponse(JSON.stringify({
+        lead: {
+          id: lead.id,
+          name: lead.name,
+          phone: lead.phone,
+          status: lead.status,
+          property_interest: lead.property_interest
+        },
+        citas: citas || [],
+        total_citas: citas?.length || 0,
+        citas_activas: (citas || []).filter((c: any) => ['scheduled', 'confirmed', 'pending'].includes(c.status)),
+        ultimos_mensajes: ultimos5
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🧪 DEBUG IDENTIFICAR VENDEDOR - Ver qué vendedor se identifica por teléfono
+    // USO: /debug-vendedor?phone=5212224558475
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/debug-vendedor" && request.method === "GET") {
+      const phone = url.searchParams.get('phone') || '5212224558475';
+      const phoneLimpio = phone.replace(/\D/g, '').slice(-10);
+
+      // Buscar todos los team_members activos
+      const { data: teamMembers } = await supabase.client
+        .from('team_members')
+        .select('*')
+        .eq('active', true);
+
+      // Simular la lógica de identificación
+      const vendedor = (teamMembers || []).find((tm: any) => {
+        if (!tm.phone) return false;
+        const tmPhone = tm.phone.replace(/\D/g, '').slice(-10);
+        return tmPhone === phoneLimpio;
+      });
+
+      return corsResponse(JSON.stringify({
+        phone_buscado: phone,
+        phone_limpio: phoneLimpio,
+        total_team_members: teamMembers?.length || 0,
+        vendedor_encontrado: vendedor ? {
+          id: vendedor.id,
+          name: vendedor.name,
+          phone: vendedor.phone,
+          role: vendedor.role
+        } : null,
+        todos_los_phones: (teamMembers || []).map((tm: any) => ({
+          id: tm.id,
+          name: tm.name,
+          phone: tm.phone,
+          phone_limpio: tm.phone?.replace(/\D/g, '').slice(-10),
+          role: tm.role
+        }))
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🧪 DEBUG APROBAR FOLLOWUP - Simula exactamente lo que hace el handler
+    // USO: /debug-aprobar?vendedor_id=xxx&nombre_lead=rodrigo
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/debug-aprobar" && request.method === "GET") {
+      const vendedorId = url.searchParams.get('vendedor_id') || '7bb05214-826c-4d1b-a418-228b8d77bd64';
+      const nombreLead = url.searchParams.get('nombre_lead') || 'rodrigo';
+
+      // 1. Buscar TODOS los leads del vendedor
+      const { data: allLeads, error: err1 } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, notes')
+        .eq('assigned_to', vendedorId);
+
+      // 2. Filtrar leads que tienen pending_followup con status pending
+      const leadsConPending = (allLeads || []).filter((l: any) => {
+        const notas = typeof l.notes === 'object' ? l.notes : {};
+        return notas.pending_followup && notas.pending_followup.status === 'pending';
+      });
+
+      // 3. Si se especificó nombre, filtrar
+      let leadTarget: any = leadsConPending[0];
+      if (nombreLead && leadsConPending.length > 0) {
+        const normalizado = nombreLead.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        leadTarget = leadsConPending.find((l: any) => {
+          const leadNombre = (l.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          return leadNombre.includes(normalizado) || normalizado.includes(leadNombre.split(' ')[0]);
+        }) || leadsConPending[0];
+      }
+
+      // 4. Verificar pending_followup del lead target
+      let pendingInfo = null;
+      if (leadTarget) {
+        const notas = typeof leadTarget.notes === 'object' ? leadTarget.notes : {};
+        pendingInfo = notas.pending_followup;
+      }
+
+      return corsResponse(JSON.stringify({
+        vendedor_id: vendedorId,
+        nombre_lead_buscado: nombreLead,
+        total_leads_del_vendedor: allLeads?.length || 0,
+        leads_con_pending_followup: leadsConPending.length,
+        leads_ids: leadsConPending.map((l: any) => ({ id: l.id, name: l.name })),
+        lead_target: leadTarget ? { id: leadTarget.id, name: leadTarget.name, phone: leadTarget.phone } : null,
+        pending_followup: pendingInfo,
+        error: err1?.message
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // 🧪 TEST REAL - Envía mensajes de prueba REALES a tu teléfono
     // USO: /test-real?test=briefing|video|comando|alerta
     // ═══════════════════════════════════════════════════════════════════════
@@ -429,6 +657,7 @@ export default {
                 'comando': 'Prueba comando ventas y envía resultado',
                 'video': 'Genera y envía video de prueba (tarda ~2min)',
                 'recap': 'Envía recap de 7pm (template + mensaje pendiente)',
+                'followup': 'Simula follow-up pendiente (sistema aprobación)',
                 'all': 'Ejecuta TODOS los tests'
               },
               uso: '/test-real?test=mensaje'
@@ -544,8 +773,96 @@ export default {
             }
             break;
 
+          case 'followup':
+            // Simular sistema de aprobación de follow-up
+            const TEST_LEAD_PHONE = '5215610016226'; // Teléfono de lead de prueba
+
+            // Buscar el vendedor de prueba
+            const { data: vendedorFollowup } = await supabase.client
+              .from('team_members')
+              .select('*')
+              .eq('phone', TEST_PHONE)
+              .single();
+
+            if (!vendedorFollowup) {
+              resultados.followup = '❌ Vendedor no encontrado';
+              break;
+            }
+
+            // Buscar lead por teléfono de prueba o cualquier lead con teléfono
+            let leadTest = null;
+            const { data: leadPorTel } = await supabase.client
+              .from('leads')
+              .select('id, name, phone, notes')
+              .eq('phone', TEST_LEAD_PHONE)
+              .single();
+
+            if (leadPorTel) {
+              leadTest = leadPorTel;
+            } else {
+              // Buscar cualquier lead con teléfono
+              const { data: cualquierLead } = await supabase.client
+                .from('leads')
+                .select('id, name, phone, notes')
+                .not('phone', 'is', null)
+                .limit(1)
+                .single();
+              leadTest = cualquierLead;
+            }
+
+            if (!leadTest) {
+              resultados.followup = '❌ No hay leads para probar';
+              break;
+            }
+
+            // Crear pending_followup de prueba
+            const mensajeTest = `¡Hola ${leadTest.name?.split(' ')[0] || 'amigo'}! 👋 Soy Sara de Grupo Santa Rita. Vi que nos contactaste recientemente. ¿Te gustaría que te cuente más sobre nuestras casas?`;
+            const ahoraTest = new Date();
+            const expiraTest = new Date(ahoraTest.getTime() + 30 * 60 * 1000);
+
+            // Usar el teléfono del lead o el TEST_LEAD_PHONE como fallback
+            const leadPhoneToUse = (leadTest.phone?.replace(/\D/g, '') || TEST_LEAD_PHONE);
+
+            const notasLead = typeof leadTest.notes === 'object' ? leadTest.notes : {};
+            const pendingFollowupTest = {
+              tipo: 'followup_test',
+              mensaje: mensajeTest,
+              lead_phone: leadPhoneToUse,
+              lead_name: leadTest.name || 'Lead Test',
+              vendedor_id: vendedorFollowup.id,
+              created_at: ahoraTest.toISOString(),
+              expires_at: expiraTest.toISOString(),
+              status: 'pending'
+            };
+
+            await supabase.client
+              .from('leads')
+              .update({ notes: { ...notasLead, pending_followup: pendingFollowupTest } })
+              .eq('id', leadTest.id);
+
+            // Notificar al vendedor
+            const nombreCorto = leadTest.name?.split(' ')[0]?.toLowerCase() || 'lead';
+            await meta.sendWhatsAppMessage(TEST_PHONE,
+              `📤 *FOLLOW-UP PENDIENTE (TEST)*\n\n` +
+              `Lead: *${leadTest.name}*\n` +
+              `En 30 min enviaré:\n\n` +
+              `"${mensajeTest}"\n\n` +
+              `━━━━━━━━━━━━━━━━━━━━━\n` +
+              `• *ok ${nombreCorto}* → enviar ahora\n` +
+              `• *cancelar ${nombreCorto}* → no enviar\n` +
+              `• *editar ${nombreCorto} [mensaje]* → tu versión\n` +
+              `━━━━━━━━━━━━━━━━━━━━━\n` +
+              `_Si no respondes, se envía en 30 min_`
+            );
+
+            resultados.followup = '✅ Follow-up pendiente creado';
+            resultados.lead = leadTest.name;
+            resultados.comandos = [`ok ${nombreCorto}`, `cancelar ${nombreCorto}`, `editar ${nombreCorto} Hola, soy...`];
+            resultados.nota = 'Responde con uno de los comandos para probar';
+            break;
+
           default:
-            return corsResponse(JSON.stringify({ error: 'Test no válido', tests_disponibles: ['mensaje', 'briefing', 'reporte', 'alerta', 'comando', 'video', 'recap', 'all'] }));
+            return corsResponse(JSON.stringify({ error: 'Test no válido', tests_disponibles: ['mensaje', 'briefing', 'reporte', 'alerta', 'comando', 'video', 'recap', 'followup', 'all'] }));
         }
 
         return corsResponse(JSON.stringify({ ok: true, ...resultados }));

@@ -6682,17 +6682,40 @@ Responde con fecha y hora:
 
   private async vendedorAprobarFollowup(from: string, nombreLead: string | undefined, vendedor: any, nombre: string): Promise<void> {
     try {
-      // Buscar lead con pending_followup del vendedor
-      const query = this.supabase.client
+      console.log(`🔍 vendedorAprobarFollowup: vendedor.id=${vendedor.id}, nombreLead=${nombreLead}`);
+
+      // Buscar TODOS los leads del vendedor y filtrar en código
+      // (la query JSONB de Supabase no siempre funciona bien)
+      const { data: allLeads, error } = await this.supabase.client
         .from('leads')
         .select('id, name, phone, notes')
-        .eq('assigned_to', vendedor.id)
-        .not('notes->pending_followup', 'is', null);
+        .eq('assigned_to', vendedor.id);
 
-      const { data: leads } = await query;
+      if (error) {
+        console.error('Error buscando leads:', error);
+        await this.meta.sendWhatsAppMessage(from, `❌ Error BD: ${error.message}`);
+        return;
+      }
+
+      console.log(`🔍 Leads encontrados para vendedor ${vendedor.id}: ${allLeads?.length || 0}`);
+
+      // Filtrar leads que tienen pending_followup con status pending
+      const leads = (allLeads || []).filter(l => {
+        const notas = typeof l.notes === 'object' ? l.notes : {};
+        const hasPending = notas.pending_followup && notas.pending_followup.status === 'pending';
+        if (hasPending) {
+          console.log(`✓ Lead ${l.name} tiene pending_followup pendiente`);
+        }
+        return hasPending;
+      });
+
+      console.log(`🔍 Leads con pending_followup: ${leads.length} de ${allLeads?.length || 0}`);
 
       if (!leads || leads.length === 0) {
-        await this.meta.sendWhatsAppMessage(from, `📭 No tienes follow-ups pendientes.`);
+        // DEBUG: mostrar por qué no hay leads
+        const debugInfo = `vendedor.id=${vendedor.id}, total_leads=${allLeads?.length || 0}`;
+        console.log(`📭 No hay follow-ups pendientes. Debug: ${debugInfo}`);
+        await this.meta.sendWhatsAppMessage(from, `📭 No tienes follow-ups pendientes.\n\n_Debug: ${debugInfo}_`);
         return;
       }
 
@@ -6709,20 +6732,46 @@ Responde con fecha y hora:
       const notas = typeof leadTarget.notes === 'object' ? leadTarget.notes : {};
       const pending = notas.pending_followup;
 
+      console.log(`🔍 leadTarget: ${leadTarget.name} (${leadTarget.id}), pending: ${JSON.stringify(pending)?.substring(0, 200)}`);
+
+      // Nombre del lead (preferir pending, fallback a leadTarget)
+      const leadName = pending?.lead_name || leadTarget.name || 'lead';
+
       if (!pending || pending.status !== 'pending') {
-        await this.meta.sendWhatsAppMessage(from, `📭 No hay follow-up pendiente para ${leadTarget.name}.`);
+        // DEBUG: mostrar qué falló
+        const debugStatus = `pending=${!!pending}, status=${pending?.status}`;
+        console.log(`📭 No hay follow-up pendiente para ${leadName}. Debug: ${debugStatus}`);
+        await this.meta.sendWhatsAppMessage(from, `📭 No hay follow-up pendiente para ${leadName}.\n\n_Debug: ${debugStatus}_`);
+        return;
+      }
+
+      // Teléfono del lead (preferir pending, fallback a leadTarget.phone)
+      const leadPhone = (pending.lead_phone || leadTarget.phone || '').replace(/\D/g, '');
+
+      if (!leadPhone) {
+        await this.meta.sendWhatsAppMessage(from, `❌ Error: ${leadName} no tiene teléfono registrado.`);
+        console.error(`❌ Lead ${leadTarget.id} sin teléfono`);
         return;
       }
 
       // Enviar mensaje al lead
-      await this.meta.sendWhatsAppMessage(pending.lead_phone, pending.mensaje);
+      console.log(`📤 Enviando follow-up a ${leadName} (${leadPhone})...`);
+      try {
+        const sendResult = await this.meta.sendWhatsAppMessage(leadPhone, pending.mensaje);
+        console.log(`📤 Resultado envío a ${leadPhone}:`, JSON.stringify(sendResult));
+      } catch (sendError: any) {
+        console.error(`❌ Error enviando a ${leadPhone}:`, sendError?.message || sendError);
+        // Intentar con template si falla (fuera de ventana 24h)
+        await this.meta.sendWhatsAppMessage(from, `⚠️ No pude enviar a ${leadName} - puede estar fuera de ventana 24h.\n\nEl lead debe escribir primero para poder enviarle mensajes.`);
+        return;
+      }
 
       // Actualizar status
       notas.pending_followup = { ...pending, status: 'approved', approved_at: new Date().toISOString() };
       await this.supabase.client.from('leads').update({ notes: notas }).eq('id', leadTarget.id);
 
-      await this.meta.sendWhatsAppMessage(from, `✅ Follow-up enviado a *${leadTarget.name}*\n\n"${pending.mensaje.substring(0, 100)}..."`);
-      console.log(`✅ Follow-up aprobado por ${nombre} para ${leadTarget.name}`);
+      await this.meta.sendWhatsAppMessage(from, `✅ Follow-up enviado a *${leadName}* (${leadPhone})\n\n"${pending.mensaje.substring(0, 100)}..."`);
+      console.log(`✅ Follow-up aprobado por ${nombre} para ${leadName} (${leadPhone})`);
 
     } catch (error) {
       console.error('Error aprobando follow-up:', error);
