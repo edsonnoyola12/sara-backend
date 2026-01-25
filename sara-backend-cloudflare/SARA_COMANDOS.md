@@ -156,6 +156,9 @@ npx wrangler tail --format=pretty
 | `bridge [nombre]` | Chat directo con lead (10 min) | `bridgeLead` |
 | `#mas` / `#continuar` | Extender bridge 6 min más | `extenderBridge` |
 | `#cerrar` / `#fin` | Terminar conexiones activas | `cerrarBridge` |
+| `apartar [nombre] en [desarrollo] [enganche]` | Registrar apartado | `vendedorRegistrarApartado` |
+| `cerrar venta [nombre]` | Marcar venta como cerrada | `vendedorCerrarVenta` |
+| `cancelar [nombre]` | Marcar lead como caído | `vendedorCancelarLead` |
 | Números `1`, `2`, `3`, `4` | Responder a opciones pendientes | - |
 
 > **NOTA**: Los comandos brochure/ubicacion/video buscan por nombre de desarrollo (ej: "Monte Verde") O por nombre de modelo (ej: "Acacia", "Fresno").
@@ -188,6 +191,26 @@ Registra un lead que se queda asignado al vendedor (NO entra a round robin):
 - `nuevo lead Juan Pérez 5551234567` - Sin desarrollo
 - `nuevo lead María López 5559876543 Monte Verde` - Con desarrollo
 - `agregar Pedro García 5551112222` - Alias
+
+### Comando: apartar (VentasService)
+Registra apartado de propiedad:
+- `apartar Juan en Distrito Falco 50000` - Con enganche
+- `apartar María en Monte Verde 30000 para el 20 enero` - Con fecha de pago
+- Actualiza lead a status `reserved`
+- Envía felicitación automática al cliente
+
+### Comando: cerrar venta (VentasService)
+Marca una venta como cerrada:
+- `cerrar venta Juan García`
+- `venta cerrada María`
+- Actualiza lead a status `closed_won`
+
+### Comando: cancelar lead (VentasService)
+Marca lead como caído:
+- `cancelar Juan`
+- `lead caído María López`
+- `descartar Pedro`
+- Actualiza lead a status `fallen`
 
 ---
 
@@ -751,6 +774,36 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-25
+
+**Sesión 5 (22:45) - Análisis completo y mejoras de código**
+
+- ✅ **Validación firma webhook Meta (opcional):**
+  - Código para verificar `X-Hub-Signature-256` en webhooks
+  - Si `META_WEBHOOK_SECRET` está configurado → valida firma
+  - Si no está → funciona igual (warning en logs)
+  - Previene spoofing de mensajes falsos
+
+- ✅ **Regla IA: No inventar tasas de interés:**
+  - NUNCA mencionar tasas específicas ("6.5% anual")
+  - NUNCA comparar bancos ("BBVA tiene mejor tasa")
+  - NUNCA prometer tiempos de aprobación
+  - Redirigir al asesor hipotecario para info de tasas
+
+- ✅ **VentasService implementado (13 métodos):**
+  - `parseApartado()` / `registrarApartado()` - Registrar apartados
+  - `parseCerrarVenta()` / `cerrarVenta()` - Cerrar ventas
+  - `parseCancelarLead()` / `cancelarLead()` - Cancelar leads
+  - Comandos: `apartar Juan en Falco 50000`, `cerrar venta Juan`, `cancelar María`
+
+- ✅ **Mejora de logging (~140 cambios):**
+  - `console.log('⚠️...')` → `console.error('⚠️...')`
+  - `console.log('❌...')` → `console.error('❌...')`
+  - Errores ahora aparecen con nivel correcto en Cloudflare
+
+- ✅ **Limpieza de código:**
+  - 18 archivos backup movidos a `_old_backups/`
+  - Agregado `_old_backups/` a `.gitignore`
+  - Repo más limpio (-17KB)
 
 **Sesión 4 (22:30) - Seguridad de Endpoints**
 
