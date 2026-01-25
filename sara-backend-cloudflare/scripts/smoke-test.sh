@@ -1,73 +1,95 @@
 #!/bin/bash
-# Smoke Test para SARA - Verifica que endpoints críticos respondan
-# Uso: ./scripts/smoke-test.sh
+# ═══════════════════════════════════════════════════════════════════════════
+# SARA Backend - Smoke Tests
+# Ejecutar después de cada deploy para verificar que el sistema funciona
+# USO: ./scripts/smoke-test.sh [URL] [API_SECRET]
+# ═══════════════════════════════════════════════════════════════════════════
 
-BASE_URL="https://sara-backend.edson-633.workers.dev"
+set -e
+
+# Colores para output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+API_URL=${1:-"https://sara-backend.edsonnoyola12.workers.dev"}
+API_SECRET=${2:-""}
+
+echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "${YELLOW}  SARA Backend - Smoke Tests${NC}"
+echo -e "${YELLOW}  URL: $API_URL${NC}"
+echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+echo ""
+
 PASSED=0
 FAILED=0
 
-echo "🧪 SARA Smoke Test"
-echo "=================="
-echo ""
-
+# Helper function
 test_endpoint() {
-  local name="$1"
-  local url="$2"
-  local expected="$3"
+  local name=$1
+  local method=$2
+  local endpoint=$3
+  local expected_status=$4
+  local extra_args=$5
 
-  response=$(curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null)
+  echo -n "  Testing: $name... "
 
-  if [ "$response" == "$expected" ]; then
-    echo "✅ $name - OK ($response)"
+  response=$(curl -s -o /dev/null -w "%{http_code}" -X "$method" "$API_URL$endpoint" $extra_args 2>/dev/null || echo "000")
+
+  if [ "$response" == "$expected_status" ]; then
+    echo -e "${GREEN}PASS${NC} (HTTP $response)"
     ((PASSED++))
   else
-    echo "❌ $name - FALLÓ (esperado: $expected, recibido: $response)"
+    echo -e "${RED}FAIL${NC} (Expected $expected_status, got $response)"
     ((FAILED++))
   fi
 }
 
-test_json_endpoint() {
-  local name="$1"
-  local url="$2"
+# ═══════════════════════════════════════════════════════════════════════════
+# 1. Health Checks (públicos)
+# ═══════════════════════════════════════════════════════════════════════════
+echo -e "\n${YELLOW}[1/4] Health Checks${NC}"
+test_endpoint "Root endpoint" "GET" "/" "200"
+test_endpoint "Health endpoint" "GET" "/health" "200"
 
-  response=$(curl -s "$url" 2>/dev/null)
+# ═══════════════════════════════════════════════════════════════════════════
+# 2. Auth Tests (debe rechazar sin API key)
+# ═══════════════════════════════════════════════════════════════════════════
+echo -e "\n${YELLOW}[2/4] Auth Tests${NC}"
+test_endpoint "API sin auth (debe rechazar)" "GET" "/api/team-members" "401"
+test_endpoint "Debug sin auth (debe rechazar)" "GET" "/debug-cache" "401"
 
-  if echo "$response" | grep -q "{"; then
-    echo "✅ $name - OK (JSON válido)"
-    ((PASSED++))
-  else
-    echo "❌ $name - FALLÓ (no es JSON)"
-    ((FAILED++))
-  fi
-}
+# ═══════════════════════════════════════════════════════════════════════════
+# 3. Webhook Tests
+# ═══════════════════════════════════════════════════════════════════════════
+echo -e "\n${YELLOW}[3/4] Webhook Tests${NC}"
+test_endpoint "Webhook GET (verificación Meta)" "GET" "/webhook/meta?hub.mode=subscribe&hub.verify_token=test&hub.challenge=test123" "200"
 
-echo "📡 Probando endpoints..."
-echo ""
-
-# Health check
-test_endpoint "Health Check" "$BASE_URL/health" "200"
-
-# Debug endpoints
-test_json_endpoint "Debug GPS" "$BASE_URL/debug-gps"
-
-# Webhook (debe retornar 200 o 400, no 500)
-response=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/webhook" 2>/dev/null)
-if [ "$response" != "500" ] && [ "$response" != "502" ] && [ "$response" != "503" ]; then
-  echo "✅ Webhook endpoint - OK ($response)"
-  ((PASSED++))
+# ═══════════════════════════════════════════════════════════════════════════
+# 4. Protected Endpoints (con API key si se proporciona)
+# ═══════════════════════════════════════════════════════════════════════════
+if [ -n "$API_SECRET" ]; then
+  echo -e "\n${YELLOW}[4/4] Protected Endpoints (con auth)${NC}"
+  test_endpoint "Debug cache con auth" "GET" "/debug-cache?api_key=$API_SECRET" "200"
+  test_endpoint "API team-members con auth" "GET" "/api/team-members?api_key=$API_SECRET" "200"
 else
-  echo "❌ Webhook endpoint - FALLÓ ($response)"
-  ((FAILED++))
+  echo -e "\n${YELLOW}[4/4] Protected Endpoints${NC}"
+  echo -e "  ${YELLOW}SKIP${NC} - No API_SECRET proporcionado"
+  echo "  Uso: $0 URL API_SECRET"
 fi
 
-echo ""
-echo "=================="
-echo "Resultados: $PASSED pasaron, $FAILED fallaron"
-
-if [ $FAILED -gt 0 ]; then
-  echo "⚠️  Hay endpoints fallando!"
-  exit 1
-else
-  echo "🎉 Todos los endpoints responden correctamente"
+# ═══════════════════════════════════════════════════════════════════════════
+# Resumen
+# ═══════════════════════════════════════════════════════════════════════════
+echo -e "\n${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+TOTAL=$((PASSED + FAILED))
+if [ $FAILED -eq 0 ]; then
+  echo -e "  ${GREEN}RESULTADO: $PASSED/$TOTAL tests pasaron${NC}"
+  echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
   exit 0
+else
+  echo -e "  ${RED}RESULTADO: $PASSED/$TOTAL tests pasaron, $FAILED fallaron${NC}"
+  echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+  exit 1
 fi

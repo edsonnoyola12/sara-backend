@@ -33,16 +33,113 @@ export interface Env {
   SARA_CACHE?: KVNamespace; // Cache KV para reducir queries a DB
 }
 
-function corsResponse(body: string | null, status: number = 200, contentType: string = 'application/json'): Response {
+// ═══════════════════════════════════════════════════════════════════════════
+// CORS: Dominios permitidos (whitelist)
+// ═══════════════════════════════════════════════════════════════════════════
+const ALLOWED_ORIGINS = [
+  'https://sara-crm.vercel.app',
+  'https://sara-crm.netlify.app',
+  'https://gruposantarita.com',
+  'https://www.gruposantarita.com',
+  'http://localhost:3000',
+  'http://localhost:5173',
+];
+
+function getCorsOrigin(request: Request): string {
+  const origin = request.headers.get('Origin');
+  // Si el origen está en whitelist, devolverlo; sino, devolver el primero (o vacío para webhooks)
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    return origin;
+  }
+  // Para webhooks de Meta/Facebook que no tienen Origin header
+  if (!origin) {
+    return ALLOWED_ORIGINS[0];
+  }
+  // Origen no autorizado - devolver vacío (browser bloqueará)
+  return '';
+}
+
+function corsResponse(body: string | null, status: number = 200, contentType: string = 'application/json', request?: Request): Response {
+  const allowedOrigin = request ? getCorsOrigin(request) : ALLOWED_ORIGINS[0];
   return new Response(body, {
     status,
     headers: {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': allowedOrigin,
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Request-ID',
       'Content-Type': contentType,
     },
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOGGING: Structured JSON logging con requestId
+// ═══════════════════════════════════════════════════════════════════════════
+function generateRequestId(): string {
+  return `req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+}
+
+function log(level: 'info' | 'warn' | 'error', message: string, requestId: string, metadata?: Record<string, any>): void {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    level,
+    requestId,
+    message,
+    ...metadata
+  };
+  if (level === 'error') {
+    console.error(JSON.stringify(entry));
+  } else if (level === 'warn') {
+    console.warn(JSON.stringify(entry));
+  } else {
+    console.log(JSON.stringify(entry));
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RATE LIMITING: 100 req/min por IP usando KV
+// ═══════════════════════════════════════════════════════════════════════════
+async function checkRateLimit(request: Request, env: Env, requestId: string): Promise<Response | null> {
+  // Solo aplicar rate limit si KV está disponible
+  if (!env.SARA_CACHE) return null;
+
+  // No limitar webhooks de Meta (necesitan responder rápido)
+  const url = new URL(request.url);
+  if (url.pathname.startsWith('/webhook')) return null;
+
+  const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
+  const key = `ratelimit:${ip}`;
+  const limit = 100; // requests por minuto
+  const windowSeconds = 60;
+
+  try {
+    const current = await env.SARA_CACHE.get(key);
+    const count = current ? parseInt(current, 10) : 0;
+
+    if (count >= limit) {
+      log('warn', `Rate limit exceeded for IP: ${ip}`, requestId, { ip, count, limit });
+      return new Response(JSON.stringify({
+        error: 'Too many requests',
+        retry_after: windowSeconds
+      }), {
+        status: 429,
+        headers: {
+          'Content-Type': 'application/json',
+          'Retry-After': String(windowSeconds),
+          'X-RateLimit-Limit': String(limit),
+          'X-RateLimit-Remaining': '0',
+        }
+      });
+    }
+
+    // Incrementar contador
+    await env.SARA_CACHE.put(key, String(count + 1), { expirationTtl: windowSeconds });
+  } catch (e) {
+    // Si falla KV, permitir la request (fail open)
+    log('error', 'Rate limit check failed', requestId, { error: String(e) });
+  }
+
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -339,10 +436,24 @@ async function registrarMensajeAutomatico(supabase: SupabaseService, leadId: str
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    const requestId = generateRequestId();
+
+    // Log incoming request
+    log('info', `${request.method} ${url.pathname}`, requestId, {
+      method: request.method,
+      path: url.pathname,
+      ip: request.headers.get('CF-Connecting-IP') || 'unknown'
+    });
 
     if (request.method === 'OPTIONS') {
-      return corsResponse(null, 204);
+      return corsResponse(null, 204, 'application/json', request);
     }
+
+    // ═══════════════════════════════════════════════════════════
+    // RATE LIMITING: 100 req/min por IP
+    // ═══════════════════════════════════════════════════════════
+    const rateLimitError = await checkRateLimit(request, env, requestId);
+    if (rateLimitError) return rateLimitError;
 
     // ═══════════════════════════════════════════════════════════
     // SEGURIDAD: Verificar autenticación para rutas protegidas
