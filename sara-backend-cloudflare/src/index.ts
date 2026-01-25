@@ -355,6 +355,7 @@ export default {
                 'alerta': 'Simula alerta de lead caliente',
                 'comando': 'Prueba comando ventas y envía resultado',
                 'video': 'Genera y envía video de prueba (tarda ~2min)',
+                'recap': 'Envía recap de 7pm (template + mensaje pendiente)',
                 'all': 'Ejecuta TODOS los tests'
               },
               uso: '/test-real?test=mensaje'
@@ -443,8 +444,35 @@ export default {
             resultados.resumen = '✅ 3 tests ejecutados - revisa tu WhatsApp';
             break;
 
+          case 'recap':
+            // Forzar envío de recap (ignorar last_recap_sent)
+            const { data: vendedorRecap } = await supabase.client
+              .from('team_members')
+              .select('*')
+              .eq('phone', TEST_PHONE)
+              .single();
+            if (vendedorRecap) {
+              // Limpiar last_recap_sent para forzar envío
+              await supabase.client.from('team_members')
+                .update({ last_recap_sent: null })
+                .eq('id', vendedorRecap.id);
+              // Limpiar last_sara_interaction de hoy para simular que NO usó SARA
+              const notasVend = typeof vendedorRecap.notes === 'string' ? JSON.parse(vendedorRecap.notes || '{}') : (vendedorRecap.notes || {});
+              delete notasVend.last_sara_interaction;
+              await supabase.client.from('team_members')
+                .update({ notes: notasVend })
+                .eq('id', vendedorRecap.id);
+              // Ahora enviar recap
+              await enviarRecapDiario(supabase, meta, { ...vendedorRecap, last_recap_sent: null, notes: notasVend });
+              resultados.recap = '✅ Recap enviado (template + pending_recap guardado)';
+              resultados.nota = 'Responde al template para recibir el mensaje completo';
+            } else {
+              resultados.recap = '❌ Vendedor no encontrado';
+            }
+            break;
+
           default:
-            return corsResponse(JSON.stringify({ error: 'Test no válido', tests_disponibles: ['mensaje', 'briefing', 'reporte', 'alerta', 'comando', 'video', 'all'] }));
+            return corsResponse(JSON.stringify({ error: 'Test no válido', tests_disponibles: ['mensaje', 'briefing', 'reporte', 'alerta', 'comando', 'video', 'recap', 'all'] }));
         }
 
         return corsResponse(JSON.stringify({ ok: true, ...resultados }));
