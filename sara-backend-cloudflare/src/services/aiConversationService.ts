@@ -16,6 +16,7 @@ import { ClaudeService } from './claude';
 import { scoringService } from './leadScoring';
 import { PromocionesService } from './promocionesService';
 import { HORARIOS } from '../handlers/constants';
+import { I18nService, SupportedLanguage, createI18n } from './i18nService';
 
 // Interfaces
 interface AIAnalysis {
@@ -33,6 +34,7 @@ interface AIAnalysis {
   fecha_sugerida?: string;
   hora_sugerida?: string;
   desarrollo_cita?: string;
+  detected_language?: SupportedLanguage; // Idioma detectado del mensaje (es/en)
 }
 
 // Handler reference para acceder a métodos auxiliares
@@ -107,6 +109,14 @@ export class AIConversationService {
         contactar_vendedor: false
       };
     }
+
+    // ═══ DETECCIÓN DE IDIOMA ═══
+    // Detectar idioma del mensaje y usar preferencia guardada si existe
+    const i18n = createI18n(message);
+    const storedLang = lead?.notes?.preferred_language as SupportedLanguage | undefined;
+    const detectedLang = storedLang || i18n.getLanguage();
+    i18n.setLanguage(detectedLang);
+    console.log(`🌐 Idioma: detectado=${i18n.detectLanguage(message)}, guardado=${storedLang || 'ninguno'}, usando=${detectedLang}`);
 
     // Formatear historial para OpenAI - asegurar que content sea siempre string válido
     // AUMENTADO de 8 a 15 para mejor contexto (incluye acciones enviadas)
@@ -272,11 +282,22 @@ Eres SARA, una **agente inmobiliaria HUMANA y conversacional** de Grupo Santa Ri
 
 Tu objetivo:
 - Ayudar a la persona a encontrar la mejor casa según su vida real.
-- Hablar como asesora profesional mexicana, NO como robot ni formulario.
+- Hablar como asesora profesional, NO como robot ni formulario.
 - Generar confianza, emoción y claridad.
 - Vender sin presión, pero con seguridad y entusiasmo.
 
-Respondes SIEMPRE en español neutro mexicano, con tono cálido, cercano y profesional.
+━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 IDIOMA DEL CLIENTE: ${detectedLang === 'en' ? 'INGLÉS' : 'ESPAÑOL'}
+━━━━━━━━━━━━━━━━━━━━━━━━
+${detectedLang === 'en' ? `
+⚠️ IMPORTANTE: El cliente se comunica en INGLÉS. Debes:
+- Responder completamente en inglés
+- Mantener un tono cálido y profesional
+- Mostrar precios en MXN y USD (1 USD ≈ 17 MXN)
+- Si el cliente cambia a español, adaptarte al español
+` : `
+Respondes en español neutro mexicano, con tono cálido, cercano y profesional.
+`}
 Usa emojis con moderación: máximo 1-2 por mensaje, solo donde sumen emoción.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1720,11 +1741,12 @@ RECUERDA:
         intent: parsed.intent || 'otro',
         secondary_intents: secondaryIntents,
         extracted_data: parsed.extracted_data || {},
-        response: parsed.response || '¡Hola! ¿En qué puedo ayudarte?',
+        response: parsed.response || (detectedLang === 'en' ? 'Hello! How can I help you?' : '¡Hola! ¿En qué puedo ayudarte?'),
         send_gps: parsed.send_gps || false,
         send_video_desarrollo: parsed.send_video_desarrollo || false,
         send_contactos: parsed.send_contactos || false,
-        contactar_vendedor: parsed.contactar_vendedor || false
+        contactar_vendedor: parsed.contactar_vendedor || false,
+        detected_language: detectedLang // Idioma detectado para usar en executeAIDecision
       };
       
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3463,15 +3485,16 @@ Tú dime, ¿por dónde empezamos?`;
           console.error('⚠️ Error guardando historial');
         }
 
-        // Marcar tiempo de última respuesta
+        // Marcar tiempo de última respuesta y guardar idioma preferido
+        // El idioma se detecta del mensaje y se guarda para usar en futuras conversaciones
+        const updatedNotes = {
+          ...(leadFrescoRL?.notes || {}),
+          last_response_time: ahora,
+          preferred_language: analysis.detected_language || 'es' // Guardar idioma detectado (es/en)
+        };
         await this.supabase.client
           .from('leads')
-          .update({
-            notes: {
-              ...(leadFrescoRL?.notes || {}),
-              last_response_time: ahora
-            }
-          })
+          .update({ notes: updatedNotes })
           .eq('id', lead.id);
       } else {
         console.log('⏸️ Respuesta de Claude NO enviada (ya se envió pregunta de nombre para cita)');

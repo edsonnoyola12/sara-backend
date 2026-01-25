@@ -10,7 +10,8 @@
     "@google/genai": "^1.30.0",
     "@supabase/supabase-js": "^2.39.0",
     "hono": "^4.0.0",
-    "itty-router": "^5.0.22"
+    "itty-router": "^5.0.22",
+    "toucan-js": "^4.1.1"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.5.41",

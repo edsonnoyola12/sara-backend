@@ -14,6 +14,7 @@ import { BroadcastQueueService } from './services/broadcastQueueService';
 import { IACoachingService } from './services/iaCoachingService';
 import { CEOCommandsService } from './services/ceoCommandsService';
 import { VendorCommandsService } from './services/vendorCommandsService';
+import { SentryService, initSentry } from './services/sentryService';
 
 export interface Env {
   SUPABASE_URL: string;
@@ -31,6 +32,8 @@ export interface Env {
   API_SECRET?: string; // Para proteger endpoints sensibles
   META_WEBHOOK_SECRET?: string; // Para validar firma de webhooks Meta/Facebook
   SARA_CACHE?: KVNamespace; // Cache KV para reducir queries a DB
+  SENTRY_DSN?: string; // DSN de Sentry para error tracking
+  ENVIRONMENT?: string; // production, staging, development
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -171,11 +174,12 @@ function checkApiAuth(request: Request, env: Env): Response | null {
 
 // Helper para verificar si una ruta necesita autenticación
 function requiresAuth(pathname: string): boolean {
-  // Endpoints que NO requieren auth (webhooks, health checks, status)
+  // Endpoints que NO requieren auth (webhooks, health checks, status, analytics)
   const publicPaths = [
     '/webhook',           // Meta webhook
     '/health',            // Health check
     '/status',            // Status dashboard
+    '/analytics',         // Analytics dashboard
     '/',                  // Root
   ];
 
@@ -435,9 +439,20 @@ async function registrarMensajeAutomatico(supabase: SupabaseService, leadId: str
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const requestId = generateRequestId();
+
+    // Inicializar Sentry para error tracking
+    const sentry = initSentry(request, env, ctx);
+    sentry.setTag('request_id', requestId);
+    sentry.setTag('path', url.pathname);
+    sentry.addBreadcrumb({
+      message: `${request.method} ${url.pathname}`,
+      category: 'http',
+      level: 'info',
+      data: { method: request.method, path: url.pathname }
+    });
 
     // Log incoming request
     log('info', `${request.method} ${url.pathname}`, requestId, {
@@ -449,6 +464,8 @@ export default {
     if (request.method === 'OPTIONS') {
       return corsResponse(null, 204, 'application/json', request);
     }
+
+    try {
 
     // ═══════════════════════════════════════════════════════════
     // RATE LIMITING: 100 req/min por IP
@@ -9335,6 +9352,24 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       return corsResponse(JSON.stringify(backup));
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // ANALYTICS DASHBOARD - Métricas de conversión y ventas
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/analytics') {
+      const period = url.searchParams.get('period') || '30';
+      const analytics = await getAnalyticsDashboard(supabase, parseInt(period));
+
+      const acceptHeader = request.headers.get('Accept') || '';
+      if (acceptHeader.includes('text/html')) {
+        return new Response(renderAnalyticsPage(analytics), {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' }
+        });
+      }
+
+      return corsResponse(JSON.stringify(analytics, null, 2), 200, 'application/json', request);
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // A/B TEST RESULTS - Ver resultados
     // ═══════════════════════════════════════════════════════════════
@@ -10976,12 +11011,41 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
 
     return corsResponse(JSON.stringify({ error: 'Not Found' }), 404);
+    } catch (error) {
+      // Capturar error en Sentry con contexto completo
+      sentry.captureException(error, {
+        request_id: requestId,
+        path: url.pathname,
+        method: request.method,
+        ip: request.headers.get('CF-Connecting-IP') || 'unknown'
+      });
+
+      log('error', `Unhandled error: ${error instanceof Error ? error.message : String(error)}`, requestId, {
+        error: error instanceof Error ? error.stack : String(error)
+      });
+
+      return corsResponse(JSON.stringify({
+        error: 'Internal Server Error',
+        request_id: requestId
+      }), 500, 'application/json', request);
+    }
   },
 
   // ═══════════════════════════════════════════════════════════
   // CRON JOBS - Mensajes automáticos
   // ═══════════════════════════════════════════════════════════
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    // Inicializar Sentry para cron jobs
+    const cronRequest = new Request('https://cron.internal/scheduled');
+    const sentry = initSentry(cronRequest, env, ctx);
+    sentry.setTag('cron', event.cron);
+    sentry.addBreadcrumb({
+      message: `Cron triggered: ${event.cron}`,
+      category: 'cron',
+      level: 'info'
+    });
+
+    try {
     const supabase = new SupabaseService(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
     const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
 
@@ -12036,6 +12100,15 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     // ═══════════════════════════════════════════════════════════
     console.log('📤 Procesando broadcasts encolados...');
     await procesarBroadcastQueue(supabase, meta);
+    } catch (error) {
+      // Capturar errores de cron en Sentry
+      sentry.captureException(error, {
+        cron: event.cron,
+        scheduled_time: new Date(event.scheduledTime).toISOString()
+      });
+      console.error('❌ Error en cron job:', error);
+      throw error; // Re-throw para que Cloudflare lo registre
+    }
   },
 };
 
@@ -18116,6 +18189,486 @@ async function getSystemStatus(
   }
 
   return status;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ANALYTICS DASHBOARD - Funciones de métricas de conversión
+// ═══════════════════════════════════════════════════════════════════════════
+interface AnalyticsDashboard {
+  period_days: number;
+  generated_at: string;
+  funnel: {
+    total_leads: number;
+    leads_with_appointment: number;
+    leads_converted: number;
+    conversion_rate_appointment: string;
+    conversion_rate_sale: string;
+  };
+  leads_by_period: {
+    today: number;
+    yesterday: number;
+    this_week: number;
+    last_week: number;
+    this_month: number;
+  };
+  leads_by_source: Array<{ source: string; count: number; percentage: string }>;
+  leads_by_status: Array<{ status: string; count: number; percentage: string }>;
+  top_sellers: Array<{ name: string; leads: number; appointments: number; sales: number }>;
+  response_times: {
+    avg_first_response_minutes: number;
+    avg_to_appointment_hours: number;
+  };
+  recent_conversions: Array<{ lead_name: string; property: string; date: string; seller: string }>;
+}
+
+async function getAnalyticsDashboard(
+  supabase: SupabaseService,
+  periodDays: number
+): Promise<AnalyticsDashboard> {
+  const now = new Date();
+  const periodStart = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000);
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+  const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const lastWeekStart = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const dashboard: AnalyticsDashboard = {
+    period_days: periodDays,
+    generated_at: now.toISOString(),
+    funnel: {
+      total_leads: 0,
+      leads_with_appointment: 0,
+      leads_converted: 0,
+      conversion_rate_appointment: '0%',
+      conversion_rate_sale: '0%',
+    },
+    leads_by_period: {
+      today: 0,
+      yesterday: 0,
+      this_week: 0,
+      last_week: 0,
+      this_month: 0,
+    },
+    leads_by_source: [],
+    leads_by_status: [],
+    top_sellers: [],
+    response_times: {
+      avg_first_response_minutes: 0,
+      avg_to_appointment_hours: 0,
+    },
+    recent_conversions: [],
+  };
+
+  try {
+    // Get all leads in period
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, status, source, created_at, assigned_to, property_interest, first_response_at')
+      .gte('created_at', periodStart.toISOString());
+
+    if (!leads) return dashboard;
+
+    // Funnel metrics
+    dashboard.funnel.total_leads = leads.length;
+    dashboard.funnel.leads_with_appointment = leads.filter((l: any) => 
+      l.status === 'cita_agendada' || l.status === 'cita_realizada' || l.status === 'ganado'
+    ).length;
+    dashboard.funnel.leads_converted = leads.filter((l: any) => l.status === 'ganado').length;
+    
+    if (dashboard.funnel.total_leads > 0) {
+      dashboard.funnel.conversion_rate_appointment = 
+        ((dashboard.funnel.leads_with_appointment / dashboard.funnel.total_leads) * 100).toFixed(1) + '%';
+      dashboard.funnel.conversion_rate_sale = 
+        ((dashboard.funnel.leads_converted / dashboard.funnel.total_leads) * 100).toFixed(1) + '%';
+    }
+
+    // Leads by period
+    dashboard.leads_by_period.today = leads.filter((l: any) => 
+      new Date(l.created_at) >= todayStart
+    ).length;
+    dashboard.leads_by_period.yesterday = leads.filter((l: any) => {
+      const d = new Date(l.created_at);
+      return d >= yesterdayStart && d < todayStart;
+    }).length;
+    dashboard.leads_by_period.this_week = leads.filter((l: any) => 
+      new Date(l.created_at) >= weekStart
+    ).length;
+    dashboard.leads_by_period.last_week = leads.filter((l: any) => {
+      const d = new Date(l.created_at);
+      return d >= lastWeekStart && d < weekStart;
+    }).length;
+    dashboard.leads_by_period.this_month = leads.filter((l: any) => 
+      new Date(l.created_at) >= monthStart
+    ).length;
+
+    // Leads by source
+    const sourceCount: Record<string, number> = {};
+    leads.forEach((l: any) => {
+      const src = l.source || 'WhatsApp';
+      sourceCount[src] = (sourceCount[src] || 0) + 1;
+    });
+    dashboard.leads_by_source = Object.entries(sourceCount)
+      .map(([source, count]) => ({
+        source,
+        count,
+        percentage: ((count / leads.length) * 100).toFixed(1) + '%'
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // Leads by status
+    const statusCount: Record<string, number> = {};
+    leads.forEach((l: any) => {
+      const st = l.status || 'nuevo';
+      statusCount[st] = (statusCount[st] || 0) + 1;
+    });
+    dashboard.leads_by_status = Object.entries(statusCount)
+      .map(([status, count]) => ({
+        status,
+        count,
+        percentage: ((count / leads.length) * 100).toFixed(1) + '%'
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // Top sellers
+    const { data: teamMembers } = await supabase.client
+      .from('team_members')
+      .select('id, name')
+      .eq('active', true);
+
+    if (teamMembers) {
+      const sellerStats: Record<string, { name: string; leads: number; appointments: number; sales: number }> = {};
+      
+      teamMembers.forEach((tm: any) => {
+        sellerStats[tm.id] = { name: tm.name, leads: 0, appointments: 0, sales: 0 };
+      });
+
+      leads.forEach((l: any) => {
+        if (l.assigned_to && sellerStats[l.assigned_to]) {
+          sellerStats[l.assigned_to].leads++;
+          if (['cita_agendada', 'cita_realizada', 'ganado'].includes(l.status)) {
+            sellerStats[l.assigned_to].appointments++;
+          }
+          if (l.status === 'ganado') {
+            sellerStats[l.assigned_to].sales++;
+          }
+        }
+      });
+
+      dashboard.top_sellers = Object.values(sellerStats)
+        .filter(s => s.leads > 0)
+        .sort((a, b) => b.sales - a.sales || b.appointments - a.appointments || b.leads - a.leads)
+        .slice(0, 10);
+    }
+
+    // Response times (simplified)
+    const leadsWithResponse = leads.filter((l: any) => l.first_response_at && l.created_at);
+    if (leadsWithResponse.length > 0) {
+      const totalMinutes = leadsWithResponse.reduce((acc: number, l: any) => {
+        const created = new Date(l.created_at).getTime();
+        const responded = new Date(l.first_response_at).getTime();
+        return acc + (responded - created) / 60000;
+      }, 0);
+      dashboard.response_times.avg_first_response_minutes = Math.round(totalMinutes / leadsWithResponse.length);
+    }
+
+    // Recent conversions
+    const recentWins = leads
+      .filter((l: any) => l.status === 'ganado')
+      .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 5);
+
+    dashboard.recent_conversions = recentWins.map((l: any) => ({
+      lead_name: l.name || 'Sin nombre',
+      property: l.property_interest || 'No especificada',
+      date: l.created_at,
+      seller: teamMembers?.find((tm: any) => tm.id === l.assigned_to)?.name || 'No asignado'
+    }));
+
+  } catch (e) {
+    console.error('Error generating analytics:', e);
+  }
+
+  return dashboard;
+}
+
+function renderAnalyticsPage(analytics: AnalyticsDashboard): string {
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SARA Analytics - Dashboard de Conversión</title>
+  <meta http-equiv="refresh" content="60">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    .header {
+      text-align: center;
+      margin-bottom: 2rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #334155;
+    }
+    .header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    .header p { color: #94a3b8; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; }
+    .card {
+      background: rgba(30, 41, 59, 0.8);
+      border-radius: 1rem;
+      padding: 1.5rem;
+      border: 1px solid #334155;
+      backdrop-filter: blur(10px);
+    }
+    .card h2 {
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      color: #94a3b8;
+      margin-bottom: 1rem;
+      letter-spacing: 0.05em;
+    }
+    .funnel { grid-column: span 2; }
+    .funnel-stages {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+    }
+    .funnel-stage {
+      flex: 1;
+      text-align: center;
+      padding: 1.5rem;
+      background: linear-gradient(180deg, rgba(56, 189, 248, 0.1) 0%, rgba(56, 189, 248, 0.05) 100%);
+      border-radius: 0.75rem;
+      border: 1px solid rgba(56, 189, 248, 0.2);
+    }
+    .funnel-stage .number {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: #38bdf8;
+    }
+    .funnel-stage .label { color: #94a3b8; margin-top: 0.5rem; }
+    .funnel-stage .rate { color: #22c55e; font-size: 0.875rem; margin-top: 0.25rem; }
+    .arrow {
+      font-size: 2rem;
+      color: #475569;
+    }
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.75rem 0;
+      border-bottom: 1px solid #334155;
+    }
+    .metric-row:last-child { border-bottom: none; }
+    .metric-value { font-weight: 600; color: #38bdf8; }
+    .bar-chart { margin-top: 1rem; }
+    .bar-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+    .bar-label { width: 100px; font-size: 0.875rem; }
+    .bar-container {
+      flex: 1;
+      height: 24px;
+      background: #1e293b;
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 0 0.75rem;
+    }
+    .bar {
+      height: 100%;
+      background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%);
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding-right: 0.5rem;
+      font-size: 0.75rem;
+      min-width: 30px;
+    }
+    .bar-count { font-size: 0.875rem; width: 40px; text-align: right; }
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+    }
+    .table th, .table td {
+      padding: 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid #334155;
+    }
+    .table th { color: #94a3b8; font-weight: 500; }
+    .conversion-item {
+      padding: 0.75rem 0;
+      border-bottom: 1px solid #334155;
+    }
+    .conversion-item:last-child { border-bottom: none; }
+    .conversion-name { font-weight: 600; }
+    .conversion-details { font-size: 0.875rem; color: #94a3b8; }
+    .timestamp { text-align: center; margin-top: 2rem; color: #64748b; font-size: 0.75rem; }
+    .period-selector {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      justify-content: center;
+    }
+    .period-btn {
+      padding: 0.5rem 1rem;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.5rem;
+      color: #e2e8f0;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .period-btn:hover, .period-btn.active { background: #3b82f6; border-color: #3b82f6; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📊 SARA Analytics</h1>
+      <p>Dashboard de Conversión - Últimos ${analytics.period_days} días</p>
+    </div>
+
+    <div class="period-selector">
+      <a href="/analytics?period=7" class="period-btn ${analytics.period_days === 7 ? 'active' : ''}">7 días</a>
+      <a href="/analytics?period=30" class="period-btn ${analytics.period_days === 30 ? 'active' : ''}">30 días</a>
+      <a href="/analytics?period=90" class="period-btn ${analytics.period_days === 90 ? 'active' : ''}">90 días</a>
+    </div>
+
+    <div class="grid">
+      <!-- Funnel -->
+      <div class="card funnel">
+        <h2>🎯 Embudo de Conversión</h2>
+        <div class="funnel-stages">
+          <div class="funnel-stage">
+            <div class="number">${analytics.funnel.total_leads}</div>
+            <div class="label">Leads Totales</div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="funnel-stage">
+            <div class="number">${analytics.funnel.leads_with_appointment}</div>
+            <div class="label">Con Cita</div>
+            <div class="rate">${analytics.funnel.conversion_rate_appointment}</div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="funnel-stage">
+            <div class="number">${analytics.funnel.leads_converted}</div>
+            <div class="label">Ventas</div>
+            <div class="rate">${analytics.funnel.conversion_rate_sale}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Leads por período -->
+      <div class="card">
+        <h2>📅 Leads por Período</h2>
+        <div class="metric-row">
+          <span>Hoy</span>
+          <span class="metric-value">${analytics.leads_by_period.today}</span>
+        </div>
+        <div class="metric-row">
+          <span>Ayer</span>
+          <span class="metric-value">${analytics.leads_by_period.yesterday}</span>
+        </div>
+        <div class="metric-row">
+          <span>Esta semana</span>
+          <span class="metric-value">${analytics.leads_by_period.this_week}</span>
+        </div>
+        <div class="metric-row">
+          <span>Semana pasada</span>
+          <span class="metric-value">${analytics.leads_by_period.last_week}</span>
+        </div>
+        <div class="metric-row">
+          <span>Este mes</span>
+          <span class="metric-value">${analytics.leads_by_period.this_month}</span>
+        </div>
+      </div>
+
+      <!-- Leads por fuente -->
+      <div class="card">
+        <h2>📱 Leads por Fuente</h2>
+        <div class="bar-chart">
+          ${analytics.leads_by_source.slice(0, 5).map(s => `
+            <div class="bar-item">
+              <span class="bar-label">${s.source}</span>
+              <div class="bar-container">
+                <div class="bar" style="width: ${s.percentage}">${s.percentage}</div>
+              </div>
+              <span class="bar-count">${s.count}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <!-- Top Vendedores -->
+      <div class="card">
+        <h2>🏆 Top Vendedores</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th>Leads</th>
+              <th>Citas</th>
+              <th>Ventas</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${analytics.top_sellers.slice(0, 5).map(s => `
+              <tr>
+                <td>${s.name}</td>
+                <td>${s.leads}</td>
+                <td>${s.appointments}</td>
+                <td style="color: #22c55e; font-weight: 600;">${s.sales}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Status de Leads -->
+      <div class="card">
+        <h2>📋 Estado de Leads</h2>
+        <div class="bar-chart">
+          ${analytics.leads_by_status.slice(0, 6).map(s => `
+            <div class="bar-item">
+              <span class="bar-label">${s.status}</span>
+              <div class="bar-container">
+                <div class="bar" style="width: ${s.percentage}">${s.percentage}</div>
+              </div>
+              <span class="bar-count">${s.count}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <!-- Conversiones Recientes -->
+      <div class="card">
+        <h2>✨ Ventas Recientes</h2>
+        ${analytics.recent_conversions.length > 0 ? analytics.recent_conversions.map(c => `
+          <div class="conversion-item">
+            <div class="conversion-name">🎉 ${c.lead_name}</div>
+            <div class="conversion-details">${c.property} • ${c.seller}</div>
+          </div>
+        `).join('') : '<p style="color: #64748b;">Sin ventas en este período</p>'}
+      </div>
+    </div>
+
+    <p class="timestamp">
+      Última actualización: ${new Date(analytics.generated_at).toLocaleString('es-MX')} • Auto-refresh cada 60s
+    </p>
+  </div>
+</body>
+</html>`;
 }
 
 function renderStatusPage(status: SystemStatus): string {
