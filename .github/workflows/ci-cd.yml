@@ -122,8 +122,8 @@ jobs:
 
     steps:
       - name: 📤 Send Slack notification (Success)
-        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
         uses: slackapi/slack-github-action@v1.26.0
+        continue-on-error: true  # No fallar si Slack no está configurado
         with:
           payload: |
             {
@@ -207,8 +207,8 @@ jobs:
 
     steps:
       - name: 📤 Send Slack notification (Failure)
-        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
         uses: slackapi/slack-github-action@v1.26.0
+        continue-on-error: true  # No fallar si Slack no está configurado
         with:
           payload: |
             {
