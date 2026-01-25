@@ -22,6 +22,12 @@ import { generateOpenAPISpec, generateSwaggerUI, generateReDocUI } from './servi
 import { AuditLogService, createAuditLog } from './services/auditLogService';
 import { MetricsService, createMetrics } from './services/metricsService';
 import { BusinessHoursService, createBusinessHours, isBusinessOpen } from './services/businessHoursService';
+import { OutgoingWebhooksService, createOutgoingWebhooks } from './services/outgoingWebhooksService';
+import { SentimentAnalysisService, createSentimentAnalysis, analyzeSentiment } from './services/sentimentAnalysisService';
+import { WhatsAppTemplatesService, createWhatsAppTemplates } from './services/whatsappTemplatesService';
+import { TeamDashboardService, createTeamDashboard } from './services/teamDashboardService';
+import { LeadDeduplicationService, createLeadDeduplication } from './services/leadDeduplicationService';
+import { LinkTrackingService, createLinkTracking } from './services/linkTrackingService';
 
 export interface Env {
   SUPABASE_URL: string;
@@ -9627,6 +9633,745 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         holidays: config.holidayDates || []
       }, null, 2), 200, 'application/json', request);
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SENTIMENT ANALYSIS - Análisis de sentimiento de mensajes
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/sentiment' || url.pathname === '/api/sentiment/analyze') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const sentiment = createSentimentAnalysis();
+
+      // POST /api/sentiment - Analizar un mensaje
+      if (request.method === 'POST' && url.pathname === '/api/sentiment') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.message || typeof body.message !== 'string') {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requiere el campo "message"'
+            }), 400, 'application/json', request);
+          }
+
+          const result = sentiment.analyze(body.message);
+          const alertInfo = sentiment.shouldAlert(result);
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            message: body.message.substring(0, 100) + (body.message.length > 100 ? '...' : ''),
+            analysis: result,
+            alert: alertInfo
+          }, null, 2), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // POST /api/sentiment/analyze - Analizar conversación completa
+      if (request.method === 'POST' && url.pathname === '/api/sentiment/analyze') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.messages || !Array.isArray(body.messages)) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requiere el campo "messages" como array'
+            }), 400, 'application/json', request);
+          }
+
+          const result = sentiment.analyzeConversation(body.messages);
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            conversation: {
+              overall: result.overall,
+              trend: result.trend,
+              avgScore: result.avgScore,
+              messageCount: result.leadMessages.length
+            },
+            details: result.leadMessages
+          }, null, 2), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // WHATSAPP TEMPLATES - Gestión de templates de WhatsApp Business
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/templates' || url.pathname.startsWith('/api/templates/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const templates = createWhatsAppTemplates(
+        env.SARA_CACHE,
+        env.META_PHONE_NUMBER_ID,
+        env.META_ACCESS_TOKEN
+      );
+
+      // GET /api/templates - Listar todos los templates
+      if (request.method === 'GET' && url.pathname === '/api/templates') {
+        const list = await templates.getTemplates();
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: list.length,
+          templates: list
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/templates/approved - Solo templates aprobados
+      if (request.method === 'GET' && url.pathname === '/api/templates/approved') {
+        const list = await templates.getApprovedTemplates();
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: list.length,
+          templates: list
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/templates/stats - Estadísticas de uso
+      if (request.method === 'GET' && url.pathname === '/api/templates/stats') {
+        const stats = await templates.getUsageStats();
+        return corsResponse(JSON.stringify({
+          success: true,
+          stats
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/templates/sync - Sincronizar desde Meta
+      if (request.method === 'POST' && url.pathname === '/api/templates/sync') {
+        const synced = await templates.syncFromMeta();
+        return corsResponse(JSON.stringify({
+          success: true,
+          message: `Sincronizados ${synced.length} templates`,
+          templates: synced
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/templates/send - Enviar un template
+      if (request.method === 'POST' && url.pathname === '/api/templates/send') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.to || !body.templateName) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren los campos "to" y "templateName"'
+            }), 400, 'application/json', request);
+          }
+
+          const result = await templates.sendTemplate({
+            to: body.to,
+            templateName: body.templateName,
+            language: body.language,
+            headerParams: body.headerParams,
+            bodyParams: body.bodyParams,
+            headerMediaUrl: body.headerMediaUrl,
+            headerMediaType: body.headerMediaType,
+            buttonParams: body.buttonParams
+          });
+
+          return corsResponse(JSON.stringify({
+            success: result.success,
+            messageId: result.messageId,
+            error: result.error
+          }, null, 2), result.success ? 200 : 400, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // PUT /api/templates/:name - Actualizar metadata de un template
+      const updateMatch = url.pathname.match(/^\/api\/templates\/([^\/]+)$/);
+      if (request.method === 'PUT' && updateMatch) {
+        try {
+          const body = await request.json() as any;
+          const updated = await templates.updateTemplateMetadata(updateMatch[1], {
+            description: body.description,
+            tags: body.tags
+          });
+
+          return corsResponse(JSON.stringify({
+            success: !!updated,
+            template: updated
+          }), updated ? 200 : 404, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // GET /api/templates/tag/:tag - Buscar por tag
+      const tagMatch = url.pathname.match(/^\/api\/templates\/tag\/([^\/]+)$/);
+      if (request.method === 'GET' && tagMatch) {
+        const list = await templates.getTemplatesByTag(decodeURIComponent(tagMatch[1]));
+        return corsResponse(JSON.stringify({
+          success: true,
+          tag: tagMatch[1],
+          count: list.length,
+          templates: list
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEAM DASHBOARD - Métricas y estadísticas del equipo
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/team' || url.pathname.startsWith('/api/team/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const dashboard = createTeamDashboard(env.SARA_CACHE);
+      const period = url.searchParams.get('period') || undefined;
+
+      // GET /api/team - Resumen del equipo
+      if (request.method === 'GET' && url.pathname === '/api/team') {
+        const summary = await dashboard.getTeamSummary(period);
+        return corsResponse(JSON.stringify({
+          success: true,
+          summary
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/team/vendors - Métricas de todos los vendedores
+      if (request.method === 'GET' && url.pathname === '/api/team/vendors') {
+        const metrics = await dashboard.getAllVendorMetrics(period);
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: metrics.length,
+          vendors: metrics
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/team/leaderboard - Ranking de vendedores
+      if (request.method === 'GET' && url.pathname === '/api/team/leaderboard') {
+        const metric = (url.searchParams.get('metric') as 'conversions' | 'revenue' | 'response_time' | 'score') || 'score';
+        const limit = parseInt(url.searchParams.get('limit') || '10');
+        const leaderboard = await dashboard.getLeaderboard(metric, period, limit);
+        return corsResponse(JSON.stringify({
+          success: true,
+          metric,
+          leaderboard
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/team/vendor/:id - Métricas de un vendedor específico
+      const vendorMatch = url.pathname.match(/^\/api\/team\/vendor\/([^\/]+)$/);
+      if (request.method === 'GET' && vendorMatch) {
+        const vendorId = vendorMatch[1];
+        const metrics = await dashboard.getVendorMetrics(vendorId, period);
+        return corsResponse(JSON.stringify({
+          success: true,
+          vendor: metrics
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/team/compare - Comparar dos vendedores
+      if (request.method === 'GET' && url.pathname === '/api/team/compare') {
+        const vendor1 = url.searchParams.get('vendor1');
+        const vendor2 = url.searchParams.get('vendor2');
+
+        if (!vendor1 || !vendor2) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Se requieren los parámetros vendor1 y vendor2'
+          }), 400, 'application/json', request);
+        }
+
+        const comparison = await dashboard.compareVendors(vendor1, vendor2, period);
+        return corsResponse(JSON.stringify({
+          success: true,
+          comparison
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/team/event - Registrar evento de vendedor
+      if (request.method === 'POST' && url.pathname === '/api/team/event') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.vendorId || !body.event) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren los campos "vendorId" y "event"'
+            }), 400, 'application/json', request);
+          }
+
+          switch (body.event) {
+            case 'lead_assigned':
+              await dashboard.recordLeadAssigned(body.vendorId, body.vendorName || '', body.vendorPhone || '');
+              break;
+            case 'lead_contacted':
+              await dashboard.recordLeadContacted(body.vendorId, body.responseTimeMinutes);
+              break;
+            case 'lead_qualified':
+              await dashboard.recordLeadQualified(body.vendorId);
+              break;
+            case 'conversion':
+              await dashboard.recordConversion(body.vendorId, body.saleValue, body.daysToConvert);
+              break;
+            case 'lead_lost':
+              await dashboard.recordLeadLost(body.vendorId);
+              break;
+            case 'message':
+              await dashboard.recordMessage(body.vendorId, body.direction || 'sent');
+              break;
+            case 'appointment':
+              await dashboard.recordAppointment(body.vendorId, body.status || 'scheduled');
+              break;
+            default:
+              return corsResponse(JSON.stringify({
+                success: false,
+                error: `Evento desconocido: ${body.event}`
+              }), 400, 'application/json', request);
+          }
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            message: `Evento ${body.event} registrado`
+          }), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // LEAD DEDUPLICATION - Detección y fusión de leads duplicados
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/leads/deduplicate' || url.pathname.startsWith('/api/leads/deduplicate/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const dedup = createLeadDeduplication();
+
+      // POST /api/leads/deduplicate/check - Verificar si un lead es duplicado
+      if (request.method === 'POST' && url.pathname === '/api/leads/deduplicate/check') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.lead || !body.existingLeads) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren los campos "lead" y "existingLeads"'
+            }), 400, 'application/json', request);
+          }
+
+          const match = dedup.checkForDuplicate(body.lead, body.existingLeads);
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            isDuplicate: !!match,
+            match: match || null
+          }, null, 2), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // POST /api/leads/deduplicate/find - Encontrar todos los duplicados
+      if (request.method === 'POST' && url.pathname === '/api/leads/deduplicate/find') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.leads || !Array.isArray(body.leads)) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requiere el campo "leads" como array'
+            }), 400, 'application/json', request);
+          }
+
+          const duplicates = dedup.findDuplicates(body.leads);
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            count: duplicates.length,
+            duplicates
+          }, null, 2), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // POST /api/leads/deduplicate/stats - Estadísticas de duplicados
+      if (request.method === 'POST' && url.pathname === '/api/leads/deduplicate/stats') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.leads || !Array.isArray(body.leads)) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requiere el campo "leads" como array'
+            }), 400, 'application/json', request);
+          }
+
+          const stats = dedup.getStats(body.leads);
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            stats
+          }, null, 2), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // POST /api/leads/deduplicate/merge - Fusionar dos leads
+      if (request.method === 'POST' && url.pathname === '/api/leads/deduplicate/merge') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.primary || !body.secondary) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren los campos "primary" y "secondary" (objetos lead)'
+            }), 400, 'application/json', request);
+          }
+
+          const result = dedup.mergeLeads(body.primary, body.secondary);
+
+          return corsResponse(JSON.stringify({
+            success: result.success,
+            result
+          }, null, 2), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // POST /api/leads/deduplicate/sql - Generar SQL para fusionar
+      if (request.method === 'POST' && url.pathname === '/api/leads/deduplicate/sql') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.primaryId || !body.secondaryId) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren los campos "primaryId" y "secondaryId"'
+            }), 400, 'application/json', request);
+          }
+
+          const queries = dedup.generateMergeSQL(body.primaryId, body.secondaryId);
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            queries,
+            warning: 'Revisar y ejecutar estas queries manualmente en Supabase'
+          }, null, 2), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // LINK TRACKING - Rastreo de clicks en enlaces
+    // ═══════════════════════════════════════════════════════════════
+
+    // GET /t/:shortCode - Redirect con tracking (público, sin auth)
+    const trackingMatch = url.pathname.match(/^\/t\/([a-zA-Z0-9]+)$/);
+    if (request.method === 'GET' && trackingMatch) {
+      const tracking = createLinkTracking(env.SARA_CACHE);
+      const shortCode = trackingMatch[1];
+
+      const result = await tracking.recordClick(shortCode, {
+        ip: request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || undefined,
+        userAgent: request.headers.get('User-Agent') || undefined,
+        referrer: request.headers.get('Referer') || undefined
+      });
+
+      if (result.success && result.redirectUrl) {
+        return new Response(null, {
+          status: 302,
+          headers: { 'Location': result.redirectUrl }
+        });
+      }
+
+      // Enlace no válido - redirigir a home
+      return new Response(null, {
+        status: 302,
+        headers: { 'Location': 'https://gruposantarita.com' }
+      });
+    }
+
+    // API endpoints de link tracking (requieren auth)
+    if (url.pathname === '/api/tracking' || url.pathname.startsWith('/api/tracking/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const tracking = createLinkTracking(env.SARA_CACHE);
+
+      // GET /api/tracking - Resumen general
+      if (request.method === 'GET' && url.pathname === '/api/tracking') {
+        const summary = await tracking.getSummary();
+        return corsResponse(JSON.stringify({
+          success: true,
+          summary
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/tracking/links - Listar todos los enlaces
+      if (request.method === 'GET' && url.pathname === '/api/tracking/links') {
+        const links = await tracking.getAllLinks();
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: links.length,
+          links
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/tracking/links - Crear enlace rastreable
+      if (request.method === 'POST' && url.pathname === '/api/tracking/links') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.url) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requiere el campo "url"'
+            }), 400, 'application/json', request);
+          }
+
+          const link = await tracking.createLink({
+            url: body.url,
+            leadId: body.leadId,
+            leadPhone: body.leadPhone,
+            campaignId: body.campaignId,
+            campaignName: body.campaignName,
+            tags: body.tags,
+            expiresInDays: body.expiresInDays,
+            metadata: body.metadata
+          });
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            link,
+            trackingUrl: tracking.getTrackingUrl(link.shortCode)
+          }, null, 2), 201, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // GET /api/tracking/links/:id - Obtener enlace específico
+      const linkMatch = url.pathname.match(/^\/api\/tracking\/links\/([^\/]+)$/);
+      if (request.method === 'GET' && linkMatch) {
+        const link = await tracking.getLink(linkMatch[1]);
+
+        if (!link) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Enlace no encontrado'
+          }), 404, 'application/json', request);
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          link,
+          trackingUrl: tracking.getTrackingUrl(link.shortCode)
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/tracking/links/:id/stats - Estadísticas de un enlace
+      const statsMatch = url.pathname.match(/^\/api\/tracking\/links\/([^\/]+)\/stats$/);
+      if (request.method === 'GET' && statsMatch) {
+        const stats = await tracking.getLinkStats(statsMatch[1]);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          stats
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // DELETE /api/tracking/links/:id - Eliminar enlace
+      const deleteMatch = url.pathname.match(/^\/api\/tracking\/links\/([^\/]+)$/);
+      if (request.method === 'DELETE' && deleteMatch) {
+        const deleted = await tracking.deleteLink(deleteMatch[1]);
+
+        return corsResponse(JSON.stringify({
+          success: deleted,
+          message: deleted ? 'Enlace eliminado' : 'Enlace no encontrado'
+        }), deleted ? 200 : 404, 'application/json', request);
+      }
+
+      // GET /api/tracking/lead/:leadId - Enlaces de un lead
+      const leadMatch = url.pathname.match(/^\/api\/tracking\/lead\/([^\/]+)$/);
+      if (request.method === 'GET' && leadMatch) {
+        const links = await tracking.getLinksByLead(leadMatch[1]);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: links.length,
+          links
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/tracking/campaign/:campaignId - Estadísticas de campaña
+      const campaignMatch = url.pathname.match(/^\/api\/tracking\/campaign\/([^\/]+)$/);
+      if (request.method === 'GET' && campaignMatch) {
+        const stats = await tracking.getCampaignStats(campaignMatch[1]);
+
+        if (!stats) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Campaña no encontrada'
+          }), 404, 'application/json', request);
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          campaign: stats
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // OUTGOING WEBHOOKS - Gestión de webhooks salientes
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/webhooks' || url.pathname.startsWith('/api/webhooks/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const webhooks = createOutgoingWebhooks(env.SARA_CACHE);
+
+      // GET /api/webhooks - Listar todos
+      if (request.method === 'GET' && url.pathname === '/api/webhooks') {
+        const list = await webhooks.getWebhooks();
+        return corsResponse(JSON.stringify({
+          success: true,
+          webhooks: list
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/webhooks - Crear nuevo
+      if (request.method === 'POST' && url.pathname === '/api/webhooks') {
+        try {
+          const body = await request.json() as any;
+          const created = await webhooks.createWebhook({
+            name: body.name,
+            url: body.url,
+            events: body.events || [],
+            secret: body.secret,
+            active: body.active !== false,
+            headers: body.headers
+          });
+          return corsResponse(JSON.stringify({
+            success: true,
+            webhook: created
+          }, null, 2), 201, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // GET /api/webhooks/failed - Ver entregas fallidas
+      if (request.method === 'GET' && url.pathname === '/api/webhooks/failed') {
+        const failed = await webhooks.getFailedDeliveries();
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: failed.length,
+          deliveries: failed
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/webhooks/test - Probar un webhook
+      if (request.method === 'POST' && url.pathname === '/api/webhooks/test') {
+        const webhookId = url.searchParams.get('id');
+        if (!webhookId) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Falta parámetro id'
+          }), 400, 'application/json', request);
+        }
+
+        const webhook = await webhooks.getWebhook(webhookId);
+        if (!webhook) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Webhook no encontrado'
+          }), 404, 'application/json', request);
+        }
+
+        // Enviar evento de prueba
+        await webhooks.trigger('lead.created', {
+          test: true,
+          message: 'Este es un evento de prueba desde SARA',
+          timestamp: new Date().toISOString()
+        });
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          message: 'Evento de prueba enviado'
+        }), 200, 'application/json', request);
+      }
+
+      // DELETE /api/webhooks/:id - Eliminar
+      const deleteMatch = url.pathname.match(/^\/api\/webhooks\/([^\/]+)$/);
+      if (request.method === 'DELETE' && deleteMatch) {
+        const deleted = await webhooks.deleteWebhook(deleteMatch[1]);
+        return corsResponse(JSON.stringify({
+          success: deleted,
+          message: deleted ? 'Webhook eliminado' : 'Webhook no encontrado'
+        }), deleted ? 200 : 404, 'application/json', request);
+      }
+
+      // PUT /api/webhooks/:id - Actualizar
+      const updateMatch = url.pathname.match(/^\/api\/webhooks\/([^\/]+)$/);
+      if (request.method === 'PUT' && updateMatch) {
+        try {
+          const body = await request.json() as any;
+          const updated = await webhooks.updateWebhook(updateMatch[1], body);
+          return corsResponse(JSON.stringify({
+            success: !!updated,
+            webhook: updated
+          }), updated ? 200 : 404, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+    }
+
 
 
 

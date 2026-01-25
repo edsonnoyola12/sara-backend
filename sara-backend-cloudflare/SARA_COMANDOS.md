@@ -469,6 +469,12 @@ Total: 8 actividades
 | `src/services/creditFlowService.ts` | Flujo de crédito hipotecario |
 | `src/services/leadMessageService.ts` | Procesamiento de mensajes de leads |
 | `src/services/aiConversationService.ts` | Conversación con IA (Claude) |
+| `src/services/outgoingWebhooksService.ts` | Webhooks salientes a sistemas externos |
+| `src/services/sentimentAnalysisService.ts` | Análisis de sentimiento de mensajes |
+| `src/services/whatsappTemplatesService.ts` | Gestión de templates de WhatsApp |
+| `src/services/teamDashboardService.ts` | Dashboard y métricas del equipo |
+| `src/services/leadDeduplicationService.ts` | Detección y fusión de leads duplicados |
+| `src/services/linkTrackingService.ts` | Rastreo de clicks en enlaces |
 | `src/index.ts` | CRON jobs incluyendo `verificarBridgesPorExpirar` |
 
 ---
@@ -621,7 +627,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-24 22:15*
+*Última actualización: 2026-01-25 13:25*
 
 ---
 
@@ -757,6 +763,180 @@ npx wrangler secret put API_SECRET
 
 ---
 
+## NUEVOS ENDPOINTS API (2026-01-25)
+
+### Análisis de Sentimiento
+```bash
+# Analizar un mensaje
+POST /api/sentiment
+{
+  "message": "¡Excelente! Me encanta la casa, quiero agendar visita YA"
+}
+# Response: { sentiment: "urgent", score: 0.85, urgency: true, enthusiasm: true }
+
+# Analizar conversación completa
+POST /api/sentiment/analyze
+{
+  "messages": [
+    { "role": "user", "content": "Hola, me interesa Monte Verde" },
+    { "role": "assistant", "content": "¡Hola! Con gusto te ayudo" },
+    { "role": "user", "content": "¿Cuánto cuesta?" }
+  ]
+}
+# Response: { overall: "positive", trend: "stable", avgScore: 0.6 }
+```
+
+### Webhooks Salientes
+```bash
+# Listar webhooks
+GET /api/webhooks
+
+# Crear webhook
+POST /api/webhooks
+{
+  "name": "Zapier Lead Nuevo",
+  "url": "https://hooks.zapier.com/...",
+  "events": ["lead.created", "lead.qualified"],
+  "secret": "mi_secret_opcional"
+}
+
+# Eliminar webhook
+DELETE /api/webhooks/{id}
+
+# Ver entregas fallidas
+GET /api/webhooks/failed
+
+# Probar webhook
+POST /api/webhooks/test?id={webhook_id}
+```
+
+### Templates WhatsApp
+```bash
+# Listar templates
+GET /api/templates
+
+# Solo aprobados
+GET /api/templates/approved
+
+# Sincronizar desde Meta
+POST /api/templates/sync
+
+# Enviar template
+POST /api/templates/send
+{
+  "to": "5215512345678",
+  "templateName": "confirmacion_cita",
+  "bodyParams": ["Juan", "25 de enero", "10:00 AM", "Monte Verde"]
+}
+
+# Estadísticas de uso
+GET /api/templates/stats
+
+# Buscar por tag
+GET /api/templates/tag/followup
+```
+
+### Dashboard de Equipo
+```bash
+# Resumen del equipo
+GET /api/team
+GET /api/team?period=2026-01
+
+# Métricas de todos los vendedores
+GET /api/team/vendors
+
+# Leaderboard
+GET /api/team/leaderboard?metric=conversions&limit=10
+# Métricas: conversions, revenue, response_time, score
+
+# Métricas de un vendedor
+GET /api/team/vendor/{vendor_id}
+
+# Comparar vendedores
+GET /api/team/compare?vendor1=abc&vendor2=xyz
+
+# Registrar evento
+POST /api/team/event
+{
+  "vendorId": "abc123",
+  "event": "conversion",  // lead_assigned, lead_contacted, lead_qualified, conversion, lead_lost, message, appointment
+  "saleValue": 500000,
+  "daysToConvert": 15
+}
+```
+
+### Deduplicación de Leads
+```bash
+# Verificar si un lead es duplicado
+POST /api/leads/deduplicate/check
+{
+  "lead": { "id": "new", "phone": "5215512345678", "name": "Juan" },
+  "existingLeads": [...]
+}
+
+# Encontrar todos los duplicados
+POST /api/leads/deduplicate/find
+{
+  "leads": [...]
+}
+
+# Estadísticas de duplicados
+POST /api/leads/deduplicate/stats
+{
+  "leads": [...]
+}
+
+# Fusionar dos leads
+POST /api/leads/deduplicate/merge
+{
+  "primary": { "id": "lead1", ... },
+  "secondary": { "id": "lead2", ... }
+}
+
+# Generar SQL para fusionar
+POST /api/leads/deduplicate/sql
+{
+  "primaryId": "lead1",
+  "secondaryId": "lead2"
+}
+```
+
+### Link Tracking
+```bash
+# Resumen general
+GET /api/tracking
+
+# Listar enlaces
+GET /api/tracking/links
+
+# Crear enlace rastreable
+POST /api/tracking/links
+{
+  "url": "https://gruposantarita.com/monte-verde",
+  "leadId": "lead123",
+  "campaignId": "promo-enero",
+  "campaignName": "Promoción Enero",
+  "tags": ["promo", "monte-verde"],
+  "expiresInDays": 30
+}
+# Response: { trackingUrl: "https://sara.gruposantarita.com/t/abc123XY" }
+
+# Estadísticas de un enlace
+GET /api/tracking/links/{id}/stats
+
+# Enlaces de un lead
+GET /api/tracking/lead/{lead_id}
+
+# Estadísticas de campaña
+GET /api/tracking/campaign/{campaign_id}
+
+# Redirect (público, sin auth)
+GET /t/{shortCode}
+# Registra click y redirige a URL original
+```
+
+---
+
 ## FOLLOW-UPS AUTOMÁTICOS (CRON)
 
 El sistema ejecuta automáticamente estos follow-ups para no perder leads:
@@ -841,6 +1021,59 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-25
+
+**Sesión 7 (13:15) - 6 Nuevas Funcionalidades**
+
+- ✅ **Webhooks Salientes (`/api/webhooks`)**
+  - Envío automático de eventos a sistemas externos (Zapier, Make, CRMs)
+  - Eventos: `lead.created`, `lead.qualified`, `appointment.scheduled`, `sale.completed`, etc.
+  - Reintentos automáticos con exponential backoff (1s, 5s, 30s)
+  - Firma HMAC-SHA256 para seguridad
+  - Cola de entregas fallidas con retry manual
+  - Archivo: `src/services/outgoingWebhooksService.ts`
+
+- ✅ **Análisis de Sentimiento (`/api/sentiment`)**
+  - Detecta mood del lead: positivo, negativo, neutral, urgente
+  - Analiza palabras, emojis, frases en español e inglés
+  - Detecta frustración (múltiples ?, MAYÚSCULAS) y entusiasmo (!!!)
+  - Genera alertas automáticas según prioridad
+  - Score de -1 a 1 con nivel de confianza
+  - Archivo: `src/services/sentimentAnalysisService.ts`
+
+- ✅ **Templates WhatsApp (`/api/templates`)**
+  - Sincronización con Meta API
+  - Gestión de templates aprobados/pendientes/rechazados
+  - Envío con variables dinámicas (nombre, fecha, propiedad)
+  - Soporte para media en header (imagen, video, documento)
+  - Estadísticas de uso por template
+  - Archivo: `src/services/whatsappTemplatesService.ts`
+
+- ✅ **Dashboard de Equipo (`/api/team`)**
+  - Métricas por vendedor: conversiones, tiempo respuesta, citas, mensajes
+  - Leaderboard configurable por métrica (conversiones, revenue, score)
+  - Comparativas entre vendedores
+  - Alertas de vendedores que necesitan atención
+  - Performance score 0-100 calculado automáticamente
+  - Archivo: `src/services/teamDashboardService.ts`
+
+- ✅ **Deduplicación de Leads (`/api/leads/deduplicate`)**
+  - Detecta duplicados por teléfono (90% confianza), email (85%), nombre (50-70%)
+  - Score de confianza para cada match
+  - Acción sugerida: merge, review, ignore
+  - Fusión de datos con preservación de historial
+  - Genera SQL para fusionar en Supabase
+  - Archivo: `src/services/leadDeduplicationService.ts`
+
+- ✅ **Link Tracking (`/api/tracking` y `/t/:code`)**
+  - Crea URLs rastreables para medir engagement
+  - Registra clicks con metadata (dispositivo, browser, IP)
+  - Estadísticas por enlace y por campaña
+  - Seguimiento por lead individual
+  - Redirect automático con `/t/:shortCode`
+  - Archivo: `src/services/linkTrackingService.ts`
+
+- ✅ Tests: 260 pasando ✅
+- ✅ Deploy exitoso
 
 **Sesión 6 (09:00) - Infraestructura Enterprise**
 
