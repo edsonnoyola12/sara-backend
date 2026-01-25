@@ -28,6 +28,9 @@ import { WhatsAppTemplatesService, createWhatsAppTemplates } from './services/wh
 import { TeamDashboardService, createTeamDashboard } from './services/teamDashboardService';
 import { LeadDeduplicationService, createLeadDeduplication } from './services/leadDeduplicationService';
 import { LinkTrackingService, createLinkTracking } from './services/linkTrackingService';
+import { SLAMonitoringService, createSLAMonitoring } from './services/slaMonitoringService';
+import { AutoAssignmentService, createAutoAssignment } from './services/autoAssignmentService';
+import { LeadAttributionService, createLeadAttribution } from './services/leadAttributionService';
 
 export interface Env {
   SUPABASE_URL: string;
@@ -10256,6 +10259,477 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         return corsResponse(JSON.stringify({
           success: true,
           campaign: stats
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SLA MONITORING - Monitoreo de tiempos de respuesta
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/sla' || url.pathname.startsWith('/api/sla/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const sla = createSLAMonitoring(env.SARA_CACHE);
+
+      // GET /api/sla - Obtener configuración actual
+      if (request.method === 'GET' && url.pathname === '/api/sla') {
+        const config = await sla.getConfig();
+        return corsResponse(JSON.stringify({
+          success: true,
+          config
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // PUT /api/sla - Actualizar configuración
+      if (request.method === 'PUT' && url.pathname === '/api/sla') {
+        try {
+          const body = await request.json() as any;
+          const updated = await sla.updateConfig(body);
+          return corsResponse(JSON.stringify({
+            success: true,
+            config: updated
+          }, null, 2), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // GET /api/sla/pending - Ver respuestas pendientes
+      if (request.method === 'GET' && url.pathname === '/api/sla/pending') {
+        const result = await sla.checkPendingResponses();
+        return corsResponse(JSON.stringify({
+          success: true,
+          pending: {
+            warnings: result.warnings,
+            breaches: result.breaches,
+            escalations: result.escalations,
+            total: result.warnings.length + result.breaches.length + result.escalations.length
+          }
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/sla/violations - Ver violaciones
+      if (request.method === 'GET' && url.pathname === '/api/sla/violations') {
+        const vendorId = url.searchParams.get('vendorId') || undefined;
+        const status = url.searchParams.get('status') as 'open' | 'resolved' | 'escalated' | undefined;
+        const fromDate = url.searchParams.get('from') || undefined;
+        const toDate = url.searchParams.get('to') || undefined;
+
+        const violations = await sla.getViolations({ vendorId, status, fromDate, toDate });
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: violations.length,
+          violations
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/sla/metrics - Métricas SLA
+      if (request.method === 'GET' && url.pathname === '/api/sla/metrics') {
+        const from = url.searchParams.get('from') || undefined;
+        const to = url.searchParams.get('to') || undefined;
+        const period = from && to ? { from, to } : undefined;
+
+        const metrics = await sla.getMetrics(period);
+        return corsResponse(JSON.stringify({
+          success: true,
+          metrics
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/sla/track - Registrar mensaje entrante (para testing)
+      if (request.method === 'POST' && url.pathname === '/api/sla/track') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.leadId || !body.vendorId) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren leadId y vendorId'
+            }), 400, 'application/json', request);
+          }
+
+          await sla.trackIncomingMessage({
+            id: body.leadId,
+            name: body.leadName || 'Lead',
+            phone: body.leadPhone || '',
+            vendorId: body.vendorId,
+            vendorName: body.vendorName || 'Vendedor',
+            vendorPhone: body.vendorPhone || '',
+            isFirstMessage: body.isFirstMessage || false
+          });
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            message: 'Tracking SLA iniciado'
+          }), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // POST /api/sla/resolve - Marcar respuesta del vendedor
+      if (request.method === 'POST' && url.pathname === '/api/sla/resolve') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.leadId || !body.vendorId) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren leadId y vendorId'
+            }), 400, 'application/json', request);
+          }
+
+          const result = await sla.trackVendorResponse(body.leadId, body.vendorId);
+
+          if (!result) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'No hay tracking pendiente para este lead'
+            }), 404, 'application/json', request);
+          }
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            withinSLA: result.withinSLA,
+            responseMinutes: result.responseMinutes,
+            slaLimit: result.slaLimit
+          }), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // AUTO-ASSIGNMENT - Motor de reglas para asignación de leads
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/assignment' || url.pathname.startsWith('/api/assignment/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const assignment = createAutoAssignment(env.SARA_CACHE);
+
+      // GET /api/assignment/rules - Listar todas las reglas
+      if (request.method === 'GET' && url.pathname === '/api/assignment/rules') {
+        const rules = await assignment.getRules();
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: rules.length,
+          rules
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/assignment/rules - Crear nueva regla
+      if (request.method === 'POST' && url.pathname === '/api/assignment/rules') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.name || !body.assignTo) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren los campos "name" y "assignTo"'
+            }), 400, 'application/json', request);
+          }
+
+          const rule = await assignment.createRule({
+            name: body.name,
+            description: body.description,
+            priority: body.priority || 100,
+            conditions: body.conditions || [],
+            conditionLogic: body.conditionLogic || 'AND',
+            assignTo: body.assignTo,
+            schedule: body.schedule,
+            active: body.active !== false
+          });
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            rule
+          }, null, 2), 201, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // GET /api/assignment/rules/:id - Obtener regla específica
+      const ruleMatch = url.pathname.match(/^\/api\/assignment\/rules\/([^\/]+)$/);
+      if (request.method === 'GET' && ruleMatch) {
+        const rule = await assignment.getRule(ruleMatch[1]);
+
+        if (!rule) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Regla no encontrada'
+          }), 404, 'application/json', request);
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          rule
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // PUT /api/assignment/rules/:id - Actualizar regla
+      const updateRuleMatch = url.pathname.match(/^\/api\/assignment\/rules\/([^\/]+)$/);
+      if (request.method === 'PUT' && updateRuleMatch) {
+        try {
+          const body = await request.json() as any;
+          const updated = await assignment.updateRule(updateRuleMatch[1], body);
+
+          if (!updated) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Regla no encontrada'
+            }), 404, 'application/json', request);
+          }
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            rule: updated
+          }, null, 2), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // DELETE /api/assignment/rules/:id - Eliminar regla
+      const deleteRuleMatch = url.pathname.match(/^\/api\/assignment\/rules\/([^\/]+)$/);
+      if (request.method === 'DELETE' && deleteRuleMatch) {
+        const deleted = await assignment.deleteRule(deleteRuleMatch[1]);
+
+        return corsResponse(JSON.stringify({
+          success: deleted,
+          message: deleted ? 'Regla eliminada' : 'Regla no encontrada'
+        }), deleted ? 200 : 404, 'application/json', request);
+      }
+
+      // POST /api/assignment/assign - Asignar lead usando reglas
+      if (request.method === 'POST' && url.pathname === '/api/assignment/assign') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.lead || !body.vendors) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren los campos "lead" y "vendors"'
+            }), 400, 'application/json', request);
+          }
+
+          const result = await assignment.assignLead(body.lead, body.vendors);
+
+          return corsResponse(JSON.stringify({
+            success: result.success,
+            assignment: result
+          }, null, 2), result.success ? 200 : 400, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // GET /api/assignment/stats - Estadísticas de uso
+      if (request.method === 'GET' && url.pathname === '/api/assignment/stats') {
+        const stats = await assignment.getStats();
+        return corsResponse(JSON.stringify({
+          success: true,
+          stats
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // LEAD ATTRIBUTION - Rastreo de origen de leads (UTM)
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/attribution' || url.pathname.startsWith('/api/attribution/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const attribution = createLeadAttribution(env.SARA_CACHE);
+
+      // GET /api/attribution - Resumen de atribución
+      if (request.method === 'GET' && url.pathname === '/api/attribution') {
+        const from = url.searchParams.get('from') || undefined;
+        const to = url.searchParams.get('to') || undefined;
+        const period = from && to ? { from, to } : undefined;
+
+        const summary = await attribution.getSummary(period);
+        return corsResponse(JSON.stringify({
+          success: true,
+          summary
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/attribution/track - Registrar atribución de lead
+      if (request.method === 'POST' && url.pathname === '/api/attribution/track') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.leadId || !body.leadPhone) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren los campos "leadId" y "leadPhone"'
+            }), 400, 'application/json', request);
+          }
+
+          const result = await attribution.trackLead(
+            body.leadId,
+            body.leadPhone,
+            {
+              utm_source: body.utm_source,
+              utm_medium: body.utm_medium,
+              utm_campaign: body.utm_campaign,
+              utm_term: body.utm_term,
+              utm_content: body.utm_content,
+              referrer: body.referrer,
+              landing_page: body.landing_page
+            },
+            body.leadName
+          );
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            attribution: result
+          }, null, 2), 201, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // POST /api/attribution/conversion - Registrar conversión
+      if (request.method === 'POST' && url.pathname === '/api/attribution/conversion') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.leadId) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requiere el campo "leadId"'
+            }), 400, 'application/json', request);
+          }
+
+          const result = await attribution.trackConversion(body.leadId, body.value);
+
+          if (!result) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Lead no encontrado en atribución'
+            }), 404, 'application/json', request);
+          }
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            attribution: result
+          }, null, 2), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // GET /api/attribution/lead/:id - Obtener atribución de un lead
+      const leadMatch = url.pathname.match(/^\/api\/attribution\/lead\/([^\/]+)$/);
+      if (request.method === 'GET' && leadMatch) {
+        const result = await attribution.getLeadAttribution(leadMatch[1]);
+
+        if (!result) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Atribución no encontrada'
+          }), 404, 'application/json', request);
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          attribution: result
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/attribution/spend - Registrar gasto en publicidad
+      if (request.method === 'POST' && url.pathname === '/api/attribution/spend') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.source || !body.date || body.amount === undefined) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren los campos "source", "date" y "amount"'
+            }), 400, 'application/json', request);
+          }
+
+          const result = await attribution.recordAdSpend({
+            source: body.source,
+            campaign: body.campaign,
+            date: body.date,
+            amount: body.amount,
+            currency: body.currency || 'MXN'
+          });
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            spend: result
+          }, null, 2), 201, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // GET /api/attribution/spend - Obtener gastos
+      if (request.method === 'GET' && url.pathname === '/api/attribution/spend') {
+        const source = url.searchParams.get('source') || undefined;
+        const campaign = url.searchParams.get('campaign') || undefined;
+        const from = url.searchParams.get('from') || undefined;
+        const to = url.searchParams.get('to') || undefined;
+
+        const spend = await attribution.getAdSpend({
+          source,
+          campaign,
+          fromDate: from,
+          toDate: to
+        });
+
+        const total = spend.reduce((sum, s) => sum + s.amount, 0);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: spend.length,
+          total,
+          spend
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/attribution/best-channel - Mejor canal de conversión
+      if (request.method === 'GET' && url.pathname === '/api/attribution/best-channel') {
+        const best = await attribution.getBestPerformingChannel();
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          bestChannel: best
         }, null, 2), 200, 'application/json', request);
       }
     }

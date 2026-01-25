@@ -475,6 +475,9 @@ Total: 8 actividades
 | `src/services/teamDashboardService.ts` | Dashboard y métricas del equipo |
 | `src/services/leadDeduplicationService.ts` | Detección y fusión de leads duplicados |
 | `src/services/linkTrackingService.ts` | Rastreo de clicks en enlaces |
+| `src/services/slaMonitoringService.ts` | Monitoreo SLA de tiempos de respuesta |
+| `src/services/autoAssignmentService.ts` | Motor de reglas de asignación automática |
+| `src/services/leadAttributionService.ts` | Atribución de leads con UTM |
 | `src/index.ts` | CRON jobs incluyendo `verificarBridgesPorExpirar` |
 
 ---
@@ -935,6 +938,157 @@ GET /t/{shortCode}
 # Registra click y redirige a URL original
 ```
 
+### SLA Monitoring
+```bash
+# Obtener configuración SLA
+GET /api/sla
+
+# Actualizar configuración
+PUT /api/sla
+{
+  "firstResponseTime": 5,    // minutos para primer contacto
+  "followUpTime": 15,        // minutos para responder
+  "escalationTime": 30,      // minutos para escalar
+  "alertChannels": ["whatsapp"],
+  "escalationContacts": ["supervisor_id"],
+  "active": true
+}
+
+# Ver respuestas pendientes (leads esperando)
+GET /api/sla/pending
+
+# Ver violaciones de SLA
+GET /api/sla/violations
+GET /api/sla/violations?vendorId=xxx&status=open
+
+# Métricas SLA
+GET /api/sla/metrics
+GET /api/sla/metrics?from=2026-01-01&to=2026-01-31
+
+# Registrar mensaje entrante (inicia tracking)
+POST /api/sla/track
+{
+  "leadId": "lead123",
+  "leadPhone": "5215512345678",
+  "vendorId": "vendor123",
+  "isFirstMessage": true
+}
+
+# Registrar respuesta del vendedor
+POST /api/sla/resolve
+{
+  "leadId": "lead123",
+  "vendorId": "vendor123"
+}
+# Response: { withinSLA: true, responseMinutes: 3.5, slaLimit: 5 }
+```
+
+### Auto-Assignment Rules
+```bash
+# Listar reglas
+GET /api/assignment/rules
+
+# Crear regla
+POST /api/assignment/rules
+{
+  "name": "Monte Verde a Juan",
+  "priority": 10,
+  "conditions": [
+    { "type": "development", "operator": "equals", "value": "monte verde" }
+  ],
+  "conditionLogic": "AND",
+  "assignTo": {
+    "type": "specific",
+    "vendorIds": ["vendor_juan"]
+  },
+  "active": true
+}
+
+# Ejemplos de condiciones:
+# - Por desarrollo: { "type": "development", "operator": "contains", "value": "monte" }
+# - Por idioma: { "type": "language", "operator": "equals", "value": "english" }
+# - Por score: { "type": "score", "operator": "greater_than", "value": 70 }
+# - Por fuente: { "type": "source", "operator": "in", "value": ["facebook", "instagram"] }
+
+# Tipos de asignación:
+# - specific: a vendedor(es) específico(s)
+# - pool: round robin entre grupo de vendedores
+# - round_robin: round robin entre todos
+# - least_workload: al de menor carga de trabajo
+
+# Actualizar regla
+PUT /api/assignment/rules/{id}
+
+# Eliminar regla
+DELETE /api/assignment/rules/{id}
+
+# Asignar lead usando reglas
+POST /api/assignment/assign
+{
+  "lead": {
+    "phone": "5215512345678",
+    "development": "Monte Verde",
+    "source": "facebook"
+  },
+  "vendors": [
+    { "id": "v1", "name": "Juan", "phone": "...", "active": true, "currentActiveLeads": 5 },
+    { "id": "v2", "name": "María", "phone": "...", "active": true, "currentActiveLeads": 3 }
+  ]
+}
+# Response: { vendorId: "v2", vendorName: "María", ruleName: "Menor carga", reason: "..." }
+
+# Estadísticas de uso de reglas
+GET /api/assignment/stats
+```
+
+### Lead Attribution (UTM)
+```bash
+# Resumen de atribución (últimos 30 días)
+GET /api/attribution
+GET /api/attribution?from=2026-01-01&to=2026-01-31
+
+# Registrar atribución de lead
+POST /api/attribution/track
+{
+  "leadId": "lead123",
+  "leadPhone": "5215512345678",
+  "leadName": "Juan García",
+  "utm_source": "facebook",
+  "utm_medium": "cpc",
+  "utm_campaign": "promo_enero_2026",
+  "utm_content": "video_testimonial",
+  "landing_page": "/monte-verde"
+}
+
+# Registrar conversión
+POST /api/attribution/conversion
+{
+  "leadId": "lead123",
+  "value": 500000  // valor de la venta
+}
+
+# Obtener atribución de un lead
+GET /api/attribution/lead/{leadId}
+
+# Registrar gasto en publicidad
+POST /api/attribution/spend
+{
+  "source": "facebook",
+  "campaign": "promo_enero_2026",
+  "date": "2026-01-25",
+  "amount": 5000,
+  "currency": "MXN"
+}
+
+# Ver gastos
+GET /api/attribution/spend
+GET /api/attribution/spend?source=facebook&from=2026-01-01
+
+# Mejor canal de conversión
+GET /api/attribution/best-channel
+# Response: { channel: "facebook", conversionRate: 15 }
+```
+
 ---
 
 ## FOLLOW-UPS AUTOMÁTICOS (CRON)
@@ -1021,6 +1175,35 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-25
+
+**Sesión 8 (13:40) - 3 Funcionalidades Críticas para Ventas**
+
+- ✅ **SLA Monitoring (`/api/sla`)**
+  - Monitorea tiempo de respuesta de vendedores
+  - Alerta cuando se excede límite (default: 5 min primer contacto, 15 min follow-up)
+  - Escalamiento automático a supervisores después de 30 min
+  - Métricas de cumplimiento SLA por vendedor
+  - Configurable por horario de aplicación
+  - Archivo: `src/services/slaMonitoringService.ts`
+
+- ✅ **Auto-Assignment Rules (`/api/assignment`)**
+  - Motor de reglas para asignar leads automáticamente
+  - Condiciones: desarrollo, horario, carga de trabajo, idioma, fuente, score
+  - Tipos de asignación: específico, pool, round robin, menor carga
+  - Prioridades configurables entre reglas
+  - Estadísticas de uso por regla
+  - Archivo: `src/services/autoAssignmentService.ts`
+
+- ✅ **Lead Attribution UTM (`/api/attribution`)**
+  - Rastrea origen de leads con parámetros UTM
+  - Fuentes: Facebook, Google, TikTok, Instagram, orgánico, directo
+  - Estadísticas por canal, campaña y landing page
+  - Registro de gasto en publicidad
+  - Calcula costo por lead (CPL) y ROAS
+  - Archivo: `src/services/leadAttributionService.ts`
+
+- ✅ Tests: 260 pasando ✅
+- ✅ Deploy exitoso
 
 **Sesión 7 (13:15) - 6 Nuevas Funcionalidades**
 
