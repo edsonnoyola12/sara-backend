@@ -412,6 +412,8 @@ Total: 8 actividades
 31. ✅ DNC no excluido de broadcasts - Excluir `do_not_contact=true` en queries
 32. ✅ Comando `ver` fallaba con columna `stage` inexistente - Removida de queries (2026-01-24)
 33. ✅ Team members tratados como leads - Prioridad team_member sobre lead (2026-01-24)
+34. ✅ Follow-up approval no encontraba leads - Query JSONB cambiada a filtrado en código (2026-01-24)
+35. ✅ SARA inventaba citas/horarios - Nueva regla ultra-crítica en prompt de IA (2026-01-24)
 
 ---
 
@@ -529,7 +531,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-24 21:20*
+*Última actualización: 2026-01-24 22:15*
 
 ---
 
@@ -726,6 +728,31 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-24
+
+**Sesión 3 (21:00) - Fix Follow-up Approval + Anti-Invención Citas**
+
+- ✅ **Sistema de aprobación de follow-ups arreglado:**
+  - Fix: Query JSONB de Supabase no funcionaba, cambiado a filtrado en código
+  - Fix: Fallbacks para `lead_phone` y `lead_name` cuando son null
+  - Fix: Debug info en mensajes para diagnosticar problemas
+  - Ahora funciona correctamente: vendedor recibe preview, responde `ok [nombre]`, mensaje llega al lead
+
+- ✅ **Regla ULTRA-CRÍTICA: SARA no inventa citas:**
+  - Problema: SARA decía "mañana a las 10 AM" cuando NO había cita
+  - Solución: Nueva regla en prompt de IA
+  - `"Interés en modelo ≠ cita agendada"`
+  - Flujo correcto: info modelo → preguntar si quiere visita → cliente da fecha → crear cita
+  - Solo después de crear cita puede mencionar fecha/hora
+
+- ✅ **Nuevos endpoints de debug:**
+  - `/debug-followup?phone=X` - Ver pending_followup de un lead
+  - `/debug-vendedor?phone=X` - Ver qué vendedor se identifica por teléfono
+  - `/debug-aprobar?vendedor_id=X&nombre_lead=X` - Simular handler de aprobar
+  - `/debug-citas?phone=X` - Ver citas de un lead + últimos mensajes
+  - `/test-contexto?phone=X` - Ver qué info recibe la IA sobre un lead
+
+- ✅ Tests: 211 pasando ✅
+- ✅ Deploy exitoso
 
 **Sesión 2 (19:00) - Sugerencias Inteligentes con IA**
 - ✅ **Sugerencias inteligentes cuando comando no reconocido:**
