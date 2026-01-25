@@ -206,6 +206,27 @@ export class VendorCommandsService {
       return { matched: true, handlerName: 'vendedorLeadsPendientes' };
     }
 
+    // ═══ NOTA / APUNTE - Agregar nota a un lead ═══
+    // Formato flexible: "nota rodrigo hablé por tel", "nota Juan: le interesa", "apunte María presupuesto 2M"
+    const notaMatch = msg.match(/^(?:nota|apunte|registrar)\s+([a-záéíóúñü]+)[\s:]+(.+)$/i);
+    if (notaMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorAgregarNota',
+        handlerParams: { nombreLead: notaMatch[1].trim(), textoNota: notaMatch[2].trim() }
+      };
+    }
+
+    // ═══ VER NOTAS - Ver notas de un lead ═══
+    const verNotasMatch = msg.match(/^(?:notas\s+(?:de\s+)?|ver\s+notas\s+(?:de\s+)?)([a-záéíóúñü]+)$/i);
+    if (verNotasMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorVerNotas',
+        handlerParams: { nombreLead: verNotasMatch[1].trim() }
+      };
+    }
+
     // ═══ COACHING - Consejos para un lead específico ═══
     const coachMatch = msg.match(/^coach(?:ing)?\s+(.+)$/i);
     if (coachMatch) {
@@ -956,5 +977,144 @@ export class VendorCommandsService {
     } catch (e) {
       return { success: false, error: '❌ Error al actualizar lead' };
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // NOTAS DE LEADS
+  // ═══════════════════════════════════════════════════════════════════
+
+  parseAgregarNota(body: string): { nombreLead: string | null; textoNota: string | null } {
+    // Formato flexible: "nota rodrigo hablé por tel", "nota Juan: le interesa"
+    const match = body.match(/^(?:nota|apunte|registrar)\s+([a-záéíóúñü]+)[\s:]+(.+)$/i);
+    if (match) {
+      return { nombreLead: match[1].trim(), textoNota: match[2].trim() };
+    }
+    return { nombreLead: null, textoNota: null };
+  }
+
+  parseVerNotas(body: string): string | null {
+    const match = body.match(/^(?:notas\s+(?:de\s+)?|ver\s+notas\s+(?:de\s+)?)([a-záéíóúñü]+)$/i);
+    return match ? match[1].trim() : null;
+  }
+
+  getMensajeAyudaAgregarNota(): string {
+    return `📝 *Para agregar una nota escribe:*\n\n` +
+      `*nota [nombre] [texto]*\n\n` +
+      `*Ejemplos:*\n` +
+      `• nota Juan hablé por tel, quiere visita sábado\n` +
+      `• nota María le interesa el jardín\n` +
+      `• apunte Pedro presupuesto 2M`;
+  }
+
+  getMensajeAyudaVerNotas(): string {
+    return `📋 *Para ver notas escribe:*\n\n` +
+      `*notas [nombre]*\n\n` +
+      `Ejemplo: notas Juan`;
+  }
+
+  async agregarNotaPorNombre(
+    nombreLead: string,
+    textoNota: string,
+    vendedorId: string,
+    vendedorName: string
+  ): Promise<{ success: boolean; error?: string; multipleLeads?: any[]; lead?: any; totalNotas?: number }> {
+    try {
+      // Buscar lead
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name, notes, assigned_to')
+        .ilike('name', `%${nombreLead}%`)
+        .eq('assigned_to', vendedorId)
+        .limit(5);
+
+      if (!leads || leads.length === 0) {
+        return { success: false, error: `No encontré a "${nombreLead}" en tus leads.` };
+      }
+
+      if (leads.length > 1) {
+        const exactMatch = leads.find(l => l.name.toLowerCase() === nombreLead.toLowerCase());
+        if (!exactMatch) {
+          return { success: false, multipleLeads: leads };
+        }
+        leads.splice(0, leads.length, exactMatch);
+      }
+
+      const lead = leads[0];
+      const notasLead = typeof lead.notes === 'object' ? lead.notes : {};
+      const notasArray = notasLead.notas_vendedor || [];
+
+      // Agregar nueva nota
+      notasArray.push({
+        texto: textoNota,
+        por: vendedorName,
+        fecha: new Date().toISOString()
+      });
+
+      notasLead.notas_vendedor = notasArray;
+
+      await this.supabase.client
+        .from('leads')
+        .update({ notes: notasLead, updated_at: new Date().toISOString() })
+        .eq('id', lead.id);
+
+      console.log(`📝 Nota agregada a ${lead.name} por ${vendedorName}: "${textoNota.substring(0, 50)}..."`);
+
+      return { success: true, lead, totalNotas: notasArray.length };
+    } catch (e) {
+      console.error('Error agregando nota:', e);
+      return { success: false, error: 'Error al agregar nota' };
+    }
+  }
+
+  async getLeadNotas(nombreLead: string, vendedorId: string): Promise<{ success: boolean; error?: string; lead?: any }> {
+    try {
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name, notes')
+        .ilike('name', `%${nombreLead}%`)
+        .eq('assigned_to', vendedorId)
+        .limit(1);
+
+      if (!leads || leads.length === 0) {
+        return { success: false, error: `No encontré a "${nombreLead}"` };
+      }
+
+      return { success: true, lead: leads[0] };
+    } catch (e) {
+      return { success: false, error: 'Error al buscar notas' };
+    }
+  }
+
+  formatNotaAgregada(nombreLead: string, textoNota: string, totalNotas: number): string {
+    return `✅ *Nota guardada para ${nombreLead}*\n\n` +
+      `📝 "${textoNota}"\n\n` +
+      `_Total: ${totalNotas} nota${totalNotas > 1 ? 's' : ''}_`;
+  }
+
+  formatMultipleLeadsNotas(leads: any[]): string {
+    let msg = `🔍 Encontré ${leads.length} leads:\n\n`;
+    leads.forEach((l, i) => {
+      msg += `${i + 1}. ${l.name}\n`;
+    });
+    msg += `\n💡 Sé más específico con el nombre`;
+    return msg;
+  }
+
+  formatLeadNotas(lead: any): string {
+    const notasLead = typeof lead.notes === 'object' ? lead.notes : {};
+    const notasArray = notasLead.notas_vendedor || [];
+
+    if (notasArray.length === 0) {
+      return `📋 *${lead.name}* no tiene notas guardadas.\n\n` +
+        `💡 Agrega una: *nota ${lead.name.split(' ')[0]} [texto]*`;
+    }
+
+    let msg = `📋 *Notas de ${lead.name}* (${notasArray.length}):\n\n`;
+    notasArray.slice(-5).forEach((nota: any, i: number) => {
+      const fecha = nota.fecha ? new Date(nota.fecha).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) : '';
+      msg += `${i + 1}. ${nota.texto}\n   _${nota.por || 'Vendedor'} - ${fecha}_\n\n`;
+    });
+
+    return msg;
   }
 }

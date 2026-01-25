@@ -1048,6 +1048,20 @@ export class WhatsAppHandler {
 
       const msgLower = body.toLowerCase();
 
+      // ╔════════════════════════════════════════════════════════════════════════╗
+      // ║  CRÍTICO: ACTUALIZAR last_message_at SIEMPRE QUE UN LEAD ESCRIBE       ║
+      // ║  Esto es fundamental para detectar la ventana de 24h de WhatsApp       ║
+      // ╚════════════════════════════════════════════════════════════════════════╝
+      try {
+        await this.supabase.client
+          .from('leads')
+          .update({ last_message_at: new Date().toISOString() })
+          .eq('id', lead.id);
+        console.log(`✅ last_message_at actualizado para lead ${lead.id}`);
+      } catch (e) {
+        console.log('⚠️ Error actualizando last_message_at:', e);
+      }
+
       // ═══ PRIMERO: DETECTAR SI LEAD QUIERE CONTACTAR ASESOR/VENDEDOR ═══
       const quiereContacto = msgLower.includes('hablar con') ||
         msgLower.includes('contactar') ||
@@ -3181,6 +3195,97 @@ export class WhatsAppHandler {
     const { notes, notasVendedor } = await vendorService.getVendedorNotes(vendedor.id);
 
     // ═══════════════════════════════════════════════════════════
+    // SELECCIÓN DE TEMPLATE PENDIENTE (lead fuera de 24h)
+    // ═══════════════════════════════════════════════════════════
+    const pendingTemplateSelection = notasVendedor?.pending_template_selection;
+    if (pendingTemplateSelection && /^[1-5]$/.test(mensaje.trim())) {
+      const opcion = parseInt(mensaje.trim());
+      const leadPhone = pendingTemplateSelection.lead_phone;
+      const leadName = pendingTemplateSelection.lead_name?.split(' ')[0] || 'Hola';
+      const leadFullName = pendingTemplateSelection.lead_name || 'Lead';
+      const leadId = pendingTemplateSelection.lead_id;
+
+      // Formatear teléfono para mostrar
+      const telLimpio = leadPhone.replace(/\D/g, '').slice(-10);
+      const telFormateado = `${telLimpio.slice(0,3)}-${telLimpio.slice(3,6)}-${telLimpio.slice(6)}`;
+
+      // Opción 5: Cancelar
+      if (opcion === 5) {
+        delete notasVendedor.pending_template_selection;
+        await this.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+        await this.meta.sendWhatsAppMessage(from, `✅ Cancelado. No se envió nada a ${leadFullName}.`);
+        return;
+      }
+
+      // Opción 4: Contacto directo (llamar/WhatsApp desde su cel)
+      if (opcion === 4) {
+        // Guardar estado para registrar interacción después
+        notasVendedor.pending_direct_contact = {
+          lead_id: leadId,
+          lead_name: leadFullName,
+          lead_phone: leadPhone,
+          timestamp: new Date().toISOString()
+        };
+        delete notasVendedor.pending_template_selection;
+        await this.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+
+        await this.meta.sendWhatsAppMessage(from,
+          `📞 *Contacto directo con ${leadFullName}*\n\n` +
+          `📱 *Teléfono:* ${telFormateado}\n` +
+          `📲 *WhatsApp:* wa.me/52${telLimpio}\n` +
+          `📞 *Llamar:* tel:+52${telLimpio}\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `⚠️ *IMPORTANTE*: Después de contactarlo, registra qué pasó:\n\n` +
+          `Escribe: *nota ${leadName} [lo que pasó]*\n\n` +
+          `Ejemplo:\n` +
+          `_nota ${leadName} hablé por tel, quiere visita el sábado_`
+        );
+        console.log(`📞 Vendedor ${vendedor.name} solicitó contacto directo con ${leadFullName}`);
+        return;
+      }
+
+      // Opciones 1-3: Enviar template
+      delete notasVendedor.pending_template_selection;
+      await this.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+
+      try {
+        let templateName = '';
+        let templateParams: any[] = [];
+
+        switch (opcion) {
+          case 1: // Reactivación
+            templateName = 'reactivacion_lead';
+            templateParams = [{ type: 'body', parameters: [{ type: 'text', text: leadName }] }];
+            break;
+          case 2: // Seguimiento
+            templateName = 'seguimiento_lead';
+            templateParams = [{ type: 'body', parameters: [{ type: 'text', text: leadName }] }];
+            break;
+          case 3: // Info crédito
+            templateName = 'info_credito';
+            templateParams = [{ type: 'body', parameters: [{ type: 'text', text: leadName }] }];
+            break;
+        }
+
+        await this.meta.sendTemplate(leadPhone, templateName, 'es_MX', templateParams);
+
+        await this.meta.sendWhatsAppMessage(from,
+          `✅ *Template enviado a ${leadFullName}*\n\n` +
+          `Cuando responda, podrás escribirle directamente.\n\n` +
+          `💡 Usa *bridge ${leadName}* cuando responda.`
+        );
+        console.log(`📤 Template ${templateName} enviado a ${leadPhone}`);
+      } catch (err) {
+        console.error('Error enviando template seleccionado:', err);
+        await this.meta.sendWhatsAppMessage(from,
+          `❌ Error al enviar template. Intenta de nuevo o llama directamente:\n\n` +
+          `📱 ${telFormateado}`
+        );
+      }
+      return;
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // MENSAJE PENDIENTE A LEAD (después de comando "ver")
     // ═══════════════════════════════════════════════════════════
     const pendingMsgToLead = notasVendedor?.pending_message_to_lead;
@@ -3190,12 +3295,56 @@ export class WhatsAppHandler {
 
       // Solo válido por 10 minutos
       if (minutosTranscurridos <= 10) {
-        // Enviar mensaje al lead
+        // Verificar ventana de 24h del lead
+        const { data: leadData } = await this.supabase.client
+          .from('leads')
+          .select('last_message_at, name')
+          .eq('id', pendingMsgToLead.lead_id)
+          .single();
+
+        const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const dentroVentana24h = leadData?.last_message_at && leadData.last_message_at > hace24h;
+        console.log(`📊 Verificación 24h: last_message_at=${leadData?.last_message_at}, hace24h=${hace24h}, dentroVentana=${dentroVentana24h}`);
+
         const leadPhone = pendingMsgToLead.lead_phone.startsWith('521')
           ? pendingMsgToLead.lead_phone
           : '521' + pendingMsgToLead.lead_phone.replace(/\D/g, '').slice(-10);
 
+        // Si está fuera de la ventana de 24h, preguntar qué template enviar
+        if (!dentroVentana24h) {
+          console.log(`⚠️ Lead ${pendingMsgToLead.lead_name} fuera de ventana 24h, preguntando template`);
+
+          // Guardar contexto para selección de template
+          notasVendedor.pending_template_selection = {
+            lead_id: pendingMsgToLead.lead_id,
+            lead_name: pendingMsgToLead.lead_name,
+            lead_phone: leadPhone,
+            mensaje_original: body,
+            timestamp: new Date().toISOString()
+          };
+          delete notasVendedor.pending_message_to_lead;
+          await this.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+
+          // Formatear teléfono para mostrar
+          const telLimpio = leadPhone.replace(/\D/g, '').slice(-10);
+          const telFormateado = `${telLimpio.slice(0,3)}-${telLimpio.slice(3,6)}-${telLimpio.slice(6)}`;
+
+          await this.meta.sendWhatsAppMessage(from,
+            `⚠️ *${pendingMsgToLead.lead_name} no ha escrito en 24h*\n\n` +
+            `WhatsApp no permite mensajes directos.\n\n` +
+            `*¿Qué quieres hacer?*\n\n` +
+            `*1.* 📩 Template reactivación\n` +
+            `*2.* 📩 Template seguimiento\n` +
+            `*3.* 📩 Template info crédito\n` +
+            `*4.* 📞 Contactar directo (te doy su cel)\n` +
+            `*5.* ❌ Cancelar\n\n` +
+            `_Responde con el número_`
+          );
+          return;
+        }
+
         try {
+          console.log(`📤 Enviando mensaje pendiente a: ${leadPhone} (dentro de 24h)`);
           await this.meta.sendWhatsAppMessage(leadPhone,
             `💬 *Mensaje de ${vendedor.name?.split(' ')[0] || 'tu asesor'}:*\n\n${body}`
           );
@@ -3209,10 +3358,19 @@ export class WhatsAppHandler {
             `"${body.substring(0, 100)}${body.length > 100 ? '...' : ''}"\n\n` +
             `💡 Para hablar directo: *bridge ${pendingMsgToLead.lead_name?.split(' ')[0] || 'lead'}*`
           );
+          console.log(`✅ Mensaje pendiente enviado exitosamente a ${leadPhone}`);
           return;
-        } catch (err) {
-          console.error('Error enviando mensaje pendiente:', err);
-          // Continuar con el flujo normal
+        } catch (err: any) {
+          console.error('❌ Error enviando mensaje pendiente:', err);
+          // Notificar al vendedor del error
+          await this.meta.sendWhatsAppMessage(from,
+            `❌ *Error al enviar mensaje a ${pendingMsgToLead.lead_name}*\n\n` +
+            `El mensaje no pudo ser entregado. Intenta con *bridge ${pendingMsgToLead.lead_name?.split(' ')[0]}*`
+          );
+          // Limpiar pending
+          delete notasVendedor.pending_message_to_lead;
+          await this.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+          return;
         }
       } else {
         // Expirado, limpiar
@@ -3253,8 +3411,13 @@ export class WhatsAppHandler {
 
     // ═══════════════════════════════════════════════════════════
     // 🎓 ONBOARDING - Tutorial para vendedores nuevos
+    // Solo mostrar si NO es un comando conocido y NO hay bridge/pending activo
     // ═══════════════════════════════════════════════════════════
-    if (!notasVendedor?.onboarding_completed) {
+    const esComandoConocido = /^(ver|bridge|citas?|leads?|hoy|ayuda|help|resumen|briefing|meta|brochure|ubicacion|video|coach|quien|info|hot|pendientes|credito|nuevo|reagendar|cancelar|agendar|#)/i.test(mensaje);
+    const tieneBridgeActivo = notasVendedor?.active_bridge && notasVendedor.active_bridge.expires_at && new Date(notasVendedor.active_bridge.expires_at) > new Date();
+    const tienePendingMessage = notasVendedor?.pending_message_to_lead;
+
+    if (!notasVendedor?.onboarding_completed && !esComandoConocido && !tieneBridgeActivo && !tienePendingMessage) {
       console.log(`🎓 ONBOARDING: ${nombreVendedor} es nuevo, enviando tutorial`);
 
       // Mensaje de bienvenida y tutorial
@@ -3478,6 +3641,49 @@ export class WhatsAppHandler {
 
         const leadPhone = activeBridge.lead_phone;
         if (leadPhone) {
+          // Verificar ventana de 24h del lead
+          const { data: leadData } = await this.supabase.client
+            .from('leads')
+            .select('last_message_at')
+            .eq('id', activeBridge.lead_id)
+            .single();
+
+          const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+          const dentroVentana24h = leadData?.last_message_at && leadData.last_message_at > hace24h;
+          console.log(`📊 Bridge 24h check: last_message_at=${leadData?.last_message_at}, dentroVentana=${dentroVentana24h}`);
+
+          if (!dentroVentana24h) {
+            // Fuera de ventana - preguntar qué hacer
+            console.log(`⚠️ Bridge: Lead ${activeBridge.lead_name} fuera de ventana 24h`);
+
+            // Formatear teléfono para mostrar
+            const telLimpio = leadPhone.replace(/\D/g, '').slice(-10);
+
+            // Guardar contexto para selección de template
+            notasVendedor.pending_template_selection = {
+              lead_id: activeBridge.lead_id,
+              lead_name: activeBridge.lead_name,
+              lead_phone: leadPhone,
+              mensaje_original: body,
+              from_bridge: true,
+              timestamp: new Date().toISOString()
+            };
+            await this.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+
+            await this.meta.sendWhatsAppMessage(from,
+              `⚠️ *${activeBridge.lead_name} no ha escrito en 24h*\n\n` +
+              `WhatsApp no permite mensajes directos.\n\n` +
+              `*¿Qué quieres hacer?*\n\n` +
+              `*1.* 📩 Template reactivación\n` +
+              `*2.* 📩 Template seguimiento\n` +
+              `*3.* 📩 Template info crédito\n` +
+              `*4.* 📞 Contactar directo (te doy su cel)\n` +
+              `*5.* ❌ Cancelar\n\n` +
+              `_Responde con el número_`
+            );
+            return;
+          }
+
           const msgFormateado = `💬 *${nombreVendedor}:*\n${body}`;
           await this.meta.sendWhatsAppMessage(leadPhone, msgFormateado);
 
@@ -4752,10 +4958,10 @@ export class WhatsAppHandler {
 
       // ━━━ NOTAS Y ACTIVIDADES ━━━
       case 'vendedorAgregarNota':
-        await this.vendedorAgregarNota(from, body, vendedor, nombreVendedor);
+        await this.vendedorAgregarNotaConParams(from, params.nombreLead, params.textoNota, vendedor, nombreVendedor);
         break;
       case 'vendedorVerNotas':
-        await this.vendedorVerNotas(from, body, vendedor, nombreVendedor);
+        await this.vendedorVerNotasConParams(from, params.nombreLead, vendedor, nombreVendedor);
         break;
       case 'registrarActividad':
         await this.registrarActividad(from, params.nombre, params.tipo, vendedor, params.monto);
@@ -6397,6 +6603,64 @@ Responde con fecha y hora:
     } catch (error) {
       console.error('Error viendo notas:', error);
       await this.twilio.sendWhatsAppMessage(from, 'Error al obtener notas. Intenta de nuevo.');
+    }
+  }
+
+  // Versión con params ya parseados
+  private async vendedorAgregarNotaConParams(from: string, nombreLead: string, textoNota: string, vendedor: any, nombre: string): Promise<void> {
+    try {
+      const vendorService = new VendorCommandsService(this.supabase);
+
+      if (!nombreLead || !textoNota) {
+        await this.meta.sendWhatsAppMessage(from, vendorService.getMensajeAyudaAgregarNota());
+        return;
+      }
+
+      const result = await vendorService.agregarNotaPorNombre(nombreLead, textoNota, vendedor.id, vendedor.name || nombre);
+
+      if (result.error) {
+        await this.meta.sendWhatsAppMessage(from, `❌ ${result.error}`);
+        return;
+      }
+
+      if (result.multipleLeads) {
+        await this.meta.sendWhatsAppMessage(from, vendorService.formatMultipleLeadsNotas(result.multipleLeads));
+        return;
+      }
+
+      if (result.success && result.lead) {
+        const mensaje = vendorService.formatNotaAgregada(result.lead.name, textoNota, result.totalNotas!);
+        await this.meta.sendWhatsAppMessage(from, mensaje);
+      }
+    } catch (error) {
+      console.error('Error agregando nota:', error);
+      await this.meta.sendWhatsAppMessage(from, 'Error al agregar nota. Intenta de nuevo.');
+    }
+  }
+
+  private async vendedorVerNotasConParams(from: string, nombreLead: string, vendedor: any, nombre: string): Promise<void> {
+    try {
+      const vendorService = new VendorCommandsService(this.supabase);
+
+      if (!nombreLead) {
+        await this.meta.sendWhatsAppMessage(from, vendorService.getMensajeAyudaVerNotas());
+        return;
+      }
+
+      const result = await vendorService.getLeadNotas(nombreLead, vendedor.id);
+
+      if (result.error) {
+        await this.meta.sendWhatsAppMessage(from, `❌ ${result.error}`);
+        return;
+      }
+
+      if (result.lead) {
+        const mensaje = vendorService.formatLeadNotas(result.lead);
+        await this.meta.sendWhatsAppMessage(from, mensaje);
+      }
+    } catch (error) {
+      console.error('Error viendo notas:', error);
+      await this.meta.sendWhatsAppMessage(from, 'Error al obtener notas. Intenta de nuevo.');
     }
   }
 

@@ -286,7 +286,7 @@ export default {
       // Buscar lead
       const { data: leads, error } = await supabase.client
         .from('leads')
-        .select('id, name, phone, assigned_to, lead_score, status')
+        .select('id, name, phone, assigned_to, lead_score, status, last_message_at, updated_at, created_at')
         .or(`phone.ilike.%${phoneLimpio}%,phone.ilike.%${phoneLimpio.slice(-10)}%`)
         .limit(5);
 
@@ -306,10 +306,21 @@ export default {
         .ilike('phone', `%${phoneLimpio}%`)
         .limit(5);
 
+      // Calcular si está dentro de ventana 24h
+      const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const leadsConVentana = (leads || []).map((l: any) => ({
+        ...l,
+        dentroVentana24h: l.last_message_at ? l.last_message_at > hace24h : false,
+        horasDesdeUltimoMensaje: l.last_message_at
+          ? Math.round((Date.now() - new Date(l.last_message_at).getTime()) / (1000 * 60 * 60))
+          : null
+      }));
+
       return corsResponse(JSON.stringify({
         buscando: phoneLimpio,
         encontrados: leads?.length || 0,
-        leads: leads || [],
+        leads: leadsConVentana,
+        hace24h,
         ceo: teamMembers?.[0] || null,
         queryConAssigned: {
           ceoId,
