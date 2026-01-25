@@ -15,7 +15,7 @@ export class LeadAssignmentService {
       .eq('active', true);
 
     if (!salespeople || salespeople.length === 0) {
-      console.log('❌ No hay vendedores disponibles');
+      console.error('❌ No hay vendedores disponibles');
       return null;
     }
 

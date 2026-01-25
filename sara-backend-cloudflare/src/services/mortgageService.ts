@@ -82,7 +82,7 @@ export class MortgageService {
       });
 
       if (asesores.length === 0) {
-        console.log('⚠️ No hay asesores hipotecarios activos');
+        console.error('⚠️ No hay asesores hipotecarios activos');
         return { success: false, error: 'No hay asesores disponibles' };
       }
 

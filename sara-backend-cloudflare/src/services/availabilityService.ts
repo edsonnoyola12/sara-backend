@@ -33,7 +33,7 @@ export class AvailabilityService {
       .gte('end_time', time);
 
     if (!schedules || schedules.length === 0) {
-      console.log('❌ Nadie trabaja ese día/hora');
+      console.error('❌ Nadie trabaja ese día/hora');
       
       // Buscar próximos días laborables
       const alternatives = await this.findAlternativeDays(date, userType);
@@ -73,7 +73,7 @@ export class AvailabilityService {
     }
 
     // 3. Todos ocupados - buscar horarios alternativos
-    console.log('⚠️ Ocupado - buscando alternativas...');
+    console.error('⚠️ Ocupado - buscando alternativas...');
     const alternatives = await this.findAlternativeSlots(date, schedules[0].user_id);
     
     return {

@@ -30,7 +30,7 @@ export class SalespersonScheduler {
       .gte('end_time', requestedTime);
 
     if (!availabilities || availabilities.length === 0) {
-      console.log('❌ No hay vendedores disponibles ese día/hora');
+      console.error('❌ No hay vendedores disponibles ese día/hora');
       return null;
     }
 
@@ -52,7 +52,7 @@ export class SalespersonScheduler {
     }
 
     if (availableSalespeople.length === 0) {
-      console.log('⚠️ Todos ocupados en ese horario');
+      console.error('⚠️ Todos ocupados en ese horario');
       return { salesperson: availabilities[0].team_members, isAvailable: false };
     }
 

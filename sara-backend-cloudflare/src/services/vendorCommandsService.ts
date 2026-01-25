@@ -32,7 +32,7 @@ export class VendorCommandsService {
         .single();
 
       if (error) {
-        console.log(`❌ getVendedorNotes ERROR: ${error.message}`);
+        console.error(`❌ getVendedorNotes ERROR: ${error.message}`);
         return { notes: {}, notasVendedor: {} };
       }
 
@@ -46,7 +46,7 @@ export class VendorCommandsService {
             notas = JSON.parse(vendedor.notes);
             console.log(`📋 getVendedorNotes: parsed keys=[${Object.keys(notas).join(',')}]`);
           } catch (e) {
-            console.log(`❌ getVendedorNotes: JSON parse error`);
+            console.error(`❌ getVendedorNotes: JSON parse error`);
             notas = {};
           }
         } else if (notesType === 'object') {
@@ -64,7 +64,7 @@ export class VendorCommandsService {
       const keysOriginal = Object.keys(notas).length;
       const keysSanitizadas = Object.keys(notasSanitizadas).length;
       if (keysOriginal !== keysSanitizadas) {
-        console.log(`⚠️ NOTAS SANITIZADAS para ${vendedorId}: ${keysOriginal} -> ${keysSanitizadas} keys`);
+        console.error(`⚠️ NOTAS SANITIZADAS para ${vendedorId}: ${keysOriginal} -> ${keysSanitizadas} keys`);
         await this.supabase.client
           .from('team_members')
           .update({ notes: notasSanitizadas })
@@ -73,7 +73,7 @@ export class VendorCommandsService {
 
       return { notes: notasSanitizadas, notasVendedor: notasSanitizadas };
     } catch (e) {
-      console.log(`❌ getVendedorNotes EXCEPTION: ${e}`);
+      console.error(`❌ getVendedorNotes EXCEPTION: ${e}`);
       return { notes: {}, notasVendedor: {} };
     }
   }
@@ -357,7 +357,7 @@ export class VendorCommandsService {
       }
 
       if (!lead) {
-        console.log(`❌ Lead "${nombreLead}" no encontrado`);
+        console.error(`❌ Lead "${nombreLead}" no encontrado`);
         return { success: false, message: `No encontré ningún lead con el nombre "${nombreLead}". Verifica el nombre o usa el teléfono.` };
       }
 
@@ -370,7 +370,7 @@ export class VendorCommandsService {
       );
 
       if (asesores.length === 0) {
-        console.log('❌ No hay asesores hipotecarios activos');
+        console.error('❌ No hay asesores hipotecarios activos');
         return { success: false, message: 'No hay asesores hipotecarios disponibles en este momento. Intenta más tarde.' };
       }
 
@@ -427,7 +427,7 @@ export class VendorCommandsService {
           });
 
         if (maError) {
-          console.log('⚠️ Error creando mortgage_application:', maError);
+          console.error('⚠️ Error creando mortgage_application:', maError);
         } else {
           console.log('✅ mortgage_application creada');
         }

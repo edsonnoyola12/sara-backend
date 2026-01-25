@@ -22,7 +22,7 @@ export function createMarketingAlertsRouter(
       const marketingTeam = teamRes.data || [];
 
       if (marketingTeam.length === 0) {
-        console.log('⚠️ No hay personal de marketing activo');
+        console.error('⚠️ No hay personal de marketing activo');
         return new Response(JSON.stringify({ success: false, message: 'No hay personal de marketing' }), {
           headers: { 'Content-Type': 'application/json' }
         });

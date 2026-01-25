@@ -27,7 +27,7 @@ export class ClaudeService {
 
       // Si no hay mensajes, retornar vacío
       if (messages.length === 0) {
-        console.log('⚠️ Claude: No hay mensajes para procesar');
+        console.error('⚠️ Claude: No hay mensajes para procesar');
         return '';
       }
 
@@ -63,7 +63,7 @@ export class ClaudeService {
       const text = data.content?.[0]?.text || '';
 
       if (!text) {
-        console.log('⚠️ Claude: Respuesta vacía', JSON.stringify(data).substring(0, 200));
+        console.error('⚠️ Claude: Respuesta vacía', JSON.stringify(data).substring(0, 200));
       }
 
       return text;

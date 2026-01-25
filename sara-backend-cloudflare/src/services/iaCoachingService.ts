@@ -230,13 +230,13 @@ export class IACoachingService {
    */
   async enviarCoachingPersonalizado(vendedorId: string): Promise<boolean> {
     if (!this.meta) {
-      console.log('⚠️ MetaWhatsAppService no configurado para coaching');
+      console.error('⚠️ MetaWhatsAppService no configurado para coaching');
       return false;
     }
 
     const metrics = await this.obtenerMetricasVendedor(vendedorId, 14); // últimas 2 semanas
     if (!metrics || !metrics.phone) {
-      console.log(`⚠️ No se pudieron obtener métricas para vendedor ${vendedorId}`);
+      console.error(`⚠️ No se pudieron obtener métricas para vendedor ${vendedorId}`);
       return false;
     }
 

@@ -145,7 +145,7 @@ export class LeadMessageService {
         created_at: new Date().toISOString()
       });
     } catch (err) {
-      console.log('⚠️ Error guardando encuesta (tabla puede no existir):', err);
+      console.error('⚠️ Error guardando encuesta (tabla puede no existir):', err);
     }
 
     // Limpiar pending_satisfaction_survey
@@ -382,7 +382,7 @@ export class LeadMessageService {
       console.log('📅 Marcando evento para borrar de Calendar:', eventId);
     }
 
-    console.log('❌ Cita cancelada por lead:', lead.name);
+    console.error('❌ Cita cancelada por lead:', lead.name);
     return result;
   }
 

@@ -101,7 +101,7 @@ export class NotificationService {
             console.error(`❌ Error enviando recordatorio 24h:`, e);
           }
         } else {
-          console.log(`⚠️ Cita ${cita.id?.slice(0,8)} sin teléfono de lead`);
+          console.error(`⚠️ Cita ${cita.id?.slice(0,8)} sin teléfono de lead`);
         }
       }
 
@@ -139,7 +139,7 @@ export class NotificationService {
             console.error(`❌ Error enviando recordatorio 2h:`, e);
           }
         } else {
-          console.log(`⚠️ Cita ${cita.id?.slice(0,8)} sin teléfono de lead`);
+          console.error(`⚠️ Cita ${cita.id?.slice(0,8)} sin teléfono de lead`);
         }
       }
 

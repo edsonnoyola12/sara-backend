@@ -897,7 +897,7 @@ export class AgenciaReportingService {
     const leadsLimitados = leadsSegmento.slice(0, MAX_LEADS_PER_BROADCAST);
 
     if (totalLeads > MAX_LEADS_PER_BROADCAST) {
-      console.log(`⚠️ BROADCAST: Limitando de ${totalLeads} a ${MAX_LEADS_PER_BROADCAST} leads`);
+      console.error(`⚠️ BROADCAST: Limitando de ${totalLeads} a ${MAX_LEADS_PER_BROADCAST} leads`);
     }
 
     return {

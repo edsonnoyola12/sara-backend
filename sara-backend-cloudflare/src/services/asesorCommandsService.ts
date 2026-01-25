@@ -1466,7 +1466,7 @@ Ejemplo:
       try {
         await this.meta.sendWhatsAppMessage(leadPhone, mensajeLead);
       } catch (e) {
-        console.log('⚠️ No se pudo notificar al lead sobre la cita');
+        console.error('⚠️ No se pudo notificar al lead sobre la cita');
       }
 
       // Actualizar mortgage_application si existe

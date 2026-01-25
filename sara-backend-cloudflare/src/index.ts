@@ -28,6 +28,7 @@ export interface Env {
   META_ACCESS_TOKEN: string;
   GEMINI_API_KEY: string;
   API_SECRET?: string; // Para proteger endpoints sensibles
+  META_WEBHOOK_SECRET?: string; // Para validar firma de webhooks Meta/Facebook
 }
 
 function corsResponse(body: string | null, status: number = 200, contentType: string = 'application/json'): Response {
@@ -87,6 +88,64 @@ function requiresAuth(pathname: string): boolean {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// SEGURIDAD: Verificación de firma de webhooks Meta/Facebook
+// ═══════════════════════════════════════════════════════════════════════════
+async function verifyMetaSignature(request: Request, body: string, secret: string): Promise<boolean> {
+  const signature = request.headers.get('X-Hub-Signature-256');
+  if (!signature) {
+    console.error('❌ Webhook sin firma X-Hub-Signature-256');
+    return false;
+  }
+
+  // La firma viene como "sha256=HASH"
+  const expectedSignature = signature.replace('sha256=', '');
+
+  try {
+    // Crear HMAC-SHA256 del body con el secret
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+
+    const signatureBuffer = await crypto.subtle.sign(
+      'HMAC',
+      key,
+      encoder.encode(body)
+    );
+
+    // Convertir a hex
+    const hashArray = Array.from(new Uint8Array(signatureBuffer));
+    const computedSignature = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+    // Comparación timing-safe (evita timing attacks)
+    if (computedSignature.length !== expectedSignature.length) {
+      console.error('❌ Firma inválida: longitud incorrecta');
+      return false;
+    }
+
+    let match = true;
+    for (let i = 0; i < computedSignature.length; i++) {
+      if (computedSignature[i] !== expectedSignature[i]) {
+        match = false;
+      }
+    }
+
+    if (!match) {
+      console.error('❌ Firma inválida: no coincide');
+    }
+
+    return match;
+  } catch (e) {
+    console.error('❌ Error verificando firma:', e);
+    return false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // HELPER: Asignación inteligente de vendedores
 // ═══════════════════════════════════════════════════════════════════════════
 interface TeamMemberAvailability {
@@ -116,7 +175,7 @@ function getAvailableVendor(vendedores: TeamMemberAvailability[]): TeamMemberAva
   const activos = vendedores.filter(v => v.active && v.role === 'vendedor');
 
   if (activos.length === 0) {
-    console.log('⚠️ No hay vendedores activos, buscando fallback...');
+    console.error('⚠️ No hay vendedores activos, buscando fallback...');
 
     // FALLBACK 1: Buscar coordinadores o admins activos
     const coordinadores = vendedores.filter(v =>
@@ -196,9 +255,9 @@ function getAvailableVendor(vendedores: TeamMemberAvailability[]): TeamMemberAva
   }
 
   // 3. Si nadie está disponible, asignar al de menor ventas de todos los activos (fallback)
-  console.log('⚠️ Nadie disponible, usando fallback a activos');
+  console.error('⚠️ Nadie disponible, usando fallback a activos');
   const fallback = activos.sort((a, b) => (a.sales_count || 0) - (b.sales_count || 0))[0];
-  console.log(`⚠️ Fallback: ${fallback.name} (${fallback.sales_count} ventas)`);
+  console.error(`⚠️ Fallback: ${fallback.name} (${fallback.sales_count} ventas)`);
   return fallback;
 }
 
@@ -1692,7 +1751,7 @@ Responde *SI* para confirmar tu asistencia.`;
                 await calendar.deleteEvent(apt.google_event_vendedor_id);
                 console.log('🗑️ Evento de Calendar borrado:', apt.google_event_vendedor_id);
               } catch (e) {
-                console.log('⚠️ No se pudo borrar evento:', apt.google_event_vendedor_id);
+                console.error('⚠️ No se pudo borrar evento:', apt.google_event_vendedor_id);
               }
             }
           }
@@ -1940,7 +1999,7 @@ ${statusAnterior} → ${statusNuevo}
             }
           }
         } catch (e) {
-          console.log('⚠️ Error notificando cambio de status:', e);
+          console.error('⚠️ Error notificando cambio de status:', e);
         }
       }
       
@@ -1967,7 +2026,7 @@ ${statusAnterior} → ${statusNuevo}
             console.log('📤 Notificación enviada a', vendedor.name);
           }
         } catch (e) {
-          console.log('⚠️ Error notificando:', e);
+          console.error('⚠️ Error notificando:', e);
         }
       }
 
@@ -2021,7 +2080,7 @@ ${asesor.phone ? `📱 *Tel:* ${asesor.phone}` : ''}
             console.log('📤 Vendedor notificado de asignación a asesor');
           }
         } catch (e) {
-          console.log('⚠️ Error notificando asesor hipotecario:', e);
+          console.error('⚠️ Error notificando asesor hipotecario:', e);
         }
       }
 
@@ -2113,7 +2172,7 @@ ${asesor.phone ? `📱 *Tel:* ${asesor.phone}` : ''}
         .single();
       
       if (error) {
-        console.log('❌ Error creando lead:', error);
+        console.error('❌ Error creando lead:', error);
         // Mensaje amigable para teléfono duplicado
         if (error.code === '23505' && error.message.includes('phone')) {
           return corsResponse(JSON.stringify({ error: 'Ya existe un lead con este teléfono. Búscalo en la lista de leads.' }), 400);
@@ -2177,7 +2236,7 @@ ${creditoInfo}${citaInfo}
           await meta.sendWhatsAppMessage(vendedorAsignado.phone, mensaje);
           console.log('📤 Notificación enviada a vendedor:', vendedorAsignado.name);
         } catch (e) {
-          console.log('⚠️ Error notificando vendedor:', e);
+          console.error('⚠️ Error notificando vendedor:', e);
         }
       }
       
@@ -2232,7 +2291,7 @@ ${creditoInfo}${citaInfo}
             .single();
           
           if (mortgageError) {
-            console.log('⚠️ Error creando mortgage:', mortgageError);
+            console.error('⚠️ Error creando mortgage:', mortgageError);
           } else {
             console.log('📋 Mortgage creado:', mortgage?.id, 'Asesor:', asesorAsignado?.name || 'Sin asignar');
           }
@@ -2259,10 +2318,10 @@ ${creditoInfo}${citaInfo}
             await meta.sendWhatsAppMessage(asesorAsignado.phone, msgAsesor);
             console.log('📤 Notificación enviada a asesor:', asesorAsignado.name);
           } else if (body.enviar_a_asesor && !asesorAsignado) {
-            console.log('⚠️ No se encontró asesor para banco:', body.banco_preferido);
+            console.error('⚠️ No se encontró asesor para banco:', body.banco_preferido);
           }
         } catch (e) {
-          console.log('⚠️ Error en proceso de crédito:', e);
+          console.error('⚠️ Error en proceso de crédito:', e);
         }
       }
       
@@ -2331,13 +2390,13 @@ Creado desde CRM por: ${body.creador_name || 'Sistema'}`;
             .single();
           
           if (appointmentError) {
-            console.log('⚠️ Error creando appointment:', appointmentError);
+            console.error('⚠️ Error creando appointment:', appointmentError);
           } else {
             console.log('📅 Appointment creado en CRM:', appointment?.id);
           }
           
         } catch (e) {
-          console.log('⚠️ Error creando cita:', e);
+          console.error('⚠️ Error creando cita:', e);
         }
       }
       
@@ -2372,7 +2431,7 @@ ${gpsLink ? '📍 Ubicación: ' + gpsLink : ''}
           await meta.sendWhatsAppMessage(data.phone, msgCliente);
           console.log('📤 Confirmación enviada a cliente:', data.name);
         } catch (e) {
-          console.log('⚠️ Error notificando cliente:', e);
+          console.error('⚠️ Error notificando cliente:', e);
         }
       }
       
@@ -2408,7 +2467,7 @@ ${gpsLink ? '📍 Ubicación: ' + gpsLink : ''}
             await calendar.deleteEvent(googleEventId);
             console.log('📅 Evento eliminado de Google Calendar:', googleEventId);
           } catch (calError) {
-            console.log('⚠️ Error eliminando de Google Calendar:', calError);
+            console.error('⚠️ Error eliminando de Google Calendar:', calError);
           }
         }
         
@@ -2455,7 +2514,7 @@ Si deseas reagendar, contáctanos. ¡Estamos para servirte! 🏠`;
               await meta.sendWhatsAppMessage(phoneCliente, msgCliente);
               console.log('📤 Notificación de cancelación enviada a cliente:', appointment.lead_name);
             } catch (e) {
-              console.log('⚠️ Error notificando cliente:', e);
+              console.error('⚠️ Error notificando cliente:', e);
             }
           }
           
@@ -2484,14 +2543,14 @@ Cancelada por: ${body.cancelled_by || 'CRM'}`;
                 console.log('📤 Notificación de cancelación enviada a vendedor:', vendedor.name);
               }
             } catch (e) {
-              console.log('⚠️ Error notificando vendedor:', e);
+              console.error('⚠️ Error notificando vendedor:', e);
             }
           }
         }
         
         return corsResponse(JSON.stringify(data));
       } catch (e: any) {
-        console.log('❌ Error cancelando cita:', e);
+        console.error('❌ Error cancelando cita:', e);
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
     }
@@ -2600,7 +2659,7 @@ Para reagendar, contáctanos. ¡Estamos para servirte! 🏠`;
 
         return corsResponse(JSON.stringify({ success: true, action: body.action }));
       } catch (e: any) {
-        console.log('❌ Error enviando notificación:', e);
+        console.error('❌ Error enviando notificación:', e);
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
     }
@@ -2634,7 +2693,7 @@ ${body.nota}
 
         return corsResponse(JSON.stringify({ success: true }));
       } catch (e: any) {
-        console.log('❌ Error enviando nota:', e);
+        console.error('❌ Error enviando nota:', e);
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
     }
@@ -2670,7 +2729,7 @@ ${body.nota || 'Sin nota'}
 
         return corsResponse(JSON.stringify({ success: true }));
       } catch (e: any) {
-        console.log('❌ Error notificando reasignación:', e);
+        console.error('❌ Error notificando reasignación:', e);
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
     }
@@ -2789,7 +2848,7 @@ ${body.nota || 'Sin nota'}
               }).eq('id', body.lead_id);
             }
           } catch (e) {
-            console.log('⚠️ Error enviando template:', e);
+            console.error('⚠️ Error enviando template:', e);
             // Fallback: enviar mensaje normal si falla el template
             try {
               const msgCliente = `📅 *CITA CONFIRMADA*\n\n¡Hola ${body.lead_name || ''}! 👋\n\nTu cita ha sido agendada:\n\n📆 *Fecha:* ${fechaFormateada}\n🕐 *Hora:* ${citaHora}\n📍 *Lugar:* ${body.property_name || 'Por confirmar'}\n${gpsLink ? '🗺️ *Ubicación:* ' + gpsLink : ''}\n👤 *Te atenderá:* ${body.vendedor_name || 'Un asesor'}\n\n¡Te esperamos! 🏠`;
@@ -2797,7 +2856,7 @@ ${body.nota || 'Sin nota'}
               await meta.sendWhatsAppMessage(phoneCliente, msgCliente);
               confirmationSent = true;
             } catch (e2) {
-              console.log('⚠️ Error fallback mensaje:', e2);
+              console.error('⚠️ Error fallback mensaje:', e2);
             }
           }
         }
@@ -2836,13 +2895,13 @@ Creada desde CRM`;
               console.log('📤 Notificación enviada a vendedor:', vendedor.name);
             }
           } catch (e) {
-            console.log('⚠️ Error notificando vendedor:', e);
+            console.error('⚠️ Error notificando vendedor:', e);
           }
         }
         
         return corsResponse(JSON.stringify(data), 201);
       } catch (e: any) {
-        console.log('❌ Error creando cita:', e);
+        console.error('❌ Error creando cita:', e);
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
     }
@@ -2869,7 +2928,7 @@ Creada desde CRM`;
           .single();
         
         if (error) {
-          console.log('❌ Error DB:', error);
+          console.error('❌ Error DB:', error);
           throw error;
         }
         
@@ -2896,10 +2955,10 @@ Creada desde CRM`;
             });
             console.log('📅 Google Calendar actualizado:', googleEventId, dateTimeStr);
           } catch (calError) {
-            console.log('⚠️ Error Google Calendar (ignorado):', calError);
+            console.error('⚠️ Error Google Calendar (ignorado):', calError);
           }
         } else {
-          console.log('⚠️ Cita sin google_event_vendedor_id, no se puede sincronizar con Google Calendar');
+          console.error('⚠️ Cita sin google_event_vendedor_id, no se puede sincronizar con Google Calendar');
         }
         
         // Enviar notificaciones por WhatsApp si se solicitó
@@ -2981,14 +3040,14 @@ ${gpsLink ? '🗺️ *Maps:* ' + gpsLink : ''}`;
               console.log('📤 Notificación enviada a vendedor:', vendedorName);
             }
           } catch (notifError) {
-            console.log('⚠️ Error enviando notificaciones:', notifError);
+            console.error('⚠️ Error enviando notificaciones:', notifError);
           }
         }
         
         console.log('✅ Cita actualizada:', id);
         return corsResponse(JSON.stringify(data));
       } catch (e: any) {
-        console.log('❌ Error actualizando cita:', e);
+        console.error('❌ Error actualizando cita:', e);
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
     }
@@ -3046,7 +3105,7 @@ ${gpsLink ? '🗺️ *Maps:* ' + gpsLink : ''}`;
         .single();
       
       if (error) {
-        console.log('❌ Error actualizando hipoteca:', error);
+        console.error('❌ Error actualizando hipoteca:', error);
         return corsResponse(JSON.stringify({ error: error.message }), 400);
       }
       
@@ -3122,7 +3181,7 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
             }
           }
         } catch (e) {
-          console.log('⚠️ Error notificando vendedor sobre crédito:', e);
+          console.error('⚠️ Error notificando vendedor sobre crédito:', e);
         }
       }
       
@@ -3995,7 +4054,7 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
             .select('id');
 
           if (citasError) {
-            console.log(`⚠️ Error borrando citas de ${lead.name}: ${citasError.message}`);
+            console.error(`⚠️ Error borrando citas de ${lead.name}: ${citasError.message}`);
           }
           totalCitasBorradas += citasBorradas?.length || 0;
 
@@ -4006,7 +4065,7 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
             .eq('lead_id', lead.id);
 
           if (mortgageError) {
-            console.log(`⚠️ Error borrando mortgage_applications de ${lead.name}: ${mortgageError.message}`);
+            console.error(`⚠️ Error borrando mortgage_applications de ${lead.name}: ${mortgageError.message}`);
           } else {
             console.log(`✅ Mortgage applications borradas para ${lead.name}`);
           }
@@ -4018,7 +4077,7 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
             .eq('id', lead.id);
 
           if (deleteError) {
-            console.log(`❌ Error borrando lead ${lead.name}: ${deleteError.message}`);
+            console.error(`❌ Error borrando lead ${lead.name}: ${deleteError.message}`);
           } else {
             console.log(`✅ Lead ${lead.name} borrado exitosamente`);
             leadsBorrados.push(lead.name || lead.id);
@@ -4294,7 +4353,23 @@ Mensaje: ${mensaje}`;
     if (url.pathname === '/webhook/meta' && request.method === 'POST') {
       try {
         console.log('📥 WEBHOOK META: Recibiendo mensaje...');
-        const body = await request.json() as any;
+
+        // Leer body como texto para verificar firma
+        const bodyText = await request.text();
+
+        // Verificar firma si META_WEBHOOK_SECRET está configurado
+        if (env.META_WEBHOOK_SECRET) {
+          const isValid = await verifyMetaSignature(request, bodyText, env.META_WEBHOOK_SECRET);
+          if (!isValid) {
+            console.error('🚫 WEBHOOK META: Firma inválida - posible spoofing');
+            return new Response('Invalid signature', { status: 401 });
+          }
+          console.log('✅ WEBHOOK META: Firma verificada');
+        } else {
+          console.warn('⚠️ META_WEBHOOK_SECRET no configurado - webhooks sin verificar');
+        }
+
+        const body = JSON.parse(bodyText) as any;
         console.log('📥 Body recibido:', JSON.stringify(body).substring(0, 500));
 
         const entry = body?.entry?.[0];
@@ -4456,7 +4531,7 @@ Mensaje: ${mensaje}`;
                 // Detectar objeciones
                 const objeciones = detectarObjeciones(text);
                 if (objeciones.length > 0) {
-                  console.log(`⚠️ Objeciones detectadas para ${leadHot.name}: ${objeciones.map(o => o.tipo).join(', ')}`);
+                  console.error(`⚠️ Objeciones detectadas para ${leadHot.name}: ${objeciones.map(o => o.tipo).join(', ')}`);
                   await alertarObjecion(supabase, meta, leadHot, text, objeciones);
                 }
 
@@ -4480,7 +4555,7 @@ Mensaje: ${mensaje}`;
           const followupService = new FollowupService(supabase);
           await followupService.cancelarPorRespuesta('', from);
         } else {
-          console.log('⚠️ No hay mensajes en el webhook (puede ser status update)');
+          console.error('⚠️ No hay mensajes en el webhook (puede ser status update)');
         }
 
         return new Response('OK', { status: 200 });
@@ -4508,7 +4583,22 @@ Mensaje: ${mensaje}`;
 
     if (url.pathname === '/webhook/facebook-leads' && request.method === 'POST') {
       try {
-        const body = await request.json() as any;
+        // Leer body como texto para verificar firma
+        const bodyText = await request.text();
+
+        // Verificar firma si META_WEBHOOK_SECRET está configurado
+        if (env.META_WEBHOOK_SECRET) {
+          const isValid = await verifyMetaSignature(request, bodyText, env.META_WEBHOOK_SECRET);
+          if (!isValid) {
+            console.error('🚫 FACEBOOK LEADS: Firma inválida - posible spoofing');
+            return new Response('Invalid signature', { status: 401 });
+          }
+          console.log('✅ FACEBOOK LEADS: Firma verificada');
+        } else {
+          console.warn('⚠️ META_WEBHOOK_SECRET no configurado - webhooks sin verificar');
+        }
+
+        const body = JSON.parse(bodyText) as any;
         console.log('🔥 Facebook Lead recibido:', JSON.stringify(body));
 
         const entry = body?.entry?.[0];
@@ -4579,7 +4669,7 @@ Mensaje: ${mensaje}`;
           }
 
           if (existingLead) {
-            console.log(`⚠️ Lead ya existe: ${existingLead.id}`);
+            console.error(`⚠️ Lead ya existe: ${existingLead.id}`);
             // Actualizar con datos de Facebook si es más reciente
             await supabase.client.from('leads').update({
               source: 'facebook_ads',
@@ -4781,7 +4871,7 @@ Mensaje: ${mensaje}`;
                       await meta.sendWhatsAppMessage(phoneLead, msgLead);
                       console.log('📤 Notificación cancelación (Google→WhatsApp) a lead:', appointment.lead_name);
                     } catch (e) {
-                      console.log('⚠️ Error notificando lead:', e);
+                      console.error('⚠️ Error notificando lead:', e);
                     }
                   }
                 }
@@ -4881,7 +4971,7 @@ Mensaje: ${mensaje}`;
             borrados.push(huerfano.summary || huerfano.id);
             console.log('🗑️ Evento huérfano borrado:', huerfano.summary);
           } catch (e) {
-            console.log('⚠️ Error borrando evento:', huerfano.id, e);
+            console.error('⚠️ Error borrando evento:', huerfano.id, e);
           }
         }
 
@@ -7279,7 +7369,7 @@ _Solo responde con el número_ 🙏`;
         for (const lead of leads) {
           try {
             if (!lead.phone) {
-              console.log(`⚠️ ${lead.name} sin teléfono, saltando...`);
+              console.error(`⚠️ ${lead.name} sin teléfono, saltando...`);
               continue;
             }
 
@@ -7337,7 +7427,7 @@ _Solo responde con el número_ 🙏`;
             const { error: insertError } = await supabase.client.from('surveys').insert(surveyData);
 
             if (insertError) {
-              console.log(`❌ Error guardando encuesta en DB:`, insertError);
+              console.error(`❌ Error guardando encuesta en DB:`, insertError);
             } else {
               console.log(`✅ Encuesta guardada en DB para ${lead.phone}`);
             }
@@ -7348,7 +7438,7 @@ _Solo responde con el número_ 🙏`;
             // Rate limiting
             await new Promise(r => setTimeout(r, 1000));
           } catch (e) {
-            console.log(`❌ Error enviando a ${lead.name}:`, e);
+            console.error(`❌ Error enviando a ${lead.name}:`, e);
             errores++;
           }
         }
@@ -7544,7 +7634,7 @@ _Solo responde con el número_ 🙏`;
             console.log(`✅ Video enviado a ${miembro.name}`);
             enviados.push(miembro.name);
           } catch (e: any) {
-            console.log(`❌ Error enviando a ${miembro.name}: ${e.message}`);
+            console.error(`❌ Error enviando a ${miembro.name}: ${e.message}`);
             errores.push(`${miembro.name}: ${e.message}`);
           }
         }
@@ -9111,7 +9201,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         .select('id, name, phone, notes')
         .eq('active', true);
 
-      if (tmError) console.log('❌ Error cargando team_members:', tmError);
+      if (tmError) console.error('❌ Error cargando team_members:', tmError);
 
       const teamMember = allTeamMembers?.find((tm: any) => {
         if (!tm.phone) return false;
@@ -11014,10 +11104,10 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
               `_Incremento anual: 6%_`
             );
           } catch (e) {
-            console.log('⚠️ No se pudo notificar al CEO sobre precios');
+            console.error('⚠️ No se pudo notificar al CEO sobre precios');
           }
         } else {
-          console.log('⚠️ No hay propiedades para actualizar');
+          console.error('⚠️ No hay propiedades para actualizar');
         }
       } catch (e) {
         console.error('❌ Error en actualización de precios:', e);
@@ -11352,7 +11442,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     // 🚨 PRE-NO-SHOW ALERT: Citas en 2h sin confirmación
     // Alerta al vendedor para que contacte al lead antes de la cita
     // ═══════════════════════════════════════════════════════════
-    console.log('⚠️ Verificando citas próximas sin confirmación...');
+    console.error('⚠️ Verificando citas próximas sin confirmación...');
     try {
       const ahora = new Date();
       const en2horas = new Date(ahora.getTime() + 2 * 60 * 60 * 1000);
@@ -11402,7 +11492,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
                 `💡 El cliente NO ha confirmado.\n` +
                 `Escribe *bridge ${lead.name?.split(' ')[0] || 'lead'}* para contactarlo y confirmar.`
               );
-              console.log(`⚠️ PRE-NO-SHOW ALERT enviada a ${vendedor.name}: Cita con ${lead.name} en 2h sin confirmar`);
+              console.error(`⚠️ PRE-NO-SHOW ALERT enviada a ${vendedor.name}: Cita con ${lead.name} en 2h sin confirmar`);
 
               // Marcar como alertado
               await supabase.client.from('appointments')
@@ -11793,7 +11883,7 @@ async function procesarFollowupsPendientes(supabase: SupabaseService, meta: Meta
         const phoneLimpio = (pending.lead_phone || lead.phone || '').replace(/\D/g, '');
 
         if (!phoneLimpio) {
-          console.log(`⚠️ Lead ${lead.name} sin teléfono, saltando`);
+          console.error(`⚠️ Lead ${lead.name} sin teléfono, saltando`);
           continue;
         }
 
@@ -13127,7 +13217,7 @@ async function procesarRespuestaEncuesta(supabase: SupabaseService, phone: strin
             .eq('active', true);
 
           // Notificación asíncrona - no esperamos
-          console.log(`⚠️ Encuesta negativa de ${encuesta.lead_name} sobre ${encuesta.vendedor_name}`);
+          console.error(`⚠️ Encuesta negativa de ${encuesta.lead_name} sobre ${encuesta.vendedor_name}`);
         }
 
         return respuestas[respuesta];
@@ -14266,7 +14356,7 @@ async function aplicarPreciosProgramados(supabase: SupabaseService, meta: MetaWh
       .select('id, name, development, price, price_equipped');
 
     if (error || !propiedades || propiedades.length === 0) {
-      console.log('⚠️ Error obteniendo propiedades:', error?.message);
+      console.error('⚠️ Error obteniendo propiedades:', error?.message);
       return;
     }
 
@@ -14303,7 +14393,7 @@ async function aplicarPreciosProgramados(supabase: SupabaseService, meta: MetaWh
           resumen.push(`• ${prop.development}: ${prop.name} $${(precioAnterior/1000000).toFixed(2)}M → $${(nuevoPrecio/1000000).toFixed(2)}M`);
         }
       } catch (e) {
-        console.log(`❌ Error actualizando ${prop.name}:`, e);
+        console.error(`❌ Error actualizando ${prop.name}:`, e);
       }
     }
 
@@ -15228,7 +15318,7 @@ async function verificarConsistenciaCalendario(
 
       // Si el evento NO existe en Google Calendar
       if (!googleEventIds.has(cita.google_event_vendedor_id)) {
-        console.log(`⚠️ Cita ${cita.id} (${cita.lead_name}) - evento NO existe en Google Calendar`);
+        console.error(`⚠️ Cita ${cita.id} (${cita.lead_name}) - evento NO existe en Google Calendar`);
 
         // Marcar como cancelled
         await supabase.client
@@ -15241,7 +15331,7 @@ async function verificarConsistenciaCalendario(
           .eq('id', cita.id);
 
         resultado.canceladas++;
-        console.log(`❌ Cita ${cita.id} marcada como cancelled (evento borrado de Google)`);
+        console.error(`❌ Cita ${cita.id} marcada como cancelled (evento borrado de Google)`);
       }
     }
 
@@ -15373,7 +15463,7 @@ async function detectarNoShows(supabase: SupabaseService, meta: MetaWhatsAppServ
       }
 
       if (!vendedor?.phone) {
-        console.log(`⚠️ Cita ${cita.id} sin vendedor o sin teléfono, saltando`);
+        console.error(`⚠️ Cita ${cita.id} sin vendedor o sin teléfono, saltando`);
         continue;
       }
 
@@ -15393,7 +15483,7 @@ async function detectarNoShows(supabase: SupabaseService, meta: MetaWhatsAppServ
             : vendedorData.notes;
         }
       } catch (e) {
-        console.log(`⚠️ Error parseando notas de ${vendedor.name}:`, e);
+        console.error(`⚠️ Error parseando notas de ${vendedor.name}:`, e);
         notasActuales = {};
       }
 
@@ -15561,7 +15651,7 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
 
   const MAX_VIDEOS_DIA = 100;
   if ((videosHoy || 0) >= MAX_VIDEOS_DIA) {
-    console.log(`⚠️ RATE LIMIT: Ya se generaron ${videosHoy} videos hoy (máx ${MAX_VIDEOS_DIA})`);
+    console.error(`⚠️ RATE LIMIT: Ya se generaron ${videosHoy} videos hoy (máx ${MAX_VIDEOS_DIA})`);
     return;
   }
 
@@ -15610,7 +15700,7 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
             continue;
           }
         } catch (retryError: any) {
-          console.log(`⚠️ Error en retry de video ${video.id}: ${retryError.message}`);
+          console.error(`⚠️ Error en retry de video ${video.id}: ${retryError.message}`);
         }
       }
 
@@ -15627,7 +15717,7 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
 
       if (!statusResponse.ok) {
         const errorText = await statusResponse.text();
-        console.log(`⚠️ Error verificando video ${video.id}: ${errorText}`);
+        console.error(`⚠️ Error verificando video ${video.id}: ${errorText}`);
         continue;
       }
 
@@ -15662,7 +15752,7 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
             });
 
             if (!videoResponse.ok) {
-              console.log(`❌ Error descargando video: ${videoResponse.status}`);
+              console.error(`❌ Error descargando video: ${videoResponse.status}`);
               // NO marcar como enviado, se reintentará
               continue;
             }
@@ -15698,7 +15788,7 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
                   `   ${stats.topName} (${stats.topCierres} cierres)\n\n` +
                   `¡Vamos por más! 💪🔥`;
               } catch (e) {
-                console.log('⚠️ No se pudo parsear stats, usando caption default');
+                console.error('⚠️ No se pudo parsear stats, usando caption default');
               }
 
               // Enviar video a equipo EN PARALELO
@@ -15711,7 +15801,7 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
               enviadoExitoso = resultados.some(r => r.status === 'fulfilled');
               resultados.forEach((r, i) => {
                 if (r.status === 'rejected') {
-                  console.log(`⚠️ Error enviando video a ${miembrosConPhone[i]?.name}: ${r.reason?.message || r.reason}`);
+                  console.error(`⚠️ Error enviando video a ${miembrosConPhone[i]?.name}: ${r.reason?.message || r.reason}`);
                 }
               });
             } else {
@@ -15731,12 +15821,12 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
               console.log(`✅ Video ${video.id} marcado como enviado`);
             }
           } catch (downloadError: any) {
-            console.log(`❌ Error en flujo de video: ${downloadError.message}`);
+            console.error(`❌ Error en flujo de video: ${downloadError.message}`);
             // NO marcar como enviado, se reintentará en próximo cron
           }
 
         } else if (status.error) {
-          console.log(`❌ Video fallido: ${status.error.message}`);
+          console.error(`❌ Video fallido: ${status.error.message}`);
           await supabase.client
             .from('pending_videos')
             .update({ sent: true, completed_at: new Date().toISOString(), video_url: `ERROR: ${status.error.message}` })
@@ -15751,7 +15841,7 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
               .update({ sent: true, completed_at: new Date().toISOString(), video_url: `ERROR_RAI: ${raiReasons[0]}` })
               .eq('id', video.id);
           } else {
-            console.log(`⚠️ Video completado pero sin URI`);
+            console.error(`⚠️ Video completado pero sin URI`);
             console.log(`📦 Estructura completa:`, JSON.stringify(status));
             await supabase.client
               .from('pending_videos')
@@ -15763,7 +15853,7 @@ async function verificarVideosPendientes(supabase: SupabaseService, meta: MetaWh
         console.log(`⏳ Video ${video.id} aún procesando...`);
       }
     } catch (e: any) {
-      console.log(`❌ Error procesando video ${video.id}: ${e.message}`);
+      console.error(`❌ Error procesando video ${video.id}: ${e.message}`);
       // Marcar como enviado para evitar reintentos infinitos
       await supabase.client
         .from('pending_videos')
@@ -15866,7 +15956,7 @@ async function generarVideoSemanalLogros(supabase: SupabaseService, meta: MetaWh
         await meta.sendWhatsAppMessage(miembro.phone, mensajeTexto);
         console.log(`✅ Resumen enviado a ${miembro.name}`);
       } catch (e) {
-        console.log(`⚠️ Error enviando a ${miembro.name}`);
+        console.error(`⚠️ Error enviando a ${miembro.name}`);
       }
     }
 
@@ -15898,7 +15988,7 @@ Cinematic, warm color grading. 8 seconds. No text, no overlays, no captions - cl
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('⚠️ Veo 3 error:', errorText);
+      console.error('⚠️ Veo 3 error:', errorText);
       return;
     }
 
@@ -15906,7 +15996,7 @@ Cinematic, warm color grading. 8 seconds. No text, no overlays, no captions - cl
     const operationName = result.name;
     
     if (!operationName) {
-      console.log('⚠️ No operation name para video semanal');
+      console.error('⚠️ No operation name para video semanal');
       return;
     }
 
@@ -16053,7 +16143,7 @@ async function alertaInactividadVendedor(supabase: SupabaseService, meta: MetaWh
       .eq('active', true);
 
     if (!admins || admins.length === 0) {
-      console.log('⚠️ No hay admins para notificar');
+      console.error('⚠️ No hay admins para notificar');
       return;
     }
 
@@ -16065,7 +16155,7 @@ async function alertaInactividadVendedor(supabase: SupabaseService, meta: MetaWh
       .eq('active', true);
 
     if (!vendedores || vendedores.length === 0) {
-      console.log('⚠️ No hay vendedores activos');
+      console.error('⚠️ No hay vendedores activos');
       return;
     }
 
@@ -16415,7 +16505,7 @@ async function recordatorioFinalDia(supabase: SupabaseService, meta: MetaWhatsAp
           if (!admin.phone) continue;
           try {
             await meta.sendWhatsAppMessage(admin.phone, adminMsg);
-            console.log(`⚠️ Alerta admin 5pm enviada a ${admin.name}`);
+            console.error(`⚠️ Alerta admin 5pm enviada a ${admin.name}`);
           } catch (e) {
             console.log(`Error enviando alerta admin 5pm:`, e);
           }
@@ -16749,7 +16839,7 @@ async function followUpLeadsInactivos(supabase: SupabaseService, meta: MetaWhats
         }
 
       } catch (e) {
-        console.log(`❌ Error enviando follow-up a ${lead.name}:`, e);
+        console.error(`❌ Error enviando follow-up a ${lead.name}:`, e);
       }
     }
 
@@ -16952,7 +17042,7 @@ async function recordatoriosPagoApartado(supabase: SupabaseService, meta: MetaWh
           recordatoriosEnviados++;
           await new Promise(r => setTimeout(r, 1000)); // Rate limiting
         } catch (e) {
-          console.log(`❌ Error enviando recordatorio a ${lead.name}:`, e);
+          console.error(`❌ Error enviando recordatorio a ${lead.name}:`, e);
         }
       }
     }
@@ -17053,7 +17143,7 @@ async function reactivarLeadsPerdidos(supabase: SupabaseService, meta: MetaWhats
           leadsPorVendedor.get(vendedor.id)!.push({ lead, vendedor });
         }
       } catch (e) {
-        console.log(`❌ Error reactivando ${lead.name}:`, e);
+        console.error(`❌ Error reactivando ${lead.name}:`, e);
       }
 
       await new Promise(r => setTimeout(r, 2000));
@@ -17208,7 +17298,7 @@ async function procesarCumpleañosLeads(
       }
 
     } catch (e) {
-      console.log(`❌ Error felicitando a ${lead.name}:`, e);
+      console.error(`❌ Error felicitando a ${lead.name}:`, e);
     }
 
     // Esperar entre mensajes
@@ -17335,7 +17425,7 @@ async function felicitarCumpleañosEquipo(supabase: SupabaseService, meta: MetaW
         }).eq('id', miembro.id);
 
       } catch (e) {
-        console.log(`❌ Error felicitando a ${miembro.name}:`, e);
+        console.error(`❌ Error felicitando a ${miembro.name}:`, e);
       }
 
       await new Promise(r => setTimeout(r, 1000));
@@ -17523,7 +17613,7 @@ Esperamos que sigas disfrutando tu casa y creando recuerdos increíbles. ¡Graci
         }
 
       } catch (e) {
-        console.log(`❌ Error felicitando aniversario de ${cliente.name}:`, e);
+        console.error(`❌ Error felicitando aniversario de ${cliente.name}:`, e);
       }
 
       await new Promise(r => setTimeout(r, 1500));
@@ -18996,7 +19086,7 @@ async function seguimientoPostVenta(supabase: SupabaseService, meta: MetaWhatsAp
             );
           }
         } catch (templateErr) {
-          console.log(`⚠️ Template referidos falló para ${cliente.name}:`, templateErr);
+          console.error(`⚠️ Template referidos falló para ${cliente.name}:`, templateErr);
         }
         continue; // Ya procesamos este cliente
 
@@ -19135,7 +19225,7 @@ async function enviarFelicitacionesCumple(supabase: SupabaseService, meta: MetaW
         enviados++;
 
       } catch (templateErr) {
-        console.log(`⚠️ Template feliz_cumple no disponible para ${lead.name}, usando fallback...`);
+        console.error(`⚠️ Template feliz_cumple no disponible para ${lead.name}, usando fallback...`);
 
         // Fallback: mensaje regular (solo si estamos dentro de 24hrs)
         try {
@@ -19159,7 +19249,7 @@ async function enviarFelicitacionesCumple(supabase: SupabaseService, meta: MetaW
 
           enviados++;
         } catch (fallbackErr) {
-          console.log(`❌ No se pudo enviar felicitación a ${lead.name}:`, fallbackErr);
+          console.error(`❌ No se pudo enviar felicitación a ${lead.name}:`, fallbackErr);
         }
       }
     }
@@ -19227,7 +19317,7 @@ async function felicitarEquipoCumple(supabase: SupabaseService, meta: MetaWhatsA
           .eq('id', miembro.id);
 
       } catch (err) {
-        console.log(`⚠️ Error felicitando a ${miembro.name} (equipo):`, err);
+        console.error(`⚠️ Error felicitando a ${miembro.name} (equipo):`, err);
       }
     }
 
@@ -19345,7 +19435,7 @@ async function seguimientoCredito(supabase: SupabaseService, meta: MetaWhatsAppS
         enviados++;
 
       } catch (templateErr) {
-        console.log(`⚠️ Template info_credito no disponible para ${lead.name}, usando fallback...`);
+        console.error(`⚠️ Template info_credito no disponible para ${lead.name}, usando fallback...`);
 
         // Fallback: mensaje regular (solo funcionará si hay ventana de 24hrs abierta)
         try {
@@ -19372,7 +19462,7 @@ async function seguimientoCredito(supabase: SupabaseService, meta: MetaWhatsAppS
 
           enviados++;
         } catch (fallbackErr) {
-          console.log(`❌ No se pudo enviar seguimiento crédito a ${lead.name}:`, fallbackErr);
+          console.error(`❌ No se pudo enviar seguimiento crédito a ${lead.name}:`, fallbackErr);
         }
       }
     }
@@ -21287,7 +21377,7 @@ async function alertarObjecion(
       .single();
 
     if (!vendedor?.phone) {
-      console.log(`⚠️ Objeción detectada para ${lead.name} pero vendedor sin teléfono`);
+      console.error(`⚠️ Objeción detectada para ${lead.name} pero vendedor sin teléfono`);
       return;
     }
 
@@ -21297,7 +21387,7 @@ async function alertarObjecion(
     if (ultimaObjecion) {
       const hace2h = new Date(Date.now() - 2 * 60 * 60 * 1000);
       if (new Date(ultimaObjecion) > hace2h) {
-        console.log(`⚠️ Lead ${lead.name} ya tiene alerta de objeción reciente`);
+        console.error(`⚠️ Lead ${lead.name} ya tiene alerta de objeción reciente`);
         return;
       }
     }
@@ -21330,7 +21420,7 @@ async function alertarObjecion(
     alertaMsg += `\n📞 Responde: bridge ${nombreCortoObj}`;
 
     await meta.sendWhatsAppMessage(vendedor.phone, alertaMsg);
-    console.log(`⚠️ Alerta de objeción enviada a ${vendedor.name}: ${lead.name} (${tiposObjecion})`);
+    console.error(`⚠️ Alerta de objeción enviada a ${vendedor.name}: ${lead.name} (${tiposObjecion})`);
 
     // Guardar en notas
     const notasActualizadas = {

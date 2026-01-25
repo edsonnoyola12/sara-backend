@@ -66,7 +66,7 @@ export class FollowupService {
       const { data: rules, error } = await query.order('sequence_order', { ascending: true });
 
       if (error || !rules || rules.length === 0) {
-        console.log('⚠️ No hay reglas activas para este evento');
+        console.error('⚠️ No hay reglas activas para este evento');
         return 0;
       }
 
@@ -103,7 +103,7 @@ export class FollowupService {
         .insert(followupsToInsert);
 
       if (insertError) {
-        console.log('❌ Error programando follow-ups:', insertError);
+        console.error('❌ Error programando follow-ups:', insertError);
         return 0;
       }
 
@@ -111,7 +111,7 @@ export class FollowupService {
       return followupsToInsert.length;
 
     } catch (e) {
-      console.log('❌ Error en programarFollowups:', e);
+      console.error('❌ Error en programarFollowups:', e);
       return 0;
     }
   }
@@ -195,17 +195,17 @@ export class FollowupService {
             results.sent++;
           } else {
             results.failed++;
-            console.log(`❌ Error enviando follow-up a ${followup.lead_name}`);
+            console.error(`❌ Error enviando follow-up a ${followup.lead_name}`);
           }
 
         } catch (e) {
-          console.log(`❌ Error procesando follow-up ${followup.id}:`, e);
+          console.error(`❌ Error procesando follow-up ${followup.id}:`, e);
           results.failed++;
         }
       }
 
     } catch (e) {
-      console.log('❌ Error en procesarFollowupsPendientes:', e);
+      console.error('❌ Error en procesarFollowupsPendientes:', e);
     }
 
     return results;
@@ -286,7 +286,7 @@ export class FollowupService {
       return count;
 
     } catch (e) {
-      console.log('❌ Error en cancelarPorRespuesta:', e);
+      console.error('❌ Error en cancelarPorRespuesta:', e);
       return 0;
     }
   }
@@ -315,7 +315,7 @@ export class FollowupService {
       return count;
 
     } catch (e) {
-      console.log('❌ Error en cancelarPorCambioStatus:', e);
+      console.error('❌ Error en cancelarPorCambioStatus:', e);
       return 0;
     }
   }

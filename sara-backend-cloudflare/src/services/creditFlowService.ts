@@ -133,7 +133,7 @@ export class CreditFlowService {
             created_at: new Date().toISOString()
           });
         } catch (actErr) {
-          console.log('⚠️ Error registrando actividad abandono:', actErr);
+          console.error('⚠️ Error registrando actividad abandono:', actErr);
         }
 
         // Notificar al asesor si había uno asignado
@@ -150,14 +150,14 @@ export class CreditFlowService {
               console.log(`📤 Asesor ${asesor.name} debería ser notificado del abandono`);
             }
           } catch (asesorErr) {
-            console.log('⚠️ Error obteniendo asesor para notificar:', asesorErr);
+            console.error('⚠️ Error obteniendo asesor para notificar:', asesorErr);
           }
         }
 
         console.log(`🏦 Flujo de crédito CANCELADO para lead ${leadId} (razón: ${razon || 'cambio_tema'})`);
       }
     } catch (e) {
-      console.log('⚠️ Error cancelando flujo de crédito:', e);
+      console.error('⚠️ Error cancelando flujo de crédito:', e);
     }
   }
 

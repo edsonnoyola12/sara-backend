@@ -134,7 +134,7 @@ export class AppointmentSchedulingService {
         try {
           await this.calendar.deleteEvent(appointment.google_event_id);
         } catch (e) {
-          console.log('⚠️ No se pudo eliminar evento de Calendar:', e);
+          console.error('⚠️ No se pudo eliminar evento de Calendar:', e);
         }
       }
 
@@ -393,7 +393,7 @@ reagendar ${nombreLead} mañana 4pm`;
             end: { dateTime: endISO, timeZone: 'America/Mexico_City' }
           });
         } catch (e) {
-          console.log('⚠️ No se pudo actualizar evento en Calendar:', e);
+          console.error('⚠️ No se pudo actualizar evento en Calendar:', e);
         }
       }
 
@@ -546,7 +546,7 @@ reagendar ${nombreLead} mañana 4pm`;
             }
           }
         } catch (e) {
-          console.log('⚠️ No se pudo crear/actualizar evento en Calendar:', e);
+          console.error('⚠️ No se pudo crear/actualizar evento en Calendar:', e);
         }
       }
 
@@ -792,7 +792,7 @@ agendar ${nombreLead} mañana 4pm`;
           gpsLink = propData.gps_link || '';
           console.log('📍 Ubicación encontrada:', { ubicacion, gpsLink: gpsLink ? 'SÍ' : 'NO' });
         } else {
-          console.log('⚠️ No se encontró propiedad para:', desarrolloBuscar);
+          console.error('⚠️ No se encontró propiedad para:', desarrolloBuscar);
         }
       }
 
@@ -854,7 +854,7 @@ agendar ${nombreLead} mañana 4pm`;
               .eq('id', appointment.id);
           }
         } catch (e) {
-          console.log('⚠️ No se pudo crear evento en Calendar:', e);
+          console.error('⚠️ No se pudo crear evento en Calendar:', e);
         }
       }
 
@@ -940,7 +940,7 @@ agendar ${nombreLead} mañana 4pm`;
           gpsLink = propData.gps_link || '';
           console.log('📍 Ubicación encontrada:', { ubicacion, gpsLink: gpsLink ? 'SÍ' : 'NO' });
         } else {
-          console.log('⚠️ No se encontró propiedad para:', desarrolloBuscar);
+          console.error('⚠️ No se encontró propiedad para:', desarrolloBuscar);
         }
       }
 
@@ -1001,7 +1001,7 @@ agendar ${nombreLead} mañana 4pm`;
               .eq('id', appointment.id);
           }
         } catch (e) {
-          console.log('⚠️ No se pudo crear evento en Calendar:', e);
+          console.error('⚠️ No se pudo crear evento en Calendar:', e);
         }
       }
 

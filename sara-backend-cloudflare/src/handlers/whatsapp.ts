@@ -211,7 +211,7 @@ export class WhatsAppHandler {
       const result = await mortgageService.finalizeCreditFlow(lead, teamMembers);
 
       if (!result.success || !result.asesor) {
-        console.log('⚠️ No hay asesor disponible');
+        console.error('⚠️ No hay asesor disponible');
         return;
       }
 
@@ -247,7 +247,7 @@ export class WhatsAppHandler {
       console.log('✅ Datos del asesor enviados al cliente');
 
     } catch (e) {
-      console.log('⚠️ Error finalizando flujo crédito:', e);
+      console.error('⚠️ Error finalizando flujo crédito:', e);
     }
   }
   
@@ -309,7 +309,7 @@ export class WhatsAppHandler {
       console.log(`📊 Score Funnel: ${resultado.status} → ${resultado.score} (${resultado.temperature})`);
       resultado.breakdown.details.forEach(d => console.log(`   ${d}`));
     } catch (e) {
-      console.log('⚠️ Error actualizando score:', e);
+      console.error('⚠️ Error actualizando score:', e);
     }
   }
 
@@ -340,14 +340,14 @@ export class WhatsAppHandler {
       
       // Filtrar status callbacks de Twilio
       if (rawRequest?.SmsStatus || rawRequest?.MessageStatus || rawRequest?.EventType) {
-        console.log('⚠️ Ignorando status callback');
+        console.error('⚠️ Ignorando status callback');
         return;
       }
       
       // Filtrar mensajes vacíos o status
       const ignoredMessages = ['OK', 'SENT', 'DELIVERED', 'READ', 'FAILED', 'QUEUED'];
       if (!trimmedBody || ignoredMessages.includes(trimmedBody.toUpperCase())) {
-        console.log('⚠️ Ignorando:', trimmedBody);
+        console.error('⚠️ Ignorando:', trimmedBody);
         return;
       }
 
@@ -376,7 +376,7 @@ export class WhatsAppHandler {
             await this.twilio.sendWhatsAppMessage(from, '🧪 *MODO TEST*\n\nLead borrado. Escribe cualquier cosa para empezar como cliente nuevo.');
             return;
           } else {
-            console.log('⚠️ RESET rechazado - Lead tiene más de 24h:', leadTest.name);
+            console.error('⚠️ RESET rechazado - Lead tiene más de 24h:', leadTest.name);
           }
         }
       }
@@ -497,7 +497,7 @@ export class WhatsAppHandler {
             true // bypass rate limit para alertas
           );
         } catch (e) {
-          console.log('⚠️ No se pudo alertar admin sobre DNC');
+          console.error('⚠️ No se pudo alertar admin sobre DNC');
         }
 
         return; // No procesar más este mensaje
@@ -514,7 +514,7 @@ export class WhatsAppHandler {
             console.log(`📭 ${cancelados} follow-ups cancelados - lead respondió`);
           }
         } catch (e) {
-          console.log('⚠️ Error cancelando follow-ups:', e);
+          console.error('⚠️ Error cancelando follow-ups:', e);
         }
       }
 
@@ -566,7 +566,7 @@ export class WhatsAppHandler {
               }
             }
           } catch (notifErr) {
-            console.log('⚠️ Error notificando vendedor:', notifErr);
+            console.error('⚠️ Error notificando vendedor:', notifErr);
           }
         }
       }
@@ -582,7 +582,7 @@ export class WhatsAppHandler {
           return; // No procesar más, ya respondimos a la encuesta
         }
       } catch (e) {
-        console.log('⚠️ Error procesando respuesta de encuesta:', e);
+        console.error('⚠️ Error procesando respuesta de encuesta:', e);
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -604,7 +604,7 @@ export class WhatsAppHandler {
           return;
         }
       } catch (e) {
-        console.log('⚠️ Error procesando post-visita:', e);
+        console.error('⚠️ Error procesando post-visita:', e);
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -662,7 +662,7 @@ export class WhatsAppHandler {
           }
         }
       } catch (e) {
-        console.log('⚠️ Error procesando respuesta a broadcast:', e);
+        console.error('⚠️ Error procesando respuesta a broadcast:', e);
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -717,10 +717,10 @@ export class WhatsAppHandler {
                   await this.meta.sendWhatsAppMessage(asesor.phone, msgAsesor);
                   console.log(`📤 Asesor ${asesor.name} notificado exitosamente`);
                 } else {
-                  console.log(`⚠️ Asesor sin teléfono o inactivo (is_active=${asesor.is_active})`);
+                  console.error(`⚠️ Asesor sin teléfono o inactivo (is_active=${asesor.is_active})`);
                 }
               } else {
-                console.log(`⚠️ No se encontró asesor o contexto - enviando mensaje genérico`);
+                console.error(`⚠️ No se encontró asesor o contexto - enviando mensaje genérico`);
                 await this.meta.sendWhatsAppMessage(cleanPhone,
                   `Te contactaremos pronto con un asesor especializado.\n\n¡Gracias por tu interés! 🏠`);
               }
@@ -742,7 +742,7 @@ export class WhatsAppHandler {
           }
         }
       } catch (creditErr) {
-        console.log('⚠️ Error en flujo de crédito:', creditErr);
+        console.error('⚠️ Error en flujo de crédito:', creditErr);
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -799,7 +799,7 @@ export class WhatsAppHandler {
             await this.twilio.sendWhatsAppMessage(from, msgConfirmacion);
             return; // No continuar a SARA
           } else if (esNegativo) {
-            console.log('❌ Lead quiere cancelar/cambiar cita:', body);
+            console.error('❌ Lead quiere cancelar/cambiar cita:', body);
             await this.twilio.sendWhatsAppMessage(from, `Entendido, sin problema. ¿Te gustaría reprogramar para otro día u hora? Estoy aquí para ayudarte. 😊`);
             return; // No continuar a SARA
           }
@@ -851,7 +851,7 @@ export class WhatsAppHandler {
               created_at: new Date().toISOString()
             });
           } catch (err) {
-            console.log('⚠️ Error guardando encuesta:', err);
+            console.error('⚠️ Error guardando encuesta:', err);
           }
 
           // Limpiar pending_satisfaction_survey
@@ -918,7 +918,7 @@ export class WhatsAppHandler {
             .eq('id', vendedor.id);
           console.log(`✅ last_sara_interaction actualizado para ${vendedor.name}: ${now}`);
         } catch (e) {
-          console.log('⚠️ Error actualizando last_sara_interaction:', e);
+          console.error('⚠️ Error actualizando last_sara_interaction:', e);
         }
 
         // ═══ VERIFICAR SI HAY NOTIFICACIÓN PENDIENTE ═══
@@ -945,7 +945,7 @@ export class WhatsAppHandler {
             console.log(`✅ Notificación pendiente enviada y limpiada`);
           }
         } catch (e) {
-          console.log('⚠️ Error procesando notificación pendiente:', e);
+          console.error('⚠️ Error procesando notificación pendiente:', e);
         }
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -975,7 +975,7 @@ export class WhatsAppHandler {
                 await this.meta.sendWhatsAppMessage(phoneFormatted, message);
                 return true;
               } catch (e) {
-                console.log('❌ Error enviando a cliente:', e);
+                console.error('❌ Error enviando a cliente:', e);
                 return false;
               }
             },
@@ -985,7 +985,7 @@ export class WhatsAppHandler {
                 await this.meta.sendWhatsAppMessage(phone, message);
                 return true;
               } catch (e) {
-                console.log('❌ Error enviando a vendedor:', e);
+                console.error('❌ Error enviando a vendedor:', e);
                 return false;
               }
             }
@@ -1043,7 +1043,7 @@ export class WhatsAppHandler {
       try {
         leadNotes = lead.notes ? (typeof lead.notes === 'string' ? JSON.parse(lead.notes) : lead.notes) : {};
       } catch (e) {
-        console.log('⚠️ Error parseando notas del lead, continuando sin notas');
+        console.error('⚠️ Error parseando notas del lead, continuando sin notas');
       }
 
       const msgLower = body.toLowerCase();
@@ -1059,7 +1059,7 @@ export class WhatsAppHandler {
           .eq('id', lead.id);
         console.log(`✅ last_message_at actualizado para lead ${lead.id}`);
       } catch (e) {
-        console.log('⚠️ Error actualizando last_message_at:', e);
+        console.error('⚠️ Error actualizando last_message_at:', e);
       }
 
       // ═══ PRIMERO: DETECTAR SI LEAD QUIERE CONTACTAR ASESOR/VENDEDOR ═══
@@ -1111,7 +1111,7 @@ export class WhatsAppHandler {
             try {
               await this.supabase.client.from('leads').update({ notes: leadNotes }).eq('id', lead.id);
             } catch (e) {
-              console.log('⚠️ Error limpiando pending_response_to:', e);
+              console.error('⚠️ Error limpiando pending_response_to:', e);
             }
           }
 
@@ -1138,7 +1138,7 @@ export class WhatsAppHandler {
               created_at: new Date().toISOString()
             });
           } catch (e) {
-            console.log('⚠️ Error registrando actividad bridge:', e);
+            console.error('⚠️ Error registrando actividad bridge:', e);
           }
         }
 
@@ -1197,7 +1197,7 @@ export class WhatsAppHandler {
             await this.calendar.deleteEvent(leadMsgResult.deleteCalendarEvent);
             console.log('🗑️ Evento de Calendar borrado:', leadMsgResult.deleteCalendarEvent);
           } catch (calErr) {
-            console.log('⚠️ Error borrando evento de Calendar:', calErr);
+            console.error('⚠️ Error borrando evento de Calendar:', calErr);
           }
         }
 
@@ -1508,7 +1508,7 @@ export class WhatsAppHandler {
           console.error('❌ Error enviando mensaje reagenda:', err);
         }
       } else {
-        console.log(`⚠️ NO se envió mensaje de reagenda: noLlego=${showConfirmResult.noLlego}, leadPhone=${showConfirmResult.leadPhone || 'NULL'}`);
+        console.error(`⚠️ NO se envió mensaje de reagenda: noLlego=${showConfirmResult.noLlego}, leadPhone=${showConfirmResult.leadPhone || 'NULL'}`);
       }
 
       return;
@@ -1847,7 +1847,7 @@ export class WhatsAppHandler {
       console.log(`💬 CEO esperando mensaje para ${lead.name}`);
 
     } catch (e) {
-      console.log('❌ Error en ceoMensajeLead:', e);
+      console.error('❌ Error en ceoMensajeLead:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error. Intenta de nuevo.`);
     }
   }
@@ -1962,7 +1962,7 @@ export class WhatsAppHandler {
         created_at: new Date().toISOString()
       });
       if (activityError) {
-        console.log('❌ Error registrando actividad bridge_start:', activityError);
+        console.error('❌ Error registrando actividad bridge_start:', activityError);
       } else {
         console.log('📝 Actividad bridge_start registrada para', ceo.name, 'lead:', lead.id);
       }
@@ -1970,7 +1970,7 @@ export class WhatsAppHandler {
       console.log(`🔗 Bridge activado: ${ceo.name} ↔ ${lead.name}`);
 
     } catch (e) {
-      console.log('❌ Error en ceoBridgeLead:', e);
+      console.error('❌ Error en ceoBridgeLead:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error. Intenta de nuevo.`);
     }
   }
@@ -2029,7 +2029,7 @@ export class WhatsAppHandler {
         created_at: new Date().toISOString()
       });
       if (activityError2) {
-        console.log('❌ Error registrando actividad bridge_start:', JSON.stringify(activityError2));
+        console.error('❌ Error registrando actividad bridge_start:', JSON.stringify(activityError2));
       } else {
         console.log('✅ Actividad bridge_start registrada OK');
       }
@@ -2037,7 +2037,7 @@ export class WhatsAppHandler {
       console.log(`🔗 Bridge activado (directo): ${ceo.name} ↔ ${lead.name}`);
 
     } catch (e) {
-      console.log('❌ Error en ceoBridgeLeadDirect:', e);
+      console.error('❌ Error en ceoBridgeLeadDirect:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error activando bridge.`);
     }
   }
@@ -2117,7 +2117,7 @@ export class WhatsAppHandler {
       console.log(`✅ Bridge extendido: ${nombreCEO} ↔ ${leadName}`);
 
     } catch (e) {
-      console.log('❌ Error extendiendo bridge:', e);
+      console.error('❌ Error extendiendo bridge:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error extendiendo bridge.`);
     }
   }
@@ -2212,7 +2212,7 @@ export class WhatsAppHandler {
           leadNotes = lead.notes ?
             (typeof lead.notes === 'string' ? JSON.parse(lead.notes) : lead.notes) : {};
         } catch (e) {
-          console.log(`⚠️ Error parseando notas de ${lead.name}, saltando`);
+          console.error(`⚠️ Error parseando notas de ${lead.name}, saltando`);
           continue;
         }
 
@@ -2250,7 +2250,7 @@ export class WhatsAppHandler {
       }
 
     } catch (e) {
-      console.log('❌ Error en ceoCerrarBridge:', e);
+      console.error('❌ Error en ceoCerrarBridge:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al cerrar conexiones.`);
     }
   }
@@ -2359,7 +2359,7 @@ export class WhatsAppHandler {
       );
 
     } catch (e) {
-      console.log('❌ Error en ceoMoverLead:', e);
+      console.error('❌ Error en ceoMoverLead:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al mover lead.`);
     }
   }
@@ -2420,7 +2420,7 @@ export class WhatsAppHandler {
         );
       }
     } catch (e) {
-      console.log('❌ Error en ceoQuienEs:', e);
+      console.error('❌ Error en ceoQuienEs:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al buscar lead.`);
     }
   }
@@ -2516,12 +2516,12 @@ export class WhatsAppHandler {
             `\n¡Contáctalo pronto!`
           );
         } catch (e) {
-          console.log('⚠️ No se pudo notificar al vendedor');
+          console.error('⚠️ No se pudo notificar al vendedor');
         }
       }
 
     } catch (e) {
-      console.log('❌ Error en ceoNuevoLead:', e);
+      console.error('❌ Error en ceoNuevoLead:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al crear lead.`);
     }
   }
@@ -2561,7 +2561,7 @@ export class WhatsAppHandler {
 
       await this.meta.sendWhatsAppMessage(cleanPhone, `📄 *Brochure ${prop.development}*\n\n${urls[0]}`);
     } catch (e) {
-      console.log('❌ Error en ceoBrochure:', e);
+      console.error('❌ Error en ceoBrochure:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al obtener brochure.`);
     }
   }
@@ -2614,7 +2614,7 @@ export class WhatsAppHandler {
 
       await this.meta.sendWhatsAppMessage(cleanPhone, msg);
     } catch (e) {
-      console.log('❌ Error en ceoUbicacion:', e);
+      console.error('❌ Error en ceoUbicacion:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al obtener ubicación.`);
     }
   }
@@ -2665,7 +2665,7 @@ export class WhatsAppHandler {
         : prop.development;
       await this.meta.sendWhatsAppMessage(cleanPhone, `🎬 *Video ${titulo}*\n\n${videoUrl}`);
     } catch (e) {
-      console.log('❌ Error en ceoVideo:', e);
+      console.error('❌ Error en ceoVideo:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al obtener video.`);
     }
   }
@@ -3312,7 +3312,7 @@ export class WhatsAppHandler {
 
         // Si está fuera de la ventana de 24h, preguntar qué template enviar
         if (!dentroVentana24h) {
-          console.log(`⚠️ Lead ${pendingMsgToLead.lead_name} fuera de ventana 24h, preguntando template`);
+          console.error(`⚠️ Lead ${pendingMsgToLead.lead_name} fuera de ventana 24h, preguntando template`);
 
           // Guardar contexto para selección de template
           notasVendedor.pending_template_selection = {
@@ -3654,7 +3654,7 @@ export class WhatsAppHandler {
 
           if (!dentroVentana24h) {
             // Fuera de ventana - preguntar qué hacer
-            console.log(`⚠️ Bridge: Lead ${activeBridge.lead_name} fuera de ventana 24h`);
+            console.error(`⚠️ Bridge: Lead ${activeBridge.lead_name} fuera de ventana 24h`);
 
             // Formatear teléfono para mostrar
             const telLimpio = leadPhone.replace(/\D/g, '').slice(-10);
@@ -4338,7 +4338,7 @@ export class WhatsAppHandler {
           console.error('❌ Error enviando mensaje reagenda:', err);
         }
       } else {
-        console.log(`⚠️ NO se envió mensaje de reagenda: noLlego=${showConfirmResult.noLlego}, leadPhone=${showConfirmResult.leadPhone || 'NULL'}`);
+        console.error(`⚠️ NO se envió mensaje de reagenda: noLlego=${showConfirmResult.noLlego}, leadPhone=${showConfirmResult.leadPhone || 'NULL'}`);
       }
 
       return true;
@@ -5164,7 +5164,7 @@ export class WhatsAppHandler {
           leadNotes = lead.notes ?
             (typeof lead.notes === 'string' ? JSON.parse(lead.notes) : lead.notes) : {};
         } catch (e) {
-          console.log(`⚠️ Error parseando notas de ${lead.name}, saltando`);
+          console.error(`⚠️ Error parseando notas de ${lead.name}, saltando`);
           continue;
         }
 
@@ -5201,7 +5201,7 @@ export class WhatsAppHandler {
       }
 
     } catch (e) {
-      console.log('❌ Error en vendedorCerrarBridge:', e);
+      console.error('❌ Error en vendedorCerrarBridge:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al cerrar conexiones.`);
     }
   }
@@ -5733,7 +5733,7 @@ export class WhatsAppHandler {
           console.log(`📤 Mensaje enviado a vendedor ${handlerResult.vendedorPhone}`);
         } else {
           // Fuera de ventana 24h: guardar notificación pendiente y enviar template de reactivación
-          console.log(`⚠️ Vendedor ${vendedorPhoneClean} fuera de ventana 24h, guardando notificación pendiente`);
+          console.error(`⚠️ Vendedor ${vendedorPhoneClean} fuera de ventana 24h, guardando notificación pendiente`);
           try {
             // Guardar la notificación pendiente en notes del vendedor
             if (vendedorId) {
@@ -6029,7 +6029,7 @@ export class WhatsAppHandler {
             console.log('📌 Notificación enviada al vendedor:', vendedorAsignado.name);
           }
         } catch (e) {
-          console.log('⚠️ Error notificando vendedor:', e);
+          console.error('⚠️ Error notificando vendedor:', e);
         }
       }
 
@@ -6039,7 +6039,7 @@ export class WhatsAppHandler {
         await followupService.programarFollowups(lead.id, lead.phone || '', lead.name, 'Por definir', 'status_change', nuevaEtapa);
         console.log(`📌 Follow-ups programados para ${lead.name} (${nuevaEtapa})`);
       } catch (e) {
-        console.log('⚠️ Error programando follow-ups:', e);
+        console.error('⚠️ Error programando follow-ups:', e);
       }
 
       const mensaje = vendorService.formatCambioEtapa(lead.name, etapaTexto);
@@ -6084,7 +6084,7 @@ export class WhatsAppHandler {
       try {
         const followupService = new FollowupService(this.supabase);
         await followupService.programarFollowups(lead.id, lead.phone || '', lead.name, 'Por definir', 'status_change', nuevaEtapa);
-      } catch (e) { console.log('⚠️ Error follow-ups:', e); }
+      } catch (e) { console.error('⚠️ Error follow-ups:', e); }
 
       let respuesta = vendorService.formatCambioEtapa(lead.name, etapaTexto);
 
@@ -6286,7 +6286,7 @@ export class WhatsAppHandler {
       await this.twilio.sendWhatsAppMessage(from, vendorService.formatConfirmacionAsesorAsignado(result.lead, result.asesor));
       console.log(`✅ Lead ${result.lead.name} asignado a asesor ${result.asesor.name} (notif=${result.asesor.is_active !== false})`);
     } catch (e) {
-      console.log('❌ Error asignando asesor:', e);
+      console.error('❌ Error asignando asesor:', e);
       await this.twilio.sendWhatsAppMessage(from, '❌ Error al asignar. Intenta de nuevo.');
     }
   }
@@ -6314,7 +6314,7 @@ export class WhatsAppHandler {
       await this.twilio.sendWhatsAppMessage(from, vendorService.formatConfirmacionPreguntaEnviada(result.asesor, result.lead));
       console.log(`✅ Pregunta a asesor ${result.asesor.name} sobre ${result.lead.name} (notif=${result.asesor.is_active !== false})`);
     } catch (e) {
-      console.log('❌ Error preguntando a asesor:', e);
+      console.error('❌ Error preguntando a asesor:', e);
       await this.twilio.sendWhatsAppMessage(from, '❌ Error. Intenta de nuevo.');
     }
   }
@@ -6336,7 +6336,7 @@ export class WhatsAppHandler {
       await this.twilio.sendWhatsAppMessage(from, msg);
       console.log(`📞 Teléfono mostrado: ${result.lead.name} -> ${usuario.name}`);
     } catch (e) {
-      console.log('❌ Error mostrando teléfono:', e);
+      console.error('❌ Error mostrando teléfono:', e);
       await this.twilio.sendWhatsAppMessage(from, `❌ Error. Intenta de nuevo.`);
     }
   }
@@ -6370,7 +6370,7 @@ export class WhatsAppHandler {
       await this.twilio.sendWhatsAppMessage(from, pregunta);
       console.log(`💬 Esperando mensaje para ${result.lead.name} de ${usuario.name}`);
     } catch (e) {
-      console.log('❌ Error preparando mensaje:', e);
+      console.error('❌ Error preparando mensaje:', e);
       await this.twilio.sendWhatsAppMessage(from, `❌ Error. Intenta de nuevo.`);
     }
   }
@@ -6416,7 +6416,7 @@ export class WhatsAppHandler {
         await this.meta.sendWhatsAppMessage(from, `❌ Error activando chat directo. Intenta de nuevo.`);
       }
     } catch (e) {
-      console.log('❌ Error enviando mensaje pendiente:', e);
+      console.error('❌ Error enviando mensaje pendiente:', e);
       await this.meta.sendWhatsAppMessage(from, `❌ Error enviando mensaje. Intenta de nuevo.`);
     }
   }
@@ -6459,7 +6459,7 @@ export class WhatsAppHandler {
         console.log('📤 Mensaje de felicitación enviado a cliente:', result.lead.name);
       }
     } catch (e) {
-      console.log('❌ Error en vendedorRegistrarApartado:', e);
+      console.error('❌ Error en vendedorRegistrarApartado:', e);
       await this.twilio.sendWhatsAppMessage(from, '❌ Error registrando apartado. Intenta de nuevo.');
     }
   }
@@ -7960,7 +7960,7 @@ Responde con fecha y hora:
           );
           console.log(`📤 Notificación enviada a asesor: ${asesor.name}`);
         } catch (notifError) {
-          console.log(`⚠️ Error notificando a asesor ${asesor.name}:`, notifError);
+          console.error(`⚠️ Error notificando a asesor ${asesor.name}:`, notifError);
         }
       }
 
@@ -8452,7 +8452,7 @@ Responde con fecha y hora:
       .eq('active', true);
 
     if (!vendedores?.length) {
-      console.log('⚠️ No hay vendedores activos');
+      console.error('⚠️ No hay vendedores activos');
       return null;
     }
 
@@ -8470,7 +8470,7 @@ Responde con fecha y hora:
       return encontrado;
     }
 
-    console.log('⚠️ No se encontró vendedor con nombre:', nombreBuscado);
+    console.error('⚠️ No se encontró vendedor con nombre:', nombreBuscado);
     return null;
   }
 
@@ -8494,7 +8494,7 @@ Responde con fecha y hora:
   // ✅ FIX 07-ENE-2026: Búsqueda robusta de miembro del equipo
   private findTeamMemberByRole(teamMembers: any[], role: string, banco?: string): any | null {
     if (!teamMembers?.length) {
-      console.log('⚠️ findTeamMemberByRole: Sin miembros del equipo');
+      console.error('⚠️ findTeamMemberByRole: Sin miembros del equipo');
       return null;
     }
 
@@ -8550,7 +8550,7 @@ Responde con fecha y hora:
       }
     }
 
-    console.log(`⚠️ No se encontró ${role} en el equipo`);
+    console.error(`⚠️ No se encontró ${role} en el equipo`);
     return null;
   }
 
@@ -8567,7 +8567,7 @@ Responde con fecha y hora:
         const { data: fallback } = await this.supabase.client
           .from('team_members')
           .select("*");
-        console.log('⚠️ Usando fallback sin filtro active:', fallback?.length || 0, 'miembros');
+        console.error('⚠️ Usando fallback sin filtro active:', fallback?.length || 0, 'miembros');
         return fallback || [];
       }
 
@@ -8618,7 +8618,7 @@ Responde con fecha y hora:
       }
 
       if (!photoUrl) {
-        console.log('⚠️ No hay foto disponible');
+        console.error('⚠️ No hay foto disponible');
         return null;
       }
       
@@ -8626,7 +8626,7 @@ Responde con fecha y hora:
       
       const imgResponse = await fetch(photoUrl);
       if (!imgResponse.ok) {
-        console.log('⚠️ Error descargando imagen');
+        console.error('⚠️ Error descargando imagen');
         return null;
       }
       const imgBuffer = await imgResponse.arrayBuffer();
@@ -8661,14 +8661,14 @@ Responde con fecha y hora:
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.log(`⚠️ Veo 3 Error API (${response.status}):`, errorText);
+        console.error(`⚠️ Veo 3 Error API (${response.status}):`, errorText);
         return null;
       }
 
       const result = await response.json();
       
       if (result.error) {
-         console.log('❌ Google rechazó:', JSON.stringify(result.error));
+         console.error('❌ Google rechazó:', JSON.stringify(result.error));
          return null;
       }
 
@@ -8690,7 +8690,7 @@ Responde con fecha y hora:
       return operationName;
       
     } catch (e) {
-      console.log('❌ Excepción en generarVideoBienvenida:', e);
+      console.error('❌ Excepción en generarVideoBienvenida:', e);
       return null;
     }
   }
@@ -8734,7 +8734,7 @@ Responde con fecha y hora:
       // Manejar errores
       if (!result.success) {
         if (result.errorType === 'duplicate') {
-          console.log('⚠️ Cita duplicada detectada, no se crea nueva');
+          console.error('⚠️ Cita duplicada detectada, no se crea nueva');
           return;
         }
         if (result.errorType === 'out_of_hours') {
@@ -8869,7 +8869,7 @@ Responde con fecha y hora:
         console.log('ℹ️ No genera video:', yaEnvioVideoParaEsteDesarrollo ? 'Ya se envió' : 'No hay foto');
       }
     } catch (videoErr) {
-      console.log('⚠️ Error en video bienvenida:', videoErr);
+      console.error('⚠️ Error en video bienvenida:', videoErr);
     }
   }
 
@@ -8903,7 +8903,7 @@ Responde con fecha y hora:
       );
 
       if (!result.success) {
-        console.log('❌ Error en mortgage:', result.error);
+        console.error('❌ Error en mortgage:', result.error);
         return;
       }
 
@@ -8927,7 +8927,7 @@ Responde con fecha y hora:
       }
 
     } catch (e) {
-      console.log('❌ Error en crearOActualizarMortgageApplication:', e);
+      console.error('❌ Error en crearOActualizarMortgageApplication:', e);
     }
   }
 
@@ -9386,10 +9386,10 @@ Responde con fecha y hora:
             await this.meta.sendWhatsAppMessage(vendedorPhone, respuesta.notificarVendedor);
             console.log(`📤 Notificación enviada a vendedor ${survey.vendedor_name} (${vendedorPhone})`);
           } else {
-            console.log(`⚠️ Vendedor ${survey.vendedor_name} no tiene teléfono - no se puede notificar`);
+            console.error(`⚠️ Vendedor ${survey.vendedor_name} no tiene teléfono - no se puede notificar`);
           }
         } catch (vendorError) {
-          console.log(`⚠️ Error notificando a vendedor (no afecta respuesta al lead):`, vendorError);
+          console.error(`⚠️ Error notificando a vendedor (no afecta respuesta al lead):`, vendorError);
         }
 
         // TERCERO: Guardar feedback en el lead (después de preparar respuesta)
@@ -9397,7 +9397,7 @@ Responde con fecha y hora:
           await encuestasService.guardarRespuestaPostVisita(leadConEncuesta.id, notas, respuesta.tipo, mensaje);
           console.log(`💾 Feedback guardado en lead ${leadConEncuesta.id}`);
         } catch (saveError) {
-          console.log(`⚠️ Error guardando feedback (respuesta igual se envía):`, saveError);
+          console.error(`⚠️ Error guardando feedback (respuesta igual se envía):`, saveError);
         }
 
         // SIEMPRE retornar la respuesta al lead
@@ -9601,7 +9601,7 @@ Responde con fecha y hora:
             )
           );
         } catch (e) {
-          console.log('⚠️ No se pudo enviar mensaje al referido:', e);
+          console.error('⚠️ No se pudo enviar mensaje al referido:', e);
         }
         return true;
     }
@@ -9618,7 +9618,7 @@ Responde con fecha y hora:
       const result = await postVisitService.procesarRespuestaVendedor(vendedorId, mensaje);
       return result;
     } catch (e) {
-      console.log('⚠️ Error procesando post-visita:', e);
+      console.error('⚠️ Error procesando post-visita:', e);
       return null;
     }
   }
@@ -9683,7 +9683,7 @@ Responde con fecha y hora:
       console.log(`📋 POST-VISITA SEARCH: No se encontró contexto con phone=${phoneSuffix}`);
       return null;
     } catch (e) {
-      console.log('⚠️ Error buscando post-visita por phone:', e);
+      console.error('⚠️ Error buscando post-visita por phone:', e);
       return null;
     }
   }
@@ -9763,11 +9763,11 @@ Responde con fecha y hora:
 
         case 'marcar_lost':
           // Ya se marcó en el service, solo log
-          console.log(`❌ Lead ${result.datos?.lead_id} marcado como lost: ${result.datos?.razon}`);
+          console.error(`❌ Lead ${result.datos?.lead_id} marcado como lost: ${result.datos?.razon}`);
           break;
       }
     } catch (e) {
-      console.log('⚠️ Error ejecutando acción post-visita:', e);
+      console.error('⚠️ Error ejecutando acción post-visita:', e);
     }
   }
 
@@ -9809,7 +9809,7 @@ Responde con fecha y hora:
 
       return mensaje;
     } catch (e) {
-      console.log('⚠️ Error iniciando post-visita:', e);
+      console.error('⚠️ Error iniciando post-visita:', e);
       return null;
     }
   }

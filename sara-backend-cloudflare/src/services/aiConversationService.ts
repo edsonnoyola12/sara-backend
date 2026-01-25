@@ -85,7 +85,7 @@ export class AIConversationService {
 
       console.log(`📝 Acción guardada en historial: ${mensajeAccion}`);
     } catch (e) {
-      console.log('⚠️ Error guardando acción en historial:', e);
+      console.error('⚠️ Error guardando acción en historial:', e);
     }
   }
 
@@ -154,7 +154,7 @@ export class AIConversationService {
         console.log('📅 No hay cita existente para este lead');
       }
     } catch (e) {
-      console.log('⚠️ Error verificando cita existente para prompt:', e);
+      console.error('⚠️ Error verificando cita existente para prompt:', e);
     }
 
     // Crear catálogo desde DB (optimizado: solo detalle del desarrollo de interés)
@@ -184,7 +184,7 @@ export class AIConversationService {
         console.log('🎯 Promociones activas incluidas en prompt:', promosActivas.length);
       }
     } catch (e) {
-      console.log('⚠️ Error consultando promociones:', e);
+      console.error('⚠️ Error consultando promociones:', e);
     }
 
     // Contexto de broadcast si existe
@@ -657,6 +657,35 @@ ESTO ES TAN IMPORTANTE COMO NO INVENTAR NOMBRES.
 2. Cliente confirma interés → PREGUNTAS: "¿Te gustaría visitarlo? ¿Qué día te funciona?"
 3. Cliente da fecha/hora → ENTONCES creas la cita
 4. SOLO después de crear cita → puedes mencionar fecha/hora
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+💰💰💰 REGLA CRÍTICA: NUNCA INVENTAR TASAS DE INTERÉS 💰💰💰
+━━━━━━━━━━━━━━━━━━━━━━━━
+ESTO ES TAN IMPORTANTE COMO NO INVENTAR NOMBRES O CITAS.
+
+🚫🚫🚫 PROHIBIDO ABSOLUTAMENTE:
+- NUNCA menciones tasas de interés específicas (ej: "6.5% anual", "tasa del 8%")
+- NUNCA digas qué banco tiene "mejor tasa" o "tasa más baja"
+- NUNCA compares tasas entre bancos
+- NUNCA inventes plazos específicos de crédito que no estén en los datos
+- NUNCA prometas tiempos de aprobación (ej: "te aprueban en 3 días")
+
+❌ GRAVEMENTE INCORRECTO:
+- "BBVA maneja tasas desde 9.5% anual"
+- "Banorte tiene mejor tasa que Santander"
+- "La tasa fija está en 10.5%"
+- "Te aprueban el crédito en una semana"
+
+✅ CORRECTO - Lo que SÍ puedes decir:
+- "Las tasas varían según tu historial y el banco. Nuestro asesor te ayuda a encontrar la mejor opción."
+- "Trabajamos con BBVA, Banorte, Santander y otros bancos aliados."
+- "El asesor hipotecario te dará las tasas actualizadas según tu perfil."
+- "Cada banco maneja condiciones diferentes, por eso te conectamos con un experto."
+
+⚠️ CUANDO PREGUNTEN POR TASAS:
+"Las tasas de interés cambian constantemente y dependen de tu perfil crediticio.
+Te conecto con nuestro asesor hipotecario que te dará información actualizada y personalizada.
+¿Te parece bien?"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️ RESPONDE A MÚLTIPLES INTENCIONES ⚠️
@@ -2208,7 +2237,7 @@ Tú dime, ¿por dónde empezamos?`;
       });
 
       if (!desarrolloEncontrado) {
-        console.log(`⚠️ Interés "${propertyInterest}" no coincide con ningún desarrollo`);
+        console.error(`⚠️ Interés "${propertyInterest}" no coincide con ningún desarrollo`);
       }
     }
 
@@ -2275,7 +2304,7 @@ Tú dime, ¿por dónde empezamos?`;
         await this.supabase.client.from('leads').update(updateData).eq('id', lead.id);
         console.log('🧠 Datos de Claude guardados:', JSON.stringify(updateData));
       } catch (e) {
-        console.log('⚠️ Error guardando datos de Claude');
+        console.error('⚠️ Error guardando datos de Claude');
       }
     }
     
@@ -2358,7 +2387,7 @@ Tú dime, ¿por dónde empezamos?`;
           .limit(1);
 
         if (errorCita) {
-          console.log('⚠️ Error buscando cita activa:', errorCita.message);
+          console.error('⚠️ Error buscando cita activa:', errorCita.message);
         }
 
         const citaActiva = citasActivas && citasActivas.length > 0 ? citasActivas[0] : null;
@@ -2543,7 +2572,7 @@ Tú dime, ¿por dónde empezamos?`;
                     });
                     console.log('✅ Evento de Calendar ACTUALIZADO (no eliminado)');
                   } catch (calErr) {
-                    console.log('⚠️ Error actualizando evento de Calendar:', calErr);
+                    console.error('⚠️ Error actualizando evento de Calendar:', calErr);
                   }
                 }
 
@@ -2629,7 +2658,7 @@ Tú dime, ¿por dónde empezamos?`;
                 console.log('✅ REAGENDAMIENTO COMPLETADO');
                 return;
               } catch (reagendarError) {
-                console.log('❌ Error en reagendamiento:', reagendarError);
+                console.error('❌ Error en reagendamiento:', reagendarError);
                 await this.meta.sendWhatsAppMessage(from, nombreLeadCorto ? `${nombreLeadCorto}, hubo un problema al reagendar. ¿Puedes intentar de nuevo? 🙏` : `Hubo un problema al reagendar. ¿Puedes intentar de nuevo? 🙏`);
                 return;
               }
@@ -2789,7 +2818,7 @@ Tú dime, ¿por dónde empezamos?`;
               ? JSON.parse(vendedorData.notes)
               : (vendedorData?.notes || {});
           } catch (e) {
-            console.log('⚠️ Error parsing vendedor notes (pending_bridge_appointment):', e instanceof Error ? e.message : e);
+            console.error('⚠️ Error parsing vendedor notes (pending_bridge_appointment):', e instanceof Error ? e.message : e);
           }
 
           // Guardar pendiente para confirmación
@@ -2861,7 +2890,7 @@ Tú dime, ¿por dónde empezamos?`;
               ? JSON.parse(vendedorData.notes)
               : vendedorData.notes;
           } catch (e) {
-            console.log('⚠️ Error parsing vendedor notes (active_bridge expiry):', e instanceof Error ? e.message : e);
+            console.error('⚠️ Error parsing vendedor notes (active_bridge expiry):', e instanceof Error ? e.message : e);
           }
 
           if (notasVendedor.active_bridge) {
@@ -3049,7 +3078,7 @@ Tú dime, ¿por dónde empezamos?`;
               }).eq('id', lead.id);
             }
           } catch (e) {
-            console.log('⚠️ Error notificando asesor:', e);
+            console.error('⚠️ Error notificando asesor:', e);
             // Fallback: informar al cliente que hubo un problema
             await this.twilio.sendWhatsAppMessage(from,
               'Hubo un pequeño problema contactando al asesor. Te escribiremos muy pronto. 😊'
@@ -3180,7 +3209,7 @@ Tú dime, ¿por dónde empezamos?`;
             }
           }
         } catch (e) {
-          console.log('⚠️ Error creando mortgage por mención:', e);
+          console.error('⚠️ Error creando mortgage por mención:', e);
         }
       }
       
@@ -3218,7 +3247,7 @@ Tú dime, ¿por dónde empezamos?`;
           lead.property_interest = desarrolloInteres;
           console.log('✅ property_interest ACTUALIZADO:', desarrolloInteres);
         } catch (e) {
-          console.log('⚠️ Error guardando property_interest');
+          console.error('⚠️ Error guardando property_interest');
         }
       }
       
@@ -3295,7 +3324,7 @@ Tú dime, ¿por dónde empezamos?`;
         const horaFinAtencion = esSabado ? HORARIOS.HORA_FIN_SABADO : HORARIOS.HORA_FIN_DEFAULT;
 
         if (horaNumero > 0 && (horaNumero < horaInicioAtencion || horaNumero >= horaFinAtencion)) {
-          console.log(`⚠️ HORA FUERA DE HORARIO (validación temprana): ${horaNumero}:00`);
+          console.error(`⚠️ HORA FUERA DE HORARIO (validación temprana): ${horaNumero}:00`);
           horaFueraDeHorario = true;
           yaEnvioMensajeHorarioInvalido = true; // Marcar que enviaremos mensaje de horario inválido
           const nombreClienteCorto = nombreCliente?.split(' ')[0] || '';
@@ -3344,7 +3373,7 @@ Tú dime, ¿por dónde empezamos?`;
         const nombresHallucinated = ['Salma', 'María', 'Juan', 'Pedro', 'Ana', 'Luis', 'Carlos', 'Carmen', 'José', 'Rosa', 'Miguel', 'Laura', 'Antonio', 'Sofía', 'Sofia', 'Diana', 'Jorge', 'Patricia', 'Roberto', 'Andrea'];
         for (const nombreFalso of nombresHallucinated) {
           if (nombreFalso.toLowerCase() !== nombreCliente.toLowerCase() && respuestaLimpia.includes(nombreFalso)) {
-            console.log(`⚠️ CORRIGIENDO nombre hallucinated: ${nombreFalso} → ${nombreCliente}`);
+            console.error(`⚠️ CORRIGIENDO nombre hallucinated: ${nombreFalso} → ${nombreCliente}`);
             // Reemplazar en patrones comunes como "¡Listo Salma!" o "Hola Salma,"
             respuestaLimpia = respuestaLimpia
               .replace(new RegExp(`¡Listo ${nombreFalso}!`, 'gi'), `¡Listo ${nombreCliente}!`)
@@ -3431,7 +3460,7 @@ Tú dime, ¿por dónde empezamos?`;
             .eq('id', lead.id);
           console.log('🧠 Historial guardado (respuesta correcta)');
         } catch (e) {
-          console.log('⚠️ Error guardando historial');
+          console.error('⚠️ Error guardando historial');
         }
 
         // Marcar tiempo de última respuesta
@@ -3563,7 +3592,7 @@ Tú dime, ¿por dónde empezamos?`;
             }
           }
         } catch (e) {
-          console.log('⚠️ Error notificando asesor:', e);
+          console.error('⚠️ Error notificando asesor:', e);
         }
         
         // ═══ FIX: ENVIAR DATOS DEL ASESOR AL CLIENTE (solo si no fue notificado antes) ═══
@@ -3593,7 +3622,7 @@ Tú dime, ¿por dónde empezamos?`;
               }).eq('id', lead.id);
             }
           } catch (e) {
-            console.log('⚠️ Error enviando datos de asesor al cliente:', e);
+            console.error('⚠️ Error enviando datos de asesor al cliente:', e);
           }
         } else {
           console.log('⏭️ Cliente ya tiene info del asesor, evitando duplicado');
@@ -3662,7 +3691,7 @@ Tú dime, ¿por dónde empezamos?`;
                 .eq('id', lead.id);
             }
           } catch (e) {
-            console.log('⚠️ Error notificando vendedor:', e);
+            console.error('⚠️ Error notificando vendedor:', e);
           }
         }
       }
@@ -3689,7 +3718,7 @@ Tú dime, ¿por dónde empezamos?`;
               teamMembers, analysis, properties, env
             );
           } catch (e) {
-            console.log('⚠️ Error creando cita:', e);
+            console.error('⚠️ Error creando cita:', e);
           }
         }
       }
@@ -3769,7 +3798,7 @@ Tú dime, ¿por dónde empezamos?`;
                 await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', `${devParaGPSSolo} - pregunté si quiere agendar visita`);
               }
             } else {
-              console.log(`⚠️ ${devParaGPSSolo} no tiene gps_link en DB`);
+              console.error(`⚠️ ${devParaGPSSolo} no tiene gps_link en DB`);
             }
           }
           // NO continuar con el bloque de recursos completos
@@ -3859,10 +3888,10 @@ Tú dime, ¿por dónde empezamos?`;
                 } else if (!analysis.send_gps) {
                   console.log(`ℹ️ GPS de ${dev} disponible pero no solicitado`);
                 } else {
-                  console.log(`⚠️ GPS de ${dev} solicitado pero no disponible en DB`);
+                  console.error(`⚠️ GPS de ${dev} solicitado pero no disponible en DB`);
                 }
               } else {
-                console.log(`⚠️ No se encontró propiedad para: ${dev}`);
+                console.error(`⚠️ No se encontró propiedad para: ${dev}`);
               }
             }
             
@@ -3904,7 +3933,7 @@ Tú dime, ¿por dónde empezamos?`;
                 }
               }
               if (brochuresEnviados.length === 0) {
-                console.log('⚠️ No se encontraron brochures en DB para los desarrollos');
+                console.error('⚠️ No se encontraron brochures en DB para los desarrollos');
               }
 
               // ═══ PUSH A CITA - IMPORTANTE PARA CERRAR VENTA ═══
@@ -3939,7 +3968,7 @@ Tú dime, ¿por dónde empezamos?`;
                     .update({ conversation_history: histAct.slice(-30) })
                     .eq('id', lead.id);
                 } catch (e) {
-                  console.log('⚠️ Error guardando push en historial');
+                  console.error('⚠️ Error guardando push en historial');
                 }
               } else {
                 console.log('ℹ️ Push a cita OMITIDO - usuario ya expresó intent: confirmar_cita');
@@ -3992,7 +4021,7 @@ Tú dime, ¿por dónde empezamos?`;
                     await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', `${devParaGPS} - pregunté si quiere visitar`);
                   }
                 } else {
-                  console.log(`⚠️ ${devParaGPS} no tiene gps_link en DB`);
+                  console.error(`⚠️ ${devParaGPS} no tiene gps_link en DB`);
                 }
               }
             }
@@ -4093,7 +4122,7 @@ Tú dime, ¿por dónde empezamos?`;
           .limit(1);
         tieneCitaActiva = (citasActivas && citasActivas.length > 0);
       } catch (e) {
-        console.log('⚠️ Error verificando citas para score');
+        console.error('⚠️ Error verificando citas para score');
       }
 
       // 2. Usar scoringService centralizado
@@ -4166,7 +4195,7 @@ Tú dime, ¿por dónde empezamos?`;
               console.log(`🔥 ALERTA enviada a ${vendedorAsignado.name}: Lead ${lead.name} subió ${scoreJump} puntos`);
             }
           } catch (alertErr) {
-            console.log('⚠️ Error enviando alerta de score:', alertErr);
+            console.error('⚠️ Error enviando alerta de score:', alertErr);
           }
         }
       }
@@ -4201,7 +4230,7 @@ Tú dime, ¿por dónde empezamos?`;
       historialFresco = leadFresco?.conversation_history || [];
       console.log('👋ž Historial re-fetched, mensajes:', historialFresco.length);
     } catch (e) {
-      console.log('⚠️ Error re-fetching historial, usando cache');
+      console.error('⚠️ Error re-fetching historial, usando cache');
       historialFresco = lead.conversation_history || [];
     }
 
@@ -4612,7 +4641,7 @@ Tú dime, ¿por dónde empezamos?`;
           analysis.response = `¡Listo ${nombreCliente}! El equipo de crédito te contactará por ${modalidadElegida}.`;
         }
       } catch (e) {
-        console.log('⚠️ Error conectando con asesor:', e);
+        console.error('⚠️ Error conectando con asesor:', e);
         analysis.response = `¡Listo ${nombreCliente}! Ya pasé tus datos al asesor.`;
       }
     }
@@ -5056,7 +5085,7 @@ ${checklistFinal}
           .eq('id', lead.id);
         console.log('✅ Guardado: eligió documentos');
       } catch (e) {
-        console.log('⚠️ Error guardando elección');
+        console.error('⚠️ Error guardando elección');
       }
       
       analysis.send_contactos = false;
@@ -5251,7 +5280,7 @@ Avísame cuando lo tengas y seguimos 📌`;
         lead.needs_mortgage = true; // ← ACTUALIZAR EN MEMORIA para que crearCitaCompleta lo vea
         console.log('✅ Guardado: eligió asesor');
       } catch (e) {
-        console.log('⚠️ Error guardando elección');
+        console.error('⚠️ Error guardando elección');
       }
       
       analysis.response = `¡Perfecto ${nombreCliente}! 📌
@@ -5316,7 +5345,7 @@ Te voy a conectar con nuestro asesor especialista en ${bancoCliente}.
         lead.lead_category = 'hot'; // ← ACTUALIZAR EN MEMORIA
         console.log('✅ Guardado: modalidad', modalidad);
       } catch (e) {
-        console.log('⚠️ Error guardando modalidad');
+        console.error('⚠️ Error guardando modalidad');
       }
       
       // Buscar asesor hipotecario para notificar
@@ -5435,11 +5464,11 @@ ${modalidad === 'presencial' ? '→ Quiere CITA EN OFICINA' : ''}
             console.log('✅ Flujo de crédito marcado como completado');
             
           } catch (mortgageErr) {
-            console.log('⚠️ Error insertando mortgage_application:', mortgageErr);
+            console.error('⚠️ Error insertando mortgage_application:', mortgageErr);
           }
         }
       } catch (e) {
-        console.log('⚠️ Error notificando asesor:', e);
+        console.error('⚠️ Error notificando asesor:', e);
       }
       
       // Respuesta al cliente
@@ -5882,7 +5911,7 @@ He registrado tu solicitud de asesoría con *${bancoPreferido || 'crédito'}* po
 
 Un asesor te contactará muy pronto. ¿Hay algo más en lo que pueda ayudarte?`;
         
-        console.log('⚠️ No hay asesor disponible para', bancoPreferido);
+        console.error('⚠️ No hay asesor disponible para', bancoPreferido);
       }
       
       analysis.intent = 'info_credito';
@@ -5955,7 +5984,7 @@ Un asesor te contactará muy pronto. ¿Hay algo más en lo que pueda ayudarte?`;
       const horaFinAtencion = esSabado ? HORARIOS.HORA_FIN_SABADO : HORARIOS.HORA_FIN_DEFAULT;
 
       if (horaNumero > 0 && (horaNumero < horaInicioAtencion || horaNumero >= horaFinAtencion)) {
-        console.log(`⚠️ HORA FUERA DE HORARIO: ${horaNumero}:00 (permitido: ${horaInicioAtencion}:00 - ${horaFinAtencion}:00)`);
+        console.error(`⚠️ HORA FUERA DE HORARIO: ${horaNumero}:00 (permitido: ${horaInicioAtencion}:00 - ${horaFinAtencion}:00)`);
         const nombreCliente = lead.name?.split(' ')[0] || '';
         const horaFinTexto = esSabado ? '2:00 PM' : '6:00 PM';
         const diaTexto = esSabado ? ' los sábados' : '';
@@ -6009,7 +6038,7 @@ Un asesor te contactará muy pronto. ¿Hay algo más en lo que pueda ayudarte?`;
           }).eq('id', lead.id);
         }
       } catch (e) {
-        console.log('⚠️ No se pudieron enviar datos del asesor');
+        console.error('⚠️ No se pudieron enviar datos del asesor');
       }
     } else if (analysis.send_contactos && lead.asesor_notificado) {
       console.log('⏭️ Asesor ya notificado, evitando duplicado');
@@ -6034,7 +6063,7 @@ Un asesor te contactará muy pronto. ¿Hay algo más en lo que pueda ayudarte?`;
             .eq('id', lead.id);
           console.log('✅ Nombre guardado:', analysis.extracted_data?.nombre);
         } catch (e) {
-          console.log('⚠️ Error guardando nombre');
+          console.error('⚠️ Error guardando nombre');
         }
       }
       
@@ -6060,10 +6089,10 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
           await this.twilio.sendWhatsAppMessage(vendedor.phone, msgVendedor);
           console.log('✅ Vendedor notificado:', vendedor.name);
         } catch (e) {
-          console.log('⚠️ Error enviando WhatsApp a vendedor');
+          console.error('⚠️ Error enviando WhatsApp a vendedor');
         }
       } else {
-        console.log('⚠️ No hay vendedor disponible');
+        console.error('⚠️ No hay vendedor disponible');
       }
     }
     
@@ -6165,7 +6194,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
             lead.property_interest = desarrollo;
             console.log('✅ property_interest actualizado:', desarrollo);
           } catch (e) {
-            console.log('⚠️ Error actualizando property_interest');
+            console.error('⚠️ Error actualizando property_interest');
           }
         }
       }
@@ -6208,7 +6237,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
         }
       }
     } catch (e) {
-      console.log('⚠️ Error verificando cita previa');
+      console.error('⚠️ Error verificando cita previa');
     }
     
     if (analysis.intent === 'confirmar_cita' &&
@@ -6232,7 +6261,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       }
       // Verificación de seguridad: NO crear cita sin nombre
       else if (!tieneNombre) {
-        console.log('⚠️ Intento de cita SIN NOMBRE - no se creará');
+        console.error('⚠️ Intento de cita SIN NOMBRE - no se creará');
         // ═══ FIX: Solo preguntar si no lo hicimos ya ═══
         const ultMsgSara = (lead.conversation_history || [])
           .filter((m: any) => m.role === 'assistant')
@@ -6250,7 +6279,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
         console.log('   - properties:', Array.isArray(properties) ? `Array[${properties.length}]` : typeof properties);
         console.log('   - teamMembers:', Array.isArray(teamMembers) ? `Array[${teamMembers.length}]` : typeof teamMembers);
         if (!preguntamosCredito) {
-          console.log('⚠️ Nota: Cita creada sin info de crédito');
+          console.error('⚠️ Nota: Cita creada sin info de crédito');
         }
         await this.handler.crearCitaCompleta(
           from, cleanPhone, lead, desarrolloFinal,
@@ -6344,7 +6373,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
     
     // NO enviar recursos duplicados
     if (recursosYaEnviados && (analysis.intent === 'interes_desarrollo' || analysis.send_video_desarrollo)) {
-      console.log('⚠️ Recursos ya enviados antes, no se duplican');
+      console.error('⚠️ Recursos ya enviados antes, no se duplican');
     }
     
     if (debeEnviarRecursos) {
@@ -6409,7 +6438,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
               recursosEnviados++;
               console.log(`✅ Video YouTube enviado: ${dev} (${recursosEnviados}/${MAX_RECURSOS})`);
             } else if (!prop.youtube_link) {
-              console.log(`⚠️ ${dev} NO tiene youtube_link en DB`);
+              console.error(`⚠️ ${dev} NO tiene youtube_link en DB`);
             }
 
             // Matterport del desarrollo (personalizado)
@@ -6431,7 +6460,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       // CASO 3: FALLBACK - Si no hay desarrollo detectado pero se pidieron recursos
       // Enviar el primer desarrollo disponible que tenga video
       if (videosEnviados.size === 0 && matterportsEnviados.size === 0 && recursosEnviados < MAX_RECURSOS) {
-        console.log('⚠️ No hay desarrollo detectado, buscando fallback...');
+        console.error('⚠️ No hay desarrollo detectado, buscando fallback...');
 
         // Buscar la primera propiedad que tenga youtube_link
         const propConVideo = properties.find(p => p.youtube_link);
@@ -6457,7 +6486,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
                   .eq('id', lead.id);
                 console.log('✅ property_interest actualizado con fallback:', nombreDesarrollo);
               } catch (e) {
-                console.log('⚠️ Error actualizando property_interest');
+                console.error('⚠️ Error actualizando property_interest');
               }
             }
           }
@@ -6472,7 +6501,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
             console.log(`✅ Matterport FALLBACK enviado: ${nombreDesarrollo}`);
           }
         } else {
-          console.log('⚠️ No hay propiedades con video en la DB');
+          console.error('⚠️ No hay propiedades con video en la DB');
         }
       }
 
@@ -6495,7 +6524,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
           .eq('id', lead.id);
         console.log('📝 Marcado: recursos ya enviados para', todosDesarrollos.join(', '));
       } catch (e) {
-        console.log('⚠️ Error marcando recursos enviados');
+        console.error('⚠️ Error marcando recursos enviados');
       }
       
       // Mensaje de seguimiento después de enviar recursos - MÁS LLAMATIVO
@@ -6526,7 +6555,7 @@ Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
             // Guardar acción en historial
             await this.guardarAccionEnHistorial(lead.id, 'Envié brochure PDF completo', desarrolloParaBrochure);
           } else {
-            console.log(`⚠️ ${desarrolloParaBrochure} NO tiene brochure_urls en DB`);
+            console.error(`⚠️ ${desarrolloParaBrochure} NO tiene brochure_urls en DB`);
           }
         }
 
@@ -6548,7 +6577,7 @@ Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
               // Guardar acción en historial
               await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', desarrolloParaGPS);
             } else {
-              console.log(`⚠️ ${desarrolloParaGPS} NO tiene gps_link en DB`);
+              console.error(`⚠️ ${desarrolloParaGPS} NO tiene gps_link en DB`);
             }
           }
         }
@@ -6584,7 +6613,7 @@ Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
           // Guardar acción en historial
           await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', desarrolloParaGPS);
         } else {
-          console.log(`⚠️ ${desarrolloParaGPS} NO tiene gps_link en DB`);
+          console.error(`⚠️ ${desarrolloParaGPS} NO tiene gps_link en DB`);
           // Enviar mensaje indicando que no tenemos GPS
           await this.twilio.sendWhatsAppMessage(from, `📍 La ubicación exacta de ${desarrolloParaGPS} te la puedo dar cuando agendemos tu visita. ¿Te gustaría agendar una cita? 🏠`);
         }
@@ -6618,7 +6647,7 @@ Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
       );
       
       if (yaSeEnvioAsesor) {
-        console.log('⚠️ Ya se envió notificación al asesor anteriormente, no se duplica');
+        console.error('⚠️ Ya se envió notificación al asesor anteriormente, no se duplica');
         // NO usar return - permite que continúe el flujo (actualizar lead, etc.)
       } else {
       // PRIMERO buscar asesor del banco elegido
@@ -6676,7 +6705,7 @@ Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
           console.log('💰 Ingreso obtenido de DB:', ingresoMensual);
         }
       } catch (e) {
-        console.log('⚠️ Error obteniendo ingreso de DB:', e);
+        console.error('⚠️ Error obteniendo ingreso de DB:', e);
       }
       
       // Solo buscar en historial si no hay ingreso en DB
@@ -6733,7 +6762,7 @@ Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
           console.log('📅 Cita encontrada en DB:', citaExistente);
         }
       } catch (e) {
-        console.log('⚠️ Error buscando cita en DB');
+        console.error('⚠️ Error buscando cita en DB');
       }
       
       // Si no hay en DB, usar del análisis
@@ -6878,7 +6907,7 @@ ${msgContacto}`;
             .eq('id', lead.id);
           console.log('📝 Confirmación de asesor agregada al historial');
         } catch (e) {
-          console.log('⚠️ Error agregando confirmación al historial');
+          console.error('⚠️ Error agregando confirmación al historial');
         }
         
         // 3. CREAR CITA DE ASESORÍÍA EN DB (si tiene fecha/hora del análisis)
@@ -6913,7 +6942,7 @@ ${msgContacto}`;
           }
         }
       } else {
-        console.log('⚠️ No se encontró asesor con teléfono para notificar');
+        console.error('⚠️ No se encontró asesor con teléfono para notificar');
       }
       } // Cierre del else de yaSeEnvioAsesor
     }

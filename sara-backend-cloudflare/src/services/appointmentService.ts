@@ -79,7 +79,7 @@ export class AppointmentService {
         if (deleted) {
           console.log('✅ Cancelado en Google Calendar');
         } else {
-          console.log('⚠️ No se pudo cancelar en Google (continuamos)');
+          console.error('⚠️ No se pudo cancelar en Google (continuamos)');
         }
       }
 
@@ -235,7 +235,7 @@ Fecha: ${dateFormatted} ${appointment.scheduled_time}`;
           .limit(1);
 
         if (citaExistente && citaExistente.length > 0) {
-          console.log('⚠️ Ya existe cita reciente para este lead (status:', citaExistente[0].status, ')');
+          console.error('⚠️ Ya existe cita reciente para este lead (status:', citaExistente[0].status, ')');
           if (analysis.extracted_data?.nombre && !citaExistente[0].lead_name) {
             await this.supabase.client
               .from('appointments')
@@ -245,7 +245,7 @@ Fecha: ${dateFormatted} ${appointment.scheduled_time}`;
           return { success: false, errorType: 'duplicate' };
         }
       } catch (e) {
-        console.log('⚠️ Error verificando cita existente:', e);
+        console.error('⚠️ Error verificando cita existente:', e);
       }
     } else {
       console.log('🔄 RESCHEDULE: Saltando verificación de duplicados');
@@ -305,7 +305,7 @@ Fecha: ${dateFormatted} ${appointment.scheduled_time}`;
         .update({ status: 'scheduled', updated_at: new Date().toISOString() })
         .eq('id', lead.id);
     } catch (e) {
-      console.log('⚠️ Error actualizando status del lead:', e);
+      console.error('⚠️ Error actualizando status del lead:', e);
     }
 
     // Registrar actividad
@@ -320,7 +320,7 @@ Fecha: ${dateFormatted} ${appointment.scheduled_time}`;
           created_at: new Date().toISOString()
         });
     } catch (e) {
-      console.log('⚠️ Error registrando actividad:', e);
+      console.error('⚠️ Error registrando actividad:', e);
     }
 
     // Crear eventos en Google Calendar
@@ -418,7 +418,7 @@ Fecha: ${dateFormatted} ${appointment.scheduled_time}`;
           .update({ notes: { ...notasActuales, pending_birthday_response: true } })
           .eq('id', lead.id);
       } catch (e) {
-        console.log('⚠️ Error marcando pending_birthday');
+        console.error('⚠️ Error marcando pending_birthday');
       }
     }
 
@@ -431,7 +431,7 @@ Fecha: ${dateFormatted} ${appointment.scheduled_time}`;
         }).eq('id', appointment.id);
       }
     } catch (e) {
-      console.log('⚠️ Error marcando confirmación');
+      console.error('⚠️ Error marcando confirmación');
     }
 
     // Actualizar score del lead
@@ -447,7 +447,7 @@ Fecha: ${dateFormatted} ${appointment.scheduled_time}`;
         .eq('id', lead.id);
       console.log('📊 Score actualizado:', nuevoScore);
     } catch (e) {
-      console.log('⚠️ Error actualizando score');
+      console.error('⚠️ Error actualizando score');
     }
 
     console.log('✅ CITA COMPLETA CREADA');
