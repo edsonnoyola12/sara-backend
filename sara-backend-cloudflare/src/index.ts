@@ -15,6 +15,13 @@ import { IACoachingService } from './services/iaCoachingService';
 import { CEOCommandsService } from './services/ceoCommandsService';
 import { VendorCommandsService } from './services/vendorCommandsService';
 import { SentryService, initSentry } from './services/sentryService';
+import { FeatureFlagsService, createFeatureFlags } from './services/featureFlagsService';
+import { EmailReportsService, createEmailReports } from './services/emailReportsService';
+import { AudioTranscriptionService, createAudioTranscription, isAudioMessage, extractAudioInfo } from './services/audioTranscriptionService';
+import { generateOpenAPISpec, generateSwaggerUI, generateReDocUI } from './services/apiDocsService';
+import { AuditLogService, createAuditLog } from './services/auditLogService';
+import { MetricsService, createMetrics } from './services/metricsService';
+import { BusinessHoursService, createBusinessHours, isBusinessOpen } from './services/businessHoursService';
 
 export interface Env {
   SUPABASE_URL: string;
@@ -34,6 +41,10 @@ export interface Env {
   SARA_CACHE?: KVNamespace; // Cache KV para reducir queries a DB
   SENTRY_DSN?: string; // DSN de Sentry para error tracking
   ENVIRONMENT?: string; // production, staging, development
+  // Email reports
+  RESEND_API_KEY?: string; // API key de Resend para enviar emails
+  REPORT_TO_EMAILS?: string; // Emails destino separados por coma
+  OPENAI_API_KEY?: string; // Para transcripción de audio (Whisper)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -9326,6 +9337,34 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // API DOCS - Documentación OpenAPI/Swagger
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/docs' || url.pathname === '/api/docs') {
+      const baseUrl = `https://${url.host}`;
+      const specUrl = `${baseUrl}/api/openapi.json`;
+      return new Response(generateSwaggerUI(specUrl), {
+        status: 200,
+        headers: { 'Content-Type': 'text/html; charset=utf-8' }
+      });
+    }
+
+    if (url.pathname === '/docs/redoc') {
+      const baseUrl = `https://${url.host}`;
+      const specUrl = `${baseUrl}/api/openapi.json`;
+      return new Response(generateReDocUI(specUrl), {
+        status: 200,
+        headers: { 'Content-Type': 'text/html; charset=utf-8' }
+      });
+    }
+
+    if (url.pathname === '/api/openapi.json' || url.pathname === '/openapi.json') {
+      const baseUrl = `https://${url.host}`;
+      const spec = generateOpenAPISpec(baseUrl);
+      return corsResponse(JSON.stringify(spec, null, 2), 200, 'application/json', request);
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
     // STATUS DASHBOARD - Vista completa del sistema
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/status') {
@@ -9369,6 +9408,229 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
 
       return corsResponse(JSON.stringify(analytics, null, 2), 200, 'application/json', request);
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // FEATURE FLAGS - Control de funcionalidades sin deploy
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/flags' || url.pathname === '/flags') {
+      const featureFlags = createFeatureFlags(env.SARA_CACHE);
+
+      // GET - Obtener todos los flags
+      if (request.method === 'GET') {
+        const flags = await featureFlags.getFlags();
+        return corsResponse(JSON.stringify({
+          success: true,
+          flags,
+          updated_at: new Date().toISOString()
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // PUT/POST - Actualizar flags (requiere auth)
+      if (request.method === 'PUT' || request.method === 'POST') {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+
+        try {
+          const body = await request.json() as Record<string, any>;
+          await featureFlags.setFlags(body);
+          const updatedFlags = await featureFlags.getFlags();
+          return corsResponse(JSON.stringify({
+            success: true,
+            message: 'Flags actualizados',
+            flags: updatedFlags
+          }, null, 2), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'JSON inválido'
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // DELETE - Resetear a defaults (requiere auth)
+      if (request.method === 'DELETE') {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+
+        await featureFlags.resetToDefaults();
+        const flags = await featureFlags.getFlags();
+        return corsResponse(JSON.stringify({
+          success: true,
+          message: 'Flags reseteados a valores por defecto',
+          flags
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // EMAIL REPORTS - Enviar reportes por correo
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/reports/send' || url.pathname === '/send-report') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const period = url.searchParams.get('period') || 'weekly';
+      const emailReports = createEmailReports(supabase, env);
+
+      let success = false;
+      if (period === 'daily') {
+        success = await emailReports.sendDailyReport();
+      } else if (period === 'monthly') {
+        success = await emailReports.sendMonthlyReport();
+      } else {
+        success = await emailReports.sendWeeklyReport();
+      }
+
+      return corsResponse(JSON.stringify({
+        success,
+        message: success ? `Reporte ${period} enviado` : 'Error enviando reporte (verificar RESEND_API_KEY)',
+        period
+      }), success ? 200 : 500, 'application/json', request);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // EMAIL REPORTS - Preview del reporte (sin enviar)
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/reports/preview' || url.pathname === '/report-preview') {
+      const days = parseInt(url.searchParams.get('days') || '7');
+      const emailReports = createEmailReports(supabase, env);
+      const data = await emailReports.generateReportData(days);
+
+      const acceptHeader = request.headers.get('Accept') || '';
+      if (acceptHeader.includes('text/html')) {
+        return new Response(emailReports.generateReportHTML(data), {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' }
+        });
+      }
+
+      return corsResponse(JSON.stringify(data, null, 2), 200, 'application/json', request);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // AUDIT LOG - Bitácora de acciones
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/audit' || url.pathname === '/audit') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const auditLog = createAuditLog(env.SARA_CACHE);
+
+      // GET - Consultar logs
+      if (request.method === 'GET') {
+        const action = url.searchParams.get('action') || undefined;
+        const actorType = url.searchParams.get('actor_type') || undefined;
+        const targetId = url.searchParams.get('target_id') || undefined;
+        const limit = parseInt(url.searchParams.get('limit') || '50');
+        const hours = parseInt(url.searchParams.get('hours') || '24');
+
+        // Si piden summary
+        if (url.searchParams.get('summary') === 'true') {
+          const summary = await auditLog.getSummary(hours);
+          return corsResponse(JSON.stringify({
+            success: true,
+            period_hours: hours,
+            summary
+          }, null, 2), 200, 'application/json', request);
+        }
+
+        const entries = await auditLog.query({
+          action: action as any,
+          actorType,
+          targetId,
+          limit
+        });
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: entries.length,
+          entries
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // CACHE MANAGEMENT - Administrar caché inteligente
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/cache' || url.pathname === '/cache') {
+      // GET - Ver stats del cache
+      if (request.method === 'GET') {
+        const info = cache.getCacheInfo();
+        return corsResponse(JSON.stringify({
+          success: true,
+          ...info
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST - Warmup del cache
+      if (request.method === 'POST') {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+
+        const result = await cache.warmup(supabase);
+        return corsResponse(JSON.stringify({
+          success: result.success,
+          message: result.success ? 'Cache precalentado' : 'Error en warmup',
+          cached: result.cached
+        }, null, 2), result.success ? 200 : 500, 'application/json', request);
+      }
+
+      // DELETE - Invalidar todo el cache
+      if (request.method === 'DELETE') {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+
+        await cache.invalidateAll();
+        return corsResponse(JSON.stringify({
+          success: true,
+          message: 'Cache invalidado completamente'
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // METRICS - Dashboard de rendimiento y latencia
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/metrics' || url.pathname === '/api/metrics') {
+      const metrics = createMetrics(env.SARA_CACHE);
+      const hours = parseInt(url.searchParams.get('hours') || '1');
+      const summary = await metrics.getSummary(hours);
+
+      const acceptHeader = request.headers.get('Accept') || '';
+      if (acceptHeader.includes('text/html')) {
+        return new Response(metrics.generateDashboardHTML(summary), {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' }
+        });
+      }
+
+      return corsResponse(JSON.stringify(summary, null, 2), 200, 'application/json', request);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // BUSINESS HOURS - Estado del horario laboral
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/business-hours' || url.pathname === '/business-hours') {
+      const businessHours = createBusinessHours();
+      const info = businessHours.getScheduleInfo();
+      const config = businessHours.getConfig();
+
+      return corsResponse(JSON.stringify({
+        success: true,
+        ...info,
+        schedule: config.schedule.map(s => ({
+          ...s,
+          dayName: ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][s.dayOfWeek]
+        })),
+        holidays: config.holidayDates || []
+      }, null, 2), 200, 'application/json', request);
+    }
+
+
+
+
 
     // ═══════════════════════════════════════════════════════════════
     // A/B TEST RESULTS - Ver resultados

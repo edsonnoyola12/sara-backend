@@ -247,6 +247,123 @@ export class CacheService {
       await this.set(KEYS.LEAD_BY_PHONE(lead.phone), lead, TTL.LEAD);
     }
   }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SMART CACHING - Funciones avanzadas
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Precalienta el cache con datos frecuentemente usados
+   */
+  async warmup(supabase: any): Promise<{ success: boolean; cached: string[] }> {
+    const cached: string[] = [];
+
+    try {
+      // 1. Team members
+      const { data: teamMembers } = await supabase.client
+        .from('team_members')
+        .select('*');
+      if (teamMembers) {
+        await this.set(KEYS.TEAM_MEMBERS, teamMembers, TTL.TEAM_MEMBERS);
+        cached.push('team_members');
+
+        const active = teamMembers.filter((m: any) => m.active);
+        await this.set(KEYS.TEAM_MEMBERS_ACTIVE, active, TTL.TEAM_MEMBERS);
+        cached.push('team_members_active');
+      }
+
+      // 2. Properties
+      const { data: properties } = await supabase.client
+        .from('properties')
+        .select('*')
+        .eq('available', true);
+      if (properties) {
+        await this.set(KEYS.PROPERTIES, properties, TTL.PROPERTIES);
+        cached.push('properties');
+      }
+
+      // 3. Developments
+      const { data: developments } = await supabase.client
+        .from('developments')
+        .select('*')
+        .eq('active', true);
+      if (developments) {
+        await this.set(KEYS.DEVELOPMENTS, developments, TTL.DEVELOPMENTS);
+        cached.push('developments');
+      }
+
+      console.log(`🔥 Cache warmup completo: ${cached.join(', ')}`);
+      return { success: true, cached };
+    } catch (e) {
+      console.error('Error en cache warmup:', e);
+      return { success: false, cached };
+    }
+  }
+
+  /**
+   * Wrapper genérico para cachear cualquier query
+   */
+  async wrap<T>(
+    key: string,
+    fetchFn: () => Promise<T>,
+    ttlSeconds: number = 300
+  ): Promise<T> {
+    const cached = await this.get<T>(key);
+    if (cached !== null) {
+      return cached;
+    }
+
+    const data = await fetchFn();
+    if (data !== null && data !== undefined) {
+      await this.set(key, data, ttlSeconds);
+    }
+    return data;
+  }
+
+  /**
+   * Obtiene múltiples keys en paralelo
+   */
+  async getMultiple<T>(keys: string[]): Promise<Map<string, T | null>> {
+    const results = new Map<string, T | null>();
+
+    await Promise.all(
+      keys.map(async (key) => {
+        const value = await this.get<T>(key);
+        results.set(key, value);
+      })
+    );
+
+    return results;
+  }
+
+  /**
+   * Invalida todas las keys que coinciden con un patrón
+   * Nota: KV no soporta patrones, pero podemos invalidar keys conocidas
+   */
+  async invalidateAll(): Promise<void> {
+    await Promise.all([
+      this.invalidate(KEYS.TEAM_MEMBERS),
+      this.invalidate(KEYS.TEAM_MEMBERS_ACTIVE),
+      this.invalidate(KEYS.PROPERTIES),
+      this.invalidate(KEYS.DEVELOPMENTS)
+    ]);
+    console.log('🗑️ Cache completamente invalidado');
+  }
+
+  /**
+   * Obtiene información de uso del cache
+   */
+  getCacheInfo(): {
+    stats: { hits: number; misses: number; hitRate: string };
+    ttl: typeof TTL;
+    available: boolean;
+  } {
+    return {
+      stats: this.getStats(),
+      ttl: TTL,
+      available: this.isAvailable()
+    };
+  }
 }
 
 // Export singleton para uso global
