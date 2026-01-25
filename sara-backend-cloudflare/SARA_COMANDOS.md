@@ -529,7 +529,41 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-24 20:45*
+*Última actualización: 2026-01-24 21:05*
+
+---
+
+## AUTOMATIZACIONES OPTIMIZADAS (2026-01-24)
+
+### Cambios realizados para reducir spam
+
+| Antes | Después | Mejora |
+|-------|---------|--------|
+| 8am: 2 mensajes a CEO (supervisión + reporte) | 8am: 1 mensaje consolidado | -50% mensajes |
+| 7pm: 2 mensajes a vendedores (recap + reporte) | 7pm: 1 mensaje consolidado | -50% mensajes |
+| Alerta inactividad 11am y 3pm | Alerta inactividad solo 11am | -50% alertas |
+| Sin límite de mensajes a leads | Máx 2 mensajes automáticos/día | Anti-spam |
+
+### Límite de mensajes por lead
+
+```
+Máximo: 2 mensajes automáticos por día
+Excepciones: confirmación de cita, respuesta directa
+```
+
+Funciones afectadas:
+- `followUp24hLeadsNuevos` - verifica límite antes de enviar
+- `reengagementDirectoLeads` - verifica límite antes de enviar
+- `nurturingEducativo` - verifica límite antes de enviar
+
+### Cronograma consolidado
+
+| Hora | Destinatario | Mensaje |
+|------|--------------|---------|
+| 8am L-V | CEO/Admin | Reporte consolidado (resultados + pipeline + alertas) |
+| 8am L-V | Vendedores | Briefing matutino (citas + leads) |
+| 11am L-V | Admins | Alerta inactividad vendedores |
+| 7pm L-V | Vendedores | Reporte consolidado (recap + métricas) |
 
 ---
 
