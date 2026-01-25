@@ -528,7 +528,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-24 20:20*
+*Última actualización: 2026-01-24 20:35*
 
 ---
 
@@ -681,8 +681,9 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
   - Opción 4: muestra teléfono del lead y recuerda registrar nota
 
 - ✅ **Recap 7pm solo si NO usó SARA:**
-  - A las 7pm L-V se envía mensaje "¿Cómo te fue hoy?"
+  - A las 7pm L-V se envía template `reactivar_equipo`
   - Solo a vendedores que NO interactuaron con SARA ese día
+  - Cuando responden → reciben mensaje "¿Cómo te fue hoy?"
   - Invita a reportar con comando `nota [nombre] [qué pasó]`
   - Si ya usó SARA → no recibe recap (ya interactuó)
 
