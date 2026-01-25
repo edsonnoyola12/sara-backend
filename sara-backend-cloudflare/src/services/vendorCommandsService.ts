@@ -94,6 +94,32 @@ export class VendorCommandsService {
   detectRouteCommand(body: string, mensaje: string): { matched: boolean; handlerName?: string; handlerParams?: any } {
     const msg = mensaje.toLowerCase().trim();
 
+    // ═══ FOLLOW-UP PENDIENTE: OK / CANCELAR / EDITAR ═══
+    // Formato: "ok juan", "cancelar juan", "editar juan Hola, soy Pedro..."
+    if (/^ok(\s+[a-záéíóúñü]+)?$/i.test(msg)) {
+      const match = msg.match(/^ok(?:\s+([a-záéíóúñü]+))?$/i);
+      return { matched: true, handlerName: 'vendedorAprobarFollowup', handlerParams: { nombreLead: match?.[1]?.trim() } };
+    }
+
+    // Cancelar follow-up (distinto de cancelar cita)
+    const matchCancelarFollowup = msg.match(/^cancelar\s+([a-záéíóúñü]+)$/i);
+    if (matchCancelarFollowup && !/^cancelar\s+cita/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorCancelarFollowup', handlerParams: { nombreLead: matchCancelarFollowup[1].trim() } };
+    }
+
+    // Editar follow-up
+    const matchEditarFollowup = msg.match(/^editar\s+([a-záéíóúñü]+)\s+(.+)$/i);
+    if (matchEditarFollowup) {
+      return {
+        matched: true,
+        handlerName: 'vendedorEditarFollowup',
+        handlerParams: {
+          nombreLead: matchEditarFollowup[1].trim(),
+          nuevoMensaje: matchEditarFollowup[2].trim()
+        }
+      };
+    }
+
     // ═══ CITAS ═══
     if (/^(mis\s+)?citas?(\s+hoy)?$/i.test(msg) || msg === 'ver citas') {
       return { matched: true, handlerName: 'vendedorCitasHoy' };

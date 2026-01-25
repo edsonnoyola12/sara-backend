@@ -4963,6 +4963,18 @@ export class WhatsAppHandler {
       case 'vendedorVerNotas':
         await this.vendedorVerNotasConParams(from, params.nombreLead, vendedor, nombreVendedor);
         break;
+
+      // ━━━ FOLLOW-UP PENDIENTE: APROBAR / CANCELAR / EDITAR ━━━
+      case 'vendedorAprobarFollowup':
+        await this.vendedorAprobarFollowup(from, params.nombreLead, vendedor, nombreVendedor);
+        break;
+      case 'vendedorCancelarFollowup':
+        await this.vendedorCancelarFollowup(from, params.nombreLead, vendedor, nombreVendedor);
+        break;
+      case 'vendedorEditarFollowup':
+        await this.vendedorEditarFollowup(from, params.nombreLead, params.nuevoMensaje, vendedor, nombreVendedor);
+        break;
+
       case 'registrarActividad':
         await this.registrarActividad(from, params.nombre, params.tipo, vendedor, params.monto);
         break;
@@ -6664,6 +6676,150 @@ Responde con fecha y hora:
     }
   }
 
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // FOLLOW-UP PENDIENTE: APROBAR / CANCELAR / EDITAR
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  private async vendedorAprobarFollowup(from: string, nombreLead: string | undefined, vendedor: any, nombre: string): Promise<void> {
+    try {
+      // Buscar lead con pending_followup del vendedor
+      const query = this.supabase.client
+        .from('leads')
+        .select('id, name, phone, notes')
+        .eq('assigned_to', vendedor.id)
+        .not('notes->pending_followup', 'is', null);
+
+      const { data: leads } = await query;
+
+      if (!leads || leads.length === 0) {
+        await this.meta.sendWhatsAppMessage(from, `📭 No tienes follow-ups pendientes.`);
+        return;
+      }
+
+      // Si se especificó nombre, filtrar
+      let leadTarget = leads[0];
+      if (nombreLead) {
+        const normalizado = nombreLead.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        leadTarget = leads.find(l => {
+          const leadNombre = (l.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          return leadNombre.includes(normalizado) || normalizado.includes(leadNombre.split(' ')[0]);
+        }) || leads[0];
+      }
+
+      const notas = typeof leadTarget.notes === 'object' ? leadTarget.notes : {};
+      const pending = notas.pending_followup;
+
+      if (!pending || pending.status !== 'pending') {
+        await this.meta.sendWhatsAppMessage(from, `📭 No hay follow-up pendiente para ${leadTarget.name}.`);
+        return;
+      }
+
+      // Enviar mensaje al lead
+      await this.meta.sendWhatsAppMessage(pending.lead_phone, pending.mensaje);
+
+      // Actualizar status
+      notas.pending_followup = { ...pending, status: 'approved', approved_at: new Date().toISOString() };
+      await this.supabase.client.from('leads').update({ notes: notas }).eq('id', leadTarget.id);
+
+      await this.meta.sendWhatsAppMessage(from, `✅ Follow-up enviado a *${leadTarget.name}*\n\n"${pending.mensaje.substring(0, 100)}..."`);
+      console.log(`✅ Follow-up aprobado por ${nombre} para ${leadTarget.name}`);
+
+    } catch (error) {
+      console.error('Error aprobando follow-up:', error);
+      await this.meta.sendWhatsAppMessage(from, 'Error al aprobar. Intenta de nuevo.');
+    }
+  }
+
+  private async vendedorCancelarFollowup(from: string, nombreLead: string, vendedor: any, nombre: string): Promise<void> {
+    try {
+      // Buscar lead por nombre
+      const normalizado = nombreLead.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name, notes')
+        .eq('assigned_to', vendedor.id)
+        .not('notes->pending_followup', 'is', null);
+
+      if (!leads || leads.length === 0) {
+        await this.meta.sendWhatsAppMessage(from, `📭 No tienes follow-ups pendientes.`);
+        return;
+      }
+
+      const leadTarget = leads.find(l => {
+        const leadNombre = (l.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return leadNombre.includes(normalizado) || normalizado.includes(leadNombre.split(' ')[0]);
+      });
+
+      if (!leadTarget) {
+        await this.meta.sendWhatsAppMessage(from, `❌ No encontré follow-up pendiente para "${nombreLead}".`);
+        return;
+      }
+
+      const notas = typeof leadTarget.notes === 'object' ? leadTarget.notes : {};
+      notas.pending_followup = { ...notas.pending_followup, status: 'cancelled', cancelled_at: new Date().toISOString() };
+      await this.supabase.client.from('leads').update({ notes: notas }).eq('id', leadTarget.id);
+
+      await this.meta.sendWhatsAppMessage(from, `🚫 Follow-up cancelado para *${leadTarget.name}*.\nNo se enviará mensaje.`);
+      console.log(`🚫 Follow-up cancelado por ${nombre} para ${leadTarget.name}`);
+
+    } catch (error) {
+      console.error('Error cancelando follow-up:', error);
+      await this.meta.sendWhatsAppMessage(from, 'Error al cancelar. Intenta de nuevo.');
+    }
+  }
+
+  private async vendedorEditarFollowup(from: string, nombreLead: string, nuevoMensaje: string, vendedor: any, nombre: string): Promise<void> {
+    try {
+      // Buscar lead por nombre
+      const normalizado = nombreLead.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone, notes')
+        .eq('assigned_to', vendedor.id)
+        .not('notes->pending_followup', 'is', null);
+
+      if (!leads || leads.length === 0) {
+        await this.meta.sendWhatsAppMessage(from, `📭 No tienes follow-ups pendientes.`);
+        return;
+      }
+
+      const leadTarget = leads.find(l => {
+        const leadNombre = (l.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return leadNombre.includes(normalizado) || normalizado.includes(leadNombre.split(' ')[0]);
+      });
+
+      if (!leadTarget) {
+        await this.meta.sendWhatsAppMessage(from, `❌ No encontré follow-up pendiente para "${nombreLead}".`);
+        return;
+      }
+
+      const notas = typeof leadTarget.notes === 'object' ? leadTarget.notes : {};
+      const pending = notas.pending_followup;
+
+      // Enviar mensaje personalizado del vendedor
+      const phoneLimpio = (leadTarget.phone || '').replace(/\D/g, '');
+      await this.meta.sendWhatsAppMessage(phoneLimpio, nuevoMensaje);
+
+      // Actualizar status
+      notas.pending_followup = {
+        ...pending,
+        status: 'edited',
+        mensaje_original: pending.mensaje,
+        mensaje_enviado: nuevoMensaje,
+        edited_at: new Date().toISOString()
+      };
+      await this.supabase.client.from('leads').update({ notes: notas }).eq('id', leadTarget.id);
+
+      await this.meta.sendWhatsAppMessage(from, `✅ Mensaje editado enviado a *${leadTarget.name}*\n\n"${nuevoMensaje.substring(0, 100)}..."`);
+      console.log(`✏️ Follow-up editado por ${nombre} para ${leadTarget.name}`);
+
+    } catch (error) {
+      console.error('Error editando follow-up:', error);
+      await this.meta.sendWhatsAppMessage(from, 'Error al editar. Intenta de nuevo.');
+    }
+  }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // AYUDA CONTEXTUAL

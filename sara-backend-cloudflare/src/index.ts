@@ -11302,6 +11302,12 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     await verificarBridgesPorExpirar(supabase, meta);
 
     // ═══════════════════════════════════════════════════════════
+    // FOLLOW-UPS PENDIENTES - Enviar si pasaron 30 min (cada 2 min)
+    // ═══════════════════════════════════════════════════════════
+    console.log('📤 Verificando follow-ups pendientes expirados...');
+    await procesarFollowupsPendientes(supabase, meta);
+
+    // ═══════════════════════════════════════════════════════════
     // BROADCAST QUEUE - Procesar broadcasts encolados (cada 2 min)
     // ═══════════════════════════════════════════════════════════
     console.log('📤 Procesando broadcasts encolados...');
@@ -11371,6 +11377,98 @@ async function verificarBridgesPorExpirar(supabase: SupabaseService, meta: MetaW
     console.log(advertidos > 0 ? '🔗 Bridges advertidos: ' + advertidos : '🔗 No hay bridges por expirar');
   } catch (e) {
     console.error('❌ Error verificando bridges:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// PROCESAR FOLLOW-UPS PENDIENTES (cada 2 min)
+// Envía automáticamente si pasaron 30 min sin respuesta del vendedor
+// ═══════════════════════════════════════════════════════════
+async function procesarFollowupsPendientes(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+
+    // Buscar leads con pending_followup que ya expiraron
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, assigned_to, team_members:assigned_to(name)')
+      .not('notes->pending_followup', 'is', null);
+
+    if (!leads || leads.length === 0) {
+      console.log('📤 No hay follow-ups pendientes');
+      return;
+    }
+
+    let enviados = 0;
+    let saltados = 0;
+
+    for (const lead of leads) {
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      const pending = notas.pending_followup;
+
+      // Solo procesar si está pendiente
+      if (!pending || pending.status !== 'pending') {
+        continue;
+      }
+
+      // Verificar si ya expiró (30 min desde creación)
+      const expiresAt = new Date(pending.expires_at);
+      if (ahora < expiresAt) {
+        saltados++;
+        continue; // Aún no expira, el vendedor tiene tiempo
+      }
+
+      // Ya pasaron 30 min sin respuesta del vendedor - enviar automáticamente
+      try {
+        const phoneLimpio = (pending.lead_phone || lead.phone || '').replace(/\D/g, '');
+
+        if (!phoneLimpio) {
+          console.log(`⚠️ Lead ${lead.name} sin teléfono, saltando`);
+          continue;
+        }
+
+        await meta.sendWhatsAppMessage(phoneLimpio, pending.mensaje);
+
+        // Registrar mensaje automático
+        await registrarMensajeAutomatico(supabase, lead.id);
+
+        // Actualizar status
+        notas.pending_followup = {
+          ...pending,
+          status: 'sent_auto',
+          sent_at: ahora.toISOString(),
+          motivo: 'timeout_30min'
+        };
+        await supabase.client.from('leads').update({ notes: notas }).eq('id', lead.id);
+
+        enviados++;
+        const vendedorNombre = (lead.team_members as any)?.name || 'Sin vendedor';
+        console.log(`📤 Follow-up AUTO enviado a ${lead.name} (vendedor ${vendedorNombre} no respondió en 30 min)`);
+
+        // Notificar al vendedor que se envió automático
+        const { data: vendedor } = await supabase.client
+          .from('team_members')
+          .select('phone, name')
+          .eq('id', lead.assigned_to)
+          .single();
+
+        if (vendedor?.phone) {
+          await meta.sendWhatsAppMessage(vendedor.phone.replace(/\D/g, ''),
+            `✅ Follow-up enviado automáticamente a *${lead.name}*\n\n(No respondiste en 30 min)`
+          );
+        }
+
+      } catch (err) {
+        console.error(`Error enviando follow-up auto a ${lead.name}:`, err);
+      }
+    }
+
+    if (enviados > 0 || saltados > 0) {
+      console.log(`📤 Follow-ups: ${enviados} enviados auto, ${saltados} esperando aprobación`);
+    }
+
+  } catch (e) {
+    console.error('Error procesando follow-ups pendientes:', e);
   }
 }
 
@@ -19036,39 +19134,64 @@ async function followUp24hLeadsNuevos(supabase: SupabaseService, meta: MetaWhats
       const mensaje = mensajeTemplate.replace('{nombre}', nombre);
 
       try {
-        await meta.sendWhatsAppMessage(phoneLimpio, mensaje);
+        // ═══════════════════════════════════════════════════════════
+        // SISTEMA DE APROBACIÓN: Guardar pendiente y notificar vendedor
+        // El vendedor tiene 30 min para aprobar, editar o cancelar
+        // ═══════════════════════════════════════════════════════════
+        const vendedor = lead.team_members as any;
+        const ahora = new Date();
+        const expiraEn = new Date(ahora.getTime() + 30 * 60 * 1000); // 30 minutos
 
-        // Registrar mensaje automático enviado
-        await registrarMensajeAutomatico(supabase, lead.id);
+        // Guardar follow-up pendiente en notes del lead
+        const notasActuales = typeof lead.notes === 'object' ? lead.notes : {};
+        const pendingFollowup = {
+          tipo: 'followup_24h',
+          mensaje: mensaje,
+          lead_phone: phoneLimpio,
+          lead_name: lead.name,
+          vendedor_id: lead.assigned_to,
+          created_at: ahora.toISOString(),
+          expires_at: expiraEn.toISOString(),
+          status: 'pending' // pending, approved, cancelled, sent
+        };
 
-        // Marcar alerta como enviada
         await supabase.client
           .from('leads')
           .update({
-            alerta_enviada_24h: hoyStr,
-            updated_at: new Date().toISOString()
+            notes: { ...notasActuales, pending_followup: pendingFollowup },
+            alerta_enviada_24h: hoyStr // Marcar para no volver a procesar
           })
           .eq('id', lead.id);
 
-        enviados++;
-        console.log(`⏰ Follow-up 24h enviado a: ${lead.name}`);
-
-        // También alertar al vendedor asignado
-        const vendedor = lead.team_members as any;
+        // Notificar al vendedor con preview del mensaje
         if (vendedor?.phone) {
           const vendedorPhone = vendedor.phone.replace(/\D/g, '');
-          await meta.sendWhatsAppMessage(vendedorPhone,
-            `📢 *Alerta lead sin respuesta*\n\n` +
-            `${lead.name} lleva +24h sin contestar.\n` +
-            `Le envié un recordatorio automático.\n\n` +
-            `💡 Considera llamarle directamente.`
-          );
+          const notificacion = `📤 *FOLLOW-UP PENDIENTE*\n\n` +
+            `Lead: *${lead.name}*\n` +
+            `En 30 min enviaré:\n\n` +
+            `"${mensaje}"\n\n` +
+            `━━━━━━━━━━━━━━━━━━━━━\n` +
+            `• *ok ${nombre.toLowerCase()}* → enviar ahora\n` +
+            `• *cancelar ${nombre.toLowerCase()}* → no enviar\n` +
+            `• *editar ${nombre.toLowerCase()} [mensaje]* → tu versión\n` +
+            `━━━━━━━━━━━━━━━━━━━━━\n` +
+            `_Si no respondes, se envía automático_`;
+
+          await meta.sendWhatsAppMessage(vendedorPhone, notificacion);
+          console.log(`📤 Follow-up pendiente creado para ${lead.name}, vendedor ${vendedor.name} notificado`);
+        } else {
+          // Sin vendedor asignado, enviar directo
+          await meta.sendWhatsAppMessage(phoneLimpio, mensaje);
+          await registrarMensajeAutomatico(supabase, lead.id);
+          console.log(`⏰ Follow-up 24h enviado directo a ${lead.name} (sin vendedor asignado)`);
         }
+
+        enviados++;
 
         // Pequeña pausa entre mensajes
         await new Promise(r => setTimeout(r, 2000));
       } catch (err) {
-        console.error(`Error enviando follow-up 24h a ${lead.name}:`, err);
+        console.error(`Error creando follow-up pendiente para ${lead.name}:`, err);
       }
     }
 
