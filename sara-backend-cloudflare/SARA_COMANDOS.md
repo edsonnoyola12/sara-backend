@@ -150,12 +150,16 @@ npx wrangler tail --format=pretty
 | `quien es [nombre]` / `info [nombre]` | Ver información completa del lead | `vendedorQuienEs` |
 | `ver [nombre/teléfono]` | Ver historial de conversación con lead | `vendedorVerHistorial` |
 | `mover [nombre] a [etapa]` | Mover lead a otra etapa del funnel | `vendedorMoverEtapa` |
+| `nota [nombre] [texto]` | Agregar nota/apunte a un lead | `vendedorAgregarNota` |
+| `notas [nombre]` | Ver notas guardadas de un lead | `vendedorVerNotas` |
 | `bridge [nombre]` | Chat directo con lead (10 min) | `bridgeLead` |
 | `#mas` / `#continuar` | Extender bridge 6 min más | `extenderBridge` |
 | `#cerrar` / `#fin` | Terminar conexiones activas | `cerrarBridge` |
 | Números `1`, `2`, `3`, `4` | Responder a opciones pendientes | - |
 
 > **NOTA**: Los comandos brochure/ubicacion/video buscan por nombre de desarrollo (ej: "Monte Verde") O por nombre de modelo (ej: "Acacia", "Fresno").
+
+> **SUGERENCIAS INTELIGENTES**: Si escribes un comando incompleto o no reconocido, SARA usa IA para entender tu intención y sugerirte el comando correcto. Ejemplo: si escribes solo "nota", te responde cómo usarlo correctamente.
 
 ### Comando: credito [nombre]
 Pasa un lead a un asesor hipotecario:
@@ -477,6 +481,8 @@ Total: 8 actividades
 | `bridge [nombre]` | ✅ Verificado 2026-01-22 (chat directo 6 min) |
 | `coach [nombre]` | ✅ Implementado 2026-01-22 (coaching personalizado por lead) |
 | `ver [nombre/teléfono]` | ✅ Probado 2026-01-24 (historial de conversación) |
+| `nota [nombre] [texto]` | ✅ Probado 2026-01-24 (agregar nota a lead) |
+| `notas [nombre]` | ✅ Probado 2026-01-24 (ver notas de lead) |
 
 ### Bugs arreglados en pruebas
 10. ✅ JSON parsing en `asesorCommandsService.ts` - algunos leads tenían `notes` como texto plano, agregado `safeParseNotes()` helper
@@ -522,7 +528,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-24 16:45*
+*Última actualización: 2026-01-24 19:20*
 
 ---
 
@@ -649,6 +655,30 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ---
 
 ## HISTORIAL DE CAMBIOS
+
+### 2026-01-24
+
+**Sesión 2 (19:00) - Sugerencias Inteligentes con IA**
+- ✅ **Sugerencias inteligentes cuando comando no reconocido:**
+  - Antes: Mostraba menú de ayuda genérico
+  - Ahora: Claude entiende la intención y sugiere el comando correcto
+  - Ejemplo: "nota" → "Para agregar una nota escribe: *nota [nombre] [texto]*"
+  - Función: `generateSmartResponse()` en IACoachingService
+  - Fallback inteligente si Claude no disponible
+  - Logs detallados: `[IA-INTENT]`, `[SMART-RESPONSE]`, `[generateSmartResponse]`
+
+- ✅ **Comandos nota/notas implementados:**
+  - `nota [nombre] [texto]` - Agregar nota a un lead
+  - `notas [nombre]` - Ver notas de un lead
+  - Útil para registrar llamadas, visitas, acuerdos
+
+- ✅ **Detección ventana 24h WhatsApp:**
+  - Detecta si lead no ha escrito en 24h
+  - Muestra opciones: templates o contacto directo
+  - Opción 4: muestra teléfono del lead y recuerda registrar nota
+
+- ✅ Tests: 168 pasando ✅
+- ✅ Deploy exitoso
 
 ### 2026-01-23
 
