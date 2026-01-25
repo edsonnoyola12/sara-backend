@@ -14145,17 +14145,16 @@ async function enviarRecapDiario(supabase: SupabaseService, meta: MetaWhatsAppSe
       })
       .eq('id', vendedor.id);
 
-    // 2. Enviar template (recap se envía cuando respondan)
+    // 2. Enviar template reactivar_equipo (para equipo interno)
     const templateComponents = [
       {
         type: 'body',
         parameters: [
-          { type: 'text', text: nombreCorto },
-          { type: 'text', text: 'tu resumen del día' }
+          { type: 'text', text: nombreCorto }
         ]
       }
     ];
-    await meta.sendTemplate(vendedor.phone, 'seguimiento_lead', 'es_MX', templateComponents);
+    await meta.sendTemplate(vendedor.phone, 'reactivar_equipo', 'es_MX', templateComponents);
     console.log(`📤 Template recap enviado a ${vendedor.name} (recap completo pendiente hasta que responda)`);
   } catch (error) {
     console.error(`❌ Error enviando recap a ${vendedor.name}:`, error);
