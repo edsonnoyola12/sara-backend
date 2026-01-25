@@ -157,6 +157,79 @@ function getAvailableVendor(vendedores: TeamMemberAvailability[]): TeamMemberAva
   return fallback;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// LÍMITE DE MENSAJES AUTOMÁTICOS POR LEAD
+// Máximo 2 mensajes automáticos por día para evitar spam
+// ═══════════════════════════════════════════════════════════════
+const MAX_MENSAJES_AUTOMATICOS_POR_DIA = 2;
+
+async function puedeEnviarMensajeAutomatico(supabase: SupabaseService, leadId: string): Promise<boolean> {
+  try {
+    const hoy = new Date().toISOString().split('T')[0];
+
+    // Obtener lead y verificar contador de mensajes hoy
+    const { data: lead } = await supabase.client
+      .from('leads')
+      .select('notes')
+      .eq('id', leadId)
+      .single();
+
+    if (!lead) return false;
+
+    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const mensajesHoy = notes.mensajes_automaticos_hoy || { fecha: '', count: 0 };
+
+    // Si es un nuevo día, resetear contador
+    if (mensajesHoy.fecha !== hoy) {
+      return true; // Primer mensaje del día
+    }
+
+    // Verificar límite
+    if (mensajesHoy.count >= MAX_MENSAJES_AUTOMATICOS_POR_DIA) {
+      console.log(`⏭️ Lead ${leadId} ya recibió ${mensajesHoy.count} mensajes automáticos hoy (límite: ${MAX_MENSAJES_AUTOMATICOS_POR_DIA})`);
+      return false;
+    }
+
+    return true;
+  } catch (e) {
+    console.error('Error verificando límite mensajes:', e);
+    return true; // En caso de error, permitir envío
+  }
+}
+
+async function registrarMensajeAutomatico(supabase: SupabaseService, leadId: string): Promise<void> {
+  try {
+    const hoy = new Date().toISOString().split('T')[0];
+
+    const { data: lead } = await supabase.client
+      .from('leads')
+      .select('notes')
+      .eq('id', leadId)
+      .single();
+
+    if (!lead) return;
+
+    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const mensajesHoy = notes.mensajes_automaticos_hoy || { fecha: '', count: 0 };
+
+    // Si es un nuevo día, resetear
+    if (mensajesHoy.fecha !== hoy) {
+      notes.mensajes_automaticos_hoy = { fecha: hoy, count: 1 };
+    } else {
+      notes.mensajes_automaticos_hoy = { fecha: hoy, count: mensajesHoy.count + 1 };
+    }
+
+    await supabase.client
+      .from('leads')
+      .update({ notes })
+      .eq('id', leadId);
+
+    console.log(`📊 Lead ${leadId}: mensaje automático #${notes.mensajes_automaticos_hoy.count} del día`);
+  } catch (e) {
+    console.error('Error registrando mensaje automático:', e);
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -10719,16 +10792,11 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       console.log(`⏭️ BRIEFING NO EJECUTADO - hora=${mexicoHour} (solo a las 8am)`);
     }
 
-    // 8am L-V: Briefing de supervisión para admins
+    // 8am L-V: Reporte diario consolidado CEO/Admin (incluye supervisión + métricas)
+    // CONSOLIDADO: Antes se enviaban 2 mensajes separados, ahora es 1 solo
     if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('👁️ Enviando briefing de supervisión a admins...');
-      await enviarBriefingSupervision(supabase, meta);
-    }
-
-    // 8am L-V: Reporte diario CEO/Admin
-    if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📊 Enviando reporte diario a CEO...');
-      await enviarReporteDiarioCEO(supabase, meta);
+      console.log('📊 Enviando reporte diario consolidado a CEO/Admin...');
+      await enviarReporteDiarioConsolidadoCEO(supabase, meta);
     }
 
     // 8am LUNES: Reporte semanal CEO/Admin
@@ -10835,21 +10903,10 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       console.log(`🔄 REACTIVACIÓN: ${reactivados} miembros reactivados`);
     }
 
-    // 7pm L-V: Recap del dia (solo primer ejecucion de la hora)
-    if (mexicoHour === 19 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5 && vendedores) {
-      console.log('Enviando recap del dia...');
-      let recapEnviados = 0;
-      for (const v of vendedores) {
-        if (!v.phone || !v.recibe_recap) continue;
-        await enviarRecapDiario(supabase, meta, v);
-        recapEnviados++;
-      }
-      await logEvento(supabase, 'recap', `Recap diario: ${recapEnviados} enviados`, { enviados: recapEnviados });
-    }
-
-    // 7pm L-V: Reporte diario individual a vendedores
+    // 7pm L-V: Reporte diario consolidado a vendedores (incluye recap + métricas)
+    // CONSOLIDADO: Antes se enviaban 2 mensajes separados (recap + reporte), ahora es 1 solo
     if (mexicoHour === 19 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📊 Enviando reportes diarios a vendedores...');
+      console.log('📊 Enviando reporte diario consolidado a vendedores...');
       await enviarReporteDiarioVendedores(supabase, meta);
     }
 
@@ -11121,8 +11178,8 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       await recordatorioFinalDia(supabase, meta);
     }
 
-    // 11am y 3pm L-V: Alerta de inactividad de vendedores a admins
-    if (isFirstRunOfHour && (mexicoHour === 11 || mexicoHour === 15) && dayOfWeek >= 1 && dayOfWeek <= 5) {
+    // 11am L-V: Alerta de inactividad de vendedores a admins (consolidado - antes era 11am y 3pm)
+    if (isFirstRunOfHour && mexicoHour === 11 && dayOfWeek >= 1 && dayOfWeek <= 5) {
       console.log('👔 Verificando inactividad de vendedores...');
       await alertaInactividadVendedor(supabase, meta);
     }
@@ -11368,6 +11425,15 @@ async function verificarLeadsEstancados(supabase: SupabaseService, meta: MetaWha
 // ═══════════════════════════════════════════════════════════════
 // REPORTES CEO AUTOMÁTICOS
 // ═══════════════════════════════════════════════════════════════
+
+// Función consolidada que combina reporte diario + briefing supervisión en 1 solo mensaje
+async function enviarReporteDiarioConsolidadoCEO(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  // Antes se enviaban 2 mensajes separados (briefing supervisión + reporte diario)
+  // Ahora se envía 1 solo mensaje con toda la información importante
+  await enviarReporteDiarioCEO(supabase, meta);
+  // El briefing de supervisión ya no se envía por separado - su info está en el reporte diario
+  console.log('📊 Reporte consolidado CEO enviado (1 mensaje en vez de 2)');
+}
 
 async function enviarReporteDiarioCEO(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
   // Obtener CEOs/Admins
@@ -18286,6 +18352,13 @@ async function reengagementDirectoLeads(supabase: SupabaseService, meta: MetaWha
 
       // Enviar template si corresponde
       if (pasoActual) {
+        // LÍMITE DE MENSAJES: Verificar si puede recibir más mensajes hoy
+        const puedeEnviar = await puedeEnviarMensajeAutomatico(supabase, lead.id);
+        if (!puedeEnviar) {
+          console.log(`⏭️ Re-engagement ${pasoActual} saltado para ${lead.name} (límite diario alcanzado)`);
+          continue;
+        }
+
         try {
           // Usar template aprobado "seguimiento_lead" con variables
           // Template: ¡Hola {{1}}! 👋 Hace unos días platicamos sobre *{{2}}*...
@@ -18300,6 +18373,10 @@ async function reengagementDirectoLeads(supabase: SupabaseService, meta: MetaWha
           ];
 
           await meta.sendTemplate(lead.phone, 'seguimiento_lead', 'es_MX', templateComponents);
+
+          // Registrar mensaje automático enviado
+          await registrarMensajeAutomatico(supabase, lead.id);
+
           console.log(`❄️ Re-engagement ${pasoActual} (template) enviado a ${lead.name} (${diasSinRespuesta} días)`);
 
           // Actualizar tracking + guardar contexto para respuesta
@@ -18944,6 +19021,13 @@ async function followUp24hLeadsNuevos(supabase: SupabaseService, meta: MetaWhats
     for (const lead of leads) {
       if (!lead.phone) continue;
 
+      // LÍMITE DE MENSAJES: Verificar si puede recibir más mensajes hoy
+      const puedeEnviar = await puedeEnviarMensajeAutomatico(supabase, lead.id);
+      if (!puedeEnviar) {
+        console.log(`⏭️ Follow-up 24h saltado para ${lead.name} (límite diario alcanzado)`);
+        continue;
+      }
+
       const phoneLimpio = lead.phone.replace(/\D/g, '');
       const nombre = lead.name?.split(' ')[0] || 'amigo';
 
@@ -18953,6 +19037,9 @@ async function followUp24hLeadsNuevos(supabase: SupabaseService, meta: MetaWhats
 
       try {
         await meta.sendWhatsAppMessage(phoneLimpio, mensaje);
+
+        // Registrar mensaje automático enviado
+        await registrarMensajeAutomatico(supabase, lead.id);
 
         // Marcar alerta como enviada
         await supabase.client
@@ -20407,6 +20494,13 @@ async function nurturingEducativo(supabase: SupabaseService, meta: MetaWhatsAppS
       const nombre = lead.name?.split(' ')[0] || 'amigo';
       const desarrollo = lead.property_interest || 'nuestras casas';
 
+      // LÍMITE DE MENSAJES: Verificar si puede recibir más mensajes hoy
+      const puedeEnviar = await puedeEnviarMensajeAutomatico(supabase, lead.id);
+      if (!puedeEnviar) {
+        console.log(`⏭️ Nurturing saltado para ${lead.name} (límite diario alcanzado)`);
+        continue;
+      }
+
       try {
         // Usar template para que llegue aunque no hayan escrito en 24h
         // Template seguimiento_lead: "¡Hola {{1}}! 👋 Hace unos días platicamos sobre *{{2}}*..."
@@ -20421,6 +20515,10 @@ async function nurturingEducativo(supabase: SupabaseService, meta: MetaWhatsAppS
         ];
 
         await meta.sendTemplate(lead.phone, 'seguimiento_lead', 'es_MX', templateComponents);
+
+        // Registrar mensaje automático enviado
+        await registrarMensajeAutomatico(supabase, lead.id);
+
         enviados++;
         console.log(`📚 Nurturing (template) enviado a ${lead.name}: ${contenidoSeleccionado.id}`);
 
