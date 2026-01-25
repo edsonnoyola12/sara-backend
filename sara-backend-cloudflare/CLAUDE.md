@@ -3,7 +3,7 @@
 ## ANTES DE HACER CUALQUIER COSA
 
 1. **LEE `SARA_COMANDOS.md`** - Contiene TODO lo que ya existe
-2. **CORRE `npm test`** - Si no pasan los 79 tests, NO hagas cambios
+2. **CORRE `npm test`** - Si no pasan los 211 tests, NO hagas cambios
 
 ## REGLAS CRÍTICAS
 
@@ -39,6 +39,10 @@ npm test
 # - Recursos (video/brochure): 12 tests
 # - Bridge (chat directo): 8 tests
 # - Regresiones: 5 tests
+# - Notas en CRM: 12 tests
+# - Recap condicional: 8 tests
+# - Sugerencias IA: 6 tests
+# - Comandos existentes (regresión): 17 tests
 ```
 
 ## LÓGICA DE NEGOCIO CRÍTICA
@@ -74,7 +78,10 @@ src/
 ├── utils/
 │   └── conversationLogic.ts  # Lógica extraída para tests
 └── tests/
-    └── conversationLogic.test.ts  # 35 tests críticos
+    ├── conversationLogic.test.ts  # 35 tests GPS/recursos
+    ├── vendorCommands.test.ts     # 30 tests comandos vendedor
+    ├── newFeatures.test.ts        # 43 tests notas/recap/IA
+    └── ...otros tests
 ```
 
 ## DEPLOY
