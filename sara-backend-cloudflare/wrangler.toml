@@ -11,11 +11,10 @@ compatibility_flags = ["nodejs_compat"]
 
 [triggers]
 # Crons (máximo 5 en Cloudflare free):
-# - */2 * * * *     : Check leads sin asignar cada 2 min
+# - */2 * * * *     : Check leads sin asignar cada 2 min (incluye precios día 1 a las 12 AM México)
 # - 0 14 * * 1-5    : Followups 2 PM L-V
 # - 0 1 * * *       : Tareas nocturnas + Backup diario 1 AM (TODOS los días)
-# - 0 7 1 * *       : Actualización precios mensual
-crons = ["*/2 * * * *", "0 14 * * 1-5", "0 1 * * *", "0 7 1 * *"]
+crons = ["*/2 * * * *", "0 14 * * 1-5", "0 1 * * *"]
 
 # KV Namespace para cache (PRODUCTION)
 [[kv_namespaces]]

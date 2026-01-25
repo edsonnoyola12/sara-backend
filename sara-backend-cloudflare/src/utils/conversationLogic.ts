@@ -8,6 +8,7 @@ export interface AIAnalysis {
   send_video_desarrollo?: boolean;
   send_contactos?: boolean;
   send_brochure?: boolean;
+  send_video?: boolean;
   send_matterport?: boolean;
   extracted_data?: {
     desarrollo?: string;

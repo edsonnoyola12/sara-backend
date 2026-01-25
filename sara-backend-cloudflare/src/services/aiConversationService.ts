@@ -1369,7 +1369,10 @@ Flags:
   * Tú recomiendas desarrollos y el cliente responde positivamente
   * ⚠️⚠️⚠️ REGLA DE ORO: Si mencionan un desarrollo, SIEMPRE send_video_desarrollo: true
   * NUNCA preguntes "¿te mando el video?" - SIEMPRE envíalo automáticamente
-- "send_gps": true si pide ubicación, mapa, cómo llegar (pero GPS solo con cita confirmada)
+- "send_gps": true si pide ubicación, mapa, cómo llegar, dirección, dónde queda, "mándame la ubicación", "pásame la dirección"
+- "send_brochure": true si pide brochure, folleto, PDF, catálogo, ficha técnica, planos, "mándame el brochure", "pásame el PDF"
+- "send_video": true si pide video, "mándame el video", "quiero ver el video", "pásame el video", "envíame el video"
+- "send_matterport": true si pide recorrido virtual, tour 3D, ver por dentro, matterport, "cómo se ve por dentro", "quiero ver las casas"
 - "send_contactos": true SOLO cuando:
   * El cliente pide EXPLÍCITAMENTE asesor de crédito, hipoteca, financiamiento
   * El cliente dice "sí" después de que ofreciste asesor
@@ -1421,6 +1424,9 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
   "response": "Tu respuesta conversacional para WhatsApp",
   "send_video_desarrollo": false,
   "send_gps": false,
+  "send_brochure": false,
+  "send_video": false,
+  "send_matterport": false,
   "send_contactos": false,
   "contactar_vendedor": false
 }
@@ -1744,6 +1750,9 @@ RECUERDA:
         response: parsed.response || (detectedLang === 'en' ? 'Hello! How can I help you?' : '¡Hola! ¿En qué puedo ayudarte?'),
         send_gps: parsed.send_gps || false,
         send_video_desarrollo: parsed.send_video_desarrollo || false,
+        send_brochure: parsed.send_brochure || false,
+        send_video: parsed.send_video || false,
+        send_matterport: parsed.send_matterport || false,
         send_contactos: parsed.send_contactos || false,
         contactar_vendedor: parsed.contactar_vendedor || false,
         detected_language: detectedLang // Idioma detectado para usar en executeAIDecision
@@ -3947,10 +3956,18 @@ Tú dime, ¿por dónde empezamos?`;
                 if (brochureUrl && !brochuresEnviados.includes(brochureUrl)) {
                   brochuresEnviados.push(brochureUrl);
                   await new Promise(r => setTimeout(r, 400));
-                  await this.twilio.sendWhatsAppMessage(from,
-                    `📋 *Brochure ${dev}:*\n${brochureUrl}\n\n_Modelos, precios y características_`
-                  );
-                  console.log(`✅ Brochure enviado para ${dev}:`, brochureUrl);
+                  // ⚠️ FIX 25-ENE-2026: Enviar como DOCUMENTO PDF, no solo texto con URL
+                  try {
+                    const filename = `Brochure_${dev.replace(/\s+/g, '_')}.pdf`;
+                    await this.meta.sendWhatsAppDocument(from, brochureUrl, filename, `📋 Brochure ${dev} - Modelos, precios y características`);
+                    console.log(`✅ Brochure PDF enviado para ${dev}:`, brochureUrl);
+                  } catch (docError) {
+                    // Fallback: si falla envío de documento, enviar como link
+                    console.error(`⚠️ Error enviando brochure como documento, enviando como link:`, docError);
+                    await this.twilio.sendWhatsAppMessage(from,
+                      `📋 *Brochure ${dev}:*\n${brochureUrl}\n\n_Modelos, precios y características_`
+                    );
+                  }
                   // Guardar acción en historial
                   await this.guardarAccionEnHistorial(lead.id, 'Envié brochure PDF', dev);
                 }
@@ -4045,6 +4062,76 @@ Tú dime, ¿por dónde empezamos?`;
                   }
                 } else {
                   console.error(`⚠️ ${devParaGPS} no tiene gps_link en DB`);
+                }
+              }
+            }
+
+            // ═══ BROCHURE INDEPENDIENTE - Enviar aunque recursos ya se enviaron ═══
+            // ⚠️ FIX 25-ENE-2026: Si pide brochure específicamente, enviarlo
+            if (analysis.send_brochure === true) {
+              console.log('📄 Brochure solicitado explícitamente (recursos ya enviados, enviando brochure)');
+              const devParaBrochure = desarrolloInteres || '';
+              if (devParaBrochure) {
+                const propBrochure = properties.find((p: any) => {
+                  const nombreProp = (p.development || p.name || '').toLowerCase().trim();
+                  return (nombreProp.includes(devParaBrochure.toLowerCase()) || devParaBrochure.toLowerCase().includes(nombreProp)) && p.brochure_urls;
+                });
+                const brochureRaw = propBrochure?.brochure_urls;
+                const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
+
+                if (brochureUrl) {
+                  await new Promise(r => setTimeout(r, 400));
+                  try {
+                    const filename = `Brochure_${devParaBrochure.replace(/\s+/g, '_')}.pdf`;
+                    await this.meta.sendWhatsAppDocument(from, brochureUrl, filename, `📋 Brochure ${devParaBrochure} - Modelos, precios y características`);
+                    console.log(`✅ Brochure PDF enviado (solicitado): ${devParaBrochure} - ${brochureUrl}`);
+                  } catch (docError) {
+                    console.error(`⚠️ Error enviando brochure como documento:`, docError);
+                    await this.twilio.sendWhatsAppMessage(from, `📋 *Brochure ${devParaBrochure}:*\n${brochureUrl}\n\n_Modelos, precios y características_`);
+                  }
+                  await this.guardarAccionEnHistorial(lead.id, 'Envié brochure PDF solicitado', devParaBrochure);
+                } else {
+                  console.error(`⚠️ ${devParaBrochure} no tiene brochure_urls en DB`);
+                }
+              }
+            }
+
+            // ═══ VIDEO INDEPENDIENTE - Enviar aunque recursos ya se enviaron ═══
+            if (analysis.send_video === true) {
+              console.log('🎬 Video solicitado explícitamente (recursos ya enviados, enviando video)');
+              const devParaVideo = desarrolloInteres || '';
+              if (devParaVideo) {
+                const propVideo = properties.find((p: any) => {
+                  const nombreProp = (p.development || p.name || '').toLowerCase().trim();
+                  return (nombreProp.includes(devParaVideo.toLowerCase()) || devParaVideo.toLowerCase().includes(nombreProp)) && p.youtube_link;
+                });
+                if (propVideo?.youtube_link) {
+                  await new Promise(r => setTimeout(r, 400));
+                  await this.twilio.sendWhatsAppMessage(from, `🎬 *Video de ${devParaVideo}:*\n${propVideo.youtube_link}\n\n_Conoce el desarrollo en detalle_`);
+                  console.log(`✅ Video enviado (solicitado): ${devParaVideo}`);
+                  await this.guardarAccionEnHistorial(lead.id, 'Envié video solicitado', devParaVideo);
+                } else {
+                  console.error(`⚠️ ${devParaVideo} no tiene youtube_link en DB`);
+                }
+              }
+            }
+
+            // ═══ MATTERPORT INDEPENDIENTE - Enviar aunque recursos ya se enviaron ═══
+            if (analysis.send_matterport === true) {
+              console.log('🏠 Matterport solicitado explícitamente (recursos ya enviados, enviando tour 3D)');
+              const devParaMatterport = desarrolloInteres || '';
+              if (devParaMatterport) {
+                const propMatterport = properties.find((p: any) => {
+                  const nombreProp = (p.development || p.name || '').toLowerCase().trim();
+                  return (nombreProp.includes(devParaMatterport.toLowerCase()) || devParaMatterport.toLowerCase().includes(nombreProp)) && p.matterport_link;
+                });
+                if (propMatterport?.matterport_link) {
+                  await new Promise(r => setTimeout(r, 400));
+                  await this.twilio.sendWhatsAppMessage(from, `🏠 *Recorrido virtual de ${devParaMatterport}:*\n${propMatterport.matterport_link}\n\n_Tour 3D interactivo - recorre la casa como si estuvieras ahí_`);
+                  console.log(`✅ Matterport enviado (solicitado): ${devParaMatterport}`);
+                  await this.guardarAccionEnHistorial(lead.id, 'Envié recorrido virtual solicitado', devParaMatterport);
+                } else {
+                  console.error(`⚠️ ${devParaMatterport} no tiene matterport_link en DB`);
                 }
               }
             }
@@ -6569,12 +6656,17 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
           const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
 
           if (brochureUrl) {
-            const msgBrochure = `📄 *Brochure completo de ${desarrolloParaBrochure}:*
-${brochureUrl}
-
-Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
-            await this.twilio.sendWhatsAppMessage(from, msgBrochure);
-            console.log(`✅ Brochure enviado: ${desarrolloParaBrochure} - ${brochureUrl}`);
+            // ⚠️ FIX 25-ENE-2026: Enviar como DOCUMENTO PDF, no solo texto con URL
+            try {
+              const filename = `Brochure_${desarrolloParaBrochure.replace(/\s+/g, '_')}.pdf`;
+              await this.meta.sendWhatsAppDocument(from, brochureUrl, filename, `📄 Brochure ${desarrolloParaBrochure} - Fotos, videos, tour 3D, ubicación y precios`);
+              console.log(`✅ Brochure PDF enviado: ${desarrolloParaBrochure} - ${brochureUrl}`);
+            } catch (docError) {
+              // Fallback: si falla envío de documento, enviar como link
+              console.error(`⚠️ Error enviando brochure como documento, enviando como link:`, docError);
+              const msgBrochure = `📄 *Brochure completo de ${desarrolloParaBrochure}:*\n${brochureUrl}\n\nAhí encuentras fotos, videos, tour 3D, ubicación y precios.`;
+              await this.twilio.sendWhatsAppMessage(from, msgBrochure);
+            }
             // Guardar acción en historial
             await this.guardarAccionEnHistorial(lead.id, 'Envié brochure PDF completo', desarrolloParaBrochure);
           } else {
@@ -6620,25 +6712,43 @@ Ahí encuentras fotos, videos, tour 3D, ubicación y precios.`;
     // Esto cubre el caso cuando alguien solo dice "mándame la ubicación"
     if (analysis.send_gps === true && !debeEnviarRecursos) {
       console.log('📍 GPS SOLICITADO (sin recursos)');
-      const desarrolloParaGPS = analysis.extracted_data?.desarrollo || desarrollo || todosDesarrollos[0] || lead.property_interest || '';
-      if (desarrolloParaGPS) {
-        const propConGPS = properties.find(p =>
-          p.development?.toLowerCase().includes(desarrolloParaGPS.toLowerCase()) &&
-          p.gps_link
-        );
-        const gpsUrl = propConGPS?.gps_link;
 
-        if (gpsUrl) {
-          await new Promise(resolve => setTimeout(resolve, 400));
-          const msgGPS = `📍 *Ubicación de ${desarrolloParaGPS}:*\n${gpsUrl}\n\n_Ahí te lleva directo en Google Maps_`;
-          await this.twilio.sendWhatsAppMessage(from, msgGPS);
-          console.log(`✅ GPS enviado (solo): ${desarrolloParaGPS} - ${gpsUrl}`);
-          // Guardar acción en historial
-          await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', desarrolloParaGPS);
-        } else {
-          console.error(`⚠️ ${desarrolloParaGPS} NO tiene gps_link en DB`);
-          // Enviar mensaje indicando que no tenemos GPS
-          await this.twilio.sendWhatsAppMessage(from, `📍 La ubicación exacta de ${desarrolloParaGPS} te la puedo dar cuando agendemos tu visita. ¿Te gustaría agendar una cita? 🏠`);
+      // ═══ DETECTAR SI PIDE OFICINAS ═══
+      const msgLower = message.toLowerCase();
+      const pideOficinas = msgLower.includes('oficina') ||
+        (msgLower.includes('santa rita') && !msgLower.includes('fraccion')) ||
+        msgLower.includes('oficinas centrales');
+
+      if (pideOficinas) {
+        // GPS de oficinas centrales Grupo Santa Rita
+        const gpsOficinas = 'https://maps.app.goo.gl/hUk6aH8chKef6NRY7';
+        await new Promise(resolve => setTimeout(resolve, 400));
+        const msgGPS = `📍 *Ubicación de Oficinas Grupo Santa Rita:*\n${gpsOficinas}\n\n_Ahí te lleva directo en Google Maps_`;
+        await this.twilio.sendWhatsAppMessage(from, msgGPS);
+        console.log(`✅ GPS enviado (oficinas): ${gpsOficinas}`);
+        await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', 'Oficinas Grupo Santa Rita');
+      } else {
+        // GPS de desarrollo
+        const desarrolloParaGPS = analysis.extracted_data?.desarrollo || desarrollo || todosDesarrollos[0] || lead.property_interest || '';
+        if (desarrolloParaGPS) {
+          const propConGPS = properties.find(p =>
+            p.development?.toLowerCase().includes(desarrolloParaGPS.toLowerCase()) &&
+            p.gps_link
+          );
+          const gpsUrl = propConGPS?.gps_link;
+
+          if (gpsUrl) {
+            await new Promise(resolve => setTimeout(resolve, 400));
+            const msgGPS = `📍 *Ubicación de ${desarrolloParaGPS}:*\n${gpsUrl}\n\n_Ahí te lleva directo en Google Maps_`;
+            await this.twilio.sendWhatsAppMessage(from, msgGPS);
+            console.log(`✅ GPS enviado (solo): ${desarrolloParaGPS} - ${gpsUrl}`);
+            // Guardar acción en historial
+            await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', desarrolloParaGPS);
+          } else {
+            console.error(`⚠️ ${desarrolloParaGPS} NO tiene gps_link en DB`);
+            // Enviar mensaje indicando que no tenemos GPS
+            await this.twilio.sendWhatsAppMessage(from, `📍 La ubicación exacta de ${desarrolloParaGPS} te la puedo dar cuando agendemos tu visita. ¿Te gustaría agendar una cita? 🏠`);
+          }
         }
       }
     }

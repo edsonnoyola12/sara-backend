@@ -2389,7 +2389,7 @@ ${asesor.phone ? `📱 *Tel:* ${asesor.phone}` : ''}
         }
       } else if (desarrolloCita === 'Oficinas Centrales') {
         // Link de oficinas centrales Santa Rita
-        gpsLink = 'https://maps.google.com/?q=Grupo+Santa+Rita+Oficinas';
+        gpsLink = 'https://maps.app.goo.gl/hUk6aH8chKef6NRY7';
       }
       
       // ═══════════════════════════════════════════════════════════════
@@ -3167,7 +3167,7 @@ Creada desde CRM`;
                 .single();
               if (prop?.gps_link) gpsLink = prop.gps_link;
             } else if (body.property_name === 'Oficinas Centrales') {
-              gpsLink = 'https://maps.google.com/?q=Grupo+Santa+Rita+Oficinas';
+              gpsLink = 'https://maps.app.goo.gl/hUk6aH8chKef6NRY7';
             }
             
             // Formatear fecha bonita
@@ -12781,66 +12781,6 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
 
     // ═══════════════════════════════════════════════════════════
-    // ACTUALIZACIÓN DE PRECIOS - 1ero de cada mes a la 1am México (7am UTC)
-    // Incremento: 0.5% mensual (6% anual)
-    // ═══════════════════════════════════════════════════════════
-    if (event.cron === '0 7 1 * *') {
-      console.log('💰 ACTUALIZANDO PRECIOS MENSUALES (+0.5%)...');
-      try {
-        // Obtener todas las propiedades con precios
-        const { data: properties, error: propsError } = await supabase.client
-          .from('properties')
-          .select('id, name, price_from, price_to');
-
-        if (propsError) {
-          console.error('❌ Error obteniendo properties:', propsError);
-        } else if (properties && properties.length > 0) {
-          const factor = 1.005; // 0.5% de incremento
-          let actualizadas = 0;
-
-          for (const prop of properties) {
-            const newPriceFrom = prop.price_from ? Math.round(prop.price_from * factor) : null;
-            const newPriceTo = prop.price_to ? Math.round(prop.price_to * factor) : null;
-
-            const { error: updateError } = await supabase.client
-              .from('properties')
-              .update({
-                price_from: newPriceFrom,
-                price_to: newPriceTo,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', prop.id);
-
-            if (!updateError) {
-              actualizadas++;
-              console.log(`   ✅ ${prop.name}: $${prop.price_from?.toLocaleString()} → $${newPriceFrom?.toLocaleString()}`);
-            } else {
-              console.log(`   ❌ Error actualizando ${prop.name}:`, updateError);
-            }
-          }
-
-          console.log(`💰 PRECIOS ACTUALIZADOS: ${actualizadas}/${properties.length} propiedades`);
-
-          // Notificar al CEO
-          try {
-            await meta.sendWhatsAppMessage('5212224558475',
-              `💰 *PRECIOS ACTUALIZADOS*\n\n` +
-              `Se aplicó el incremento mensual del 0.5%\n` +
-              `📊 ${actualizadas} propiedades actualizadas\n\n` +
-              `_Incremento anual: 6%_`
-            );
-          } catch (e) {
-            console.error('⚠️ No se pudo notificar al CEO sobre precios');
-          }
-        } else {
-          console.error('⚠️ No hay propiedades para actualizar');
-        }
-      } catch (e) {
-        console.error('❌ Error en actualización de precios:', e);
-      }
-    }
-
-    // ═══════════════════════════════════════════════════════════
     // BACKUP DIARIO - Corre con tareas nocturnas 1 AM UTC (7 PM México)
     // Guarda backup en KV, mantiene últimos 7 días
     // ═══════════════════════════════════════════════════════════
@@ -16164,14 +16104,18 @@ async function enviarReporteMensualMarketing(supabase: SupabaseService, meta: Me
 const INCREMENTO_MENSUAL = 0.005; // 0.5% mensual = 6% anual
 
 async function aplicarPreciosProgramados(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ACTUALIZACIÓN MENSUAL DE PRECIOS - Día 1 de cada mes a las 12:00 AM México
+  // Incrementa 0.5% mensual (6% anual) TODOS los campos de precio
+  // ═══════════════════════════════════════════════════════════════════════════
   try {
     const hoy = new Date();
     const mesActual = hoy.toLocaleString('es-MX', { month: 'long', year: 'numeric' });
 
-    // Obtener TODAS las propiedades
+    // Obtener TODAS las propiedades con TODOS los campos de precio
     const { data: propiedades, error } = await supabase.client
       .from('properties')
-      .select('id, name, development, price, price_equipped');
+      .select('id, name, development, price, price_equipped, price_from, price_to');
 
     if (error || !propiedades || propiedades.length === 0) {
       console.error('⚠️ Error obteniendo propiedades:', error?.message);
@@ -16185,21 +16129,26 @@ async function aplicarPreciosProgramados(supabase: SupabaseService, meta: MetaWh
 
     for (const prop of propiedades) {
       try {
+        // Obtener precios actuales
         const precioAnterior = Number(prop.price) || 0;
         const precioEquipadoAnterior = Number(prop.price_equipped) || 0;
+        const precioFromAnterior = Number(prop.price_from) || 0;
+        const precioToAnterior = Number(prop.price_to) || 0;
 
         // Calcular nuevos precios (redondear a enteros)
-        const nuevoPrecio = Math.round(precioAnterior * (1 + INCREMENTO_MENSUAL));
-        const nuevoPrecioEquipado = precioEquipadoAnterior > 0
-          ? Math.round(precioEquipadoAnterior * (1 + INCREMENTO_MENSUAL))
-          : null;
+        const nuevoPrecio = precioAnterior > 0 ? Math.round(precioAnterior * (1 + INCREMENTO_MENSUAL)) : null;
+        const nuevoPrecioEquipado = precioEquipadoAnterior > 0 ? Math.round(precioEquipadoAnterior * (1 + INCREMENTO_MENSUAL)) : null;
+        const nuevoPrecioFrom = precioFromAnterior > 0 ? Math.round(precioFromAnterior * (1 + INCREMENTO_MENSUAL)) : null;
+        const nuevoPrecioTo = precioToAnterior > 0 ? Math.round(precioToAnterior * (1 + INCREMENTO_MENSUAL)) : null;
 
-        // Actualizar en DB
+        // Actualizar TODOS los campos de precio en DB
         await supabase.client
           .from('properties')
           .update({
             price: nuevoPrecio,
             price_equipped: nuevoPrecioEquipado,
+            price_from: nuevoPrecioFrom,
+            price_to: nuevoPrecioTo,
             updated_at: new Date().toISOString()
           })
           .eq('id', prop.id);
@@ -16207,8 +16156,10 @@ async function aplicarPreciosProgramados(supabase: SupabaseService, meta: MetaWh
         aplicados++;
 
         // Guardar para resumen (solo primeros 3 por desarrollo)
-        if (!resumen.some(r => r.includes(prop.development))) {
-          resumen.push(`• ${prop.development}: ${prop.name} $${(precioAnterior/1000000).toFixed(2)}M → $${(nuevoPrecio/1000000).toFixed(2)}M`);
+        const precioMostrar = precioAnterior || precioFromAnterior;
+        const nuevoPrecioMostrar = nuevoPrecio || nuevoPrecioFrom;
+        if (precioMostrar && !resumen.some(r => r.includes(prop.development))) {
+          resumen.push(`• ${prop.development}: ${prop.name} $${(precioMostrar/1000000).toFixed(2)}M → $${(nuevoPrecioMostrar!/1000000).toFixed(2)}M`);
         }
       } catch (e) {
         console.error(`❌ Error actualizando ${prop.name}:`, e);

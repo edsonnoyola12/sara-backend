@@ -344,7 +344,7 @@ export class MetaWhatsAppService {
   async sendWhatsAppVideo(to: string, videoUrl: string, caption?: string): Promise<any> {
     const phone = this.normalizePhone(to);
     const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
-    
+
     const payload: any = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -363,6 +363,42 @@ export class MetaWhatsAppService {
       body: JSON.stringify(payload)
     });
     return response.json();
+  }
+
+  async sendWhatsAppDocument(to: string, documentUrl: string, filename: string, caption?: string): Promise<any> {
+    const phone = this.normalizePhone(to);
+    const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
+
+    const payload: any = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'document',
+      document: {
+        link: documentUrl,
+        filename: filename
+      }
+    };
+    if (caption) payload.document.caption = sanitizeUTF8(caption);
+
+    console.log(`📄 Enviando documento ${filename} a ${phone}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      console.error('❌ Error enviando documento:', JSON.stringify(data));
+      throw new Error(data.error?.message || 'Error enviando documento');
+    }
+    console.log(`✅ Documento enviado: ${data.messages?.[0]?.id}`);
+    return data;
   }
 
   async sendWhatsAppVideoById(to: string, mediaId: string, caption?: string): Promise<any> {
@@ -424,30 +460,6 @@ export class MetaWhatsAppService {
     }
     console.log(`✅ Video subido a Meta: ${data.id}`);
     return data.id;
-  }
-
-  async sendWhatsAppDocument(to: string, documentUrl: string, filename: string, caption?: string): Promise<any> {
-    const phone = this.normalizePhone(to);
-    const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
-    
-    const payload: any = {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to: phone,
-      type: 'document',
-      document: { link: documentUrl, filename: filename }
-    };
-    if (caption) payload.document.caption = sanitizeUTF8(caption);
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-    return response.json();
   }
 
   async sendWhatsAppLocation(to: string, latitude: number, longitude: number, name?: string, address?: string): Promise<any> {

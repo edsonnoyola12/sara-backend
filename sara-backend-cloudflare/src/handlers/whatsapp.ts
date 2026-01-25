@@ -900,15 +900,22 @@ export class WhatsAppHandler {
       if (vendedor) {
         // ═══ ACTUALIZAR última interacción PRIMERO (antes de cualquier return) ═══
         // Guardamos en notes.last_sara_interaction para trackear la ventana de 24h de WhatsApp
+        // ⚠️ FIX 25-ENE-2026: Obtener notas FRESCAS de BD (no del cache) para no borrar active_bridge
         try {
           const now = new Date().toISOString();
-          // FIX: Parsear correctamente las notas (pueden ser string JSON o objeto)
+          // Obtener notas FRESCAS de la BD (el cache puede tener datos viejos sin active_bridge)
+          const { data: freshVendedor } = await this.supabase.client
+            .from('team_members')
+            .select('notes')
+            .eq('id', vendedor.id)
+            .single();
+
           let vendedorNotes: any = {};
-          if (vendedor.notes) {
-            if (typeof vendedor.notes === 'string') {
-              try { vendedorNotes = JSON.parse(vendedor.notes); } catch { vendedorNotes = {}; }
-            } else if (typeof vendedor.notes === 'object') {
-              vendedorNotes = vendedor.notes;
+          if (freshVendedor?.notes) {
+            if (typeof freshVendedor.notes === 'string') {
+              try { vendedorNotes = JSON.parse(freshVendedor.notes); } catch { vendedorNotes = {}; }
+            } else if (typeof freshVendedor.notes === 'object') {
+              vendedorNotes = freshVendedor.notes;
             }
           }
           const updatedNotes = { ...vendedorNotes, last_sara_interaction: now };
@@ -922,14 +929,20 @@ export class WhatsAppHandler {
         }
 
         // ═══ VERIFICAR SI HAY NOTIFICACIÓN PENDIENTE ═══
+        // ⚠️ FIX 25-ENE-2026: Obtener notas FRESCAS de BD (no del cache) para no borrar active_bridge
         try {
-          // FIX: Parsear correctamente las notas
+          const { data: freshVendedorNotif } = await this.supabase.client
+            .from('team_members')
+            .select('notes')
+            .eq('id', vendedor.id)
+            .single();
+
           let vendedorNotes: any = {};
-          if (vendedor.notes) {
-            if (typeof vendedor.notes === 'string') {
-              try { vendedorNotes = JSON.parse(vendedor.notes); } catch { vendedorNotes = {}; }
-            } else if (typeof vendedor.notes === 'object') {
-              vendedorNotes = vendedor.notes;
+          if (freshVendedorNotif?.notes) {
+            if (typeof freshVendedorNotif.notes === 'string') {
+              try { vendedorNotes = JSON.parse(freshVendedorNotif.notes); } catch { vendedorNotes = {}; }
+            } else if (typeof freshVendedorNotif.notes === 'object') {
+              vendedorNotes = freshVendedorNotif.notes;
             }
           }
           if (vendedorNotes?.pending_notification?.message) {
