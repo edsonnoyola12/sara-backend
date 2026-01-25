@@ -642,6 +642,29 @@ GET /test-video-personalizado/{phone}?nombre={nombre}&desarrollo={desarrollo}
 - `GET /debug-videos` - Ver estado de videos pendientes
 - `GET /test-videos` - Forzar procesamiento de videos
 
+### 🔐 Autenticación de API
+
+**Todos los endpoints protegidos requieren API_SECRET:**
+
+```bash
+# Opción 1: Header Authorization
+curl -H "Authorization: Bearer $API_SECRET" https://sara-backend.edson-633.workers.dev/api/leads
+
+# Opción 2: Query parameter
+curl "https://sara-backend.edson-633.workers.dev/api/leads?api_key=$API_SECRET"
+```
+
+**Endpoints públicos (sin auth):** `/webhook`, `/health`, `/`
+
+**Configurar secret:**
+```bash
+# Ver secret actual
+npx wrangler secret list
+
+# Cambiar secret
+npx wrangler secret put API_SECRET
+```
+
 ---
 
 ## FOLLOW-UPS AUTOMÁTICOS (CRON)
@@ -726,6 +749,22 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ---
 
 ## HISTORIAL DE CAMBIOS
+
+### 2026-01-25
+
+**Sesión 4 (22:30) - Seguridad de Endpoints**
+
+- ✅ **Protección de endpoints con API_SECRET:**
+  - Todos los endpoints `/api/*`, `/test-*`, `/debug-*` ahora requieren autenticación
+  - Usar header `Authorization: Bearer <API_SECRET>` o query param `?api_key=<API_SECRET>`
+  - Endpoints públicos (sin auth): `/webhook`, `/health`, `/`
+  - Secret almacenado en Cloudflare: `wrangler secret put API_SECRET`
+
+- ✅ **Endpoints críticos protegidos:**
+  - `/api/leads` - Ya no expone todos los leads sin auth
+  - `/api/team-members` - Ya no expone todo el equipo sin auth
+  - `/api/appointments` - Ya no expone todas las citas sin auth
+  - +44 endpoints de debug ahora protegidos
 
 ### 2026-01-24
 

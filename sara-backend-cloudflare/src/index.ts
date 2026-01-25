@@ -27,6 +27,7 @@ export interface Env {
   META_PHONE_NUMBER_ID: string;
   META_ACCESS_TOKEN: string;
   GEMINI_API_KEY: string;
+  API_SECRET?: string; // Para proteger endpoints sensibles
 }
 
 function corsResponse(body: string | null, status: number = 200, contentType: string = 'application/json'): Response {
@@ -39,6 +40,50 @@ function corsResponse(body: string | null, status: number = 200, contentType: st
       'Content-Type': contentType,
     },
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SEGURIDAD: Verificación de API Key para endpoints protegidos
+// ═══════════════════════════════════════════════════════════════════════════
+function checkApiAuth(request: Request, env: Env): Response | null {
+  // Si no hay API_SECRET configurado, permitir acceso (desarrollo local)
+  if (!env.API_SECRET) {
+    console.warn('⚠️ API_SECRET no configurado - endpoints desprotegidos');
+    return null;
+  }
+
+  const authHeader = request.headers.get('Authorization');
+  const apiKey = authHeader?.replace('Bearer ', '');
+
+  // También aceptar ?api_key= en query string para debugging fácil
+  const url = new URL(request.url);
+  const queryKey = url.searchParams.get('api_key');
+
+  if (apiKey === env.API_SECRET || queryKey === env.API_SECRET) {
+    return null; // Autorizado
+  }
+
+  return corsResponse(JSON.stringify({
+    error: 'No autorizado',
+    hint: 'Incluye header Authorization: Bearer <API_SECRET> o ?api_key=<API_SECRET>'
+  }), 401);
+}
+
+// Helper para verificar si una ruta necesita autenticación
+function requiresAuth(pathname: string): boolean {
+  // Endpoints que NO requieren auth (webhooks, health checks)
+  const publicPaths = [
+    '/webhook',           // Meta webhook
+    '/health',            // Health check
+    '/',                  // Root
+  ];
+
+  if (publicPaths.includes(pathname)) return false;
+
+  // Todo lo demás requiere auth
+  return pathname.startsWith('/api/') ||
+         pathname.startsWith('/test-') ||
+         pathname.startsWith('/debug-');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -236,6 +281,14 @@ export default {
 
     if (request.method === 'OPTIONS') {
       return corsResponse(null, 204);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // SEGURIDAD: Verificar autenticación para rutas protegidas
+    // ═══════════════════════════════════════════════════════════
+    if (requiresAuth(url.pathname)) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
     }
 
     const supabase = new SupabaseService(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
