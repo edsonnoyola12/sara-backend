@@ -3,10 +3,34 @@ main = "src/index.ts"
 compatibility_date = "2024-11-18"
 compatibility_flags = ["nodejs_compat"]
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PRODUCTION - Default environment
+# Deploy: npx wrangler deploy
+# URL: https://sara-backend.edson-633.workers.dev
+# ═══════════════════════════════════════════════════════════════════════════
+
 [triggers]
 crons = ["*/2 * * * *", "0 14 * * 1-5", "0 1 * * 1-5", "0 7 1 * *"]
 
-# KV Namespace para cache
+# KV Namespace para cache (PRODUCTION)
 [[kv_namespaces]]
 binding = "SARA_CACHE"
 id = "e4dece3a573c470dab91996f9f4879b8"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STAGING - Environment de pruebas
+# Deploy: npx wrangler deploy --env staging
+# URL: https://sara-backend-staging.edson-633.workers.dev
+# ═══════════════════════════════════════════════════════════════════════════
+
+[env.staging]
+name = "sara-backend-staging"
+
+# NO CRONS en staging (evita spam + límite de 5 crons en Cloudflare free)
+[env.staging.triggers]
+crons = []
+
+# KV Namespace para cache (STAGING - separado de producción)
+[[env.staging.kv_namespaces]]
+binding = "SARA_CACHE"
+id = "1b0b7ddc2dc7459fa7f9ed2e00caab36"
