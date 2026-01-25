@@ -1,5 +1,6 @@
 import { SupabaseService } from './supabase';
 import { MetaWhatsAppService } from './meta-whatsapp';
+import { ClaudeService } from './claude';
 
 interface VendorMetrics {
   id: string;
@@ -70,6 +71,7 @@ const COACHING_TIPS: Record<string, CoachingTip[]> = {
 export class IACoachingService {
   constructor(
     private supabase: SupabaseService,
+    private claude?: ClaudeService,
     private meta?: MetaWhatsAppService
   ) {}
 
@@ -507,5 +509,98 @@ export class IACoachingService {
       console.error('Error generando reporte coaching:', e);
       return 'Error generando reporte.';
     }
+  }
+
+  /**
+   * Genera una respuesta inteligente cuando no se reconoce el comando
+   * Usa Claude para entender la intención y sugerir el comando correcto
+   */
+  async generateSmartResponse(mensaje: string, vendedor: any, nombre: string): Promise<string> {
+    console.log(`🧠 [generateSmartResponse] Iniciando para ${nombre}`);
+    console.log(`🧠 [generateSmartResponse] Mensaje: "${mensaje.substring(0, 50)}..."`);
+    console.log(`🧠 [generateSmartResponse] Claude disponible: ${!!this.claude}`);
+
+    try {
+      if (!this.claude) {
+        console.log(`🧠 [generateSmartResponse] ⚠️ Claude NO disponible, usando fallback`);
+        return this.getFallbackResponse(mensaje, nombre);
+      }
+
+      console.log(`🧠 [generateSmartResponse] ✅ Claude disponible, preparando prompt...`);
+
+      const systemPrompt = `Eres SARA, asistente de ventas inmobiliarias. Un vendedor escribió un mensaje que no coincide con ningún comando.
+
+Tu trabajo es:
+1. Entender qué quiere hacer el vendedor
+2. Sugerirle el comando correcto de forma amigable
+
+COMANDOS DISPONIBLES:
+- "hoy" o "resumen" → Ver resumen del día
+- "citas" → Ver citas de hoy
+- "leads" → Ver resumen de leads
+- "hot" → Ver leads calientes
+- "pendientes" → Ver leads sin seguimiento
+- "meta" → Ver avance de meta de ventas
+- "ver [nombre]" o "historial [nombre]" → Ver conversación con un lead
+- "bridge [nombre]" → Chat directo con lead por 6 min
+- "nota [nombre] [texto]" → Agregar nota a un lead
+- "notas [nombre]" → Ver notas de un lead
+- "quien es [nombre]" → Info de un lead
+- "agendar [nombre] [fecha]" → Agendar cita
+- "cancelar [nombre]" → Cancelar cita
+- "coaching [nombre]" → Tips para cerrar un lead
+- "mover [nombre] a [etapa]" → Cambiar etapa del lead
+- "adelante [nombre]" / "atrás [nombre]" → Mover en funnel
+
+REGLAS:
+- Responde en máximo 3 líneas
+- Sé amigable pero directo
+- Sugiere UN comando específico
+- Usa el nombre del vendedor: ${nombre}
+- Si no entiendes, pregunta qué quiere hacer`;
+
+      console.log(`🧠 [generateSmartResponse] Llamando a claude.chat()...`);
+      const response = await this.claude.chat([], mensaje, systemPrompt);
+      console.log(`🧠 [generateSmartResponse] Respuesta de Claude (${response?.length || 0} chars): "${response?.substring(0, 100)}..."`);
+
+      if (response && response.length > 10) {
+        console.log(`🧠 [generateSmartResponse] ✅ Usando respuesta de Claude`);
+        return response;
+      }
+
+      console.log(`🧠 [generateSmartResponse] ⚠️ Respuesta de Claude muy corta, usando fallback`);
+      return this.getFallbackResponse(mensaje, nombre);
+    } catch (e) {
+      console.error('❌ [generateSmartResponse] Error:', e);
+      return this.getFallbackResponse(mensaje, nombre);
+    }
+  }
+
+  private getFallbackResponse(mensaje: string, nombre: string): string {
+    // Intentar detectar intención básica sin IA
+    const msg = mensaje.toLowerCase();
+
+    if (msg.includes('nota') && !msg.includes(' ')) {
+      return `${nombre}, para agregar una nota escribe:\n*nota [nombre del lead] [tu nota]*\n\nEjemplo: nota Juan hablé por tel`;
+    }
+
+    if (msg.includes('notas') && !msg.includes(' ')) {
+      return `${nombre}, para ver notas escribe:\n*notas [nombre del lead]*\n\nEjemplo: notas Juan`;
+    }
+
+    if (msg.includes('ver') && !msg.includes(' ')) {
+      return `${nombre}, para ver el historial escribe:\n*ver [nombre del lead]*\n\nEjemplo: ver Juan`;
+    }
+
+    if (msg.includes('bridge') && !msg.includes(' ')) {
+      return `${nombre}, para chat directo escribe:\n*bridge [nombre del lead]*\n\nEjemplo: bridge Juan`;
+    }
+
+    if (msg.includes('cita') || msg.includes('agendar')) {
+      return `${nombre}, para agendar cita escribe:\n*agendar [nombre] [fecha]*\n\nEjemplo: agendar Juan mañana 10am`;
+    }
+
+    // Respuesta genérica amigable
+    return `${nombre}, no entendí "${mensaje.substring(0, 30)}${mensaje.length > 30 ? '...' : ''}".\n\n¿Qué quieres hacer? Puedo ayudarte con:\n• *ver [lead]* - historial\n• *nota [lead] [texto]* - agregar nota\n• *citas* - ver citas de hoy`;
   }
 }

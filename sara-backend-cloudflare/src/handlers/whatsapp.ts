@@ -7127,61 +7127,14 @@ Responde con fecha y hora:
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   private async vendedorIntentIA(from: string, body: string, vendedor: any, nombre: string): Promise<void> {
-    try {
-      const iaService = new IACoachingService(this.supabase, this.claude);
-      const { intent } = await iaService.classifyIntent(body);
+    console.log(`🧠 [IA-INTENT] Vendedor ${nombre} escribió: "${body.substring(0, 50)}..."`);
 
-      // Ejecutar según intent
-      switch (intent) {
-        case 'pregunta_propiedades':
-        case 'pregunta_ventas':
-        case 'ayuda_citas':
-        case 'ayuda_notas':
-        case 'ayuda_ventas':
-        case 'ayuda_general':
-          await this.vendedorRespuestaInteligente(from, body, vendedor, nombre);
-          break;
-        case 'briefing':
-          await this.vendedorBriefing(from, vendedor, nombre);
-          break;
-        case 'ver_citas':
-          await this.vendedorCitasHoy(from, vendedor, nombre);
-          break;
-        case 'ver_meta':
-          await this.vendedorMetaAvance(from, vendedor, nombre);
-          break;
-        case 'ver_leads':
-          await this.vendedorResumenLeads(from, vendedor, nombre);
-          break;
-        case 'agendar_cita':
-          await this.vendedorAgendarCitaCompleta(from, body, vendedor, nombre);
-          break;
-        case 'cancelar_cita':
-          await this.vendedorCancelarCita(from, body, vendedor, nombre);
-          break;
-        case 'reagendar_cita':
-          await this.vendedorReagendarCita(from, body, vendedor, nombre);
-          break;
-        case 'cerrar_venta':
-          await this.vendedorCerrarVenta(from, body, vendedor, nombre);
-          break;
-        case 'cambiar_etapa':
-          await this.vendedorCambiarEtapa(from, body, vendedor, nombre);
-          break;
-        case 'agregar_nota':
-          await this.vendedorAgregarNota(from, body, vendedor, nombre);
-          break;
-        case 'ver_notas':
-          await this.vendedorVerNotas(from, body, vendedor, nombre);
-          break;
-        case 'crear_lead':
-          await this.vendedorCrearLead(from, body, vendedor, nombre);
-          break;
-        default:
-          await this.vendedorRespuestaInteligente(from, body, vendedor, nombre);
-      }
+    try {
+      // Ir directo a respuesta inteligente - Claude entenderá el intent y sugerirá el comando correcto
+      console.log(`🧠 [IA-INTENT] Llamando a generateSmartResponse...`);
+      await this.vendedorRespuestaInteligente(from, body, vendedor, nombre);
     } catch (error) {
-      console.error('❌ Error en IA Intent:', error);
+      console.error('❌ [IA-INTENT] Error:', error);
       await this.vendedorAyuda(from, nombre);
     }
   }
@@ -7190,12 +7143,18 @@ Responde con fecha y hora:
   // RESPUESTA INTELIGENTE CON CLAUDE
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   private async vendedorRespuestaInteligente(from: string, mensaje: string, vendedor: any, nombre: string): Promise<void> {
+    console.log(`🤖 [SMART-RESPONSE] Iniciando para ${nombre}, mensaje: "${mensaje.substring(0, 50)}..."`);
+    console.log(`🤖 [SMART-RESPONSE] Claude disponible: ${!!this.claude}`);
+
     try {
       const iaService = new IACoachingService(this.supabase, this.claude);
+      console.log(`🤖 [SMART-RESPONSE] IACoachingService creado, llamando generateSmartResponse...`);
       const respuesta = await iaService.generateSmartResponse(mensaje, vendedor, nombre);
+      console.log(`🤖 [SMART-RESPONSE] Respuesta obtenida (${respuesta?.length || 0} chars): "${respuesta?.substring(0, 100)}..."`);
       await this.twilio.sendWhatsAppMessage(from, respuesta);
+      console.log(`🤖 [SMART-RESPONSE] ✅ Mensaje enviado`);
     } catch (error) {
-      console.error('❌ Error en respuesta inteligente:', error);
+      console.error('❌ [SMART-RESPONSE] Error:', error);
       await this.vendedorAyuda(from, nombre);
     }
   }
