@@ -1057,7 +1057,21 @@ export class VendorCommandsService {
         .update({ notes: notasLead, updated_at: new Date().toISOString() })
         .eq('id', lead.id);
 
-      console.log(`📝 Nota agregada a ${lead.name} por ${vendedorName}: "${textoNota.substring(0, 50)}..."`);
+      // Guardar en lead_activities para que aparezca en el CRM
+      // Usamos 'whatsapp' porque es el único tipo que el CRM muestra bien
+      const { error: actError } = await this.supabase.client.from('lead_activities').insert({
+        lead_id: lead.id,
+        team_member_id: vendedorId,
+        activity_type: 'whatsapp',
+        notes: `📝 NOTA: ${textoNota}`,
+        created_at: new Date().toISOString()
+      });
+
+      if (actError) {
+        console.error(`⚠️ Error guardando nota en activities:`, actError);
+      } else {
+        console.log(`📝 Nota agregada a ${lead.name} por ${vendedorName} (+ lead_activities): "${textoNota.substring(0, 50)}..."`);
+      }
 
       return { success: true, lead, totalNotas: notasArray.length };
     } catch (e) {
