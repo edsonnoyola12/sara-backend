@@ -8482,8 +8482,44 @@ Responde con fecha y hora:
   }
 
   private async getAllProperties(): Promise<any[]> {
-    const propertyService = new PropertyService(this.supabase);
-    return propertyService.getAllProperties();
+    const CACHE_KEY = 'properties_all';
+    const CACHE_TTL = 600; // 10 minutos
+
+    try {
+      // 1. Intentar leer del cache KV
+      const kv = this.env?.SARA_CACHE;
+      if (kv) {
+        try {
+          const cached = await kv.get(CACHE_KEY, 'json');
+          if (cached) {
+            console.log('📦 Cache HIT: properties');
+            return cached as any[];
+          }
+          console.log('🔍 Cache MISS: properties - fetching from DB');
+        } catch (cacheErr) {
+          console.error('⚠️ Error leyendo cache properties:', cacheErr);
+        }
+      }
+
+      // 2. Fetch de la DB
+      const propertyService = new PropertyService(this.supabase);
+      const data = await propertyService.getAllProperties();
+
+      // 3. Guardar en cache
+      if (kv && data?.length) {
+        try {
+          await kv.put(CACHE_KEY, JSON.stringify(data), { expirationTtl: CACHE_TTL });
+          console.log('💾 Cache SET: properties (TTL: 10min)');
+        } catch (cacheErr) {
+          console.error('⚠️ Error guardando properties en cache:', cacheErr);
+        }
+      }
+
+      return data;
+    } catch (e) {
+      console.error('❌ Excepción en getAllProperties:', e);
+      return [];
+    }
   }
 
   private findPropertyByDevelopment(properties: any[], desarrollo: string): any | null {
@@ -8555,7 +8591,26 @@ Responde con fecha y hora:
   }
 
   private async getAllTeamMembers(): Promise<any[]> {
+    const CACHE_KEY = 'team_members_active';
+    const CACHE_TTL = 300; // 5 minutos
+
     try {
+      // 1. Intentar leer del cache KV
+      const kv = this.env?.SARA_CACHE;
+      if (kv) {
+        try {
+          const cached = await kv.get(CACHE_KEY, 'json');
+          if (cached) {
+            console.log('📦 Cache HIT: team_members');
+            return cached as any[];
+          }
+          console.log('🔍 Cache MISS: team_members - fetching from DB');
+        } catch (cacheErr) {
+          console.error('⚠️ Error leyendo cache:', cacheErr);
+        }
+      }
+
+      // 2. Fetch de la DB
       const { data, error } = await this.supabase.client
         .from('team_members')
         .select("*")
@@ -8572,6 +8627,16 @@ Responde con fecha y hora:
       }
 
       console.log(`👥 Team members cargados: ${data?.length || 0} activos`);
+
+      // 3. Guardar en cache
+      if (kv && data) {
+        try {
+          await kv.put(CACHE_KEY, JSON.stringify(data), { expirationTtl: CACHE_TTL });
+          console.log('💾 Cache SET: team_members (TTL: 5min)');
+        } catch (cacheErr) {
+          console.error('⚠️ Error guardando en cache:', cacheErr);
+        }
+      }
 
       // ✅ FIX 07-ENE-2026: Validar que hay al menos 1 vendedor y 1 asesor
       const vendedores = (data || []).filter((m: any) => m.role?.toLowerCase().includes('vendedor'));

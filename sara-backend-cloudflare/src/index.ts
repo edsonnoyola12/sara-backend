@@ -1,5 +1,6 @@
 import { SupabaseService } from './services/supabase';
 import { ClaudeService } from './services/claude';
+import { CacheService } from './services/cacheService';
 
 import { MetaWhatsAppService } from './services/meta-whatsapp';
 import { CalendarService } from './services/calendar';
@@ -29,6 +30,7 @@ export interface Env {
   GEMINI_API_KEY: string;
   API_SECRET?: string; // Para proteger endpoints sensibles
   META_WEBHOOK_SECRET?: string; // Para validar firma de webhooks Meta/Facebook
+  SARA_CACHE?: KVNamespace; // Cache KV para reducir queries a DB
 }
 
 function corsResponse(body: string | null, status: number = 200, contentType: string = 'application/json'): Response {
@@ -352,6 +354,7 @@ export default {
 
     const supabase = new SupabaseService(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
 
+    const cache = new CacheService(env.SARA_CACHE);
     // ═══════════════════════════════════════════════════════════
     // API Routes - Team Members
     // ═══════════════════════════════════════════════════════════
@@ -514,6 +517,44 @@ export default {
           error: err2?.message
         },
         error: error?.message
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // DEBUG CACHE - Ver estadísticas del cache KV
+    // USO: /debug-cache
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/debug-cache" && request.method === "GET") {
+      const stats = cache.getStats();
+      const available = cache.isAvailable();
+
+      // Test de cache: escribir y leer
+      let testResult = { write: false, read: false, value: null as string | null };
+      if (available) {
+        try {
+          const testKey = '_debug_test_' + Date.now();
+          await (env.SARA_CACHE as KVNamespace).put(testKey, 'test_value', { expirationTtl: 60 });
+          testResult.write = true;
+          const readVal = await (env.SARA_CACHE as KVNamespace).get(testKey);
+          testResult.read = readVal === 'test_value';
+          testResult.value = readVal;
+          await (env.SARA_CACHE as KVNamespace).delete(testKey);
+        } catch (e: any) {
+          testResult.value = e.message;
+        }
+      }
+
+      return corsResponse(JSON.stringify({
+        cache_disponible: available,
+        estadisticas: stats,
+        test_kv: testResult,
+        ttl_configurado: {
+          team_members: '5 min',
+          properties: '10 min',
+          developments: '10 min',
+          leads: '1 min'
+        },
+        nota: 'Estadísticas se resetean en cada request (Workers son stateless)'
       }));
     }
 

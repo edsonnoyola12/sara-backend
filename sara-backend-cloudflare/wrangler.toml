@@ -5,3 +5,8 @@ compatibility_flags = ["nodejs_compat"]
 
 [triggers]
 crons = ["*/2 * * * *", "0 14 * * 1-5", "0 1 * * 1-5", "0 7 1 * *"]
+
+# KV Namespace para cache
+[[kv_namespaces]]
+binding = "SARA_CACHE"
+id = "e4dece3a573c470dab91996f9f4879b8"
