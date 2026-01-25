@@ -39,10 +39,10 @@ test_endpoint() {
 
   if [ "$response" == "$expected_status" ]; then
     echo -e "${GREEN}PASS${NC} (HTTP $response)"
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
   else
     echo -e "${RED}FAIL${NC} (Expected $expected_status, got $response)"
-    ((FAILED++))
+    FAILED=$((FAILED + 1))
   fi
 }
 
@@ -64,7 +64,8 @@ test_endpoint "Debug sin auth (debe rechazar)" "GET" "/debug-cache" "401"
 # 3. Webhook Tests
 # ═══════════════════════════════════════════════════════════════════════════
 echo -e "\n${YELLOW}[3/4] Webhook Tests${NC}"
-test_endpoint "Webhook GET (verificación Meta)" "GET" "/webhook/meta?hub.mode=subscribe&hub.verify_token=test&hub.challenge=test123" "200"
+# Webhook con token incorrecto debe rechazar (403) - esto verifica que el endpoint existe y valida tokens
+test_endpoint "Webhook rechaza token inválido" "GET" "/webhook/meta?hub.mode=subscribe&hub.verify_token=invalid&hub.challenge=test123" "403"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 4. Protected Endpoints (con API key si se proporciona)
