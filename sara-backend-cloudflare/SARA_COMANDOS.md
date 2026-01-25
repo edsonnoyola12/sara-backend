@@ -39,7 +39,7 @@ npx wrangler tail --format=pretty
 - KV Cache separado
 - Mismos secrets que producción
 
-### Tests Automatizados (211 tests)
+### Tests Automatizados (222 tests)
 
 | Archivo | Tests | Qué protege |
 |---------|-------|-------------|
@@ -49,6 +49,7 @@ npx wrangler tail --format=pretty
 | `vendorCommands.test.ts` | 30 | Comandos Vendedor: citas, leads, agendar, brochure |
 | `ceoCommands.test.ts` | 27 | Comandos CEO: leads, equipo, ventas, bridge, recursos |
 | `vendedorParsers.test.ts` | 22 | Parseo de fechas, horas, días |
+| `retryService.test.ts` | 11 | Retry logic, exponential backoff, error detection |
 | `leadScoring.test.ts` | 11 | Scoring de leads |
 | `dateParser.test.ts` | 8 | Parseo de fechas en español |
 | `ServiceFactory.test.ts` | 3 | Factory de servicios |
@@ -823,6 +824,21 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 - ⏸️ **CI/CD con GitHub Actions:**
   - Workflow creado pero pendiente de token con scope `workflow`
   - Archivo: `.github/workflows/ci-cd.yml` (en repo root)
+
+- ✅ **Retry Logic con Exponential Backoff:**
+  - `RetryService` nuevo en `src/services/retryService.ts`
+  - Reintentos automáticos para errores de red y 5xx
+  - Exponential backoff con jitter (evita thundering herd)
+  - Integrado en: MetaWhatsAppService, ClaudeService, CalendarService
+  - 11 tests nuevos (222 total)
+  - Configuración por servicio:
+    | Servicio | Max Retries | Base Delay | Max Delay |
+    |----------|-------------|------------|-----------|
+    | Supabase | 3 | 500ms | 5s |
+    | Anthropic | 3 | 2s | 15s |
+    | Meta | 3 | 1s | 10s |
+    | Google | 3 | 1s | 8s |
+    | Veo | 2 | 3s | 20s |
 
 **Sesión 5 (22:45) - Análisis completo y mejoras de código**
 
