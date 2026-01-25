@@ -529,7 +529,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-24 21:05*
+*Última actualización: 2026-01-24 21:20*
 
 ---
 
@@ -564,6 +564,39 @@ Funciones afectadas:
 | 8am L-V | Vendedores | Briefing matutino (citas + leads) |
 | 11am L-V | Admins | Alerta inactividad vendedores |
 | 7pm L-V | Vendedores | Reporte consolidado (recap + métricas) |
+
+---
+
+## SISTEMA DE APROBACIÓN DE FOLLOW-UPS (2026-01-24)
+
+### Flujo
+```
+1. SARA detecta lead sin respuesta (+24h)
+2. En vez de enviar directo, notifica al vendedor:
+
+   📤 *FOLLOW-UP PENDIENTE*
+   Lead: Juan García
+   En 30 min enviaré:
+   "¡Hola Juan! 👋 Vi que nos contactaste ayer..."
+
+   • ok juan → enviar ahora
+   • cancelar juan → no enviar
+   • editar juan [mensaje] → tu versión
+
+3. Si vendedor no responde en 30 min → se envía automático
+```
+
+### Comandos del vendedor
+| Comando | Acción |
+|---------|--------|
+| `ok` o `ok juan` | Enviar follow-up inmediatamente |
+| `cancelar juan` | No enviar follow-up |
+| `editar juan Hola, soy Pedro de Santa Rita...` | Enviar mensaje personalizado |
+
+### Beneficios
+- Vendedor tiene control sobre el mensaje
+- Puede personalizar o cancelar si ya contactó al lead
+- Si está ocupado, SARA lo envía automáticamente
 
 ---
 
