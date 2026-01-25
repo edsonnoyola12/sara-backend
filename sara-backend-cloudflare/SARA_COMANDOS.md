@@ -17,14 +17,15 @@ npx wrangler deploy
 npx wrangler tail --format=pretty
 ```
 
-### Tests Automatizados (168 tests)
+### Tests Automatizados (211 tests)
 
 | Archivo | Tests | Qué protege |
 |---------|-------|-------------|
-| `ceoCommands.test.ts` | 27 | Comandos CEO: leads, equipo, ventas, bridge, recursos |
-| `vendorCommands.test.ts` | 30 | Comandos Vendedor: citas, leads, agendar, brochure |
-| `asesorCommands.test.ts` | 32 | Comandos Asesor: leads, docs, preaprobado, rechazado |
+| `newFeatures.test.ts` | 43 | Notas en CRM, recap condicional, sugerencias IA, regresión comandos |
 | `conversationLogic.test.ts` | 35 | GPS solo, recursos completos, bridge |
+| `asesorCommands.test.ts` | 32 | Comandos Asesor: leads, docs, preaprobado, rechazado |
+| `vendorCommands.test.ts` | 30 | Comandos Vendedor: citas, leads, agendar, brochure |
+| `ceoCommands.test.ts` | 27 | Comandos CEO: leads, equipo, ventas, bridge, recursos |
 | `vendedorParsers.test.ts` | 22 | Parseo de fechas, horas, días |
 | `leadScoring.test.ts` | 11 | Scoring de leads |
 | `dateParser.test.ts` | 8 | Parseo de fechas en español |
@@ -528,7 +529,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-24 20:35*
+*Última actualización: 2026-01-24 20:45*
 
 ---
 
