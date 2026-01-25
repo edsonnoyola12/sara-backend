@@ -5,11 +5,13 @@
 # 1. Corre tests en cada push/PR
 # 2. Despliega a producción cuando se hace push a main
 # 3. Ejecuta smoke tests después del deploy
+# 4. Notifica a Slack el resultado
 #
 # SECRETS REQUERIDOS (configurar en GitHub > Settings > Secrets):
 # - CLOUDFLARE_API_TOKEN: Token con permisos de Workers
 # - CLOUDFLARE_ACCOUNT_ID: ID de tu cuenta Cloudflare
 # - API_SECRET: Para ejecutar smoke tests con endpoints protegidos
+# - SLACK_WEBHOOK_URL: Webhook de Slack para notificaciones
 # ═══════════════════════════════════════════════════════════════════════════
 
 name: CI/CD
@@ -110,17 +112,169 @@ jobs:
           echo "URL: https://sara-backend.edson-633.workers.dev"
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # JOB 3: Notify (opcional - solo si falla)
+  # JOB 3: Notify Success
+  # ═══════════════════════════════════════════════════════════════════════════
+  notify-success:
+    name: ✅ Notify Success
+    runs-on: ubuntu-latest
+    needs: [test, deploy]
+    if: success() && github.event_name == 'push'
+
+    steps:
+      - name: 📤 Send Slack notification (Success)
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "✅ SARA Deploy Exitoso",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Repo:*\n${{ github.repository }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Branch:*\n${{ github.ref_name }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Commit:*\n`${{ github.sha }}`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Autor:*\n${{ github.actor }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Mensaje:*\n${{ github.event.head_commit.message }}"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "Ver en GitHub"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "Ver Producción"
+                      },
+                      "url": "https://sara-backend.edson-633.workers.dev/health"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 4: Notify Failure
   # ═══════════════════════════════════════════════════════════════════════════
   notify-failure:
-    name: 🚨 Notify on Failure
+    name: 🚨 Notify Failure
     runs-on: ubuntu-latest
     needs: [test, deploy]
     if: failure()
 
     steps:
-      - name: 🚨 Pipeline failed
+      - name: 📤 Send Slack notification (Failure)
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "🚨 SARA Deploy FALLÓ",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Repo:*\n${{ github.repository }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Branch:*\n${{ github.ref_name }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Commit:*\n`${{ github.sha }}`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Autor:*\n${{ github.actor }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "⚠️ *Revisar los logs para más detalles*"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "🔍 Ver Logs"
+                      },
+                      "style": "danger",
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: 🚨 Pipeline failed (fallback)
         run: |
           echo "❌ CI/CD Pipeline failed!"
           echo "Check the logs above for details."
-          # Aquí podrías agregar notificación a Slack/Discord/Email

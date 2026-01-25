@@ -171,10 +171,11 @@ function checkApiAuth(request: Request, env: Env): Response | null {
 
 // Helper para verificar si una ruta necesita autenticación
 function requiresAuth(pathname: string): boolean {
-  // Endpoints que NO requieren auth (webhooks, health checks)
+  // Endpoints que NO requieren auth (webhooks, health checks, status)
   const publicPaths = [
     '/webhook',           // Meta webhook
     '/health',            // Health check
+    '/status',            // Status dashboard
     '/',                  // Root
   ];
 
@@ -9307,6 +9308,24 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       return corsResponse(JSON.stringify(health));
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // STATUS DASHBOARD - Vista completa del sistema
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/status') {
+      const status = await getSystemStatus(supabase, env, cache);
+
+      // Si piden HTML, devolver página bonita
+      const acceptHeader = request.headers.get('Accept') || '';
+      if (acceptHeader.includes('text/html')) {
+        return new Response(renderStatusPage(status), {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' }
+        });
+      }
+
+      return corsResponse(JSON.stringify(status, null, 2), 200, 'application/json', request);
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // BACKUP - Exportar datos
     // ═══════════════════════════════════════════════════════════════
@@ -17813,6 +17832,404 @@ Esperamos que sigas disfrutando tu casa y creando recuerdos increíbles. ¡Graci
   } catch (error) {
     console.error('❌ Error en felicitaciones de aniversario:', error);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATUS DASHBOARD - Sistema completo de monitoreo
+// ═══════════════════════════════════════════════════════════════════════════
+interface SystemStatus {
+  timestamp: string;
+  overall_status: 'healthy' | 'degraded' | 'down';
+  uptime: string;
+  version: string;
+  services: {
+    database: { status: string; latency_ms?: number; error?: string };
+    cache: { status: string; available: boolean; stats?: any };
+    meta_whatsapp: { status: string; configured: boolean };
+    anthropic: { status: string; configured: boolean };
+    google_calendar: { status: string; configured: boolean };
+  };
+  metrics: {
+    total_leads: number;
+    leads_today: number;
+    leads_this_week: number;
+    active_conversations: number;
+    pending_followups: number;
+    messages_today: number;
+  };
+  team: {
+    total_members: number;
+    active_members: number;
+    on_duty: number;
+  };
+  recent_activity: Array<{
+    type: string;
+    description: string;
+    timestamp: string;
+  }>;
+}
+
+async function getSystemStatus(
+  supabase: SupabaseService,
+  env: Env,
+  cache: CacheService | null
+): Promise<SystemStatus> {
+  const startTime = Date.now();
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const status: SystemStatus = {
+    timestamp: now.toISOString(),
+    overall_status: 'healthy',
+    uptime: 'running',
+    version: '2.0.0',
+    services: {
+      database: { status: 'checking' },
+      cache: { status: 'checking', available: false },
+      meta_whatsapp: { status: 'unknown', configured: false },
+      anthropic: { status: 'unknown', configured: false },
+      google_calendar: { status: 'unknown', configured: false },
+    },
+    metrics: {
+      total_leads: 0,
+      leads_today: 0,
+      leads_this_week: 0,
+      active_conversations: 0,
+      pending_followups: 0,
+      messages_today: 0,
+    },
+    team: {
+      total_members: 0,
+      active_members: 0,
+      on_duty: 0,
+    },
+    recent_activity: [],
+  };
+
+  // 1. Check Database
+  try {
+    const dbStart = Date.now();
+    const { count: totalLeads } = await supabase.client
+      .from('leads')
+      .select('*', { count: 'exact', head: true });
+
+    status.services.database = {
+      status: 'ok',
+      latency_ms: Date.now() - dbStart,
+    };
+    status.metrics.total_leads = totalLeads || 0;
+  } catch (e) {
+    status.services.database = { status: 'error', error: String(e) };
+    status.overall_status = 'degraded';
+  }
+
+  // 2. Check Cache
+  if (cache && env.SARA_CACHE) {
+    try {
+      const cacheStats = cache.getStats();
+      status.services.cache = {
+        status: 'ok',
+        available: true,
+        stats: cacheStats,
+      };
+    } catch (e) {
+      status.services.cache = { status: 'error', available: false };
+    }
+  } else {
+    status.services.cache = { status: 'not_configured', available: false };
+  }
+
+  // 3. Check External Services Configuration
+  status.services.meta_whatsapp = {
+    status: env.META_ACCESS_TOKEN && env.META_PHONE_NUMBER_ID ? 'configured' : 'not_configured',
+    configured: !!(env.META_ACCESS_TOKEN && env.META_PHONE_NUMBER_ID),
+  };
+
+  status.services.anthropic = {
+    status: env.ANTHROPIC_API_KEY ? 'configured' : 'not_configured',
+    configured: !!env.ANTHROPIC_API_KEY,
+  };
+
+  status.services.google_calendar = {
+    status: env.GOOGLE_CALENDAR_ID && env.GOOGLE_PRIVATE_KEY ? 'configured' : 'not_configured',
+    configured: !!(env.GOOGLE_CALENDAR_ID && env.GOOGLE_PRIVATE_KEY),
+  };
+
+  // 4. Get Metrics
+  try {
+    // Leads today
+    const { count: leadsToday } = await supabase.client
+      .from('leads')
+      .select('*', { count: 'exact', head: true })
+      .gte('created_at', todayStart);
+    status.metrics.leads_today = leadsToday || 0;
+
+    // Leads this week
+    const { count: leadsWeek } = await supabase.client
+      .from('leads')
+      .select('*', { count: 'exact', head: true })
+      .gte('created_at', weekStart);
+    status.metrics.leads_this_week = leadsWeek || 0;
+
+    // Active conversations (leads with recent activity)
+    const { count: activeConvos } = await supabase.client
+      .from('leads')
+      .select('*', { count: 'exact', head: true })
+      .gte('last_contact', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+    status.metrics.active_conversations = activeConvos || 0;
+
+    // Pending followups
+    const { count: pendingFollowups } = await supabase.client
+      .from('scheduled_followups')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'pending');
+    status.metrics.pending_followups = pendingFollowups || 0;
+  } catch (e) {
+    console.error('Error getting metrics:', e);
+  }
+
+  // 5. Get Team Stats
+  try {
+    const { data: teamMembers } = await supabase.client
+      .from('team_members')
+      .select('id, active, is_on_duty');
+
+    if (teamMembers) {
+      status.team.total_members = teamMembers.length;
+      status.team.active_members = teamMembers.filter((m: any) => m.active).length;
+      status.team.on_duty = teamMembers.filter((m: any) => m.active && m.is_on_duty).length;
+    }
+  } catch (e) {
+    console.error('Error getting team stats:', e);
+  }
+
+  // 6. Get Recent Activity
+  try {
+    const { data: recentLeads } = await supabase.client
+      .from('leads')
+      .select('name, created_at, source')
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    if (recentLeads) {
+      status.recent_activity = recentLeads.map((lead: any) => ({
+        type: 'new_lead',
+        description: `Nuevo lead: ${lead.name} (${lead.source || 'WhatsApp'})`,
+        timestamp: lead.created_at,
+      }));
+    }
+  } catch (e) {
+    console.error('Error getting recent activity:', e);
+  }
+
+  // Determine overall status
+  const serviceStatuses = Object.values(status.services);
+  if (serviceStatuses.some((s: any) => s.status === 'error')) {
+    status.overall_status = 'degraded';
+  }
+  if (status.services.database.status === 'error') {
+    status.overall_status = 'down';
+  }
+
+  return status;
+}
+
+function renderStatusPage(status: SystemStatus): string {
+  const statusColor = status.overall_status === 'healthy' ? '#22c55e' :
+                      status.overall_status === 'degraded' ? '#f59e0b' : '#ef4444';
+  const statusEmoji = status.overall_status === 'healthy' ? '✅' :
+                      status.overall_status === 'degraded' ? '⚠️' : '🔴';
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SARA Backend - Status</title>
+  <meta http-equiv="refresh" content="30">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #334155;
+    }
+    .header h1 { font-size: 1.5rem; }
+    .status-badge {
+      background: ${statusColor};
+      color: white;
+      padding: 0.5rem 1rem;
+      border-radius: 9999px;
+      font-weight: 600;
+      font-size: 0.875rem;
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+    .card {
+      background: #1e293b;
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      border: 1px solid #334155;
+    }
+    .card h2 {
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      color: #94a3b8;
+      margin-bottom: 1rem;
+      letter-spacing: 0.05em;
+    }
+    .metric {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.75rem 0;
+      border-bottom: 1px solid #334155;
+    }
+    .metric:last-child { border-bottom: none; }
+    .metric-value { font-weight: 600; font-size: 1.25rem; }
+    .metric-label { color: #94a3b8; }
+    .service-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 0;
+      border-bottom: 1px solid #334155;
+    }
+    .service-row:last-child { border-bottom: none; }
+    .service-status {
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .status-ok { background: #166534; color: #86efac; }
+    .status-error { background: #991b1b; color: #fca5a5; }
+    .status-warning { background: #92400e; color: #fcd34d; }
+    .activity-item {
+      padding: 0.75rem 0;
+      border-bottom: 1px solid #334155;
+      font-size: 0.875rem;
+    }
+    .activity-item:last-child { border-bottom: none; }
+    .activity-time { color: #64748b; font-size: 0.75rem; }
+    .timestamp { color: #64748b; font-size: 0.75rem; }
+    .big-number { font-size: 2.5rem; font-weight: 700; color: #38bdf8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🤖 SARA Backend Status</h1>
+      <span class="status-badge">${statusEmoji} ${status.overall_status.toUpperCase()}</span>
+    </div>
+
+    <div class="grid">
+      <!-- Metrics Overview -->
+      <div class="card">
+        <h2>📊 Métricas</h2>
+        <div class="metric">
+          <span class="metric-label">Total Leads</span>
+          <span class="metric-value">${status.metrics.total_leads.toLocaleString()}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Leads Hoy</span>
+          <span class="metric-value">${status.metrics.leads_today}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Leads Esta Semana</span>
+          <span class="metric-value">${status.metrics.leads_this_week}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Conversaciones Activas (24h)</span>
+          <span class="metric-value">${status.metrics.active_conversations}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Followups Pendientes</span>
+          <span class="metric-value">${status.metrics.pending_followups}</span>
+        </div>
+      </div>
+
+      <!-- Services Status -->
+      <div class="card">
+        <h2>🔧 Servicios</h2>
+        <div class="service-row">
+          <span>Database (Supabase)</span>
+          <span class="service-status ${status.services.database.status === 'ok' ? 'status-ok' : 'status-error'}">
+            ${status.services.database.status === 'ok' ? `OK (${status.services.database.latency_ms}ms)` : status.services.database.status}
+          </span>
+        </div>
+        <div class="service-row">
+          <span>Cache (KV)</span>
+          <span class="service-status ${status.services.cache.available ? 'status-ok' : 'status-warning'}">
+            ${status.services.cache.available ? 'OK' : 'No disponible'}
+          </span>
+        </div>
+        <div class="service-row">
+          <span>WhatsApp (Meta)</span>
+          <span class="service-status ${status.services.meta_whatsapp.configured ? 'status-ok' : 'status-warning'}">
+            ${status.services.meta_whatsapp.configured ? 'Configurado' : 'No configurado'}
+          </span>
+        </div>
+        <div class="service-row">
+          <span>IA (Claude)</span>
+          <span class="service-status ${status.services.anthropic.configured ? 'status-ok' : 'status-warning'}">
+            ${status.services.anthropic.configured ? 'Configurado' : 'No configurado'}
+          </span>
+        </div>
+        <div class="service-row">
+          <span>Calendar (Google)</span>
+          <span class="service-status ${status.services.google_calendar.configured ? 'status-ok' : 'status-warning'}">
+            ${status.services.google_calendar.configured ? 'Configurado' : 'No configurado'}
+          </span>
+        </div>
+      </div>
+
+      <!-- Team Status -->
+      <div class="card">
+        <h2>👥 Equipo</h2>
+        <div class="metric">
+          <span class="metric-label">Total Miembros</span>
+          <span class="metric-value">${status.team.total_members}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Activos</span>
+          <span class="metric-value">${status.team.active_members}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">De Guardia</span>
+          <span class="metric-value">${status.team.on_duty}</span>
+        </div>
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="card">
+        <h2>📋 Actividad Reciente</h2>
+        ${status.recent_activity.length > 0 ? status.recent_activity.map(activity => `
+          <div class="activity-item">
+            <div>${activity.description}</div>
+            <div class="activity-time">${new Date(activity.timestamp).toLocaleString('es-MX')}</div>
+          </div>
+        `).join('') : '<div class="activity-item">Sin actividad reciente</div>'}
+      </div>
+    </div>
+
+    <div style="margin-top: 2rem; text-align: center;">
+      <p class="timestamp">Última actualización: ${new Date(status.timestamp).toLocaleString('es-MX')}</p>
+      <p class="timestamp">Auto-refresh cada 30 segundos</p>
+    </div>
+  </div>
+</body>
+</html>`;
 }
 
 async function getHealthStatus(supabase: SupabaseService): Promise<any> {
