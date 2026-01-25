@@ -1,6 +1,8 @@
 // src/services/calendar.ts
 // Servicio optimizado para Google Calendar en Cloudflare Workers (Edge)
 
+import { retry, RetryPresets } from './retryService';
+
 // Interfaces para tipado fuerte
 export interface CalendarEventInput {
   summary: string;
@@ -29,6 +31,40 @@ export class CalendarService {
     this.serviceAccountEmail = serviceAccountEmail;
     this.privateKey = privateKey.replace(/\\n/g, '\n');
     this.calendarId = calendarId;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // FETCH CON RETRY - Reintentos automáticos para Google Calendar API
+  // ═══════════════════════════════════════════════════════════════
+  private async fetchWithRetry(url: string, options: RequestInit, context: string): Promise<Response> {
+    return retry(
+      async () => {
+        const response = await fetch(url, options);
+
+        // Si es error 5xx o 429 (rate limit), lanzar para reintentar
+        if (response.status >= 500 || response.status === 429) {
+          const error = new Error(`Google Calendar API Error: ${response.status}`);
+          (error as any).status = response.status;
+          throw error;
+        }
+
+        return response;
+      },
+      {
+        ...RetryPresets.google,
+        onRetry: (error, attempt, delayMs) => {
+          console.warn(JSON.stringify({
+            timestamp: new Date().toISOString(),
+            level: 'warn',
+            message: `Google Calendar retry ${attempt}/3`,
+            context,
+            error: error?.message,
+            status: error?.status,
+            delayMs,
+          }));
+        }
+      }
+    );
   }
 
   // Helper para Base64URL (necesario para JWT)
@@ -83,18 +119,41 @@ export class CalendarService {
     const signature = this.base64UrlEncode(new Uint8Array(signatureBuffer));
     const jwt = `${header}.${payload}.${signature}`;
 
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
-    });
+    // Fetch con retry para obtener el token
+    const tokenData = await retry(
+      async () => {
+        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`
+        });
 
-    if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text();
-      throw new Error(`Error obteniendo token OAuth: ${errorText}`);
-    }
+        if (tokenResponse.status >= 500 || tokenResponse.status === 429) {
+          const error = new Error(`Google OAuth Error: ${tokenResponse.status}`);
+          (error as any).status = tokenResponse.status;
+          throw error;
+        }
 
-    const tokenData = await tokenResponse.json() as any;
+        if (!tokenResponse.ok) {
+          const errorText = await tokenResponse.text();
+          throw new Error(`Error obteniendo token OAuth: ${errorText}`);
+        }
+
+        return tokenResponse.json() as Promise<any>;
+      },
+      {
+        ...RetryPresets.google,
+        onRetry: (error, attempt, delayMs) => {
+          console.warn(JSON.stringify({
+            timestamp: new Date().toISOString(),
+            level: 'warn',
+            message: `Google OAuth retry ${attempt}/3`,
+            error: error?.message,
+            delayMs,
+          }));
+        }
+      }
+    );
     
     // Guardar en caché
     this.cachedToken = tokenData.access_token;
@@ -123,7 +182,7 @@ export class CalendarService {
       ...eventData,
     };
 
-    const response = await fetch(
+    const response = await this.fetchWithRetry(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(this.calendarId)}/events?conferenceDataVersion=1`,
       {
         method: 'POST',
@@ -132,7 +191,8 @@ export class CalendarService {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(finalEvent)
-      }
+      },
+      'createEvent'
     );
 
     if (!response.ok) {

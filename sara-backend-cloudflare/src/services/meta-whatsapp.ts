@@ -1,5 +1,7 @@
 // Meta WhatsApp Cloud API Service
 
+import { retry, RetryPresets, isRetryableError } from './retryService';
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 🚨 RATE LIMITING Y CIRCUIT BREAKER - Protección contra spam
 // ═══════════════════════════════════════════════════════════════════════════
@@ -114,6 +116,40 @@ export class MetaWhatsAppService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // 🔄 FETCH CON RETRY - Reintentos automáticos para fallos de red
+  // ═══════════════════════════════════════════════════════════════════════════
+  private async fetchWithRetry(url: string, options: RequestInit, context: string): Promise<Response> {
+    return retry(
+      async () => {
+        const response = await fetch(url, options);
+
+        // Si es error 5xx o 429, lanzar para reintentar
+        if (response.status >= 500 || response.status === 429) {
+          const error = new Error(`Meta API Error: ${response.status} ${response.statusText}`);
+          (error as any).status = response.status;
+          throw error;
+        }
+
+        return response;
+      },
+      {
+        ...RetryPresets.meta,
+        onRetry: (error, attempt, delayMs) => {
+          console.warn(JSON.stringify({
+            timestamp: new Date().toISOString(),
+            level: 'warn',
+            message: `Meta API retry ${attempt}/3`,
+            context,
+            error: error?.message,
+            status: error?.status,
+            delayMs,
+          }));
+        }
+      }
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // 📤 ENVIAR MENSAJE DE WHATSAPP
   // ═══════════════════════════════════════════════════════════════════════════
   // IMPORTANTE: bypassRateLimit = true por DEFAULT para conversaciones normales
@@ -210,14 +246,14 @@ export class MetaWhatsAppService {
 
     console.log(`📤 Meta WA enviando a ${phone}: ${cleanBody.substring(0, 50)}...`);
 
-    const response = await fetch(url, {
+    const response = await this.fetchWithRetry(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
-    });
+    }, `sendMessage:${phone}`);
 
     const data = await response.json();
     if (!response.ok) {
@@ -588,14 +624,14 @@ export class MetaWhatsAppService {
 
     console.log(`📤 Enviando template "${templateName}" a ${phone}`);
 
-    const response = await fetch(url, {
+    const response = await this.fetchWithRetry(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
-    });
+    }, `sendTemplate:${templateName}:${phone}`);
 
     const data = await response.json();
     if (!response.ok) {

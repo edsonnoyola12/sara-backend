@@ -2,6 +2,8 @@
  * CLAUDE SERVICE - Wrapper for Claude API
  */
 
+import { retry, RetryPresets } from './retryService';
+
 export class ClaudeService {
   private apiKey: string;
 
@@ -10,7 +12,7 @@ export class ClaudeService {
   }
 
   /**
-   * Chat con Claude API
+   * Chat con Claude API (con retry automático)
    * @param historial - Mensajes previos del historial
    * @param userMessage - Mensaje actual del usuario
    * @param systemPrompt - Prompt del sistema (opcional)
@@ -42,17 +44,42 @@ export class ClaudeService {
         requestBody.system = systemPrompt;
       }
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.apiKey,
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify(requestBody)
-      });
+      // Fetch con retry automático
+      const data = await retry(
+        async () => {
+          const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': this.apiKey,
+              'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify(requestBody)
+          });
 
-      const data: any = await response.json();
+          // Si es error 5xx o 429 (overloaded), reintentar
+          if (response.status >= 500 || response.status === 429) {
+            const error = new Error(`Claude API Error: ${response.status}`);
+            (error as any).status = response.status;
+            throw error;
+          }
+
+          return response.json();
+        },
+        {
+          ...RetryPresets.anthropic,
+          onRetry: (error, attempt, delayMs) => {
+            console.warn(JSON.stringify({
+              timestamp: new Date().toISOString(),
+              level: 'warn',
+              message: `Claude API retry ${attempt}/3`,
+              error: error?.message,
+              status: error?.status,
+              delayMs,
+            }));
+          }
+        }
+      );
 
       // Log de error si hay
       if (data.error) {
