@@ -150,7 +150,7 @@ npx wrangler tail --format=pretty
 | `quien es [nombre]` / `info [nombre]` | Ver información completa del lead | `vendedorQuienEs` |
 | `ver [nombre/teléfono]` | Ver historial de conversación con lead | `vendedorVerHistorial` |
 | `mover [nombre] a [etapa]` | Mover lead a otra etapa del funnel | `vendedorMoverEtapa` |
-| `nota [nombre] [texto]` | Agregar nota/apunte a un lead | `vendedorAgregarNota` |
+| `nota [nombre] [texto]` | Agregar nota a un lead (aparece en CRM) | `vendedorAgregarNota` |
 | `notas [nombre]` | Ver notas guardadas de un lead | `vendedorVerNotas` |
 | `bridge [nombre]` | Chat directo con lead (10 min) | `bridgeLead` |
 | `#mas` / `#continuar` | Extender bridge 6 min más | `extenderBridge` |
@@ -528,7 +528,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-24 19:20*
+*Última actualización: 2026-01-24 20:10*
 
 ---
 
@@ -670,6 +670,8 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 - ✅ **Comandos nota/notas implementados:**
   - `nota [nombre] [texto]` - Agregar nota a un lead
   - `notas [nombre]` - Ver notas de un lead
+  - Las notas aparecen en el CRM en "Actividades del vendedor"
+  - Se guardan como tipo `whatsapp` con prefijo "📝 NOTA:"
   - Útil para registrar llamadas, visitas, acuerdos
 
 - ✅ **Detección ventana 24h WhatsApp:**
