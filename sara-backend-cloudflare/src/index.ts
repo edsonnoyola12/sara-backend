@@ -11296,10 +11296,10 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
 
     // ═══════════════════════════════════════════════════════════
-    // BACKUP DIARIO - 4 AM UTC (10 PM México)
+    // BACKUP DIARIO - Corre con tareas nocturnas 1 AM UTC (7 PM México)
     // Guarda backup en KV, mantiene últimos 7 días
     // ═══════════════════════════════════════════════════════════
-    if (event.cron === '0 4 * * *') {
+    if (event.cron === '0 1 * * *') {
       console.log('💾 INICIANDO BACKUP DIARIO...');
       try {
         const backupDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
