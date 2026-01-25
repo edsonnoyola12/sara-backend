@@ -528,7 +528,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-24 20:10*
+*Última actualización: 2026-01-24 20:20*
 
 ---
 
@@ -651,6 +651,7 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 | `felicitarCumpleañosLeads` | 9am diario | Cumpleaños de leads |
 | `seguimientoCredito` | 12pm L-V | Leads con crédito estancado |
 | `seguimientoPostVenta` | 10am diario | 30, 60, 90 días post-venta |
+| `enviarRecapDiario` | 7pm L-V | Recap solo si NO usó SARA hoy |
 
 ---
 
@@ -678,6 +679,12 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
   - Detecta si lead no ha escrito en 24h
   - Muestra opciones: templates o contacto directo
   - Opción 4: muestra teléfono del lead y recuerda registrar nota
+
+- ✅ **Recap 7pm solo si NO usó SARA:**
+  - A las 7pm L-V se envía mensaje "¿Cómo te fue hoy?"
+  - Solo a vendedores que NO interactuaron con SARA ese día
+  - Invita a reportar con comando `nota [nombre] [qué pasó]`
+  - Si ya usó SARA → no recibe recap (ya interactuó)
 
 - ✅ Tests: 168 pasando ✅
 - ✅ Deploy exitoso
