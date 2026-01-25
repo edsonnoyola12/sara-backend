@@ -39,11 +39,12 @@ npx wrangler tail --format=pretty
 - KV Cache separado
 - Mismos secrets que producción
 
-### Tests Automatizados (222 tests)
+### Tests Automatizados (260 tests)
 
 | Archivo | Tests | Qué protege |
 |---------|-------|-------------|
 | `newFeatures.test.ts` | 43 | Notas en CRM, recap condicional, sugerencias IA, regresión comandos |
+| `integration.test.ts` | 38 | **Flujos end-to-end**: endpoints, auth, webhook, comandos, CORS, cache |
 | `conversationLogic.test.ts` | 35 | GPS solo, recursos completos, bridge |
 | `asesorCommands.test.ts` | 32 | Comandos Asesor: leads, docs, preaprobado, rechazado |
 | `vendorCommands.test.ts` | 30 | Comandos Vendedor: citas, leads, agendar, brochure |
@@ -53,6 +54,25 @@ npx wrangler tail --format=pretty
 | `leadScoring.test.ts` | 11 | Scoring de leads |
 | `dateParser.test.ts` | 8 | Parseo de fechas en español |
 | `ServiceFactory.test.ts` | 3 | Factory de servicios |
+
+### Integration Tests (38 tests)
+
+Los integration tests prueban flujos completos end-to-end:
+
+| Categoría | Tests | Qué valida |
+|-----------|-------|------------|
+| Endpoints Públicos | 3 | `/`, `/health`, OPTIONS/CORS |
+| Autenticación | 3 | API key en header y query param |
+| Webhook WhatsApp | 4 | Estructura de Meta, verificación token |
+| Comandos CEO | 5 | ayuda, leads, hoy, bridge, #cerrar |
+| Comandos Vendedor | 5 | citas, brochure, ubicacion, nota, ver |
+| Comandos Asesor | 4 | mis leads, docs, preaprobado, rechazado |
+| Rate Limiting | 2 | Headers, conteo por IP |
+| Flujo Lead | 4 | Info, ubicación, cita, precios |
+| Flujo Crédito | 2 | Preguntas de crédito, info financiera |
+| Cache KV | 2 | Estadísticas, TTL por tipo |
+| CORS | 2 | Whitelist, rechazo de orígenes |
+| Estructura Datos | 3 | Campos requeridos de lead, team_member, property |
 
 **Si un test falla = NO HACER DEPLOY** hasta arreglarlo.
 
@@ -830,7 +850,7 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
   - Reintentos automáticos para errores de red y 5xx
   - Exponential backoff con jitter (evita thundering herd)
   - Integrado en: MetaWhatsAppService, ClaudeService, CalendarService
-  - 11 tests nuevos (222 total)
+  - 11 tests nuevos
   - Configuración por servicio:
     | Servicio | Max Retries | Base Delay | Max Delay |
     |----------|-------------|------------|-----------|
@@ -839,6 +859,14 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
     | Meta | 3 | 1s | 10s |
     | Google | 3 | 1s | 8s |
     | Veo | 2 | 3s | 20s |
+
+- ✅ **Integration Tests (38 tests nuevos):**
+  - Tests end-to-end para flujos completos
+  - Endpoints públicos, autenticación, webhook WhatsApp
+  - Comandos CEO, Vendedor, Asesor
+  - Rate limiting, CORS, Cache KV
+  - Flujos de Lead y Crédito
+  - **Total: 260 tests**
 
 **Sesión 5 (22:45) - Análisis completo y mejoras de código**
 
