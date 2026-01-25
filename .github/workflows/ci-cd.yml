@@ -25,6 +25,7 @@ on:
     paths:
       - 'sara-backend-cloudflare/**'
       - '.github/workflows/**'
+  workflow_dispatch:  # Permite ejecutar manualmente
 
 env:
   NODE_VERSION: '20'
