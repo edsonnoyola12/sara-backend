@@ -55,6 +55,30 @@ npx wrangler tail --format=pretty
 | `dateParser.test.ts` | 8 | Parseo de fechas en español |
 | `ServiceFactory.test.ts` | 3 | Factory de servicios |
 
+### Load Tests
+
+```bash
+# Test básico (10 VUs, 30 segundos)
+node scripts/load-tests/simple-load-test.js
+
+# Con más usuarios y duración
+node scripts/load-tests/simple-load-test.js --vus=50 --duration=60
+
+# Contra staging
+BASE_URL=https://sara-backend-staging.edson-633.workers.dev API_SECRET=xxx node scripts/load-tests/simple-load-test.js
+
+# Con k6 (más completo)
+k6 run scripts/load-tests/k6-load-test.js
+```
+
+**Métricas esperadas (producción):**
+| Métrica | Valor típico |
+|---------|--------------|
+| Error rate | < 1% |
+| P50 latency | ~400ms |
+| P95 latency | ~900ms |
+| Requests/sec | ~20-30 |
+
 ### Integration Tests (38 tests)
 
 Los integration tests prueban flujos completos end-to-end:
@@ -867,6 +891,14 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
   - Rate limiting, CORS, Cache KV
   - Flujos de Lead y Crédito
   - **Total: 260 tests**
+
+- ✅ **Load Tests:**
+  - Scripts en `scripts/load-tests/`
+  - `simple-load-test.js` - Node.js nativo, sin dependencias
+  - `k6-load-test.js` - Script profesional con escenarios
+  - Métricas: latency P50/P90/P95/P99, RPS, error rate
+  - Thresholds: error < 5%, P95 < 500ms, RPS > 10
+  - **Resultados producción (10 VUs):** 0% errores, 20.5 req/s, P50=401ms
 
 **Sesión 5 (22:45) - Análisis completo y mejoras de código**
 
