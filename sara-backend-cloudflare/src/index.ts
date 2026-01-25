@@ -14099,10 +14099,31 @@ async function enviarRecapDiario(supabase: SupabaseService, meta: MetaWhatsAppSe
     return;
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // SOLO ENVIAR SI NO USÓ SARA HOY
+  // Si ya interactuó con SARA, no necesita el recap
+  // ═══════════════════════════════════════════════════════════
+  const notasVendedor = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
+  const lastInteraction = notasVendedor.last_sara_interaction;
+
+  if (lastInteraction) {
+    const fechaInteraccion = lastInteraction.split('T')[0];
+    if (fechaInteraccion === hoy) {
+      console.log(`⏭️ ${vendedor.name} ya usó SARA hoy (${lastInteraction}), no necesita recap`);
+      // Marcar como enviado para no volver a intentar
+      await supabase.client.from('team_members').update({ last_recap_sent: hoy }).eq('id', vendedor.id);
+      return;
+    }
+  }
+
+  console.log(`📋 ${vendedor.name} NO usó SARA hoy, enviando recap...`);
+
   const nombreCorto = vendedor.name?.split(' ')[0] || 'Hola';
-  const mensaje = `*Resumen del dia, ${vendedor.name}*\n\n` +
-    `Gracias por tu esfuerzo hoy. Recuerda actualizar el status de tus leads en el CRM.\n\n` +
-    `Descansa y manana con todo!`;
+  const mensaje = `👋 *${nombreCorto}, ¿cómo te fue hoy?*\n\n` +
+    `No te vi por aquí. Cuéntame qué pasó con tus leads:\n\n` +
+    `📝 Escribe: *nota [nombre] [qué pasó]*\n` +
+    `📋 O solo cuéntame y lo registro por ti.\n\n` +
+    `_Ej: "Hablé con Juan, quiere visita el lunes"_`;
 
   // ═══════════════════════════════════════════════════════════
   // ENVIAR VÍA TEMPLATE (para que llegue aunque no hayan escrito en 24h)
