@@ -11295,6 +11295,89 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       }
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // BACKUP DIARIO - 4 AM UTC (10 PM México)
+    // Guarda backup en KV, mantiene últimos 7 días
+    // ═══════════════════════════════════════════════════════════
+    if (event.cron === '0 4 * * *') {
+      console.log('💾 INICIANDO BACKUP DIARIO...');
+      try {
+        const backupDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+        const backupKey = `backup:${backupDate}`;
+
+        // Generar backup
+        const backupData = await exportBackup(supabase);
+        backupData.backup_date = backupDate;
+        backupData.backup_type = 'automated_daily';
+
+        // Calcular tamaño aproximado
+        const backupJson = JSON.stringify(backupData);
+        const backupSizeKB = Math.round(backupJson.length / 1024);
+
+        console.log(`📊 Backup generado: ${backupSizeKB} KB`);
+        console.log(`   - Leads: ${backupData.tables?.leads?.count || 0}`);
+        console.log(`   - Appointments: ${backupData.tables?.appointments?.count || 0}`);
+        console.log(`   - Team: ${backupData.tables?.team_members?.count || 0}`);
+        console.log(`   - Properties: ${backupData.tables?.properties?.count || 0}`);
+
+        // Guardar en KV (si está disponible)
+        if (env.SARA_CACHE) {
+          // Guardar backup (expira en 7 días)
+          await env.SARA_CACHE.put(backupKey, backupJson, {
+            expirationTtl: 7 * 24 * 60 * 60 // 7 días
+          });
+
+          // Guardar metadata del último backup
+          const backupMeta = {
+            last_backup: backupDate,
+            last_backup_time: now.toISOString(),
+            size_kb: backupSizeKB,
+            tables: {
+              leads: backupData.tables?.leads?.count || 0,
+              appointments: backupData.tables?.appointments?.count || 0,
+              team_members: backupData.tables?.team_members?.count || 0,
+              properties: backupData.tables?.properties?.count || 0,
+            },
+            status: backupData.status
+          };
+          await env.SARA_CACHE.put('backup:latest', JSON.stringify(backupMeta));
+
+          console.log(`✅ BACKUP GUARDADO: ${backupKey} (${backupSizeKB} KB)`);
+
+          // Notificar al CEO (solo si hay errores o es lunes para resumen semanal)
+          const dayOfWeek = now.getDay();
+          if (backupData.status !== 'success' || dayOfWeek === 1) {
+            const emoji = backupData.status === 'success' ? '✅' : '⚠️';
+            await meta.sendWhatsAppMessage('5212224558475',
+              `💾 *BACKUP ${backupData.status === 'success' ? 'COMPLETADO' : 'CON ERRORES'}*\n\n` +
+              `${emoji} Fecha: ${backupDate}\n` +
+              `📊 Tamaño: ${backupSizeKB} KB\n` +
+              `📋 Datos:\n` +
+              `   • Leads: ${backupData.tables?.leads?.count || 0}\n` +
+              `   • Citas: ${backupData.tables?.appointments?.count || 0}\n` +
+              `   • Equipo: ${backupData.tables?.team_members?.count || 0}\n` +
+              `   • Propiedades: ${backupData.tables?.properties?.count || 0}\n\n` +
+              `_Backups se guardan 7 días_`
+            );
+          }
+        } else {
+          console.warn('⚠️ KV no disponible, backup no guardado');
+        }
+      } catch (e) {
+        console.error('❌ Error en backup diario:', e);
+        // Notificar error
+        try {
+          await meta.sendWhatsAppMessage('5212224558475',
+            `🚨 *ERROR EN BACKUP*\n\n` +
+            `Error: ${String(e)}\n\n` +
+            `Por favor revisar logs.`
+          );
+        } catch (notifyErr) {
+          console.error('❌ No se pudo notificar error de backup');
+        }
+      }
+    }
+
     // (Cumpleaños movido más abajo para incluir leads + equipo)
 
     // ═══════════════════════════════════════════════════════════

@@ -1,0 +1,187 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# SARA Backend - PR Preview Deployments
+# ═══════════════════════════════════════════════════════════════════════════
+# Despliega cada PR a una URL temporal para testing
+# URL: https://sara-backend-pr-{PR_NUMBER}.edson-633.workers.dev
+# ═══════════════════════════════════════════════════════════════════════════
+
+name: PR Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths:
+      - 'sara-backend-cloudflare/**'
+
+env:
+  NODE_VERSION: '20'
+  WORKING_DIR: './sara-backend-cloudflare'
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 1: Test
+  # ═══════════════════════════════════════════════════════════════════════════
+  test:
+    name: 🧪 Run Tests
+    runs-on: ubuntu-latest
+    if: github.event.action != 'closed'
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: '${{ env.WORKING_DIR }}/package-lock.json'
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      - name: 🧪 Run tests
+        run: npm test
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 2: Deploy Preview
+  # ═══════════════════════════════════════════════════════════════════════════
+  deploy-preview:
+    name: 🚀 Deploy Preview
+    runs-on: ubuntu-latest
+    needs: test
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: '${{ env.WORKING_DIR }}/package-lock.json'
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      - name: 🏗️ Create preview wrangler.toml
+        run: |
+          # Crear configuración temporal para preview
+          cat > wrangler.preview.toml << 'EOF'
+          name = "sara-backend-pr-${{ github.event.pull_request.number }}"
+          main = "src/index.ts"
+          compatibility_date = "2024-09-23"
+          compatibility_flags = ["nodejs_compat"]
+
+          # Usar el mismo KV de staging para previews
+          [[kv_namespaces]]
+          binding = "SARA_CACHE"
+          id = "1b0b7ddc2dc7459fa7f9ed2e00caab36"
+
+          # No crons en preview
+          [triggers]
+          crons = []
+          EOF
+
+      - name: 🚀 Deploy Preview to Cloudflare
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config wrangler.preview.toml
+          workingDirectory: ${{ env.WORKING_DIR }}
+
+      - name: 💬 Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const previewUrl = `https://sara-backend-pr-${prNumber}.edson-633.workers.dev`;
+
+            // Buscar comentario existente
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const botComment = comments.data.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('🚀 Preview Deployment')
+            );
+
+            const body = `## 🚀 Preview Deployment
+
+            | Entorno | URL |
+            |---------|-----|
+            | Preview | [${previewUrl}](${previewUrl}) |
+            | Health | [${previewUrl}/health](${previewUrl}/health) |
+            | Status | [${previewUrl}/status](${previewUrl}/status) |
+
+            **Commit:** \`${context.sha.substring(0, 7)}\`
+            **Última actualización:** ${new Date().toISOString()}
+
+            ---
+            > ⚠️ Este preview usa la base de datos de **staging**, no producción.
+            > El preview se eliminará cuando se cierre el PR.`;
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: body
+              });
+            }
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 3: Cleanup (cuando se cierra el PR)
+  # ═══════════════════════════════════════════════════════════════════════════
+  cleanup:
+    name: 🧹 Cleanup Preview
+    runs-on: ubuntu-latest
+    if: github.event.action == 'closed'
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🗑️ Delete preview worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: delete --name sara-backend-pr-${{ github.event.pull_request.number }} --force
+          workingDirectory: ${{ env.WORKING_DIR }}
+        continue-on-error: true  # No fallar si el worker ya no existe
+
+      - name: 💬 Comment cleanup
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: `## 🧹 Preview Cleanup\n\nEl preview \`sara-backend-pr-${prNumber}\` ha sido eliminado.`
+            });
