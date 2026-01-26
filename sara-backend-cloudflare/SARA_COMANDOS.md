@@ -153,7 +153,8 @@ Los integration tests prueban flujos completos end-to-end:
 | `leads` | Estado de leads | `reporteLeads` |
 | `ventas` | Métricas de ventas | `reporteVentas` |
 | `hoy` / `resumen` | Resumen del día | `resumenHoy` |
-| `citas` / `citas hoy` | Citas de hoy | `vendedorCitasHoy` |
+| `citas` / `citas hoy` / `mis citas` | Citas de hoy | `vendedorCitasHoy` |
+| `citas mañana` / `mis citas mañana` | Citas de mañana (📞 llamadas / 📋 citas) | `vendedorCitasManana` |
 | `broadcast` | Enviar mensaje masivo | `iniciarBroadcast` |
 | `segmentos` | Ver segmentos disponibles | `verSegmentos` |
 | `eventos` | Ver eventos activos | `verEventos` |
@@ -199,6 +200,7 @@ Los integration tests prueban flujos completos end-to-end:
 | Comando | Acción | Handler |
 |---------|--------|---------|
 | `citas` / `mis citas` | Ver citas de hoy | `vendedorCitasHoy` |
+| `citas mañana` / `mis citas mañana` | Ver citas de mañana (📞 llamadas / 📋 citas) | `vendedorCitasManana` |
 | `leads` / `mis leads` | Ver leads activos | `vendedorResumenLeads` |
 | `hoy` / `resumen` | Briefing del día | `vendedorBriefing` |
 | `meta` | Ver avance de meta mensual | `vendedorMetaAvance` |
