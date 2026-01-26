@@ -687,6 +687,30 @@ Funciones afectadas:
 | 11am L-V | Admins | Alerta inactividad vendedores |
 | 7pm L-V | Vendedores | Reporte consolidado (recap + métricas) |
 
+### Briefing Inteligente (8am)
+
+El briefing matutino usa **envío inteligente** según la ventana de 24h de WhatsApp:
+
+| Situación | Qué pasa |
+|-----------|----------|
+| **Ventana 24h abierta** (interactuó con SARA ayer) | 📋 Recibe briefing DIRECTO |
+| **Ventana 24h cerrada** (no ha interactuado) | 📤 Recibe template `seguimiento_lead` → cuando responde → recibe briefing |
+
+**Flujo técnico:**
+```
+1. Verificar last_sara_interaction del vendedor
+2. Si interactuó en últimas 24h:
+   → meta.sendWhatsAppMessage(briefing)
+3. Si NO interactuó:
+   → Guardar briefing en pending_briefing
+   → meta.sendTemplate('seguimiento_lead')
+   → Cuando responde → entregar pending_briefing
+```
+
+**Templates usados:**
+- `seguimiento_lead` (APPROVED) - Para reactivar ventana 24h
+- `reactivar_equipo` (APPROVED) - Para recap 7pm
+
 ---
 
 ## SISTEMA DE APROBACIÓN DE FOLLOW-UPS (2026-01-24)
