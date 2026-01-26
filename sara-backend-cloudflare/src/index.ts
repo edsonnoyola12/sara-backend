@@ -16572,18 +16572,17 @@ async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhats
         })
         .eq('id', vendedor.id);
 
-      // 2. Enviar template
+      // 2. Enviar template reactivar_equipo (más apropiado para equipo interno)
       const templateComponents = [
         {
           type: 'body',
           parameters: [
-            { type: 'text', text: nombreCorto },
-            { type: 'text', text: 'tu briefing del día' }
+            { type: 'text', text: nombreCorto }
           ]
         }
       ];
-      await meta.sendTemplate(vendedor.phone, 'seguimiento_lead', 'es_MX', templateComponents);
-      console.log(`📤 Template enviado a ${vendedor.name} (briefing pendiente hasta que responda)`);
+      await meta.sendTemplate(vendedor.phone, 'reactivar_equipo', 'es_MX', templateComponents);
+      console.log(`📤 Template reactivar_equipo enviado a ${vendedor.name} (briefing pendiente hasta que responda)`);
     }
   } catch (error) {
     console.error(`❌ Error enviando briefing a ${vendedor.name}:`, error);
