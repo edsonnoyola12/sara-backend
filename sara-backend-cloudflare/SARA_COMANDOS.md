@@ -703,13 +703,23 @@ El briefing matutino usa **envío inteligente** según la ventana de 24h de What
    → meta.sendWhatsAppMessage(briefing)
 3. Si NO interactuó:
    → Guardar briefing en pending_briefing
-   → meta.sendTemplate('seguimiento_lead')
+   → meta.sendTemplate('reactivar_equipo')
    → Cuando responde → entregar pending_briefing
 ```
 
-**Templates usados:**
-- `seguimiento_lead` (APPROVED) - Para reactivar ventana 24h
-- `reactivar_equipo` (APPROVED) - Para recap 7pm
+**Template usado:** `reactivar_equipo` (APPROVED)
+
+**Mensaje que reciben los que NO tienen ventana 24h:**
+```
+👋 ¡Hola Oscar!
+
+Soy SARA, tu asistente de Grupo Santa Rita. 🏠
+
+Responde cualquier mensaje para activar nuestra conversación
+y poder enviarte reportes, alertas y notificaciones.
+
+Escribe *ayuda* para ver comandos disponibles. 💪
+```
 
 ---
 
