@@ -3508,7 +3508,7 @@ export class WhatsAppHandler {
     // 🎓 ONBOARDING - Tutorial para vendedores nuevos
     // Solo mostrar si NO es un comando conocido y NO hay bridge/pending activo
     // ═══════════════════════════════════════════════════════════
-    const esComandoConocido = /^(ver|bridge|citas?|leads?|hoy|ayuda|help|resumen|briefing|meta|brochure|ubicacion|video|coach|quien|info|hot|pendientes|credito|nuevo|reagendar|cancelar|agendar|#)/i.test(mensaje);
+    const esComandoConocido = /^(ver|bridge|citas?|leads?|hoy|ayuda|help|resumen|briefing|meta|brochure|ubicacion|video|coach|quien|info|hot|pendientes|credito|nuevo|reagendar|cambiar|mover|cancelar|agendar|recordar|llamar|nota|notas|#)/i.test(mensaje);
     const tieneBridgeActivo = notasVendedor?.active_bridge && notasVendedor.active_bridge.expires_at && new Date(notasVendedor.active_bridge.expires_at) > new Date();
     const tienePendingMessage = notasVendedor?.pending_message_to_lead;
 
@@ -5086,6 +5086,12 @@ export class WhatsAppHandler {
         break;
       case 'vendedorProgramarLlamada':
         await this.vendedorProgramarLlamada(from, params.nombre, params.cuando, vendedor, nombreVendedor);
+        break;
+      case 'vendedorRecordarLlamar':
+        await this.vendedorRecordarLlamar(from, params.nombreLead, params.fechaHora, vendedor, nombreVendedor);
+        break;
+      case 'vendedorReagendarLlamada':
+        await this.vendedorReagendarLlamada(from, params.nombreLead, params.nuevaFechaHora, vendedor, nombreVendedor);
         break;
       case 'vendedorLlamadasPendientes':
         await this.vendedorLlamadasPendientes(from, vendedor, nombreVendedor);
@@ -8456,6 +8462,232 @@ Responde con fecha y hora:
     } catch (e) {
       console.log('Error programando llamada:', e);
       await this.twilio.sendWhatsAppMessage(from, 'Error al programar llamada.');
+    }
+  }
+
+  private async vendedorRecordarLlamar(from: string, nombreLead: string, fechaHora: string, vendedor: any, nombreVendedor: string): Promise<void> {
+    try {
+      console.log(`📞 RECORDAR LLAMAR: ${nombreLead} - ${fechaHora} (vendedor: ${nombreVendedor})`);
+
+      // 1. Buscar el lead
+      const vendorService = new VendorCommandsService(this.supabase);
+      const result = await vendorService.getLlamarLead(nombreLead, vendedor.id);
+
+      if (!result.found || !result.lead) {
+        // Buscar sugerencias
+        const { data: recentLeads } = await this.supabase.client
+          .from('leads')
+          .select('name')
+          .eq('assigned_to', vendedor.id)
+          .order('updated_at', { ascending: false })
+          .limit(50);
+
+        if (recentLeads && recentLeads.length > 0) {
+          const similarity = (a: string, b: string): number => {
+            a = a.toLowerCase(); b = b.toLowerCase();
+            if (a === b) return 1;
+            if (a.startsWith(b) || b.startsWith(a)) return 0.8;
+            if (a.includes(b) || b.includes(a)) return 0.6;
+            return 0;
+          };
+
+          const sugerencias = recentLeads
+            .map(l => ({ name: l.name, score: similarity(l.name?.split(' ')[0] || '', nombreLead) }))
+            .filter(s => s.score >= 0.4 && s.name)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 3)
+            .map(s => s.name?.split(' ')[0]);
+
+          const sugerenciasUnicas = [...new Set(sugerencias)];
+
+          if (sugerenciasUnicas.length > 0) {
+            await this.twilio.sendWhatsAppMessage(from,
+              `❌ No encontré a *${nombreLead}*\n\n💡 *¿Quisiste decir?*\n` +
+              sugerenciasUnicas.map(s => `• recordar llamar ${s} ${fechaHora}`).join('\n')
+            );
+            return;
+          }
+        }
+
+        await this.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads`);
+        return;
+      }
+
+      const lead = result.lead;
+
+      // 2. Parsear fecha y hora con parseFechaEspanol
+      const { parseFechaEspanol } = await import('../utils/dateParser');
+      const parsed = parseFechaEspanol(fechaHora);
+
+      if (!parsed || !parsed.fecha || !parsed.hora) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `⚠️ No entendí la fecha/hora.\n\n` +
+          `*Ejemplos:*\n` +
+          `• recordar llamar ${nombreLead} mañana 10am\n` +
+          `• recordar llamar ${nombreLead} lunes 3pm\n` +
+          `• recordar llamar ${nombreLead} 28/01 4pm`
+        );
+        return;
+      }
+
+      const fecha = parsed.fecha;
+      const hora = parsed.hora;
+
+      // 3. Crear cita de llamada usando AppointmentService
+      const { AppointmentService } = await import('../services/appointmentService');
+      const appointmentService = new AppointmentService(this.supabase, this.calendar, this.twilio);
+
+      const cleanPhone = lead.phone.replace(/\D/g, '');
+      const resultCita = await appointmentService.crearCitaLlamada({
+        lead,
+        cleanPhone,
+        clientName: lead.name || nombreLead,
+        fecha,
+        hora,
+        vendedor,
+        desarrollo: lead.property_interest,
+        skipDuplicateCheck: true,  // Vendedor solicita explícitamente, permitir
+        skipVendorNotification: true  // Evitar duplicado, enviamos nuestra propia confirmación
+      });
+
+      if (resultCita.success) {
+        // Formatear fecha bonita
+        const fechaObj = new Date(fecha + 'T12:00:00-06:00');
+        const fechaFormateada = fechaObj.toLocaleDateString('es-MX', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long'
+        });
+
+        await this.twilio.sendWhatsAppMessage(from,
+          `✅ *Llamada programada*\n\n` +
+          `👤 *${lead.name}*\n` +
+          `📱 ${lead.phone}\n` +
+          `📅 ${fechaFormateada}\n` +
+          `🕐 ${hora}\n\n` +
+          `Te recordaré antes de la llamada 📞`
+        );
+      } else {
+        await this.twilio.sendWhatsAppMessage(from,
+          `⚠️ No pude programar la llamada: ${resultCita.error || 'error desconocido'}`
+        );
+      }
+
+    } catch (e) {
+      console.error('Error en vendedorRecordarLlamar:', e);
+      await this.twilio.sendWhatsAppMessage(from, '❌ Error al programar llamada');
+    }
+  }
+
+  private async vendedorReagendarLlamada(from: string, nombreLead: string, nuevaFechaHora: string, vendedor: any, nombreVendedor: string): Promise<void> {
+    try {
+      console.log(`🔄 REAGENDAR LLAMADA: ${nombreLead} -> ${nuevaFechaHora} (vendedor: ${nombreVendedor})`);
+
+      // 1. Buscar el lead
+      const vendorService = new VendorCommandsService(this.supabase);
+      const result = await vendorService.getLlamarLead(nombreLead, vendedor.id);
+
+      if (!result.found || !result.lead) {
+        await this.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads`);
+        return;
+      }
+
+      const lead = result.lead;
+
+      // 2. Buscar cita de llamada activa para este lead
+      const { data: citaActiva } = await this.supabase.client
+        .from('appointments')
+        .select('*')
+        .eq('lead_id', lead.id)
+        .eq('appointment_type', 'llamada')
+        .in('status', ['scheduled', 'confirmed'])
+        .order('scheduled_date', { ascending: true })
+        .limit(1)
+        .single();
+
+      if (!citaActiva) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `⚠️ No encontré llamada programada para *${lead.name}*.\n\n` +
+          `💡 Usa: *recordar llamar ${nombreLead} [fecha] [hora]*`
+        );
+        return;
+      }
+
+      // 3. Parsear nueva fecha y hora
+      // Si solo se proporciona hora (ej: "3pm"), asumir "hoy"
+      const { parseFechaEspanol } = await import('../utils/dateParser');
+      let textoParaParsear = nuevaFechaHora;
+      const soloHora = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm|hrs?)?$/i.test(nuevaFechaHora.trim());
+      if (soloHora) {
+        textoParaParsear = `hoy ${nuevaFechaHora}`;
+        console.log(`🔄 REAGENDAR: Solo hora detectada, asumiendo hoy -> "${textoParaParsear}"`);
+      }
+      const parsed = parseFechaEspanol(textoParaParsear);
+
+      if (!parsed || !parsed.fecha || !parsed.hora) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `⚠️ No entendí la nueva fecha/hora.\n\n` +
+          `*Ejemplos:*\n` +
+          `• reagendar llamada ${nombreLead} mañana 3pm\n` +
+          `• reagendar llamada ${nombreLead} lunes 10am`
+        );
+        return;
+      }
+
+      const nuevaFecha = parsed.fecha;
+      const nuevaHora = parsed.hora;
+      const fechaAnterior = citaActiva.scheduled_date;
+      const horaAnterior = citaActiva.scheduled_time;
+
+      // 4. Actualizar la cita
+      const { parseFechaISO, parseHoraISO } = await import('../utils/dateParser');
+      const { error: updateError } = await this.supabase.client
+        .from('appointments')
+        .update({
+          scheduled_date: parseFechaISO(nuevaFecha),
+          scheduled_time: parseHoraISO(nuevaHora).substring(0, 5)
+        })
+        .eq('id', citaActiva.id);
+
+      if (updateError) {
+        console.error('Error actualizando cita:', updateError);
+        await this.twilio.sendWhatsAppMessage(from, '❌ Error al reagendar la llamada');
+        return;
+      }
+
+      // 5. Formatear fecha bonita
+      const fechaObj = new Date(nuevaFecha + 'T12:00:00-06:00');
+      const fechaFormateada = fechaObj.toLocaleDateString('es-MX', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long'
+      });
+
+      // 6. Notificar al LEAD sobre el cambio
+      const cleanPhone = lead.phone.replace(/\D/g, '');
+      const msgLead = `📞 *Llamada reagendada*\n\n` +
+        `Hola ${lead.name?.split(' ')[0] || ''}! 👋\n\n` +
+        `Tu llamada ha sido movida a:\n` +
+        `📅 *${fechaFormateada}*\n` +
+        `🕐 *${nuevaHora}*\n\n` +
+        `¡Te contactamos pronto! 😊`;
+
+      await this.meta.sendWhatsAppMessage('whatsapp:+' + cleanPhone, msgLead);
+      console.log('✅ Lead notificado del reagendamiento:', lead.name);
+
+      // 7. Confirmar al vendedor
+      await this.twilio.sendWhatsAppMessage(from,
+        `✅ *Llamada reagendada*\n\n` +
+        `👤 *${lead.name}*\n` +
+        `📱 ${lead.phone}\n` +
+        `❌ Antes: ${fechaAnterior} ${horaAnterior}\n` +
+        `✅ Ahora: ${fechaFormateada} ${nuevaHora}\n\n` +
+        `📲 *${lead.name?.split(' ')[0]} ya fue notificado*`
+      );
+
+    } catch (e) {
+      console.error('Error en vendedorReagendarLlamada:', e);
+      await this.twilio.sendWhatsAppMessage(from, '❌ Error al reagendar llamada');
     }
   }
 

@@ -226,6 +226,9 @@ Los integration tests prueban flujos completos end-to-end:
 | `apartar [nombre] en [desarrollo] [enganche]` | Registrar apartado | `vendedorRegistrarApartado` |
 | `cerrar venta [nombre]` | Marcar venta como cerrada | `vendedorCerrarVenta` |
 | `cancelar [nombre]` | Marcar lead como caído | `vendedorCancelarLead` |
+| `recordar llamar [nombre] [fecha] [hora]` | Programar llamada a un lead | `vendedorRecordarLlamar` |
+| `llamar [nombre] [día] [hora]` | Alias para programar llamada | `vendedorRecordarLlamar` |
+| `reagendar llamada [nombre] [nueva fecha/hora]` | Cambiar hora de llamada programada | `vendedorReagendarLlamada` |
 | Números `1`, `2`, `3`, `4` | Responder a opciones pendientes | - |
 
 > **NOTA**: Los comandos brochure/ubicacion/video buscan por nombre de desarrollo (ej: "Monte Verde") O por nombre de modelo (ej: "Acacia", "Fresno").
@@ -278,6 +281,22 @@ Marca lead como caído:
 - `lead caído María López`
 - `descartar Pedro`
 - Actualiza lead a status `fallen`
+
+### Comando: recordar llamar / llamar
+Programa una llamada a un lead:
+- `recordar llamar Juan mañana 10am` - Programar para mañana
+- `recordar llamar María lunes 3pm` - Programar para día específico
+- `llamar Pedro 28/01 4pm` - Formato alternativo con fecha
+- Crea appointment con `appointment_type: 'llamada'`
+- Te recordará antes de la llamada
+- El lead NO recibe notificación (a diferencia de citas presenciales)
+
+### Comando: reagendar llamada
+Cambia la hora de una llamada ya programada:
+- `reagendar llamada Juan mañana 3pm` - Mover a otro día/hora
+- `reagendar llamada María 4pm` - Si solo pones hora, asume hoy
+- `cambiar llamada de Pedro lunes 10am` - Formato alternativo
+- El lead SÍ recibe notificación del cambio
 
 ---
 
@@ -630,7 +649,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-25 13:25*
+*Última actualización: 2026-01-26 21:30*
 
 ---
 
@@ -1173,6 +1192,42 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ---
 
 ## HISTORIAL DE CAMBIOS
+
+### 2026-01-26
+
+**Sesión 1 (21:30) - Comandos de Llamada para Vendedor**
+
+- ✅ **Nuevo comando `recordar llamar [nombre] [fecha] [hora]`:**
+  - Permite al vendedor programar una llamada a un lead
+  - Crea appointment con `appointment_type: 'llamada'`
+  - Parsea fechas en español: "mañana", "lunes", "28/01"
+  - Sugerencias de leads similares si no encuentra el nombre
+  - Handler: `vendedorRecordarLlamar` en whatsapp.ts
+
+- ✅ **Nuevo comando `reagendar llamada [nombre] [nueva fecha/hora]`:**
+  - Cambia hora de llamada ya programada
+  - Si solo se da hora ("3pm"), asume hoy
+  - Notifica al lead del cambio (sin GPS)
+  - Handler: `vendedorReagendarLlamada` en whatsapp.ts
+
+- ✅ **Mejora en detección de tipo de cita:**
+  - Lead pregunta por "llamada" → busca solo citas tipo llamada
+  - Lead pregunta por "cita/visita" → busca solo citas presenciales
+  - Si no hay del tipo pedido pero hay del otro, informa al lead
+  - Archivos: `aiConversationService.ts`, `leadMessageService.ts`
+
+- ✅ **CORS mejorado para CRM:**
+  - Agregado soporte para `sara-crm-new.vercel.app`
+  - Soporte dinámico para subdominios de Vercel
+  - Endpoints CRM públicos para el frontend
+
+- ✅ **AppointmentService mejorado:**
+  - Nuevos params: `skipDuplicateCheck`, `skipVendorNotification`
+  - Evita duplicados y notificaciones redundantes
+
+- ✅ Tests: 260 pasando ✅
+
+---
 
 ### 2026-01-25
 

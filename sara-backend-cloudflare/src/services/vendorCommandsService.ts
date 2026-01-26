@@ -125,7 +125,19 @@ export class VendorCommandsService {
       return { matched: true, handlerName: 'vendedorCitasHoy' };
     }
 
-    // ═══ REAGENDAR ═══
+    // ═══ REAGENDAR LLAMADA - Cambiar hora de llamada programada ═══
+    // IMPORTANTE: Debe ir ANTES del reagendar genérico
+    // Formatos: "reagendar llamada Juan 3pm", "cambiar llamada de Juan mañana 4pm"
+    const reagendarLlamadaMatch = body.match(/^(?:reagendar|cambiar|mover)\s+(?:la\s+)?llamada\s+(?:(?:a|de)\s+)?([a-záéíóúñü]+)\s+(.+)$/i);
+    if (reagendarLlamadaMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorReagendarLlamada',
+        handlerParams: { nombreLead: reagendarLlamadaMatch[1].trim(), nuevaFechaHora: reagendarLlamadaMatch[2].trim() }
+      };
+    }
+
+    // ═══ REAGENDAR CITA (genérico) ═══
     if (/^reagendar/i.test(msg)) {
       return { matched: true, handlerName: 'vendedorReagendarCita', handlerParams: { texto: body } };
     }
@@ -294,6 +306,29 @@ export class VendorCommandsService {
         matched: true,
         handlerName: 'bridgeLead',
         handlerParams: { nombreLead: bridgeMatch[1].trim() }
+      };
+    }
+
+    // ═══ RECORDAR LLAMAR - Programar llamada a un lead ═══
+    // Formatos: "recordar llamar Juan mañana 10am", "recordarme Juan lunes 3pm", "llamar a María mañana 4"
+    const recordarMatch = body.match(/^(?:recordar(?:me)?|acordarme|avisar(?:me)?)\s+(?:llamar\s+(?:a\s+)?)?([a-záéíóúñü]+)\s+(.+)$/i);
+    if (recordarMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorRecordarLlamar',
+        handlerParams: { nombreLead: recordarMatch[1].trim(), fechaHora: recordarMatch[2].trim() }
+      };
+    }
+    // Formato alternativo: "llamar Juan mañana 10am"
+    const llamarMatch = body.match(/^llamar\s+(?:a\s+)?([a-záéíóúñü]+)\s+(mañana|hoy|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo|\d{1,2}[/-]\d{1,2})\s+(?:a\s+las?\s+)?(\d{1,2})(?::(\d{2}))?\s*(?:am|pm|hrs?)?$/i);
+    if (llamarMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorRecordarLlamar',
+        handlerParams: {
+          nombreLead: llamarMatch[1].trim(),
+          fechaHora: `${llamarMatch[2]} ${llamarMatch[3]}${llamarMatch[4] ? ':' + llamarMatch[4] : ''}`
+        }
       };
     }
 
@@ -1122,6 +1157,25 @@ export class VendorCommandsService {
       return { success: true, lead: leads[0] };
     } catch (e) {
       return { success: false, error: 'Error al buscar notas' };
+    }
+  }
+
+  async getLlamarLead(nombreLead: string, vendedorId: string): Promise<{ found: boolean; lead?: any; error?: string }> {
+    try {
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone, property_interest, notes, assigned_to')
+        .ilike('name', `%${nombreLead}%`)
+        .eq('assigned_to', vendedorId)
+        .limit(1);
+
+      if (!leads || leads.length === 0) {
+        return { found: false, error: `No encontré a "${nombreLead}"` };
+      }
+
+      return { found: true, lead: leads[0] };
+    } catch (e) {
+      return { found: false, error: 'Error al buscar lead' };
     }
   }
 

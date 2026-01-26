@@ -68,15 +68,39 @@ export class NotificationService {
       // Traer todas y filtrar en JS (porque .or() con filtros previos no funciona bien)
       const { data: allCitas24h, error: error24h } = await this.supabase.client
         .from('appointments')
-        .select('id, lead_id, lead_name, lead_phone, scheduled_date, scheduled_time, property_name, reminder_24h_sent')
+        .select('id, lead_id, lead_name, lead_phone, scheduled_date, scheduled_time, property_name, reminder_24h_sent, appointment_type')
         .gte('scheduled_date', hoyStr)
         .lte('scheduled_date', en24hStr)
         .eq('status', 'scheduled');
 
-      // Filtrar en JS: solo las que NO tienen reminder_24h_sent = true
-      const citas24h = allCitas24h?.filter(c => c.reminder_24h_sent !== true) || [];
+      // Hora actual en México
+      const ahoraMexico24h = new Date(ahora.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
 
-      console.log(`📅 DEBUG: Total citas en rango: ${allCitas24h?.length || 0}, sin recordatorio: ${citas24h.length}, error: ${error24h?.message || 'ninguno'}`);
+      // Filtrar en JS:
+      // 1. NO tiene reminder_24h_sent
+      // 2. La cita está en el FUTURO
+      // 3. La cita está entre 20h y 28h desde ahora (ventana amplia para 24h)
+      const citas24h = (allCitas24h || []).filter(c => {
+        if (c.reminder_24h_sent === true) return false;
+
+        // Construir fecha+hora de la cita
+        const citaDateTime = new Date(`${c.scheduled_date}T${c.scheduled_time || '12:00:00'}`);
+
+        // Verificar que la cita está en el futuro
+        if (citaDateTime <= ahoraMexico24h) {
+          console.log(`⏭️ Cita 24h ${c.lead_name} ${c.scheduled_date} ya pasó - ignorando`);
+          return false;
+        }
+
+        // Verificar que está entre 20h y 28h desde ahora
+        const en20h = new Date(ahoraMexico24h.getTime() + 20 * 60 * 60 * 1000);
+        const en28h = new Date(ahoraMexico24h.getTime() + 28 * 60 * 60 * 1000);
+        const dentroDeVentana = citaDateTime >= en20h && citaDateTime <= en28h;
+
+        return dentroDeVentana;
+      });
+
+      console.log(`📅 DEBUG: Total citas en rango: ${allCitas24h?.length || 0}, en ventana 24h: ${citas24h.length}, error: ${error24h?.message || 'ninguno'}`);
       if (citas24h.length) {
         console.log(`📅 DEBUG citas24h:`, citas24h.map(c => ({ id: c.id?.slice(0,8), lead: c.lead_name, phone: c.lead_phone?.slice(-4), fecha: c.scheduled_date, hora: c.scheduled_time })));
       }
@@ -86,9 +110,13 @@ export class NotificationService {
           try {
             const nombreCorto = cita.lead_name?.split(' ')[0] || 'Hola';
             const desarrollo = cita.property_name || 'nuestro desarrollo';
+            const esLlamada = (cita as any).appointment_type === 'llamada';
+            const mensaje = esLlamada
+              ? `📞 ¡Hola ${nombreCorto}! Te recordamos tu llamada mañana a las ${(cita.scheduled_time || '').substring(0, 5)}. Te contactaremos para platicar sobre ${desarrollo}. 🏠`
+              : `📅 ¡Hola ${nombreCorto}! Te recordamos tu cita mañana a las ${(cita.scheduled_time || '').substring(0, 5)}. 🏠 ${desarrollo}. ¡Te esperamos!`;
             await this.meta.sendWhatsAppMessage(
               cita.lead_phone,
-              `📅 ¡Hola ${nombreCorto}! Te recordamos tu cita mañana a las ${(cita.scheduled_time || '').substring(0, 5)}. 🏠 ${desarrollo}. ¡Te esperamos!`
+              mensaje
             );
             await this.supabase.client
               .from('appointments')
@@ -105,28 +133,61 @@ export class NotificationService {
         }
       }
 
-      // Recordatorios 2h antes - buscar citas para hoy
-      // Traer todas y filtrar en JS
+      // Recordatorios 2h antes - buscar citas para hoy y mañana
+      // Traer todas y filtrar en JS por hora exacta
       const { data: allCitas2h, error: error2h } = await this.supabase.client
         .from('appointments')
-        .select('id, lead_id, lead_name, lead_phone, scheduled_date, scheduled_time, property_name, reminder_2h_sent, reminder_vendor_2h_sent, vendedor_id')
+        .select('id, lead_id, lead_name, lead_phone, scheduled_date, scheduled_time, property_name, reminder_2h_sent, reminder_vendor_2h_sent, vendedor_id, appointment_type')
         .gte('scheduled_date', hoyStr)
         .lte('scheduled_date', en2hStr)
         .eq('status', 'scheduled');
 
-      // Filtrar en JS: solo las que NO tienen reminder_2h_sent = true
-      const citas2h = allCitas2h?.filter(c => c.reminder_2h_sent !== true) || [];
+      // Hora actual en México para comparar con hora de cita
+      const ahoraMexico = new Date(ahora.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+      const en2hMexico = new Date(ahoraMexico.getTime() + 2 * 60 * 60 * 1000);
+      const en2h30Mexico = new Date(ahoraMexico.getTime() + 2.5 * 60 * 60 * 1000); // Ventana de 30 min
 
-      console.log(`📅 DEBUG: Total citas 2h en rango: ${allCitas2h?.length || 0}, sin recordatorio: ${citas2h.length}, error: ${error2h?.message || 'ninguno'}`);
+      // Filtrar en JS:
+      // 1. NO tiene reminder_2h_sent
+      // 2. La cita está en el FUTURO (no pasada)
+      // 3. La cita está entre 1.5h y 2.5h desde ahora (ventana de 1 hora para el recordatorio)
+      const citas2h = (allCitas2h || []).filter(c => {
+        if (c.reminder_2h_sent === true) return false;
+
+        // Construir fecha+hora de la cita
+        const citaDateTime = new Date(`${c.scheduled_date}T${c.scheduled_time || '00:00:00'}`);
+
+        // Verificar que la cita está en el futuro
+        if (citaDateTime <= ahoraMexico) {
+          console.log(`⏭️ Cita ${c.lead_name} ${c.scheduled_time} ya pasó - ignorando`);
+          return false;
+        }
+
+        // Verificar que está entre 1.5h y 2.5h desde ahora
+        const en1h30Mexico = new Date(ahoraMexico.getTime() + 1.5 * 60 * 60 * 1000);
+        const dentroDeVentana = citaDateTime >= en1h30Mexico && citaDateTime <= en2h30Mexico;
+
+        if (!dentroDeVentana) {
+          console.log(`⏭️ Cita ${c.lead_name} ${c.scheduled_time} fuera de ventana 2h - ignorando`);
+        }
+
+        return dentroDeVentana;
+      });
+
+      console.log(`📅 DEBUG: Total citas 2h en rango: ${allCitas2h?.length || 0}, en ventana 2h: ${citas2h.length}, error: ${error2h?.message || 'ninguno'}`);
 
       for (const cita of citas2h || []) {
         if (cita.lead_phone) {
           try {
             const nombreCorto = cita.lead_name?.split(' ')[0] || 'Hola';
             const desarrollo = cita.property_name || 'nuestro desarrollo';
+            const esLlamada = (cita as any).appointment_type === 'llamada';
+            const mensaje2h = esLlamada
+              ? `📞 ¡${nombreCorto}, tu llamada es en 2 horas! Te contactaremos a las ${cita.scheduled_time || ''} para platicar sobre ${desarrollo}. 🏠`
+              : `⏰ ¡${nombreCorto}, tu cita es en 2 horas! 🏠 ${desarrollo} a las ${cita.scheduled_time || ''}. ¡Te esperamos!`;
             await this.meta.sendWhatsAppMessage(
               cita.lead_phone,
-              `⏰ ¡${nombreCorto}, tu cita es en 2 horas! 🏠 ${desarrollo} a las ${cita.scheduled_time || ''}. ¡Te esperamos!`
+              mensaje2h
             );
             await this.supabase.client
               .from('appointments')
@@ -163,14 +224,23 @@ export class NotificationService {
             const desarrollo = cita.property_name || 'oficina';
             const hora = (cita.scheduled_time || '').substring(0, 5);
             const telefonoLead = cita.lead_phone || 'No disponible';
+            const esLlamada = (cita as any).appointment_type === 'llamada';
 
-            const mensaje = `⏰ *RECORDATORIO DE CITA*\n\n` +
-              `Tu cita es en ~2 horas:\n\n` +
-              `👤 *Lead:* ${nombreLead}\n` +
-              `📱 *Tel:* ${telefonoLead}\n` +
-              `🏠 *Lugar:* ${desarrollo}\n` +
-              `🕐 *Hora:* ${hora}\n\n` +
-              `💡 Tip: Confirma que el cliente viene en camino`;
+            const mensaje = esLlamada
+              ? `📞 *RECORDATORIO DE LLAMADA*\n\n` +
+                `Tu llamada es en ~2 horas:\n\n` +
+                `👤 *Lead:* ${nombreLead}\n` +
+                `📱 *Tel:* ${telefonoLead}\n` +
+                `🏠 *Tema:* ${desarrollo}\n` +
+                `🕐 *Hora:* ${hora}\n\n` +
+                `💡 Tip: Ten a la mano la info del desarrollo`
+              : `⏰ *RECORDATORIO DE CITA*\n\n` +
+                `Tu cita es en ~2 horas:\n\n` +
+                `👤 *Lead:* ${nombreLead}\n` +
+                `📱 *Tel:* ${telefonoLead}\n` +
+                `🏠 *Lugar:* ${desarrollo}\n` +
+                `🕐 *Hora:* ${hora}\n\n` +
+                `💡 Tip: Confirma que el cliente viene en camino`;
 
             await this.meta.sendWhatsAppMessage(vendedor.phone, mensaje);
 

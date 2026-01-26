@@ -2443,14 +2443,30 @@ Tú dime, ¿por dónde empezamos?`;
       if (intentCita === 'cancelar_cita' || intentCita === 'reagendar_cita' || intentCita === 'info_cita') {
         console.log('🎯 INTENT DE CITA DETECTADO:', intentCita);
 
+        // Detectar si el lead pregunta por "llamada" o "cita" (visita presencial)
+        const mensajeLower = originalMessage.toLowerCase();
+        const pideLlamada = mensajeLower.includes('llamada') || mensajeLower.includes('llamar');
+        const pideCita = mensajeLower.includes('cita') || mensajeLower.includes('visita');
+        console.log(`📋 Lead pide: ${pideLlamada ? 'LLAMADA' : pideCita ? 'CITA/VISITA' : 'GENÉRICO'}`);
+
         // Buscar cita activa del lead (scheduled o confirmed)
-        // NOTA: No usar .single() porque devuelve error si no hay resultados
-        // NOTA: No usar JOIN porque falla con "relationship not found"
-        const { data: citasActivas, error: errorCita } = await this.supabase.client
+        // Filtrar por tipo según lo que pide el lead
+        let queryAppointments = this.supabase.client
           .from('appointments')
           .select('*')
           .eq('lead_id', lead.id)
-          .in('status', ['scheduled', 'confirmed'])
+          .in('status', ['scheduled', 'confirmed']);
+
+        // Filtrar por tipo de cita
+        if (pideLlamada && !pideCita) {
+          queryAppointments = queryAppointments.eq('appointment_type', 'llamada');
+          console.log('🔍 Buscando solo citas de tipo LLAMADA');
+        } else if (pideCita && !pideLlamada) {
+          queryAppointments = queryAppointments.neq('appointment_type', 'llamada');
+          console.log('🔍 Buscando solo citas PRESENCIALES (no llamada)');
+        }
+
+        const { data: citasActivas, error: errorCita } = await queryAppointments
           .order('scheduled_date', { ascending: true })
           .limit(1);
 
@@ -2458,8 +2474,33 @@ Tú dime, ¿por dónde empezamos?`;
           console.error('⚠️ Error buscando cita activa:', errorCita.message);
         }
 
-        const citaActiva = citasActivas && citasActivas.length > 0 ? citasActivas[0] : null;
-        console.log('📋 Cita activa encontrada:', citaActiva ? `${citaActiva.scheduled_date} ${citaActiva.scheduled_time}` : 'NO');
+        let citaActiva = citasActivas && citasActivas.length > 0 ? citasActivas[0] : null;
+        console.log('📋 Cita activa encontrada:', citaActiva ? `${citaActiva.scheduled_date} ${citaActiva.scheduled_time} (${citaActiva.appointment_type || 'visita'})` : 'NO');
+
+        // Si no encontró del tipo pedido, verificar si hay del otro tipo para informar
+        if (!citaActiva && (pideLlamada || pideCita)) {
+          const { data: citaOtroTipo } = await this.supabase.client
+            .from('appointments')
+            .select('*')
+            .eq('lead_id', lead.id)
+            .in('status', ['scheduled', 'confirmed'])
+            .order('scheduled_date', { ascending: true })
+            .limit(1);
+
+          if (citaOtroTipo && citaOtroTipo.length > 0) {
+            const tipoEncontrado = citaOtroTipo[0].appointment_type === 'llamada' ? 'llamada' : 'cita presencial';
+            const tipoPedido = pideLlamada ? 'llamada' : 'cita';
+            console.log(`⚠️ No hay ${tipoPedido}, pero sí hay ${tipoEncontrado}`);
+
+            // Informar al lead que no tiene lo que pide, pero sí tiene otra cosa
+            const msgNoHay = `Hola ${nombreCliente?.split(' ')[0] || ''}! 😊\n\n` +
+              `No tienes una *${tipoPedido}* programada, pero sí tienes una *${tipoEncontrado}* para el ${citaOtroTipo[0].scheduled_date} a las ${citaOtroTipo[0].scheduled_time}.\n\n` +
+              `¿Te gustaría ${intentCita === 'reagendar_cita' ? 'reagendar esa' : intentCita === 'cancelar_cita' ? 'cancelar esa' : 'saber más de esa'}?`;
+
+            await this.meta.sendWhatsAppMessage(from, msgNoHay);
+            return;
+          }
+        }
 
         // Buscar vendedor asignado si hay cita
         let vendedorCita: any = null;
@@ -2644,9 +2685,15 @@ Tú dime, ¿por dónde empezamos?`;
                   }
                 }
 
-                // 3. Enviar confirmación al LEAD con ubicación
+                // 3. Enviar confirmación al LEAD
+                // Solo incluir ubicación si NO es cita de llamada
+                const esLlamada = citaActiva.appointment_type === 'llamada';
                 const desarrolloReagendar = citaActiva.property_name || lead.property_interest || 'Los Encinos';
-                console.log('🔍 BUSCANDO GPS para desarrollo:', desarrolloReagendar);
+                if (!esLlamada) {
+                  console.log('🔍 BUSCANDO GPS para desarrollo:', desarrolloReagendar);
+                } else {
+                  console.log('📞 Cita de LLAMADA - no incluir ubicación');
+                }
 
                 // Buscar GPS y dirección de la propiedad - BÚSQUEDA MEJORADA
                 const propertiesArray = Array.isArray(properties) ? properties : [];
@@ -2685,16 +2732,44 @@ Tú dime, ¿por dónde empezamos?`;
                 const direccion = propDesarrollo?.address || propDesarrollo?.location || `Fraccionamiento ${desarrolloReagendar}, Zacatecas`;
                 const gpsLink = propDesarrollo?.gps_link || '';
 
-                const msgLead = nombreLeadCorto
-                  ? `✅ *¡Cita reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n🏠 *Desarrollo:* ${desarrolloReagendar}\n\n📍 *Dirección:* ${direccion}${gpsLink ? `\n🗺️ *Google Maps:* ${gpsLink}` : ''}\n\n¡Te esperamos ${nombreLeadCorto}! 🎉`
-                  : `✅ *¡Cita reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n🏠 *Desarrollo:* ${desarrolloReagendar}\n\n📍 *Dirección:* ${direccion}${gpsLink ? `\n🗺️ *Google Maps:* ${gpsLink}` : ''}\n\n¡Te esperamos! 🎉`;
+                // Mensaje diferente para llamada vs cita presencial
+                let msgLead: string;
+                if (esLlamada) {
+                  // Para llamadas: NO incluir ubicación
+                  msgLead = nombreLeadCorto
+                    ? `✅ *¡Llamada reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n\n¡Te llamamos a esa hora ${nombreLeadCorto}! 📞`
+                    : `✅ *¡Llamada reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n\n¡Te llamamos a esa hora! 📞`;
+                } else {
+                  // Para citas presenciales: incluir ubicación
+                  msgLead = nombreLeadCorto
+                    ? `✅ *¡Cita reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n🏠 *Desarrollo:* ${desarrolloReagendar}\n\n📍 *Dirección:* ${direccion}${gpsLink ? `\n🗺️ *Google Maps:* ${gpsLink}` : ''}\n\n¡Te esperamos ${nombreLeadCorto}! 🎉`
+                    : `✅ *¡Cita reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n🏠 *Desarrollo:* ${desarrolloReagendar}\n\n📍 *Dirección:* ${direccion}${gpsLink ? `\n🗺️ *Google Maps:* ${gpsLink}` : ''}\n\n¡Te esperamos! 🎉`;
+                }
                 await this.meta.sendWhatsAppMessage(from, msgLead);
                 console.log('✅ Confirmación de reagendamiento enviada al lead');
 
                 // 4. Notificar al VENDEDOR con mensaje de REAGENDAMIENTO
                 const vendedorCita = teamMembers.find(t => t.id === citaActiva.vendedor_id || t.id === lead.assigned_to);
                 if (vendedorCita?.phone) {
-                  const msgVendedor = `🔄🔄🔄 *CITA REAGENDADA* 🔄🔄🔄
+                  let msgVendedor: string;
+                  if (esLlamada) {
+                    // Para llamadas: mensaje simplificado sin ubicación
+                    msgVendedor = `🔄📞 *LLAMADA REAGENDADA* 📞🔄
+━━━━━━━━━━━━━━━━━━━━
+
+❌ *Antes:* ${fechaCita} a las ${horaCita}
+✅ *Ahora:* ${nuevaFecha} a las ${nuevaHoraFormateada}
+
+━━━━━━━━━━━━━━━━━━━━
+
+👤 *Cliente:* ${lead.name || 'Cliente'}
+📱 *Tel:* ${lead.phone || ''}
+
+━━━━━━━━━━━━━━━━━━━━
+⚠️ *TOMA NOTA DEL CAMBIO* ⚠️`;
+                  } else {
+                    // Para citas presenciales: incluir ubicación
+                    msgVendedor = `🔄🔄🔄 *CITA REAGENDADA* 🔄🔄🔄
 ━━━━━━━━━━━━━━━━━━━━
 
 🏠 *${desarrolloReagendar}*
@@ -2713,6 +2788,7 @@ Tú dime, ¿por dónde empezamos?`;
 
 ━━━━━━━━━━━━━━━━━━━━
 ⚠️ *TOMA NOTA DEL CAMBIO* ⚠️`;
+                  }
                   await this.meta.sendWhatsAppMessage(vendedorCita.phone, msgVendedor);
                   console.log('✅ Notificación de REAGENDAMIENTO enviada al vendedor');
                 }
@@ -2783,27 +2859,39 @@ Tú dime, ¿por dónde empezamos?`;
                                             originalMessage.toLowerCase().includes('disponible');
         if (intentCita === 'info_cita' && !preguntaHorariosDisponibles) {
           if (citaActiva) {
-            // Usar respuesta de la IA o predeterminada
-            let respuestaInfo = claudeResponse;
-            if (!respuestaInfo || respuestaInfo.length < 20) {
-              respuestaInfo = `¡Claro ${nombreLeadCorto}! 😊\n\n` +
-                `Tu cita es:\n` +
-                `📅 ${fechaCita}\n` +
-                `🕐 ${horaCita}\n` +
-                `📍 ${lugarCita}`;
+            // SIEMPRE usar datos actuales de la BD, no respuesta de Claude (puede tener info vieja)
+            const esLlamada = citaActiva.appointment_type === 'llamada';
+            const tipoCita = esLlamada ? 'llamada' : 'cita';
 
-              if (vendedorCita?.name) {
-                respuestaInfo += `\n\n👤 Te atiende: ${vendedorCita.name}`;
-              }
-              if (vendedorCita?.phone) {
-                respuestaInfo += `\n📱 Tel: ${vendedorCita.phone}`;
-              }
+            // Formatear fecha bonita
+            const fechaObj = new Date(fechaCita + 'T12:00:00-06:00');
+            const fechaFormateada = fechaObj.toLocaleDateString('es-MX', {
+              weekday: 'long',
+              day: 'numeric',
+              month: 'long'
+            });
 
+            let respuestaInfo = esLlamada
+              ? `📞 Tu ${tipoCita} está programada para *${fechaFormateada}* a las *${horaCita?.substring(0,5)}*.\n\n` +
+                `El vendedor te contactará a esa hora para platicar sobre ${lugarCita}. 🏠`
+              : `📅 Tu ${tipoCita} es:\n\n` +
+                `📆 *${fechaFormateada}*\n` +
+                `🕐 *${horaCita?.substring(0,5)}*\n` +
+                `📍 *${lugarCita}*`;
+
+            if (!esLlamada && vendedorCita?.name) {
+              respuestaInfo += `\n\n👤 Te atiende: ${vendedorCita.name}`;
+            }
+            if (!esLlamada && vendedorCita?.phone) {
+              respuestaInfo += `\n📱 Tel: ${vendedorCita.phone}`;
+            }
+
+            if (!esLlamada) {
               respuestaInfo += `\n\n¡Te esperamos! 🏠`;
             }
 
             await this.meta.sendWhatsAppMessage(from, respuestaInfo);
-            console.log('✅ Info de cita enviada');
+            console.log(`✅ Info de ${tipoCita} enviada: ${fechaCita} ${horaCita}`);
 
             // Guardar en historial
             const historialActual = lead.conversation_history || [];

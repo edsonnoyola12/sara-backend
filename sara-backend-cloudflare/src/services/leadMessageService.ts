@@ -260,16 +260,30 @@ export class LeadMessageService {
     body: string,
     mensajeLower: string
   ): Promise<LeadMessageResult> {
-    // Buscar cita activa (scheduled o confirmed)
-    console.log('🔍 Buscando cita para lead_id:', lead.id, '- Lead:', lead.name);
-    const { data: citaActiva, error: citaError } = await this.supabase.client
+    // Detectar si el lead pregunta por "llamada" o "cita" (visita presencial)
+    const pideLlamada = mensajeLower.includes('llamada') || mensajeLower.includes('llamar');
+    const pideCita = mensajeLower.includes('cita') || mensajeLower.includes('visita');
+    console.log(`🔍 Buscando cita para lead_id: ${lead.id} - Lead: ${lead.name} - Tipo: ${pideLlamada ? 'LLAMADA' : pideCita ? 'CITA' : 'GENÉRICO'}`);
+
+    // Buscar cita activa (scheduled o confirmed) - filtrar por tipo
+    let query = this.supabase.client
       .from('appointments')
-      .select('id, scheduled_date, scheduled_time, property_name, vendedor_id, vendedor_name, google_event_vendedor_id')
+      .select('id, scheduled_date, scheduled_time, property_name, vendedor_id, vendedor_name, google_event_vendedor_id, appointment_type')
       .eq('lead_id', lead.id)
-      .in('status', ['scheduled', 'confirmed'])
+      .in('status', ['scheduled', 'confirmed']);
+
+    // Filtrar por tipo según lo que pide el lead
+    if (pideLlamada && !pideCita) {
+      query = query.eq('appointment_type', 'llamada');
+    } else if (pideCita && !pideLlamada) {
+      query = query.neq('appointment_type', 'llamada');
+    }
+
+    const { data: citasActivas, error: citaError } = await query
       .order('scheduled_date', { ascending: true })
-      .limit(1)
-      .single();
+      .limit(1);
+
+    const citaActiva = citasActivas && citasActivas.length > 0 ? citasActivas[0] : null;
 
     // Si encontró cita, buscar datos del vendedor
     let citaConVendedor = citaActiva as any;
@@ -283,7 +297,31 @@ export class LeadMessageService {
         citaConVendedor = { ...citaActiva, team_members: vendedor };
       }
     }
-    console.log('🔍 Cita encontrada:', citaConVendedor ? citaConVendedor.id : 'NINGUNA', '- Error:', citaError?.message || 'ninguno');
+    console.log('🔍 Cita encontrada:', citaConVendedor ? `${citaConVendedor.id} (${citaConVendedor.appointment_type || 'visita'})` : 'NINGUNA', '- Error:', citaError?.message || 'ninguno');
+
+    // Si no encontró del tipo pedido, verificar si hay del otro tipo
+    if (!citaActiva && (pideLlamada || pideCita)) {
+      const { data: citaOtroTipo } = await this.supabase.client
+        .from('appointments')
+        .select('id, scheduled_date, scheduled_time, appointment_type')
+        .eq('lead_id', lead.id)
+        .in('status', ['scheduled', 'confirmed'])
+        .order('scheduled_date', { ascending: true })
+        .limit(1);
+
+      if (citaOtroTipo && citaOtroTipo.length > 0) {
+        const tipoEncontrado = citaOtroTipo[0].appointment_type === 'llamada' ? 'llamada' : 'cita presencial';
+        const tipoPedido = pideLlamada ? 'llamada' : 'cita';
+        const nombreLead = lead.name?.split(' ')[0] || '';
+        console.log(`⚠️ No hay ${tipoPedido}, pero sí hay ${tipoEncontrado}`);
+
+        return {
+          action: 'handled',
+          response: `Hola ${nombreLead}! 😊\n\nNo tienes una *${tipoPedido}* programada, pero sí tienes una *${tipoEncontrado}* para el ${citaOtroTipo[0].scheduled_date} a las ${citaOtroTipo[0].scheduled_time}.\n\n¿Te gustaría hacer algo con esa ${tipoEncontrado}?`,
+          sendVia: 'meta'
+        };
+      }
+    }
 
     // REAGENDAR/CAMBIAR CITA - Pasar a IA para manejar con contexto
     if (this.detectaReagendarCita(mensajeLower)) {
@@ -293,7 +331,7 @@ export class LeadMessageService {
 
     // CANCELAR CITA
     if (this.detectaCancelarCita(mensajeLower)) {
-      return this.procesarCancelarCita(lead, citaConVendedor);
+      return this.procesarCancelarCita(lead, citaConVendedor, pideLlamada ? 'llamada' : pideCita ? 'cita' : null);
     }
 
     // CONFIRMAR CITA
@@ -339,11 +377,12 @@ export class LeadMessageService {
            (msg.includes('mi cita') && !msg.includes('agendar') && !msg.includes('nueva'));
   }
 
-  private async procesarCancelarCita(lead: any, cita: CitaActiva | null): Promise<LeadMessageResult> {
+  private async procesarCancelarCita(lead: any, cita: CitaActiva | null, tipoPedido?: string | null): Promise<LeadMessageResult> {
     if (!cita) {
+      const tipoTexto = tipoPedido === 'llamada' ? 'llamada' : tipoPedido === 'cita' ? 'cita' : 'cita';
       return {
         action: 'handled',
-        response: `No encontré ninguna cita activa a tu nombre. 🤔\n\n¿En qué más puedo ayudarte?`,
+        response: `No encontré ninguna ${tipoTexto} activa a tu nombre. 🤔\n\n¿En qué más puedo ayudarte?`,
         sendVia: 'meta'
       };
     }
@@ -355,9 +394,11 @@ export class LeadMessageService {
       cancellation_reason: 'Cancelado por cliente via WhatsApp'
     }).eq('id', cita.id);
 
+    const esLlamada = (cita as any).appointment_type === 'llamada';
+    const tipoTexto = esLlamada ? 'llamada' : 'cita';
     const result: LeadMessageResult = {
       action: 'handled',
-      response: `Entendido ${lead.name?.split(' ')[0] || ''}, tu cita ha sido cancelada. 😊\n\n` +
+      response: `Entendido ${lead.name?.split(' ')[0] || ''}, tu ${tipoTexto} ha sido cancelada. 😊\n\n` +
                 `Si cambias de opinión o quieres reagendar, solo escríbeme.\n\n¡Que tengas buen día!`,
       sendVia: 'meta'
     };

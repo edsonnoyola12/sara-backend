@@ -38,11 +38,8 @@ export function getNextDayOfWeek(dayOfWeek: number): Date {
 
 // Parsear texto en español para extraer fecha, hora y tipo de evento
 export function parseFechaEspanol(texto: string): ParsedFecha | null {
-  const now = new Date();
-  // Ajustar a zona horaria de México (UTC-6)
-  const mexicoOffset = -6 * 60;
-  const localOffset = now.getTimezoneOffset();
-  const mexicoNow = new Date(now.getTime() + (localOffset - mexicoOffset) * 60 * 1000);
+  // Usar getMexicoNow() para obtener fecha/hora correcta en México
+  const mexicoNow = getMexicoNow();
 
   const textoLower = texto.toLowerCase();
   let fechaTarget: Date | null = null;
@@ -232,6 +229,11 @@ export function parseFecha(fecha: string, hora: string): Date {
 
 // Parsear fecha a formato ISO (YYYY-MM-DD) para Supabase
 export function parseFechaISO(fecha: string): string {
+  // Si ya está en formato YYYY-MM-DD, retornar tal cual
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+    return fecha;
+  }
+
   const targetDate = parseFecha(fecha, '12:00');
   const year = targetDate.getFullYear();
   const month = String(targetDate.getMonth() + 1).padStart(2, '0');

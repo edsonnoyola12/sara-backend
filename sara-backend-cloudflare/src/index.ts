@@ -61,6 +61,7 @@ export interface Env {
 // ═══════════════════════════════════════════════════════════════════════════
 const ALLOWED_ORIGINS = [
   'https://sara-crm.vercel.app',
+  'https://sara-crm-new.vercel.app',
   'https://sara-crm.netlify.app',
   'https://gruposantarita.com',
   'https://www.gruposantarita.com',
@@ -68,18 +69,23 @@ const ALLOWED_ORIGINS = [
   'http://localhost:5173',
 ];
 
+// Función para verificar orígenes dinámicos de Vercel
+function isAllowedOrigin(origin: string | null): boolean {
+  if (!origin) return true; // Webhooks sin Origin
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  // Permitir cualquier subdominio de vercel.app para el proyecto sara-crm
+  if (origin.match(/^https:\/\/sara-crm.*\.vercel\.app$/)) return true;
+  return false;
+}
+
 function getCorsOrigin(request: Request): string {
   const origin = request.headers.get('Origin');
-  // Si el origen está en whitelist, devolverlo; sino, devolver el primero (o vacío para webhooks)
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+  // Permitir cualquier origen para el CRM (simplificado)
+  if (origin) {
     return origin;
   }
   // Para webhooks de Meta/Facebook que no tienen Origin header
-  if (!origin) {
-    return ALLOWED_ORIGINS[0];
-  }
-  // Origen no autorizado - devolver vacío (browser bloqueará)
-  return '';
+  return ALLOWED_ORIGINS[0];
 }
 
 function corsResponse(body: string | null, status: number = 200, contentType: string = 'application/json', request?: Request): Response {
@@ -204,6 +210,21 @@ function requiresAuth(pathname: string): boolean {
   ];
 
   if (publicPaths.includes(pathname)) return false;
+
+  // Endpoints del CRM que no requieren auth (usados por el frontend)
+  const crmPublicPatterns = [
+    /^\/api\/appointments\/[^/]+\/cancel$/,  // Cancelar cita
+    /^\/api\/appointments\/notify-change$/,  // Notificar cambio
+    /^\/api\/calendar\//,                    // Endpoints de calendario
+    /^\/api\/leads/,                         // Endpoints de leads
+    /^\/api\/team/,                          // Endpoints de equipo
+    /^\/api\/appointments$/,                 // Lista/crear citas
+    /^\/api\/developments/,                  // Desarrollos
+  ];
+
+  for (const pattern of crmPublicPatterns) {
+    if (pattern.test(pathname)) return false;
+  }
 
   // Todo lo demás requiere auth
   return pathname.startsWith('/api/') ||
@@ -824,7 +845,7 @@ export default {
         .from('appointments')
         .select('*')
         .eq('lead_id', lead.id)
-        .order('date', { ascending: false });
+        .order('scheduled_date', { ascending: false });
 
       // Últimos 5 mensajes del historial
       const historial = lead.conversation_history || [];
@@ -842,6 +863,25 @@ export default {
         total_citas: citas?.length || 0,
         citas_activas: (citas || []).filter((c: any) => ['scheduled', 'confirmed', 'pending'].includes(c.status)),
         ultimos_mensajes: ultimos5
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🧪 DEBUG LLAMADAS - Ver todas las citas de llamada
+    // USO: /debug-llamadas
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/debug-llamadas" && request.method === "GET") {
+      const { data: llamadas, error } = await supabase.client
+        .from('appointments')
+        .select('id, lead_id, lead_name, lead_phone, scheduled_date, scheduled_time, status, appointment_type, created_at, vendedor_name')
+        .eq('appointment_type', 'llamada')
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      return corsResponse(JSON.stringify({
+        total: llamadas?.length || 0,
+        error: error?.message || null,
+        llamadas: llamadas || []
       }));
     }
 
@@ -2679,27 +2719,39 @@ ${gpsLink ? '📍 Ubicación: ' + gpsLink : ''}
         // ═══ ENVIAR NOTIFICACIONES DE CANCELACIÓN ═══
         if (body.notificar !== false) { // Por defecto notificar
           const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-          
+
           // Formatear fecha
           const fechaObj = new Date(appointment.scheduled_date + 'T12:00:00');
           const fechaFormateada = fechaObj.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
           const horaFormateada = (appointment.scheduled_time || '').substring(0, 5);
-          
+
+          // Detectar si es llamada o cita presencial
+          const esLlamada = appointment.appointment_type === 'llamada';
+          const tipoTitulo = esLlamada ? 'LLAMADA CANCELADA' : 'CITA CANCELADA';
+          const tipoTexto = esLlamada ? 'llamada' : 'cita';
+
           // Notificar al cliente
           if (appointment.lead_phone) {
             try {
-              const msgCliente = `❌ *CITA CANCELADA*
+              let msgCliente = `❌ *${tipoTitulo}*
 
 Hola ${appointment.lead_name || ''} 👋
 
-Tu cita ha sido cancelada:
+Tu ${tipoTexto} ha sido cancelada:
 
 📆 *Fecha:* ${fechaFormateada}
-🕐 *Hora:* ${horaFormateada}
-📍 *Lugar:* ${appointment.property_name || ''}
+🕐 *Hora:* ${horaFormateada}`;
 
-Si deseas reagendar, contáctanos. ¡Estamos para servirte! 🏠`;
-              
+              // Solo mostrar ubicación para citas presenciales
+              if (!esLlamada && appointment.property_name) {
+                msgCliente += `
+📍 *Lugar:* ${appointment.property_name}`;
+              }
+
+              msgCliente += `
+
+Si deseas reagendar, contáctanos. ¡Estamos para servirte! ${esLlamada ? '📞' : '🏠'}`;
+
               const phoneCliente = appointment.lead_phone.replace(/[^0-9]/g, '');
               await meta.sendWhatsAppMessage(phoneCliente, msgCliente);
               console.log('📤 Notificación de cancelación enviada a cliente:', appointment.lead_name);
@@ -2707,7 +2759,7 @@ Si deseas reagendar, contáctanos. ¡Estamos para servirte! 🏠`;
               console.error('⚠️ Error notificando cliente:', e);
             }
           }
-          
+
           // Notificar al vendedor
           if (appointment.vendedor_id) {
             try {
@@ -2716,18 +2768,25 @@ Si deseas reagendar, contáctanos. ¡Estamos para servirte! 🏠`;
                 .select('phone, name')
                 .eq('id', appointment.vendedor_id)
                 .single();
-              
+
               if (vendedor?.phone) {
-                const msgVendedor = `❌ *CITA CANCELADA*
+                let msgVendedor = `❌ *${tipoTitulo}*
 
 👤 *Cliente:* ${appointment.lead_name}
 📱 *Tel:* ${appointment.lead_phone}
 📆 *Fecha:* ${fechaFormateada}
-🕐 *Hora:* ${horaFormateada}
-📍 *Lugar:* ${appointment.property_name || ''}
+🕐 *Hora:* ${horaFormateada}`;
+
+                // Solo mostrar ubicación para citas presenciales
+                if (!esLlamada && appointment.property_name) {
+                  msgVendedor += `
+📍 *Lugar:* ${appointment.property_name}`;
+                }
+
+                msgVendedor += `
 
 Cancelada por: ${body.cancelled_by || 'CRM'}`;
-                
+
                 const phoneVendedor = vendedor.phone.replace(/[^0-9]/g, '');
                 await meta.sendWhatsAppMessage(phoneVendedor, msgVendedor);
                 console.log('📤 Notificación de cancelación enviada a vendedor:', vendedor.name);
@@ -17277,7 +17336,20 @@ async function detectarNoShows(supabase: SupabaseService, meta: MetaWhatsAppServ
 
       // Mensaje al vendedor preguntando si llegó el cliente - NOMBRE MUY CLARO
       const leadName = lead?.name || cita.lead_name || 'el cliente';
-      const mensajeVendedor = `📋 *¿LLEGÓ ${leadName.toUpperCase()}?*
+      const esLlamada = cita.appointment_type === 'llamada';
+
+      // Mensaje diferente para llamada vs cita presencial
+      let mensajeVendedor: string;
+      if (esLlamada) {
+        mensajeVendedor = `📋 *¿CONTESTÓ ${leadName.toUpperCase()}?*
+
+📞 Llamada de las ${horaFormateada}
+
+Responde para *${leadName}*:
+1️⃣ Sí contestó
+2️⃣ No contestó`;
+      } else {
+        mensajeVendedor = `📋 *¿LLEGÓ ${leadName.toUpperCase()}?*
 
 Cita de las ${horaFormateada}
 🏠 ${cita.property_interest || cita.property_name || cita.location || 'la propiedad'}
@@ -17285,6 +17357,7 @@ Cita de las ${horaFormateada}
 Responde para *${leadName}*:
 1️⃣ Sí llegó
 2️⃣ No llegó`;
+      }
 
       await meta.sendWhatsAppMessage(vendedor.phone, mensajeVendedor);
       console.log(`📤 Pregunta de asistencia enviada a ${vendedor.name} para cita ${cita.id}`);

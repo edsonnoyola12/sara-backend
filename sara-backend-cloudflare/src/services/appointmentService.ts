@@ -830,8 +830,10 @@ ${infoContactos}
     hora: string;
     vendedor: any;
     desarrollo?: string;
+    skipDuplicateCheck?: boolean;  // ← Para comandos de vendedor
+    skipVendorNotification?: boolean;  // ← Evitar notificación duplicada
   }): Promise<{ success: boolean; appointmentId?: string; error?: string }> {
-    const { lead, cleanPhone, clientName, fecha, hora, vendedor, desarrollo } = params;
+    const { lead, cleanPhone, clientName, fecha, hora, vendedor, desarrollo, skipDuplicateCheck, skipVendorNotification } = params;
 
     try {
       console.log('📞 Creando cita de LLAMADA para', clientName);
@@ -843,19 +845,21 @@ ${infoContactos}
         return { success: false, error: 'hora_invalida' };
       }
 
-      // Verificar si ya existe una cita de llamada reciente
-      const { data: citaExistente } = await this.supabase.client
-        .from('appointments')
-        .select('id')
-        .eq('lead_id', lead.id)
-        .eq('appointment_type', 'llamada')
-        .not('status', 'in', '("cancelled","completed")')
-        .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
-        .limit(1);
+      // Verificar si ya existe una cita de llamada reciente (skip si vendedor lo solicita explícitamente)
+      if (!skipDuplicateCheck) {
+        const { data: citaExistente } = await this.supabase.client
+          .from('appointments')
+          .select('id')
+          .eq('lead_id', lead.id)
+          .eq('appointment_type', 'llamada')
+          .not('status', 'in', '("cancelled","completed")')
+          .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
+          .limit(1);
 
-      if (citaExistente && citaExistente.length > 0) {
-        console.log('⚠️ Ya existe cita de llamada reciente');
-        return { success: false, error: 'duplicada' };
+        if (citaExistente && citaExistente.length > 0) {
+          console.log('⚠️ Ya existe cita de llamada reciente');
+          return { success: false, error: 'duplicada' };
+        }
       }
 
       // Crear cita de llamada en DB
@@ -900,8 +904,8 @@ ${infoContactos}
         console.error('⚠️ Error registrando actividad:', e);
       }
 
-      // Notificar vendedor (SIN GPS)
-      if (vendedor?.phone) {
+      // Notificar vendedor (SIN GPS) - skip si el vendedor ya recibe su propia confirmación
+      if (vendedor?.phone && !skipVendorNotification) {
         const fechaFormateada = new Date(this.parseFechaISO(fecha) + 'T12:00:00-06:00')
           .toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
 
