@@ -817,4 +817,139 @@ ${infoContactos}
 
     return { lead };
   }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // CITA DE LLAMADA (Callback) - Sin GPS, con follow-up
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  async crearCitaLlamada(params: {
+    lead: any;
+    cleanPhone: string;
+    clientName: string;
+    fecha: string;
+    hora: string;
+    vendedor: any;
+    desarrollo?: string;
+  }): Promise<{ success: boolean; appointmentId?: string; error?: string }> {
+    const { lead, cleanPhone, clientName, fecha, hora, vendedor, desarrollo } = params;
+
+    try {
+      console.log('📞 Creando cita de LLAMADA para', clientName);
+
+      // Validar hora
+      const horaNumero = parseInt(hora.split(':')[0]) || parseInt(hora) || 0;
+      if (horaNumero < 8 || horaNumero >= 20) {
+        console.error('⚠️ Hora fuera de horario laboral:', horaNumero);
+        return { success: false, error: 'hora_invalida' };
+      }
+
+      // Verificar si ya existe una cita de llamada reciente
+      const { data: citaExistente } = await this.supabase.client
+        .from('appointments')
+        .select('id')
+        .eq('lead_id', lead.id)
+        .eq('appointment_type', 'llamada')
+        .not('status', 'in', '("cancelled","completed")')
+        .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
+        .limit(1);
+
+      if (citaExistente && citaExistente.length > 0) {
+        console.log('⚠️ Ya existe cita de llamada reciente');
+        return { success: false, error: 'duplicada' };
+      }
+
+      // Crear cita de llamada en DB
+      const { data: appointment, error } = await this.supabase.client
+        .from('appointments')
+        .insert([{
+          lead_id: lead.id,
+          lead_name: clientName,
+          lead_phone: cleanPhone,
+          property_name: desarrollo || lead.property_interest || 'Llamada programada',
+          location: 'Llamada telefónica',
+          scheduled_date: this.parseFechaISO(fecha),
+          scheduled_time: this.parseHoraISO(hora),
+          status: 'scheduled',
+          vendedor_id: vendedor?.id,
+          vendedor_name: vendedor?.name,
+          appointment_type: 'llamada',
+          duration_minutes: 15
+        }])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ Error creando cita de llamada:', error);
+        return { success: false, error: error.message };
+      }
+
+      console.log('📞 Cita de llamada creada:', appointment?.id);
+
+      // Registrar actividad
+      try {
+        await this.supabase.client
+          .from('lead_activities')
+          .insert({
+            lead_id: lead.id,
+            team_member_id: vendedor?.id || null,
+            activity_type: 'callback_scheduled',
+            notes: `Llamada programada para ${fecha} a las ${hora}`,
+            created_at: new Date().toISOString()
+          });
+      } catch (e) {
+        console.error('⚠️ Error registrando actividad:', e);
+      }
+
+      // Notificar vendedor (SIN GPS)
+      if (vendedor?.phone) {
+        const fechaFormateada = new Date(this.parseFechaISO(fecha) + 'T12:00:00-06:00')
+          .toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+
+        const notifVendedor = `📞 *LLAMADA PROGRAMADA*\n\n` +
+          `👤 *${clientName}*\n` +
+          `📱 ${cleanPhone}\n` +
+          (desarrollo ? `🏠 Interés: ${desarrollo}\n` : '') +
+          `\n📅 *${fechaFormateada}*\n` +
+          `🕐 *${hora}*\n\n` +
+          `⏰ El cliente espera tu llamada`;
+
+        await this.twilio.sendWhatsAppMessage(
+          'whatsapp:+52' + vendedor.phone.replace(/\D/g, '').slice(-10),
+          notifVendedor
+        );
+        console.log('✅ Notificación de llamada enviada a:', vendedor.name);
+      }
+
+      // Crear follow-up para 30 minutos después de la llamada programada
+      try {
+        const fechaISO = this.parseFechaISO(fecha);
+        const horaISO = this.parseHoraISO(hora);
+        const fechaHoraLlamada = new Date(`${fechaISO}T${horaISO}`);
+        const fechaFollowup = new Date(fechaHoraLlamada.getTime() + 30 * 60 * 1000); // 30 min después
+
+        await this.supabase.client
+          .from('scheduled_followups')
+          .insert({
+            lead_id: lead.id,
+            lead_phone: cleanPhone,
+            lead_name: clientName,
+            desarrollo: desarrollo || 'Seguimiento llamada',
+            message: `📞 *VERIFICAR LLAMADA*\n\n¿Se completó la llamada con ${clientName}?\n\nSi no pudiste contactarle, reagenda la llamada.\n\n📱 ${cleanPhone}`,
+            scheduled_at: fechaFollowup.toISOString(),
+            sent: false,
+            cancelled: false,
+            rule_id: null
+          });
+        console.log('✅ Follow-up de verificación programado para:', fechaFollowup.toISOString());
+      } catch (e) {
+        console.error('⚠️ Error creando follow-up:', e);
+      }
+
+      return { success: true, appointmentId: appointment?.id };
+
+    } catch (e) {
+      console.error('❌ Error general en crearCitaLlamada:', e);
+      return { success: false, error: String(e) };
+    }
+  }
 }

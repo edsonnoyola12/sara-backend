@@ -1155,13 +1155,19 @@ NO digas: "No entendí tu mensaje. ¿Podrías repetirlo?"
 
 SÍ di: "Perdón, creo que no te caché bien. ¿Me lo explicas de otra forma?"
 
-📌 **CUANDO QUIERA LLAMAR O QUE LE LLAMEN:**
-Si dice: "llámame", "me pueden marcar", "prefiero por teléfono", "quiero hablar con alguien"
+📌 **CUANDO QUIERA LLAMAR O QUE LE LLAMEN (CALLBACK):**
+Si dice: "llámame", "márcame", "me pueden marcar", "prefiero por teléfono", "quiero hablar con alguien", "márcame mañana", "llámame a las X"
+
+⚠️ IMPORTANTE: Esto es DIFERENTE a una cita de VISITA. El callback es solo una llamada telefónica, NO una cita presencial.
 
 DEBES:
 1) Si NO tienes teléfono → "¡Claro! ¿Me pasas tu número para que te marquen?"
-2) Si YA tienes teléfono → "¡Listo! Le paso tu número a nuestro equipo para que te contacte. ¿A qué hora te conviene más?"
+2) Si YA tienes teléfono → "¡Listo! Le paso tu número a nuestro equipo para que te contacte [a la hora que pidió si la dio]."
 3) Activar: contactar_vendedor: true
+4) ⚠️ NO agendes cita de visita - solo es una llamada telefónica
+
+Ejemplo si dice "márcame mañana a las 4":
+"¡Perfecto [nombre]! Ya le paso tu número a nuestro equipo para que te llamen mañana a las 4:00 PM. ¿Hay algo específico que quieras que te expliquen en la llamada?"
 
 NO le digas que no puedes hacer llamadas. Sí puedes conectarlo con alguien que lo llame.
 
@@ -1717,11 +1723,42 @@ RECUERDA:
 
       // CORRECCIÓN: Si tiene fecha Y hora Y DESARROLLO, forzar confirmar_cita (excepto reagendar)
       // NO crear cita si no sabemos qué desarrollo quiere visitar
+      // ⚠️ NUEVA REGLA: Si solo pide "márcame/llámame" SIN mencionar visita, NO crear cita
       const tieneDesarrollo = parsed.extracted_data?.desarrollo ||
                               parsed.propiedad_sugerida ||
                               (lead.property_interest && lead.property_interest !== 'null');
 
-      if (parsed.extracted_data?.fecha && parsed.extracted_data?.hora && tieneDesarrollo && parsed.intent !== 'reagendar_cita') {
+      // Detectar si es solo callback (márcame) vs visita real
+      const msgLowerCallback = message.toLowerCase();
+      const esCallbackSinVisita = (
+        msgLowerCallback.includes('márcame') ||
+        msgLowerCallback.includes('marcame') ||
+        msgLowerCallback.includes('llámame') ||
+        msgLowerCallback.includes('llamame') ||
+        msgLowerCallback.includes('llámale') ||
+        msgLowerCallback.includes('llamale') ||
+        msgLowerCallback.includes('me marques') ||
+        msgLowerCallback.includes('me llames') ||
+        msgLowerCallback.includes('me contacten') ||
+        msgLowerCallback.includes('me contacte') ||
+        msgLowerCallback.includes('me hablen') ||
+        msgLowerCallback.includes('me hable')
+      ) && !(
+        msgLowerCallback.includes('visita') ||
+        msgLowerCallback.includes('visitar') ||
+        msgLowerCallback.includes('conocer') ||
+        msgLowerCallback.includes('ir a ver') ||
+        msgLowerCallback.includes('cita para ver') ||
+        msgLowerCallback.includes('agendar cita') ||
+        msgLowerCallback.includes('agendar visita')
+      );
+
+      if (esCallbackSinVisita) {
+        // Solo callback: notificar vendedor pero NO crear cita de visita
+        parsed.contactar_vendedor = true;
+        parsed.extracted_data.solo_callback = true;
+        console.log('📞 SOLO CALLBACK detectado (sin visita) - NO crear cita de visita');
+      } else if (parsed.extracted_data?.fecha && parsed.extracted_data?.hora && tieneDesarrollo && parsed.intent !== 'reagendar_cita') {
         parsed.intent = 'confirmar_cita';
         console.log('📅 Forzando confirmar_cita: tiene fecha, hora Y desarrollo');
       } else if (parsed.extracted_data?.fecha && parsed.extracted_data?.hora && !tieneDesarrollo) {
@@ -3728,18 +3765,52 @@ Tú dime, ¿por dónde empezamos?`;
         }
       }
       
-      // 5. Si Claude detectó CITA (intent: confirmar_cita + fecha + hora) → CREAR
-      // ⚠️ PERO solo si tiene nombre real (no crear cita con "Cliente" o "Sin nombre")
+      // 5. CITAS - Dos tipos: LLAMADA (callback) o VISITA
       const tieneNombreParaCita = nombreCliente && nombreCliente !== 'Sin nombre' && nombreCliente !== 'amigo' && nombreCliente !== 'Cliente' && nombreCliente.length > 1;
-      
-      if (analysis.intent === 'confirmar_cita' && datosExtraidos.fecha && datosExtraidos.hora) {
+      const esSoloCallback = datosExtraidos.solo_callback === true;
+
+      // 5a. CALLBACKS - Crear cita de LLAMADA (fecha + hora + solo_callback)
+      if (esSoloCallback && datosExtraidos.fecha && datosExtraidos.hora) {
+        console.log('📞 SOLO CALLBACK - Crear cita de LLAMADA (no visita)');
+        try {
+          const { AppointmentService } = await import('./appointmentService');
+          const appointmentService = new AppointmentService(this.supabase, this.calendar, this.twilio);
+
+          const vendedorCallback = teamMembers.find((t: any) => t.id === lead.assigned_to) ||
+                                    teamMembers.find((t: any) => t.role === 'vendedor' && t.active);
+
+          const cleanPhoneCallback = lead.phone.replace(/\D/g, '');
+          const resultCallback = await appointmentService.crearCitaLlamada({
+            lead,
+            cleanPhone: cleanPhoneCallback,
+            clientName: nombreCliente || lead.name || 'Cliente',
+            fecha: datosExtraidos.fecha,
+            hora: String(datosExtraidos.hora),
+            vendedor: vendedorCallback,
+            desarrollo: desarrolloInteres || lead.property_interest
+          });
+
+          if (resultCallback.success) {
+            console.log('✅ Cita de llamada creada:', resultCallback.appointmentId);
+            await this.guardarAccionEnHistorial(lead.id, 'Cita de llamada programada', `${datosExtraidos.fecha} a las ${datosExtraidos.hora}`);
+          } else {
+            console.log('⚠️ No se creó cita de llamada:', resultCallback.error);
+            await this.guardarAccionEnHistorial(lead.id, 'Lead pidió callback', `${datosExtraidos.fecha} a las ${datosExtraidos.hora}`);
+          }
+        } catch (e) {
+          console.error('⚠️ Error creando cita de llamada:', e);
+          await this.guardarAccionEnHistorial(lead.id, 'Lead pidió callback', `${datosExtraidos.fecha} a las ${datosExtraidos.hora}`);
+        }
+      }
+
+      // 5b. VISITAS - Crear cita de VISITA (intent: confirmar_cita + fecha + hora, NO callback)
+      if (analysis.intent === 'confirmar_cita' && datosExtraidos.fecha && datosExtraidos.hora && !esSoloCallback) {
         if (!tieneNombreParaCita) {
           console.log('⏸️ Cita en espera - falta nombre real del cliente (tiene: ' + nombreCliente + ')');
         } else if (!desarrolloInteres) {
-          // NO crear cita si falta el desarrollo - Sara debe preguntar primero
           console.log('⏸️ Cita en espera - falta desarrollo (Claude preguntará cuál quiere visitar)');
         } else {
-          console.log('🧠 Claude decidió: Crear cita');
+          console.log('🧠 Claude decidió: Crear cita de VISITA');
           try {
             const cleanPhone = from.replace('whatsapp:+', '').replace(/\D/g, '');
             await this.handler.crearCitaCompleta(
