@@ -1176,6 +1176,31 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 
 ### 2026-01-25
 
+**Sesión 9 (18:00) - Cita de Llamada (Callback Tracking)**
+
+- ✅ **Sistema de citas de llamada (`appointment_type: 'llamada'`):**
+  - Detecta cuando lead pide callback: "márcame", "llámame", "contáctame"
+  - Distingue de visitas: "quiero visitar" → cita de visita, "márcame" → cita de llamada
+  - Crea appointment en DB con `appointment_type: 'llamada'`
+  - Duración: 15 min (vs 60 min de visitas)
+
+- ✅ **Notificación al vendedor SIN GPS:**
+  - Mensaje: "📞 LLAMADA PROGRAMADA" + nombre + teléfono + fecha + hora
+  - NO incluye ubicación/GPS (porque es llamada, no visita)
+  - Archivo: `src/services/appointmentService.ts` → `crearCitaLlamada()`
+
+- ✅ **Follow-up automático post-llamada:**
+  - Se programa 30 min después de la hora de la llamada
+  - Pregunta al vendedor: "¿Se completó la llamada con [nombre]?"
+  - Incluye teléfono para re-contactar si no se pudo
+
+- ✅ **Registro en historial:**
+  - Actividad: `callback_scheduled`
+  - Acción SARA: "Cita de llamada programada - [fecha] a las [hora]"
+
+- ✅ Tests: 260 pasando ✅
+- ✅ Deploy exitoso
+
 **Sesión 8 (13:40) - 3 Funcionalidades Críticas para Ventas**
 
 - ✅ **SLA Monitoring (`/api/sla`)**
