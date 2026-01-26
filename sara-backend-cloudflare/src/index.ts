@@ -16518,56 +16518,78 @@ async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhats
   mensaje += `\n_¡Éxito hoy!_ 💪`;
 
   // ═══════════════════════════════════════════════════════════
-  // ENVIAR VÍA TEMPLATE (para que llegue aunque no hayan escrito en 24h)
-  // Estrategia: Template llega, vendedor responde "Sí", ENTONCES enviamos briefing
+  // ENVIAR BRIEFING - Estrategia inteligente:
+  // - Si tiene ventana 24h abierta → enviar directo
+  // - Si NO tiene ventana → enviar template + guardar pending
   // ═══════════════════════════════════════════════════════════
   try {
     const nombreCorto = vendedor.name?.split(' ')[0] || 'Hola';
-
-    // 1. Guardar briefing completo en notes ANTES de enviar template
     const notasActuales = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
-    notasActuales.pending_briefing = {
-      sent_at: new Date().toISOString(),
-      fecha: fechaFormato,
-      citas: citasHoy?.length || 0,
-      acciones_pendientes: totalAcciones,
-      mensaje_completo: mensaje  // Guardar el briefing completo para enviar cuando respondan
-    };
-    await supabase.client
-      .from('team_members')
-      .update({
+
+    // Verificar si tiene ventana 24h abierta
+    const lastInteraction = notasActuales.last_sara_interaction;
+    const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const tieneVentanaAbierta = lastInteraction && lastInteraction > hace24h;
+
+    if (tieneVentanaAbierta) {
+      // ═══ VENTANA ABIERTA: Enviar briefing directo ═══
+      console.log(`📋 ${vendedor.name} tiene ventana 24h abierta (última: ${lastInteraction}) - enviando directo`);
+
+      await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+
+      // Actualizar notas
+      notasActuales.last_briefing_context = {
+        sent_at: new Date().toISOString(),
+        citas: citasHoy?.length || 0,
+        delivered: true,
+        method: 'direct'
+      };
+      delete notasActuales.pending_briefing; // Limpiar si había pendiente
+
+      await supabase.client.from('team_members').update({
         last_briefing_sent: hoyStr,
         notes: JSON.stringify(notasActuales)
-      })
-      .eq('id', vendedor.id);
+      }).eq('id', vendedor.id);
 
-    // 2. Enviar template (el briefing se envía cuando respondan)
-    const templateComponents = [
-      {
-        type: 'body',
-        parameters: [
-          { type: 'text', text: nombreCorto },
-          { type: 'text', text: 'tu briefing del día' }
-        ]
-      }
-    ];
-    await meta.sendTemplate(vendedor.phone, 'seguimiento_lead', 'es_MX', templateComponents);
-    console.log(`📤 Template briefing enviado a ${vendedor.name} (briefing completo pendiente hasta que responda)`);
+      console.log(`✅ Briefing enviado DIRECTO a ${vendedor.name}`);
+    } else {
+      // ═══ VENTANA CERRADA: Enviar template + guardar pending ═══
+      console.log(`📤 ${vendedor.name} NO tiene ventana 24h (última: ${lastInteraction || 'nunca'}) - usando template`);
+
+      // 1. Guardar briefing completo en notes
+      notasActuales.pending_briefing = {
+        sent_at: new Date().toISOString(),
+        fecha: fechaFormato,
+        citas: citasHoy?.length || 0,
+        acciones_pendientes: totalAcciones,
+        mensaje_completo: mensaje
+      };
+      await supabase.client
+        .from('team_members')
+        .update({
+          last_briefing_sent: hoyStr,
+          notes: JSON.stringify(notasActuales)
+        })
+        .eq('id', vendedor.id);
+
+      // 2. Enviar template
+      const templateComponents = [
+        {
+          type: 'body',
+          parameters: [
+            { type: 'text', text: nombreCorto },
+            { type: 'text', text: 'tu briefing del día' }
+          ]
+        }
+      ];
+      await meta.sendTemplate(vendedor.phone, 'seguimiento_lead', 'es_MX', templateComponents);
+      console.log(`📤 Template enviado a ${vendedor.name} (briefing pendiente hasta que responda)`);
+    }
   } catch (error) {
     console.error(`❌ Error enviando briefing a ${vendedor.name}:`, error);
-    // Fallback: intentar enviar solo mensaje normal (para vendedores que SÍ han escrito en 24h)
-    try {
-      await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
-      const notasActuales = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
-      notasActuales.last_briefing_context = { sent_at: new Date().toISOString(), citas: citasHoy?.length || 0 };
-      await supabase.client.from('team_members').update({ last_briefing_sent: hoyStr, notes: JSON.stringify(notasActuales) }).eq('id', vendedor.id);
-      console.log(`📋 Briefing enviado directo a ${vendedor.name} (fallback)`);
-    } catch (e2) {
-      console.error(`❌ Fallback también falló para ${vendedor.name}`);
-    }
   }
 
-  console.log(`✅ Briefing consolidado enviado a ${vendedor.name}`);
+  console.log(`✅ Proceso briefing completado para ${vendedor.name}`);
 }
 
 async function enviarRecapDiario(supabase: SupabaseService, meta: MetaWhatsAppService, vendedor: any): Promise<void> {
