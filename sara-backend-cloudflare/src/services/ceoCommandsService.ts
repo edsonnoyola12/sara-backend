@@ -21,6 +21,7 @@ export class CEOCommandsService {
           `*📊 REPORTES*\n` +
           `• *reporte* - Resumen semanal\n` +
           `• *equipo* - Ver equipo activo\n` +
+          `• *conexiones* - Quién se conectó hoy\n` +
           `• *leads* - Estado de leads\n` +
           `• *ventas* - Métricas de ventas\n\n` +
           `*📡 BROADCASTS*\n` +
@@ -65,6 +66,38 @@ export class CEOCommandsService {
       return { action: 'call_handler', handlerName: 'reporteLeads' };
     }
 
+    // ═══ MIS LEADS (resumen del vendedor/CEO) ═══
+    if (msgLower === 'mis leads' || msgLower === 'mis clientes' || msgLower === 'mi cartera') {
+      return { action: 'call_handler', handlerName: 'vendedorResumenLeads' };
+    }
+
+    // ═══ HOT - Leads calientes ═══
+    if (msgLower === 'hot' || msgLower === 'calientes' || msgLower === 'leads hot' || msgLower === 'leads calientes') {
+      return { action: 'call_handler', handlerName: 'vendedorLeadsHot' };
+    }
+
+    // ═══ NOTA - Agregar nota a lead ═══
+    // Formato: "nota Juan llamé y no contestó" o "nota 4921234567 interesado en Encinos"
+    const matchNota = mensaje.match(/^nota\s+([a-záéíóúñü\d]+)\s+(.+)$/i);
+    if (matchNota) {
+      return {
+        action: 'call_handler',
+        handlerName: 'vendedorAgregarNota',
+        handlerParams: { nombreLead: matchNota[1].trim(), nota: matchNota[2].trim() }
+      };
+    }
+
+    // ═══ VER NOTAS de un lead ═══
+    const matchVerNotas = msgLower.match(/^(?:notas|ver notas|notas de)\s+(.+)$/i);
+    if (matchVerNotas) {
+      return { action: 'call_handler', handlerName: 'vendedorVerNotas', handlerParams: { nombreLead: matchVerNotas[1].trim() } };
+    }
+
+    // ═══ COACHING - Tips de ventas ═══
+    if (msgLower === 'coaching' || msgLower === 'tips' || msgLower === 'tip' || msgLower === 'consejo') {
+      return { action: 'call_handler', handlerName: 'vendedorCoaching' };
+    }
+
     // ═══ VENTAS ═══
     if (msgLower.startsWith('ventas') || msgLower.startsWith('sales')) {
       return { action: 'call_handler', handlerName: 'reporteVentas' };
@@ -73,6 +106,12 @@ export class CEOCommandsService {
     // ═══ HOY (resumen del día) ═══
     if (msgLower === 'hoy' || msgLower === 'resumen') {
       return { action: 'call_handler', handlerName: 'resumenHoy' };
+    }
+
+    // ═══ CONEXIONES DEL EQUIPO ═══
+    if (msgLower === 'conexiones' || msgLower === 'quien se conecto' || msgLower === 'quien se conectó' ||
+        msgLower === 'quién se conectó' || msgLower === 'conectados' || msgLower === 'actividad equipo') {
+      return { action: 'call_handler', handlerName: 'reporteConexiones' };
     }
 
     // ═══ META ═══
@@ -190,8 +229,23 @@ export class CEOCommandsService {
       return { action: 'call_handler', handlerName: 'ceoUbicacion', handlerParams: { desarrollo: matchUbicacion[1].trim() } };
     }
 
+    // ═══ VER/HISTORIAL LEAD (por teléfono o nombre) ═══
+    // IMPORTANTE: Debe ir ANTES de video para que "ver 5214921052522" se detecte como lead, no video
+    const matchVerLead = msgLower.match(/^(?:ver|historial|chat|conversacion|conversación)\s+(.+)$/i);
+    if (matchVerLead) {
+      const identificador = matchVerLead[1].trim();
+      // Si parece teléfono (tiene 10+ dígitos) o es un nombre corto (no desarrollo)
+      const soloDigitos = identificador.replace(/\D/g, '');
+      const esDesarrolloConocido = ['monte verde', 'monte real', 'los encinos', 'miravalle', 'distrito falco', 'andes'].some(d => identificador.toLowerCase().includes(d));
+
+      if (soloDigitos.length >= 10 || (!esDesarrolloConocido && !identificador.includes(' '))) {
+        // Es teléfono o nombre de lead - redirigir a handler de historial
+        return { action: 'call_handler', handlerName: 'ceoVerLead', handlerParams: { identificador } };
+      }
+    }
+
     // ═══ VIDEO [desarrollo] ═══
-    const matchVideo = msgLower.match(/^(?:video|ver|tour)\s+(.+)$/i);
+    const matchVideo = msgLower.match(/^(?:video|tour)\s+(.+)$/i);
     if (matchVideo) {
       return { action: 'call_handler', handlerName: 'ceoVideo', handlerParams: { desarrollo: matchVideo[1].trim() } };
     }
@@ -556,6 +610,105 @@ export class CEOCommandsService {
           return { message: msg };
         }
 
+        // ═══ REPORTE DE CONEXIONES DEL EQUIPO ═══
+        case 'reporteConexiones': {
+          const { data: team } = await this.supabase.client
+            .from('team_members')
+            .select('name, role, oficina, notes, active')
+            .eq('active', true)
+            .order('role');
+
+          const hoy = new Date();
+          const hoyStr = hoy.toISOString().split('T')[0]; // "2026-01-26"
+
+          const conectadosHoy: { name: string; role: string; hora: string }[] = [];
+          const noConectadosCoord: { name: string; oficina: string }[] = [];
+          const noConectadosVend: { name: string; ultima: string }[] = [];
+
+          for (const m of team || []) {
+            let lastInteraction: string | null = null;
+
+            // Extraer last_sara_interaction del campo notes (puede ser string JSON o objeto)
+            if (m.notes) {
+              try {
+                const notesObj = typeof m.notes === 'string' ? JSON.parse(m.notes) : m.notes;
+                lastInteraction = notesObj?.last_sara_interaction || null;
+              } catch {
+                // Si no es JSON válido, ignorar
+              }
+            }
+
+            if (lastInteraction && lastInteraction.startsWith(hoyStr)) {
+              // Se conectó hoy
+              const hora = new Date(lastInteraction).toLocaleTimeString('es-MX', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+                timeZone: 'America/Mexico_City'
+              });
+              conectadosHoy.push({ name: m.name, role: m.role, hora });
+            } else {
+              // No se conectó hoy
+              if (m.role === 'coordinador') {
+                noConectadosCoord.push({ name: m.name, oficina: m.oficina || '-' });
+              } else if (m.role === 'vendedor') {
+                let ultimaStr = 'Sin registro';
+                if (lastInteraction) {
+                  const fecha = new Date(lastInteraction);
+                  ultimaStr = fecha.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' });
+                }
+                noConectadosVend.push({ name: m.name, ultima: ultimaStr });
+              }
+            }
+          }
+
+          // Construir mensaje
+          let msg = `📊 *REPORTE DE CONEXIONES*\n_${hoy.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}_\n\n`;
+
+          // Conectados hoy
+          if (conectadosHoy.length > 0) {
+            msg += `✅ *SE CONECTARON HOY:*\n`;
+            for (const c of conectadosHoy) {
+              msg += `• ${c.name} (${c.role}) - ${c.hora}\n`;
+            }
+            msg += `\n`;
+          }
+
+          // Coordinadores sin conexión
+          if (noConectadosCoord.length > 0) {
+            msg += `❌ *COORDINADORES SIN CONEXIÓN:*\n`;
+            for (const c of noConectadosCoord) {
+              msg += `• ${c.name} (${c.oficina})\n`;
+            }
+            msg += `\n`;
+          }
+
+          // Vendedores sin conexión
+          if (noConectadosVend.length > 0) {
+            msg += `❌ *VENDEDORES SIN CONEXIÓN HOY:*\n`;
+            for (const v of noConectadosVend) {
+              msg += `• ${v.name} - última: ${v.ultima}\n`;
+            }
+            msg += `\n`;
+          }
+
+          // Resumen
+          const totalActivos = (team || []).length;
+          const totalConectados = conectadosHoy.length;
+          const pctConectados = totalActivos > 0 ? Math.round((totalConectados / totalActivos) * 100) : 0;
+
+          msg += `📈 *RESUMEN:*\n`;
+          msg += `• Conectados: ${totalConectados} de ${totalActivos} (${pctConectados}%)\n`;
+          msg += `• Coordinadores: ${conectadosHoy.filter(c => c.role === 'coordinador').length} de ${noConectadosCoord.length + conectadosHoy.filter(c => c.role === 'coordinador').length}\n`;
+          msg += `• Vendedores: ${conectadosHoy.filter(c => c.role === 'vendedor').length} de ${noConectadosVend.length + conectadosHoy.filter(c => c.role === 'vendedor').length}\n`;
+
+          if (noConectadosCoord.length === (team || []).filter(t => t.role === 'coordinador').length && noConectadosCoord.length > 0) {
+            msg += `\n⚠️ _Ningún coordinador se conectó hoy_`;
+          }
+
+          return { message: msg };
+        }
+
         // Handlers que requieren lógica externa (en whatsapp.ts)
         case 'vendedorCitasHoy':
         case 'iniciarBroadcast':
@@ -597,6 +750,18 @@ export class CEOCommandsService {
 
         // ━━━ VIDEO ━━━
         case 'ceoVideo':
+          return { needsExternalHandler: true };
+
+        // ━━━ VER LEAD (historial/info) ━━━
+        case 'ceoVerLead':
+          return { needsExternalHandler: true };
+
+        // ━━━ COMANDOS DE VENDEDOR PARA CEO ━━━
+        case 'vendedorResumenLeads':
+        case 'vendedorLeadsHot':
+        case 'vendedorAgregarNota':
+        case 'vendedorVerNotas':
+        case 'vendedorCoaching':
           return { needsExternalHandler: true };
 
         default:

@@ -145,53 +145,123 @@ Los integration tests prueban flujos completos end-to-end:
 
 ## COMANDOS CEO
 
-| Comando | Acción | Handler |
-|---------|--------|---------|
-| `ayuda` / `help` / `?` | Ver todos los comandos | Respuesta directa |
-| `reporte` | Resumen semanal de leads | `generarReporte` |
-| `equipo` | Ver equipo activo | `reporteEquipo` |
-| `leads` | Estado de leads | `reporteLeads` |
-| `ventas` | Métricas de ventas | `reporteVentas` |
-| `hoy` / `resumen` | Resumen del día | `resumenHoy` |
-| `citas` / `citas hoy` / `mis citas` | Citas de hoy | `vendedorCitasHoy` |
-| `citas mañana` / `mis citas mañana` | Citas de mañana (📞 llamadas / 📋 citas) | `vendedorCitasManana` |
-| `broadcast` | Enviar mensaje masivo | `iniciarBroadcast` |
-| `segmentos` | Ver segmentos disponibles | `verSegmentos` |
-| `eventos` | Ver eventos activos | `verEventos` |
-| `mensaje [nombre]` | Enviar mensaje a lead (Sara intermedia) | `ceoMensajeLead` |
-| `bridge [nombre]` | Chat directo 6 min | `ceoBridgeLead` |
-| `#mas` / `#continuar` | Extender bridge 6 min más | `ceoExtenderBridge` |
-| `#cerrar` / `#fin` | Terminar TODAS las conexiones | `ceoCerrarBridge` |
-| `actividad` / `bitácora` | Ver actividad del día | `verActividad` |
-| `adelante [nombre]` | Mover lead al siguiente paso del funnel | `ceoMoverLead` |
-| `atras [nombre]` | Regresar lead al paso anterior | `ceoMoverLead` |
-| `quien es [nombre]` | Ver info completa del lead | `ceoQuienEs` |
-| `brochure [desarrollo/modelo]` | Enviar brochure del desarrollo | `ceoBrochure` |
-| `ubicacion [desarrollo/modelo]` | Enviar GPS del desarrollo | `ceoUbicacion` |
-| `video [desarrollo/modelo]` | Enviar video del desarrollo | `ceoVideo` |
+### Reportes y Resúmenes
+| Comando | Acción |
+|---------|--------|
+| `ayuda` / `help` / `?` | Ver todos los comandos |
+| `hoy` / `resumen` | Resumen del día |
+| `reporte` | Resumen semanal de leads |
+| `equipo` / `vendedores` | Ver equipo activo |
+| `leads` / `clientes` | Estado de todos los leads |
+| `ventas` | Métricas de ventas |
+| `meta` | Ver meta mensual |
+| `pendientes` | Ver leads sin seguimiento |
+| `conexiones` / `quien se conectó` | Ver quién del equipo se conectó hoy |
+| `actividad` / `bitácora` | Ver actividad del día |
+
+### Leads y Seguimiento
+| Comando | Acción |
+|---------|--------|
+| `mis leads` / `mi cartera` | Ver resumen de leads propios |
+| `hot` / `calientes` | Ver leads calientes (score >= 70) |
+| `ver [teléfono]` / `historial [teléfono]` | Ver info y conversación de un lead |
+| `quien es [nombre]` / `buscar [nombre]` | Buscar lead por nombre |
+| `nota [nombre] [texto]` | Agregar nota a un lead |
+| `notas [nombre]` | Ver notas de un lead |
+| `nuevo lead [nombre] [tel] [desarrollo]` | Crear lead manualmente |
+
+### Comunicación con Leads
+| Comando | Acción |
+|---------|--------|
+| `mensaje [nombre]` | Enviar mensaje a lead (Sara intermedia) |
+| `bridge [nombre]` | Chat directo con lead (6 min) |
+| `bridge [nombre] "mensaje"` | Bridge con mensaje inicial |
+| `#mas` / `#continuar` | Extender bridge 6 min más |
+| `#cerrar` / `#fin` | Terminar conexión activa |
+
+### Funnel y Etapas
+| Comando | Acción |
+|---------|--------|
+| `adelante [nombre]` | Mover lead al siguiente paso |
+| `atras [nombre]` | Regresar lead al paso anterior |
+
+### Citas
+| Comando | Acción |
+|---------|--------|
+| `citas` / `mis citas` | Ver citas de hoy |
+| `citas mañana` | Ver citas de mañana |
+
+### Recursos de Desarrollos
+| Comando | Acción |
+|---------|--------|
+| `brochure [desarrollo]` | Enviar brochure |
+| `ubicacion [desarrollo]` | Enviar GPS |
+| `video [desarrollo]` | Enviar video |
+
+### Marketing y Broadcasts
+| Comando | Acción |
+|---------|--------|
+| `broadcast` | Enviar mensaje masivo |
+| `segmentos` | Ver segmentos disponibles |
+| `eventos` | Ver eventos activos |
+
+### Extras
+| Comando | Acción |
+|---------|--------|
+| `coaching` / `tips` | Tips de ventas |
 
 ---
 
 ## COMANDOS ASESOR HIPOTECARIO
 
+### Leads y Gestión
 | Comando | Acción |
 |---------|--------|
-| `ayuda` | Ver comandos |
+| `ayuda` | Ver comandos disponibles |
 | `mis leads` / `leads` | Ver leads asignados |
 | `status [nombre]` / `info [nombre]` | Ver detalle de un lead |
+| `llamar [nombre]` | Ver teléfono del lead |
+| `contactado [nombre]` | Marcar como contactado |
+
+### Documentos y Crédito
+| Comando | Acción |
+|---------|--------|
 | `docs [nombre]` | Pedir documentos al lead |
 | `docs pendientes` / `pendientes` | Ver leads esperando documentos |
 | `preaprobado [nombre]` | Notificar pre-aprobación |
 | `rechazado [nombre] [motivo]` | Notificar rechazo |
-| `dile [nombre] que [msg]` | Enviar mensaje vía Sara |
-| `llamar [nombre]` | Ver teléfono del lead |
-| `adelante [nombre]` | Mover al siguiente paso del funnel |
+| `actualizar [nombre] banco=[banco] monto=[monto]` | Actualizar datos del lead |
+
+### Comunicación
+| Comando | Acción |
+|---------|--------|
+| `dile [nombre] que [mensaje]` | Enviar mensaje vía Sara |
+| `bridge [nombre]` | Chat directo con lead (6 min) |
+| `bridge [nombre] "mensaje"` | Bridge con mensaje inicial |
+| `#mas` / `#continuar` | Extender bridge 6 min más |
+| `#cerrar` / `#fin` | Terminar conexión activa |
+
+### Funnel
+| Comando | Acción |
+|---------|--------|
+| `adelante [nombre]` | Mover al siguiente paso |
 | `atras [nombre]` | Regresar al paso anterior |
-| `contactado [nombre]` | Marcar como contactado |
-| `hoy` | Citas de hoy |
-| `semana` | Citas de la semana |
+
+### Citas
+| Comando | Acción |
+|---------|--------|
+| `hoy` / `citas hoy` | Citas de hoy |
+| `semana` / `citas semana` | Citas de la semana |
+| `agendar [nombre] [fecha] [hora]` | Agendar cita |
+| `cancelar cita [nombre]` | Cancelar cita |
+| `reagendar [nombre] [fecha] [hora]` | Reagendar cita |
+
+### Otros
+| Comando | Acción |
+|---------|--------|
 | `reporte` | Ver estadísticas |
 | `on` / `off` | Activar/pausar disponibilidad |
+| `nuevo lead hipoteca [nombre] [tel]` | Crear lead de hipoteca |
 
 ---
 
@@ -299,6 +369,26 @@ Cambia la hora de una llamada ya programada:
 - `reagendar llamada María 4pm` - Si solo pones hora, asume hoy
 - `cambiar llamada de Pedro lunes 10am` - Formato alternativo
 - El lead SÍ recibe notificación del cambio
+
+---
+
+## COMANDOS AGENCIA/MARKETING
+
+| Comando | Acción |
+|---------|--------|
+| `ayuda` | Ver comandos disponibles |
+| `campañas` / `campaigns` | Ver campañas activas |
+| `metricas` / `stats` | Ver métricas de campañas |
+| `leads` | Ver leads de campañas |
+| `segmentos` | Ver segmentos disponibles |
+| `broadcast` | Enviar mensaje masivo |
+| `enviar a [segmento]` | Enviar mensaje a segmento específico |
+
+---
+
+## COMANDOS COORDINADOR
+
+Los coordinadores tienen acceso a los mismos comandos que los vendedores, más la capacidad de ver leads de su equipo.
 
 ---
 

@@ -1710,6 +1710,80 @@ export default {
       return corsResponse(JSON.stringify({ ok: true, updated: data }));
     }
 
+    // TEST: Eliminar citas de un lead (para pruebas)
+    if (url.pathname === "/test-delete-appointments") {
+      const nombre = url.searchParams.get('nombre');
+      if (!nombre) {
+        return corsResponse(JSON.stringify({ error: "Falta ?nombre=X" }), 400);
+      }
+      // Buscar lead
+      const { data: leads } = await supabase.client
+        .from('leads')
+        .select('id, name')
+        .ilike('name', `%${nombre}%`)
+        .limit(1);
+      if (!leads || leads.length === 0) {
+        return corsResponse(JSON.stringify({ error: "Lead no encontrado" }), 404);
+      }
+      const leadId = leads[0].id;
+      // Buscar citas del lead
+      const { data: citas } = await supabase.client
+        .from('appointments')
+        .select('id')
+        .eq('lead_id', leadId);
+
+      if (citas && citas.length > 0) {
+        const citaIds = citas.map(c => c.id);
+        // Eliminar surveys primero
+        await supabase.client
+          .from('surveys')
+          .delete()
+          .in('appointment_id', citaIds);
+        // Eliminar citas
+        await supabase.client
+          .from('appointments')
+          .delete()
+          .in('id', citaIds);
+      }
+      return corsResponse(JSON.stringify({ ok: true, deleted: citas?.length || 0, lead: leads[0] }));
+    }
+
+    // TEST: Actualizar property_interest de un lead
+    if (url.pathname === "/test-update-interest") {
+      const nombre = url.searchParams.get('nombre');
+      const desarrollo = url.searchParams.get('desarrollo');
+      if (!nombre || !desarrollo) {
+        return corsResponse(JSON.stringify({ error: "Falta ?nombre=X&desarrollo=Y" }), 400);
+      }
+      const { data, error } = await supabase.client
+        .from('leads')
+        .update({ property_interest: desarrollo })
+        .ilike('name', `%${nombre}%`)
+        .select('id, name, phone, property_interest');
+      if (error) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+      return corsResponse(JSON.stringify({ ok: true, updated: data }));
+    }
+
+    // TEST: Simular inactividad de lead (poner last_message_at hace 48h)
+    if (url.pathname === "/test-simulate-inactive") {
+      const nombre = url.searchParams.get('nombre');
+      if (!nombre) {
+        return corsResponse(JSON.stringify({ error: "Falta ?nombre=X" }), 400);
+      }
+      const hace48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+      const { data, error } = await supabase.client
+        .from('leads')
+        .update({ last_message_at: hace48h })
+        .ilike('name', `%${nombre}%`)
+        .select('id, name, phone, last_message_at');
+      if (error) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+      return corsResponse(JSON.stringify({ ok: true, message: `Lead(s) marcados como inactivos (48h)`, updated: data }));
+    }
+
     // TEST: Enviar video directamente a un teléfono
     if (url.pathname === "/test-force-video" && request.method === "POST") {
       const body = await request.json() as any;

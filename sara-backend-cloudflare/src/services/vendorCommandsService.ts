@@ -249,6 +249,17 @@ export class VendorCommandsService {
       return { matched: true, handlerName: 'vendedorLeadsPendientes' };
     }
 
+    // ═══ CONTACTAR [nombre] - Enviar template a lead fuera de 24h ═══
+    // Formato: "contactar Juan", "contactar roberto"
+    const contactarMatch = msg.match(/^contactar\s+([a-záéíóúñü\d]+)$/i);
+    if (contactarMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorContactarLead',
+        handlerParams: { nombreLead: contactarMatch[1].trim() }
+      };
+    }
+
     // ═══ NOTA / APUNTE - Agregar nota a un lead ═══
     // Formato flexible: "nota rodrigo hablé por tel", "nota Juan: le interesa", "apunte María presupuesto 2M"
     const notaMatch = msg.match(/^(?:nota|apunte|registrar)\s+([a-záéíóúñü]+)[\s:]+(.+)$/i);
@@ -793,9 +804,9 @@ export class VendorCommandsService {
   async getResumenLeads(vendedorId: string): Promise<any> {
     const { data: leads } = await this.supabase.client
       .from('leads')
-      .select('id, name, stage, phone')
+      .select('id, name, status, phone')
       .eq('assigned_to', vendedorId)
-      .in('stage', ['new', 'contacted', 'qualified', 'visit_scheduled', 'visited', 'negotiating'])
+      .not('status', 'in', '("won","lost","dnc","delivered")')
       .order('updated_at', { ascending: false })
       .limit(15);
 
@@ -811,8 +822,9 @@ export class VendorCommandsService {
 
     const porEtapa: { [key: string]: any[] } = {};
     leads.forEach(l => {
-      if (!porEtapa[l.stage]) porEtapa[l.stage] = [];
-      porEtapa[l.stage].push(l);
+      const etapa = l.status || 'new';
+      if (!porEtapa[etapa]) porEtapa[etapa] = [];
+      porEtapa[etapa].push(l);
     });
 
     const etapas: { [key: string]: string } = {
