@@ -24170,6 +24170,82 @@ async function alertarObjecion(
   try {
     if (objeciones.length === 0) return;
 
+    const notas = typeof lead.notes === 'object' ? lead.notes : {};
+    const nombreCortoLead = lead.name ? lead.name.split(' ')[0] : '';
+
+    // ═══════════════════════════════════════════════════════════
+    // OBJECIONES DE INDECISIÓN: SARA responde automáticamente
+    // No notifica al vendedor, maneja directamente
+    // ═══════════════════════════════════════════════════════════
+    const soloIndecision = objeciones.every(o => o.tipo === 'indecision');
+    const tieneIndecision = objeciones.some(o => o.tipo === 'indecision');
+
+    if (soloIndecision || (tieneIndecision && objeciones.length === 1)) {
+      console.log(`🤖 Objeción de INDECISIÓN detectada para ${lead.name} - SARA responde automáticamente`);
+
+      // Respuestas automáticas para indecisión (varían según contexto)
+      const msgLower = mensaje.toLowerCase();
+      let respuestaAuto = '';
+
+      if (msgLower.includes('espos') || msgLower.includes('familia') || msgLower.includes('pareja')) {
+        // Quiere consultar con familia/esposa
+        respuestaAuto = `¡Por supuesto${nombreCortoLead ? ` ${nombreCortoLead}` : ''}! Es una decisión importante y es bueno tomarla en familia 👨‍👩‍👧
+
+¿Te gustaría que agendemos una visita para que vengan juntos a conocer? Así pueden ver el espacio real y resolver todas sus dudas. Sin ningún compromiso 😊
+
+¿Qué día les quedaría mejor?`;
+      } else if (msgLower.includes('pensar') || msgLower.includes('ver') || msgLower.includes('no se')) {
+        // Necesita pensarlo
+        respuestaAuto = `Claro${nombreCortoLead ? ` ${nombreCortoLead}` : ''}, es una decisión importante y está bien tomarse el tiempo necesario 😊
+
+Para ayudarte a decidir, ¿hay alguna duda específica que pueda resolver? Por ejemplo sobre precios, financiamiento, o características de las casas.
+
+Estoy aquí para lo que necesites.`;
+      } else if (msgLower.includes('consultar') || msgLower.includes('platicar')) {
+        // Quiere consultarlo
+        respuestaAuto = `¡Perfecto${nombreCortoLead ? ` ${nombreCortoLead}` : ''}! Tómate tu tiempo para platicarlo 😊
+
+Si quieres, te puedo enviar información detallada para que la revisen juntos. También puedo agendar una visita cuando estén listos para que conozcan el lugar en persona.
+
+¿Qué te sería más útil?`;
+      } else {
+        // Respuesta genérica de indecisión
+        respuestaAuto = `Entiendo${nombreCortoLead ? ` ${nombreCortoLead}` : ''}, es una decisión importante 😊
+
+¿Hay algo específico que te gustaría saber o alguna duda que pueda resolver para ayudarte? Estoy aquí para apoyarte en lo que necesites.`;
+      }
+
+      // Enviar respuesta automática al lead
+      await meta.sendWhatsAppMessage(lead.phone, respuestaAuto);
+      console.log(`✅ SARA respondió automáticamente a indecisión de ${lead.name}`);
+
+      // Guardar en notas (sin alertar vendedor)
+      const notasActualizadas = {
+        ...notas,
+        ultima_objecion_auto: new Date().toISOString(),
+        historial_objeciones: [
+          ...((notas as any)?.historial_objeciones || []).slice(-9),
+          {
+            fecha: new Date().toISOString(),
+            tipos: ['indecision'],
+            mensaje: mensaje.substring(0, 200),
+            manejado_por: 'SARA_AUTO'
+          }
+        ]
+      };
+
+      await supabase.client
+        .from('leads')
+        .update({ notes: notasActualizadas })
+        .eq('id', lead.id);
+
+      return; // No alertar al vendedor
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // OTRAS OBJECIONES: Alertar al vendedor como antes
+    // ═══════════════════════════════════════════════════════════
+
     // Buscar vendedor asignado
     const { data: vendedor } = await supabase.client
       .from('team_members')
@@ -24183,7 +24259,6 @@ async function alertarObjecion(
     }
 
     // Verificar cooldown (no alertar misma objeción en 2 horas)
-    const notas = typeof lead.notes === 'object' ? lead.notes : {};
     const ultimaObjecion = (notas as any)?.ultima_alerta_objecion;
     if (ultimaObjecion) {
       const hace2h = new Date(Date.now() - 2 * 60 * 60 * 1000);
@@ -24193,10 +24268,14 @@ async function alertarObjecion(
       }
     }
 
+    // Filtrar indecisión de las objeciones a alertar (ya se manejó arriba si era solo indecisión)
+    const objecionesParaAlertar = objeciones.filter(o => o.tipo !== 'indecision');
+    if (objecionesParaAlertar.length === 0) return;
+
     // Construir mensaje de alerta
-    const tiposObjecion = objeciones.map(o => o.tipo).join(', ');
-    const prioridadMax = objeciones.some(o => o.prioridad === 'alta') ? 'ALTA' :
-                         objeciones.some(o => o.prioridad === 'media') ? 'MEDIA' : 'BAJA';
+    const tiposObjecion = objecionesParaAlertar.map(o => o.tipo).join(', ');
+    const prioridadMax = objecionesParaAlertar.some(o => o.prioridad === 'alta') ? 'ALTA' :
+                         objecionesParaAlertar.some(o => o.prioridad === 'media') ? 'MEDIA' : 'BAJA';
     const nombreLeadObj = lead.name || 'Sin nombre';
     const nombreCortoObj = lead.name ? lead.name.split(' ')[0] : 'lead';
 
@@ -24214,7 +24293,7 @@ async function alertarObjecion(
 `;
 
     // Agregar respuestas sugeridas (máximo 2)
-    objeciones.slice(0, 2).forEach(obj => {
+    objecionesParaAlertar.slice(0, 2).forEach(obj => {
       alertaMsg += `\n${obj.respuestaSugerida}\n`;
     });
 
@@ -24231,7 +24310,7 @@ async function alertarObjecion(
         ...((notas as any)?.historial_objeciones || []).slice(-9),
         {
           fecha: new Date().toISOString(),
-          tipos: objeciones.map(o => o.tipo),
+          tipos: objecionesParaAlertar.map(o => o.tipo),
           mensaje: mensaje.substring(0, 200)
         }
       ]
