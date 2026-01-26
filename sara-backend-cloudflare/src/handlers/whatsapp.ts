@@ -1803,6 +1803,43 @@ export class WhatsAppHandler {
         .limit(5);
 
       if (!leads || leads.length === 0) {
+        // Buscar sugerencias de nombres similares
+        const { data: recentLeads } = await this.supabase.client
+          .from('leads')
+          .select('name')
+          .order('created_at', { ascending: false })
+          .limit(100);
+
+        if (recentLeads && recentLeads.length > 0) {
+          const similarity = (a: string, b: string): number => {
+            a = a.toLowerCase(); b = b.toLowerCase();
+            if (a === b) return 1;
+            if (a.startsWith(b) || b.startsWith(a)) return 0.8;
+            if (a.includes(b) || b.includes(a)) return 0.6;
+            let matches = 0;
+            const minLen = Math.min(a.length, b.length);
+            for (let i = 0; i < minLen; i++) { if (a[i] === b[i]) matches++; }
+            return matches / Math.max(a.length, b.length);
+          };
+
+          const sugerencias = recentLeads
+            .map(l => ({ name: l.name, score: similarity(l.name?.split(' ')[0] || '', nombreLead) }))
+            .filter(s => s.score >= 0.4 && s.name)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 3)
+            .map(s => s.name?.split(' ')[0]);
+
+          const sugerenciasUnicas = [...new Set(sugerencias)];
+
+          if (sugerenciasUnicas.length > 0) {
+            await this.meta.sendWhatsAppMessage(cleanPhone,
+              `❌ No encontré "${nombreLead}"\n\n💡 *¿Quisiste decir?*\n` +
+              sugerenciasUnicas.map(s => `• ${s}`).join('\n')
+            );
+            return;
+          }
+        }
+
         await this.meta.sendWhatsAppMessage(cleanPhone, `❌ No encontré ningún lead con nombre "${nombreLead}"`);
         return;
       }
@@ -1881,6 +1918,51 @@ export class WhatsAppHandler {
         .limit(5);
 
       if (!leads || leads.length === 0) {
+        // Buscar sugerencias de nombres similares
+        const { data: recentLeads } = await this.supabase.client
+          .from('leads')
+          .select('name')
+          .order('created_at', { ascending: false })
+          .limit(100);
+
+        if (recentLeads && recentLeads.length > 0) {
+          // Función simple de similitud
+          const similarity = (a: string, b: string): number => {
+            a = a.toLowerCase();
+            b = b.toLowerCase();
+            if (a === b) return 1;
+            if (a.startsWith(b) || b.startsWith(a)) return 0.8;
+            if (a.includes(b) || b.includes(a)) return 0.6;
+            // Comparar primeras letras
+            let matches = 0;
+            const minLen = Math.min(a.length, b.length);
+            for (let i = 0; i < minLen; i++) {
+              if (a[i] === b[i]) matches++;
+            }
+            return matches / Math.max(a.length, b.length);
+          };
+
+          // Encontrar nombres similares
+          const sugerencias = recentLeads
+            .map(l => ({ name: l.name, score: similarity(l.name?.split(' ')[0] || '', nombreLead) }))
+            .filter(s => s.score >= 0.4 && s.name)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 3)
+            .map(s => s.name?.split(' ')[0]); // Solo primer nombre
+
+          // Eliminar duplicados
+          const sugerenciasUnicas = [...new Set(sugerencias)];
+
+          if (sugerenciasUnicas.length > 0) {
+            await this.meta.sendWhatsAppMessage(cleanPhone,
+              `❌ No encontré "${nombreLead}"\n\n` +
+              `💡 *¿Quisiste decir?*\n` +
+              sugerenciasUnicas.map(s => `• bridge ${s}`).join('\n')
+            );
+            return;
+          }
+        }
+
         await this.meta.sendWhatsAppMessage(cleanPhone, `❌ No encontré ningún lead con nombre "${nombreLead}"`);
         return;
       }

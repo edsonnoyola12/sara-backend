@@ -1371,7 +1371,7 @@ Flags:
   * NUNCA preguntes "¿te mando el video?" - SIEMPRE envíalo automáticamente
 - "send_gps": true si pide ubicación, mapa, cómo llegar, dirección, dónde queda, "mándame la ubicación", "pásame la dirección"
 - "send_brochure": true si pide brochure, folleto, PDF, catálogo, ficha técnica, planos, "mándame el brochure", "pásame el PDF"
-- "send_video": true si pide video, "mándame el video", "quiero ver el video", "pásame el video", "envíame el video"
+- "send_video": true si pide VIDEO EXPLÍCITAMENTE: "mándame el video", "quiero ver el video", "pásame el video", "envíame el video", "mándame video", "el video", "video por favor". ⚠️ IMPORTANTE: Si dice "mándame el video" o similar, SIEMPRE pon send_video: true (aunque también pongas send_video_desarrollo)
 - "send_matterport": true si pide recorrido virtual, tour 3D, ver por dentro, matterport, "cómo se ve por dentro", "quiero ver las casas"
 - "send_contactos": true SOLO cuando:
   * El cliente pide EXPLÍCITAMENTE asesor de crédito, hipoteca, financiamiento
@@ -3791,6 +3791,23 @@ Tú dime, ¿por dónde empezamos?`;
 
         if (soloQuiereGPS) {
           console.log('📍 SOLO GPS solicitado (sin video) - enviando ubicación únicamente');
+
+          // ═══ DETECTAR SI PIDE OFICINAS ═══
+          const msgLowerGPS = originalMessage.toLowerCase();
+          const pideOficinasGPS = msgLowerGPS.includes('oficina') ||
+            (msgLowerGPS.includes('santa rita') && !msgLowerGPS.includes('fraccion')) ||
+            msgLowerGPS.includes('oficinas centrales');
+
+          if (pideOficinasGPS) {
+            // GPS de oficinas centrales Grupo Santa Rita
+            const gpsOficinas = 'https://maps.app.goo.gl/hUk6aH8chKef6NRY7';
+            await new Promise(r => setTimeout(r, 400));
+            await this.twilio.sendWhatsAppMessage(from,
+              `📍 *Ubicación de Oficinas Grupo Santa Rita:*\n${gpsOficinas}\n\n_Ahí te lleva directo en Google Maps_`
+            );
+            console.log(`✅ GPS enviado (oficinas): ${gpsOficinas}`);
+            await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', 'Oficinas Grupo Santa Rita');
+          } else {
           const devParaGPSSolo = desarrolloInteres || analysis.extracted_data?.desarrollo || '';
           if (devParaGPSSolo) {
             const propGPSSolo = properties.find((p: any) => {
@@ -3833,6 +3850,7 @@ Tú dime, ¿por dónde empezamos?`;
               console.error(`⚠️ ${devParaGPSSolo} no tiene gps_link en DB`);
             }
           }
+          } // Cierre del else (no es oficinas)
           // NO continuar con el bloque de recursos completos
         } else if (enFlujoCreditoIncompleto && !pidioRecursosExplicito) {
           console.log('⏸️ Recursos en espera - flujo de crédito en curso');
@@ -6714,7 +6732,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       console.log('📍 GPS SOLICITADO (sin recursos)');
 
       // ═══ DETECTAR SI PIDE OFICINAS ═══
-      const msgLower = message.toLowerCase();
+      const msgLower = originalMessage.toLowerCase();
       const pideOficinas = msgLower.includes('oficina') ||
         (msgLower.includes('santa rita') && !msgLower.includes('fraccion')) ||
         msgLower.includes('oficinas centrales');
