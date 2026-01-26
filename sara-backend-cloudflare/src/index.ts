@@ -13023,25 +13023,47 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
 
     // 8am L-V: Briefing matutino (solo primer ejecucion de la hora)
-    console.log(`📋 BRIEFING CHECK: hora=${mexicoHour}===8? ${mexicoHour === 8}, isFirst=${isFirstRunOfHour}, dia=${dayOfWeek} (1-5)? ${dayOfWeek >= 1 && dayOfWeek <= 5}, vendedores=${!!vendedores}`);
+    console.log(`\n╔═══════════════════════════════════════════════════════════════════╗`);
+    console.log(`║  📋 BRIEFING MATUTINO - VERIFICACIÓN                              ║`);
+    console.log(`╚═══════════════════════════════════════════════════════════════════╝`);
+    console.log(`   🕐 Hora México: ${mexicoHour} (debe ser 8)`);
+    console.log(`   📅 Día semana: ${dayOfWeek} (L=1 a V=5, hoy=${['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dayOfWeek]})`);
+    console.log(`   👥 Total vendedores cargados: ${vendedores?.length || 0}`);
+
     // 8am-8:30am L-V: Briefing matutino (procesa en lotes para evitar timeout)
     const hoyStrBriefing = new Date().toISOString().split('T')[0];
+    console.log(`   📆 Fecha hoy: ${hoyStrBriefing}`);
+
     if (mexicoHour === 8 && dayOfWeek >= 1 && dayOfWeek <= 5 && vendedores) {
+      console.log(`\n   ✅ CONDICIONES CUMPLIDAS - Procesando briefings...`);
+
+      // Listar todos los vendedores y su estado
+      console.log(`\n   📋 ESTADO DE CADA VENDEDOR:`);
+      for (const v of vendedores) {
+        const tienePhone = !!v.phone;
+        const recibeBriefing = !!v.recibe_briefing;
+        const yaRecibioHoy = v.last_briefing_sent === hoyStrBriefing;
+        const elegible = tienePhone && recibeBriefing && !yaRecibioHoy;
+        console.log(`   ${elegible ? '🟢' : '⚪'} ${v.name} - phone:${tienePhone?'✓':'✗'} recibe:${recibeBriefing?'✓':'✗'} yaRecibió:${yaRecibioHoy?'✓':'✗'} → ${elegible ? 'ELEGIBLE' : 'SKIP'}`);
+      }
+
       // Filtrar solo los que NO han recibido briefing hoy
       const pendientes = vendedores.filter((v: any) =>
         v.phone && v.recibe_briefing && v.last_briefing_sent !== hoyStrBriefing
       );
 
       if (pendientes.length > 0) {
-        console.log(`✅ BRIEFING - ${pendientes.length} vendedores pendientes de ${vendedores.length} totales`);
+        console.log(`\n   📤 ${pendientes.length} VENDEDORES ELEGIBLES para briefing`);
 
         // Procesar máximo 5 por CRON para evitar timeout
         const BATCH_SIZE = 5;
         const lote = pendientes.slice(0, BATCH_SIZE);
         let enviados = 0;
 
+        console.log(`   🔄 Procesando lote de ${lote.length} (máx ${BATCH_SIZE} por CRON)`);
+
         for (const v of lote) {
-          console.log(`   📤 Enviando briefing a ${v.name} (${v.phone})...`);
+          console.log(`\n   ═══ PROCESANDO: ${v.name} ═══`);
           try {
             await enviarBriefingMatutino(supabase, meta, v);
             enviados++;
@@ -13051,13 +13073,20 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         }
 
         const restantes = pendientes.length - enviados;
-        console.log(`📊 BRIEFING RESULTADO: ${enviados} enviados, ${restantes > 0 ? restantes + ' pendientes para siguiente CRON' : 'todos completados'}`);
+        console.log(`\n╔═══════════════════════════════════════════════════════════════════╗`);
+        console.log(`║  📊 BRIEFING RESULTADO                                            ║`);
+        console.log(`║  ✅ Enviados: ${enviados}                                                    ║`);
+        console.log(`║  ⏳ Pendientes: ${restantes} ${restantes > 0 ? '(siguiente CRON)' : ''}                                          ║`);
+        console.log(`╚═══════════════════════════════════════════════════════════════════╝`);
         await logEvento(supabase, 'briefing', `Briefing matutino: ${enviados} enviados, ${restantes} pendientes`, { enviados, restantes, total: vendedores.length });
       } else {
-        console.log(`✅ BRIEFING - Todos los ${vendedores.length} vendedores ya recibieron su briefing hoy`);
+        console.log(`\n   ✅ Todos los ${vendedores.length} vendedores ya recibieron su briefing hoy`);
       }
-    } else if (mexicoHour !== 8) {
-      console.log(`⏭️ BRIEFING NO EJECUTADO - hora=${mexicoHour} (solo a las 8am)`);
+    } else {
+      console.log(`\n   ⏭️ BRIEFING NO EJECUTADO:`);
+      if (mexicoHour !== 8) console.log(`      - Hora incorrecta: ${mexicoHour} (debe ser 8)`);
+      if (dayOfWeek < 1 || dayOfWeek > 5) console.log(`      - Día incorrecto: ${dayOfWeek} (debe ser L-V)`);
+      if (!vendedores) console.log(`      - No hay vendedores cargados`);
     }
 
     // 8am L-V: Reporte diario consolidado CEO/Admin (incluye supervisión + métricas)
@@ -16348,11 +16377,19 @@ async function ejecutarTareaOneTime(
 }
 
 async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhatsAppService, vendedor: any): Promise<void> {
+  console.log(`\n═══════════════════════════════════════════════════════════`);
+  console.log(`📋 BRIEFING MATUTINO - Iniciando para: ${vendedor.name}`);
+  console.log(`   📱 Teléfono: ${vendedor.phone}`);
+  console.log(`   👤 Rol: ${vendedor.role}`);
+  console.log(`   🆔 ID: ${vendedor.id}`);
+  console.log(`═══════════════════════════════════════════════════════════`);
+
   const hoy = new Date();
   const hoyStr = hoy.toISOString().split('T')[0];
   const dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
   const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
   const fechaFormato = `${dias[hoy.getDay()]} ${hoy.getDate()} de ${meses[hoy.getMonth()]}`;
+  console.log(`   📅 Fecha: ${fechaFormato} (${hoyStr})`);
 
   // Tips de uso de SARA para el briefing
   const TIPS_SARA = [
@@ -16372,41 +16409,48 @@ async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhats
   const tipDelDia = TIPS_SARA[hoy.getDate() % TIPS_SARA.length]; // Tip diferente cada día
 
   // PROTECCIÓN ANTI-DUPLICADOS
+  console.log(`   🔍 Verificando duplicados - last_briefing_sent: ${vendedor.last_briefing_sent || 'nunca'}`);
   if (vendedor.last_briefing_sent === hoyStr) {
-    console.log(`⏭️ Briefing ya enviado hoy a ${vendedor.name}, saltando...`);
+    console.log(`⏭️ SKIP: Briefing ya enviado hoy a ${vendedor.name}`);
+    console.log(`═══════════════════════════════════════════════════════════\n`);
     return;
   }
+  console.log(`   ✅ No hay duplicado, continuando...`);
 
   // ═══════════════════════════════════════════════════════════
   // 1. CITAS DEL DÍA
   // ═══════════════════════════════════════════════════════════
-  const { data: citasHoy } = await supabase.client
+  console.log(`\n   📊 CONSULTANDO DATOS...`);
+  const { data: citasHoy, error: errorCitas } = await supabase.client
     .from('appointments')
     .select('*, leads(name, phone)')
     .eq('team_member_id', vendedor.id)
     .eq('scheduled_date', hoyStr)
     .eq('status', 'scheduled')
     .order('scheduled_time', { ascending: true });
+  console.log(`   🗓️ Citas hoy: ${citasHoy?.length || 0}${errorCitas ? ` (ERROR: ${errorCitas.message})` : ''}`);
 
   // ═══════════════════════════════════════════════════════════
   // 2. LEADS QUE REQUIEREN ACCIÓN
   // ═══════════════════════════════════════════════════════════
   // 2a. Leads nuevos sin contactar
-  const { data: leadsSinContactar } = await supabase.client
+  const { data: leadsSinContactar, error: errorLeadsNew } = await supabase.client
     .from('leads')
     .select('name, phone, created_at')
     .eq('assigned_to', vendedor.id)
     .eq('status', 'new');
+  console.log(`   🆕 Leads sin contactar: ${leadsSinContactar?.length || 0}${errorLeadsNew ? ` (ERROR: ${errorLeadsNew.message})` : ''}`);
 
   // 2b. Leads estancados (3+ días sin actividad)
   const hace3dias = new Date();
   hace3dias.setDate(hace3dias.getDate() - 3);
-  const { data: leadsEstancados } = await supabase.client
+  const { data: leadsEstancados, error: errorLeadsStale } = await supabase.client
     .from('leads')
     .select('name, phone, status, updated_at')
     .eq('assigned_to', vendedor.id)
     .in('status', ['contacted', 'appointment_scheduled'])
     .lt('updated_at', hace3dias.toISOString());
+  console.log(`   ⏳ Leads estancados (3+ días): ${leadsEstancados?.length || 0}${errorLeadsStale ? ` (ERROR: ${errorLeadsStale.message})` : ''}`);
 
   // ═══════════════════════════════════════════════════════════
   // 3. HIPOTECAS ESTANCADAS (si es asesor)
@@ -16522,6 +16566,7 @@ async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhats
   // - Si tiene ventana 24h abierta → enviar directo
   // - Si NO tiene ventana → enviar template + guardar pending
   // ═══════════════════════════════════════════════════════════
+  console.log(`\n   📤 PREPARANDO ENVÍO...`);
   try {
     const nombreCorto = vendedor.name?.split(' ')[0] || 'Hola';
     const notasActuales = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
@@ -16531,11 +16576,18 @@ async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhats
     const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const tieneVentanaAbierta = lastInteraction && lastInteraction > hace24h;
 
+    console.log(`   🕐 Última interacción con SARA: ${lastInteraction || 'NUNCA'}`);
+    console.log(`   🕐 Hace 24h sería: ${hace24h}`);
+    console.log(`   🔓 ¿Ventana 24h abierta?: ${tieneVentanaAbierta ? 'SÍ ✅' : 'NO ❌'}`);
+
     if (tieneVentanaAbierta) {
       // ═══ VENTANA ABIERTA: Enviar briefing directo ═══
-      console.log(`📋 ${vendedor.name} tiene ventana 24h abierta (última: ${lastInteraction}) - enviando directo`);
+      console.log(`\n   🟢 MÉTODO: ENVÍO DIRECTO (ventana abierta)`);
+      console.log(`   📱 Enviando a: ${vendedor.phone}`);
+      console.log(`   📝 Mensaje tiene ${mensaje.length} caracteres`);
 
-      await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+      const sendResult = await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+      console.log(`   ✅ Resultado envío directo:`, sendResult ? 'OK' : 'Sin respuesta');
 
       // Actualizar notas
       notasActuales.last_briefing_context = {
@@ -16551,10 +16603,11 @@ async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhats
         notes: JSON.stringify(notasActuales)
       }).eq('id', vendedor.id);
 
-      console.log(`✅ Briefing enviado DIRECTO a ${vendedor.name}`);
+      console.log(`   ✅ Briefing enviado DIRECTO exitosamente a ${vendedor.name}`);
     } else {
       // ═══ VENTANA CERRADA: Enviar template + guardar pending ═══
-      console.log(`📤 ${vendedor.name} NO tiene ventana 24h (última: ${lastInteraction || 'nunca'}) - usando template`);
+      console.log(`\n   🟡 MÉTODO: TEMPLATE + PENDING (ventana cerrada)`);
+      console.log(`   📱 Enviando template a: ${vendedor.phone}`);
 
       // 1. Guardar briefing completo en notes
       notasActuales.pending_briefing = {
@@ -16564,13 +16617,15 @@ async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhats
         acciones_pendientes: totalAcciones,
         mensaje_completo: mensaje
       };
-      await supabase.client
+      console.log(`   💾 Guardando pending_briefing en notes...`);
+      const updateResult = await supabase.client
         .from('team_members')
         .update({
           last_briefing_sent: hoyStr,
           notes: JSON.stringify(notasActuales)
         })
         .eq('id', vendedor.id);
+      console.log(`   💾 Update notes result:`, updateResult.error ? `ERROR: ${updateResult.error.message}` : 'OK');
 
       // 2. Enviar template reactivar_equipo (más apropiado para equipo interno)
       const templateComponents = [
@@ -16581,14 +16636,19 @@ async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhats
           ]
         }
       ];
-      await meta.sendTemplate(vendedor.phone, 'reactivar_equipo', 'es_MX', templateComponents);
-      console.log(`📤 Template reactivar_equipo enviado a ${vendedor.name} (briefing pendiente hasta que responda)`);
+      console.log(`   📤 Enviando template 'reactivar_equipo' con parámetro: ${nombreCorto}`);
+      const templateResult = await meta.sendTemplate(vendedor.phone, 'reactivar_equipo', 'es_MX', templateComponents);
+      console.log(`   📤 Template result:`, templateResult ? 'OK' : 'Sin respuesta');
+      console.log(`   ✅ Template enviado, briefing guardado como pending`);
     }
   } catch (error) {
-    console.error(`❌ Error enviando briefing a ${vendedor.name}:`, error);
+    console.error(`\n   ❌ ERROR EN BRIEFING para ${vendedor.name}:`, error);
+    console.error(`   ❌ Stack:`, error instanceof Error ? error.stack : 'No stack');
   }
 
-  console.log(`✅ Proceso briefing completado para ${vendedor.name}`);
+  console.log(`\n═══════════════════════════════════════════════════════════`);
+  console.log(`✅ BRIEFING COMPLETADO para ${vendedor.name}`);
+  console.log(`═══════════════════════════════════════════════════════════\n`);
 }
 
 async function enviarRecapDiario(supabase: SupabaseService, meta: MetaWhatsAppService, vendedor: any): Promise<void> {
