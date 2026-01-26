@@ -1675,6 +1675,12 @@ export class WhatsAppHandler {
     // ━━━ FALLBACK: Handlers que requieren lógica externa ━━━
     switch (handlerName) {
       // ━━━ CITAS ━━━
+      case 'vendedorCitasHoy':
+        await this.vendedorCitasHoy(from, ceo, nombreCEO);
+        break;
+      case 'vendedorCitasManana':
+        await this.vendedorCitasManana(from, ceo, nombreCEO);
+        break;
       case 'vendedorCancelarCita':
         await this.vendedorCancelarCita(from, body, ceo, nombreCEO);
         break;
@@ -5151,6 +5157,9 @@ export class WhatsAppHandler {
       case 'vendedorCitasHoy':
         await this.vendedorCitasHoy(from, vendedor, nombreVendedor);
         break;
+      case 'vendedorCitasManana':
+        await this.vendedorCitasManana(from, vendedor, nombreVendedor);
+        break;
       case 'vendedorResumenLeads':
         await this.vendedorResumenLeads(from, vendedor, nombreVendedor);
         break;
@@ -7781,6 +7790,19 @@ Responde con fecha y hora:
       await this.twilio.sendWhatsAppMessage(from, mensaje);
     } catch (e) {
       console.log('Error en citas hoy:', e);
+      await this.twilio.sendWhatsAppMessage(from, 'Error al obtener citas.');
+    }
+  }
+
+  private async vendedorCitasManana(from: string, vendedor: any, nombre: string): Promise<void> {
+    try {
+      const vendorService = new VendorCommandsService(this.supabase);
+      const esAdmin = vendedor.role === 'admin' || vendedor.role === 'coordinador';
+      const citas = await vendorService.getCitasManana(vendedor.id, esAdmin);
+      const mensaje = vendorService.formatCitasManana(citas, nombre, esAdmin);
+      await this.twilio.sendWhatsAppMessage(from, mensaje);
+    } catch (e) {
+      console.log('Error en citas mañana:', e);
       await this.twilio.sendWhatsAppMessage(from, 'Error al obtener citas.');
     }
   }

@@ -120,9 +120,14 @@ export class VendorCommandsService {
       };
     }
 
-    // ═══ CITAS ═══
+    // ═══ CITAS HOY ═══
     if (/^(mis\s+)?citas?(\s+hoy)?$/i.test(msg) || msg === 'ver citas') {
       return { matched: true, handlerName: 'vendedorCitasHoy' };
+    }
+
+    // ═══ CITAS MAÑANA ═══
+    if (/^(mis\s+)?citas?\s+ma[ñn]ana$/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorCitasManana' };
     }
 
     // ═══ REAGENDAR LLAMADA - Cambiar hora de llamada programada ═══
@@ -604,6 +609,7 @@ export class VendorCommandsService {
         scheduled_date,
         scheduled_time,
         status,
+        appointment_type,
         lead_id,
         leads!inner(name, phone)
       `)
@@ -633,8 +639,65 @@ export class VendorCommandsService {
     citas.forEach((cita, i) => {
       const hora = cita.scheduled_time?.slice(0, 5) || '??:??';
       const leadName = cita.leads?.name || 'Sin nombre';
-      const status = cita.status === 'confirmed' ? '✅' : '📋';
-      msg += `${status} *${hora}* - ${leadName}\n`;
+      const esLlamada = cita.appointment_type === 'llamada';
+      const icono = esLlamada ? '📞' : (cita.status === 'confirmed' ? '✅' : '📋');
+      const tipo = esLlamada ? 'Llamada' : 'Cita';
+      msg += `${icono} *${hora}* - ${leadName} (${tipo})\n`;
+    });
+
+    msg += `\n💡 Para reagendar: *reagendar [nombre] [día] [hora]*`;
+    return msg;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // CITAS MAÑANA
+  // ═══════════════════════════════════════════════════════════════════
+  async getCitasManana(vendedorId: string, esAdmin: boolean): Promise<any[]> {
+    const manana = new Date();
+    manana.setDate(manana.getDate() + 1);
+    const mananaStr = manana.toISOString().split('T')[0];
+
+    let query = this.supabase.client
+      .from('appointments')
+      .select(`
+        id,
+        scheduled_date,
+        scheduled_time,
+        status,
+        appointment_type,
+        lead_id,
+        leads!inner(name, phone)
+      `)
+      .eq('scheduled_date', mananaStr)
+      .in('status', ['scheduled', 'confirmed'])
+      .order('scheduled_time', { ascending: true });
+
+    if (!esAdmin) {
+      query = query.eq('vendedor_id', vendedorId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.log('Error getCitasManana:', error);
+      return [];
+    }
+    return data || [];
+  }
+
+  formatCitasManana(citas: any[], nombre: string, esAdmin: boolean): string {
+    if (!citas || citas.length === 0) {
+      return `📅 *${nombre}, no tienes citas mañana*\n\n¿Quieres agendar una?\nEscribe: *agendar cita con [nombre]*`;
+    }
+
+    let msg = `📅 *CITAS DE MAÑANA* (${citas.length})\n\n`;
+
+    citas.forEach((cita, i) => {
+      const hora = cita.scheduled_time?.slice(0, 5) || '??:??';
+      const leadName = cita.leads?.name || 'Sin nombre';
+      const esLlamada = cita.appointment_type === 'llamada';
+      const icono = esLlamada ? '📞' : (cita.status === 'confirmed' ? '✅' : '📋');
+      const tipo = esLlamada ? 'Llamada' : 'Cita';
+      msg += `${icono} *${hora}* - ${leadName} (${tipo})\n`;
     });
 
     msg += `\n💡 Para reagendar: *reagendar [nombre] [día] [hora]*`;

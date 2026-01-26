@@ -41,8 +41,13 @@ export class CEOCommandsService {
     }
 
     // ═══ CITAS HOY ═══
-    if (msgLower === 'citas' || msgLower === 'citas hoy') {
+    if (msgLower === 'citas' || msgLower === 'citas hoy' || msgLower === 'mis citas' || msgLower === 'mis citas hoy' || msgLower === 'ver citas') {
       return { action: 'call_handler', handlerName: 'vendedorCitasHoy' };
+    }
+
+    // ═══ CITAS MAÑANA ═══
+    if (msgLower === 'citas mañana' || msgLower === 'mis citas mañana' || msgLower === 'citas manana' || msgLower === 'mis citas manana') {
+      return { action: 'call_handler', handlerName: 'vendedorCitasManana' };
     }
 
     // ═══ REPORTE ═══
