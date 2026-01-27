@@ -3352,42 +3352,69 @@ Creada desde CRM`;
             
             // Formatear teléfono del vendedor para mostrar
             const vendedorPhoneDisplay = vendedorPhone ? vendedorPhone.replace(/^521/, '').replace(/^52/, '') : '';
-            
+
+            // Detectar si es llamada o cita presencial
+            const esLlamada = body.appointment_type === 'llamada' || data.appointment_type === 'llamada';
+            const tipoTitulo = esLlamada ? 'LLAMADA ACTUALIZADA' : 'CITA ACTUALIZADA';
+            const tipoTexto = esLlamada ? 'llamada' : 'cita';
+
             // Notificar al cliente (con datos del vendedor)
-            const msgCliente = `📅 *CITA ACTUALIZADA*
+            let msgCliente = `📞 *${tipoTitulo}*
 
 Hola ${(body.lead_name || 'estimado cliente').split(' ')[0]} 👋
 
-Tu cita ha sido modificada:
+Tu ${tipoTexto} ha sido modificada:
 
 📆 *Fecha:* ${fechaFormateada}
-🕐 *Hora:* ${horaFormateada}
-📍 *Lugar:* ${body.property_name || 'Por confirmar'}
-${gpsLink ? '🗺️ *Ubicación:* ' + gpsLink + '\n' : ''}
-👤 *Tu asesor:* ${vendedorName || 'Por asignar'}
-${vendedorPhoneDisplay ? '📱 *Contacto:* ' + vendedorPhoneDisplay : ''}
+🕐 *Hora:* ${horaFormateada}`;
 
-¡Te esperamos! 🏠`;
+            // Solo mostrar ubicación para citas presenciales
+            if (!esLlamada) {
+              msgCliente += `
+📍 *Lugar:* ${body.property_name || 'Por confirmar'}`;
+              if (gpsLink) {
+                msgCliente += `
+🗺️ *Ubicación:* ${gpsLink}`;
+              }
+            }
+
+            msgCliente += `
+👤 *Tu asesor:* ${vendedorName || 'Por asignar'}`;
+            if (vendedorPhoneDisplay) {
+              msgCliente += `
+📱 *Contacto:* ${vendedorPhoneDisplay}`;
+            }
+
+            msgCliente += esLlamada
+              ? `\n\n¡Te contactaremos! 📞`
+              : `\n\n¡Te esperamos! 🏠`;
 
             await meta.sendWhatsAppMessage(body.lead_phone, msgCliente);
-            console.log('📤 Notificación enviada a cliente:', body.lead_name);
-            
+            console.log(`📤 Notificación de ${tipoTexto} enviada a cliente:`, body.lead_name);
+
             // Notificar al vendedor (con datos del lead)
             if (vendedorPhone) {
               // Formatear teléfono del lead para mostrar
               const leadPhoneDisplay = body.lead_phone ? body.lead_phone.replace(/^521/, '').replace(/^52/, '') : '';
-              
-              const msgVendedor = `📅 *CITA EDITADA*
+
+              let msgVendedor = `📞 *${tipoTitulo.replace('ACTUALIZADA', 'EDITADA')}*
 
 👤 *Cliente:* ${body.lead_name}
 📱 *Tel:* ${leadPhoneDisplay}
 📆 *Fecha:* ${fechaFormateada}
-🕐 *Hora:* ${horaFormateada}
-📍 *Lugar:* ${body.property_name || 'Por confirmar'}
-${gpsLink ? '🗺️ *Maps:* ' + gpsLink : ''}`;
+🕐 *Hora:* ${horaFormateada}`;
+
+              if (!esLlamada) {
+                msgVendedor += `
+📍 *Lugar:* ${body.property_name || 'Por confirmar'}`;
+                if (gpsLink) {
+                  msgVendedor += `
+🗺️ *Maps:* ${gpsLink}`;
+                }
+              }
 
               await meta.sendWhatsAppMessage(vendedorPhone, msgVendedor);
-              console.log('📤 Notificación enviada a vendedor:', vendedorName);
+              console.log(`📤 Notificación de ${tipoTexto} enviada a vendedor:`, vendedorName);
             }
           } catch (notifError) {
             console.error('⚠️ Error enviando notificaciones:', notifError);
