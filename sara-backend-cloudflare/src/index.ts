@@ -1000,7 +1000,8 @@ export default {
                 'video': 'Genera y envía video de prueba (tarda ~2min)',
                 'recap': 'Envía recap de 7pm (template + mensaje pendiente)',
                 'followup': 'Simula follow-up pendiente (sistema aprobación)',
-                'all': 'Ejecuta TODOS los tests'
+                'all': 'Ejecuta TODOS los tests',
+                'setup-dashboard': 'Configura datos realistas para el Dashboard (metas, leads, presupuestos)'
               },
               uso: '/test-real?test=mensaje'
             }));
@@ -1203,8 +1204,89 @@ export default {
             resultados.nota = 'Responde con uno de los comandos para probar';
             break;
 
+          case 'setup-dashboard':
+            // Configurar datos realistas para el Dashboard
+            const month = '2026-01';
+
+            // 1. Meta de empresa (tabla monthly_goals)
+            // Primero intentar delete + insert para asegurar que se crea
+            await supabase.client.from('monthly_goals').delete().eq('month', month);
+            const { error: goalError } = await supabase.client.from('monthly_goals').insert({
+              month,
+              company_goal: 5
+            });
+            if (goalError) {
+              console.log('Error creando meta empresa:', goalError.message);
+            }
+
+            // 2. Metas por vendedor (tabla vendor_monthly_goals - CORRECTA)
+            const vendedoresMetas = [
+              { id: '7bb05214-826c-4d1b-a418-228b8d77bd64', goal: 2 },
+              { id: 'a1ffd78f-5c03-4c98-9968-8443a5670ed8', goal: 1 },
+              { id: '451742c2-38a2-4741-8ba4-90185ab7f023', goal: 1 },
+              { id: 'd81f53e8-25b3-45d5-99a5-aeb8eadbdf81', goal: 1 }
+            ];
+            for (const v of vendedoresMetas) {
+              await supabase.client.from('vendor_monthly_goals').upsert({
+                month,
+                vendor_id: v.id,
+                goal: v.goal
+              }, { onConflict: 'month,vendor_id' });
+            }
+
+            // 3. Limpiar datos ficticios de properties (Los Encinos con 20 ventas falsas)
+            await supabase.client.from('properties').update({ sold_units: 0 }).gt('sold_units', 0);
+
+            // 4. Actualizar leads existentes con presupuestos
+            const { data: existingLeads } = await supabase.client.from('leads').select('id, phone');
+            for (const lead of existingLeads || []) {
+              let updateData: any = {};
+              if (lead.phone?.endsWith('5510001234')) {
+                updateData = { name: 'Carlos Mendoza', budget: 2500000, score: 45, status: 'contacted' };
+              } else if (lead.phone?.endsWith('5610016226')) {
+                updateData = { name: 'Roberto García', budget: 3200000, score: 72, status: 'negotiation' };
+              } else if (lead.phone?.endsWith('9090486')) {
+                updateData = { name: 'María López', budget: 1800000, score: 35, status: 'new' };
+              }
+              if (Object.keys(updateData).length > 0) {
+                await supabase.client.from('leads').update(updateData).eq('id', lead.id);
+              }
+            }
+
+            // 4. Crear leads adicionales
+            const newLeadsData = [
+              { phone: '5215551112222', name: 'Juan Pérez', property_interest: 'Monte Verde', budget: 2100000, score: 78, status: 'negotiation', source: 'Facebook', assigned_to: '7bb05214-826c-4d1b-a418-228b8d77bd64' },
+              { phone: '5215553334444', name: 'Ana Martínez', property_interest: 'Distrito Falco', budget: 3500000, score: 85, status: 'reserved', source: 'Instagram', assigned_to: 'a1ffd78f-5c03-4c98-9968-8443a5670ed8' },
+              { phone: '5215555556666', name: 'Pedro Ramírez', property_interest: 'Andes', budget: 2800000, score: 55, status: 'visited', source: 'Google', assigned_to: '451742c2-38a2-4741-8ba4-90185ab7f023' },
+              { phone: '5215559990000', name: 'Miguel Torres', property_interest: 'Monte Verde', budget: 2300000, score: 90, status: 'closed', source: 'Referidos', assigned_to: '7bb05214-826c-4d1b-a418-228b8d77bd64', status_changed_at: '2026-01-20T10:00:00Z' }
+            ];
+
+            for (const newLead of newLeadsData) {
+              const { data: exists } = await supabase.client.from('leads').select('id').eq('phone', newLead.phone).single();
+              if (!exists) {
+                await supabase.client.from('leads').insert(newLead);
+              }
+            }
+
+            // Verificar resultado
+            const { data: finalLeads } = await supabase.client.from('leads').select('id, name, budget, score, status');
+            const { data: companyGoals } = await supabase.client.from('monthly_goals').select('*').eq('month', month);
+            const { data: vendorGoals } = await supabase.client.from('vendor_monthly_goals').select('*').eq('month', month);
+            const { data: propsLimpias } = await supabase.client.from('properties').select('name, sold_units').gt('sold_units', 0);
+
+            resultados.setup = {
+              meta_empresa: companyGoals?.[0]?.company_goal || 0,
+              metas_vendedor: vendorGoals?.length || 0,
+              leads: finalLeads?.length || 0,
+              pipeline: finalLeads?.reduce((sum: number, l: any) => sum + (Number(l.budget) || 0), 0) || 0,
+              cerrados: finalLeads?.filter((l: any) => l.status === 'closed').length || 0,
+              properties_con_ventas_ficticias: propsLimpias?.length || 0,
+              leads_detalle: finalLeads
+            };
+            break;
+
           default:
-            return corsResponse(JSON.stringify({ error: 'Test no válido', tests_disponibles: ['mensaje', 'briefing', 'reporte', 'alerta', 'comando', 'video', 'recap', 'followup', 'all'] }));
+            return corsResponse(JSON.stringify({ error: 'Test no válido', tests_disponibles: ['mensaje', 'briefing', 'reporte', 'alerta', 'comando', 'video', 'recap', 'followup', 'setup-dashboard', 'all'] }));
         }
 
         return corsResponse(JSON.stringify({ ok: true, ...resultados }));

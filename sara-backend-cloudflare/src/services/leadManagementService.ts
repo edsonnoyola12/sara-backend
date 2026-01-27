@@ -6,8 +6,24 @@ const DEFAULT_VENDEDOR_ID = '7bb05214-826c-4d1b-a418-228b8d77bd64'; // CEO Test
 export class LeadManagementService {
   constructor(private supabase: SupabaseService) {}
 
-  async getOrCreateLead(phone: string): Promise<{ lead: any; isNew: boolean }> {
+  async getOrCreateLead(phone: string): Promise<{ lead: any; isNew: boolean; isTeamMember?: boolean }> {
     const digits = phone.replace(/\D/g, '').slice(-10);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // VALIDACIÓN: No crear leads para team members
+    // ═══════════════════════════════════════════════════════════════════════
+    const { data: teamMember } = await this.supabase.client
+      .from('team_members')
+      .select('id, name, phone')
+      .like('phone', '%' + digits)
+      .limit(1);
+
+    if (teamMember && teamMember.length > 0) {
+      console.log(`⚠️ Teléfono ${phone} es de team member ${teamMember[0].name}, NO se crea lead`);
+      return { lead: null, isNew: false, isTeamMember: true };
+    }
+    // ═══════════════════════════════════════════════════════════════════════
+
     const { data } = await this.supabase.client
       .from('leads')
       .select('*')
