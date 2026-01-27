@@ -392,6 +392,22 @@ Envía template de WhatsApp a lead que está fuera de la ventana de 24h:
 - Solo funciona si el lead está fuera de la ventana de 24h de WhatsApp
 - Si el lead escribió recientemente, usar `bridge [nombre]` en su lugar
 
+### Notificaciones: Llamadas vs Citas
+
+Las llamadas (tipo `llamada`) y citas presenciales (tipo `visita`) tienen notificaciones diferenciadas:
+
+| Acción | Lead | Vendedor | Asesor | Mensaje Lead |
+|--------|------|----------|--------|--------------|
+| **Crear** | ✅ | ✅ | ✅ | Confirmación con fecha/hora |
+| **Reagendar** | ✅ | ✅ | - | "LLAMADA/CITA ACTUALIZADA" |
+| **Cancelar** | ✅ | ✅ | - | "LLAMADA/CITA CANCELADA" |
+| **Recordatorio 24h** | ✅ | - | - | "Te recordamos tu llamada/cita mañana..." |
+| **Recordatorio 2h** | ✅ | ✅ | - | "Tu llamada/cita es en 2 horas..." |
+
+**Diferencias en mensajes:**
+- **Llamadas**: Sin ubicación/GPS, dice "¡Te contactaremos! 📞"
+- **Citas**: Con ubicación y GPS, dice "¡Te esperamos! 🏠"
+
 ---
 
 ## COMANDOS AGENCIA/MARKETING
