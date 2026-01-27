@@ -1357,6 +1357,53 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 
 ## HISTORIAL DE CAMBIOS
 
+### 2026-01-27
+
+**Sesión 1 (16:00) - Dashboard Data Setup + Scoring Fix**
+
+- ✅ **Nuevo endpoint `/test-real?test=setup-dashboard`:**
+  - Configura datos realistas para el Dashboard del CRM
+  - Crea meta mensual de empresa (5 casas/mes)
+  - Crea metas por vendedor en `vendor_monthly_goals`
+  - Actualiza leads existentes con presupuestos realistas
+  - Crea leads de prueba con diferentes estados (new, contacted, negotiation, reserved, closed)
+  - Limpia datos ficticios de `properties` (sold_units = 0)
+
+- ✅ **Validación de team members como leads:**
+  - Archivo: `src/services/leadManagementService.ts`
+  - Antes de crear un lead, verifica si el teléfono pertenece a un team member
+  - Si es team member, retorna `{ lead: null, isTeamMember: true }` sin crear lead
+  - Evita que mensajes de prueba del equipo creen leads falsos
+
+- ✅ **Fix scoring en CRM (Frontend):**
+  - Archivo: `sara-crm-new/src/App.tsx`
+  - Labels: HOT >= 70, WARM >= 40, COLD < 40 (antes era >= 8, >= 5)
+  - Contadores de filtros corregidos para usar los mismos umbrales
+  - Deploy automático vía Vercel
+
+- ✅ **Pruebas reales ejecutadas:**
+  - Health check: ✅ Supabase conectado
+  - Webhook WhatsApp: ✅ Procesa mensajes
+  - Comandos CEO/Vendedor: ✅ Todos funcionan
+  - CRM Web: ✅ https://sara-crm-new.vercel.app
+  - Creación de leads: ✅ Se guardan en DB
+
+- ✅ **Datos del Dashboard configurados:**
+  | Métrica | Valor |
+  |---------|-------|
+  | Meta empresa | 5 casas/mes |
+  | Leads | 7 |
+  | Pipeline | $18.2M |
+  | Cerrados | 1 |
+  | En negociación | 2 |
+  | Reservado | 1 |
+
+- ✅ Tests: 260 pasando ✅
+- ✅ Deploy backend: Cloudflare Workers
+- ✅ Deploy frontend: Vercel (automático)
+
+---
+
 ### 2026-01-26
 
 **Sesión 1 (21:30) - Comandos de Llamada para Vendedor**
