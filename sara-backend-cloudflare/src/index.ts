@@ -1298,6 +1298,82 @@ export default {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // 🧪 TEST-LEAD - Simula mensaje de lead sin usar WhatsApp real
+    // USO: /test-lead?phone=5215551234567&name=Juan&msg=Hola%20me%20interesa
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/test-lead" && request.method === "GET") {
+      const phone = url.searchParams.get('phone');
+      const name = url.searchParams.get('name') || 'Lead Test';
+      const msg = url.searchParams.get('msg') || 'Hola, me interesa información sobre terrenos';
+
+      if (!phone) {
+        return corsResponse(JSON.stringify({
+          error: 'Falta parámetro phone',
+          uso: '/test-lead?phone=5215551234567&name=Juan&msg=Hola',
+          parametros: {
+            phone: '(requerido) Teléfono del lead, ej: 5215551234567',
+            name: '(opcional) Nombre del lead, default: Lead Test',
+            msg: '(opcional) Mensaje a simular, default: Hola, me interesa información sobre terrenos'
+          },
+          ejemplos: [
+            '/test-lead?phone=5215559999999&name=Carlos&msg=Quiero info de Monte Verde',
+            '/test-lead?phone=5215558888888&msg=Me interesa un crédito hipotecario',
+            '/test-lead?phone=5215557777777&name=Ana&msg=Donde queda Bosques de Chapultepec?'
+          ]
+        }), 400);
+      }
+
+      try {
+        // Inicializar servicios necesarios
+        const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
+        const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+        const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+
+        // Llamar al handler de WhatsApp
+        const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
+        await handler.handleIncomingMessage(`whatsapp:+${phone}`, msg, env);
+
+        // Verificar el lead creado/actualizado
+        const { data: lead } = await supabase.client
+          .from('leads')
+          .select('id, name, phone, status, score, assigned_to, created_at, updated_at')
+          .like('phone', `%${phone.slice(-10)}`)
+          .single();
+
+        // Obtener nombre del vendedor asignado
+        let vendedorNombre = null;
+        if (lead?.assigned_to) {
+          const { data: vendedor } = await supabase.client
+            .from('team_members')
+            .select('name')
+            .eq('id', lead.assigned_to)
+            .single();
+          vendedorNombre = vendedor?.name;
+        }
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          mensaje_simulado: msg,
+          lead: lead ? {
+            id: lead.id,
+            nombre: lead.name || name,
+            telefono: lead.phone,
+            status: lead.status,
+            score: lead.score,
+            asignado_a: vendedorNombre || lead.assigned_to,
+            creado: lead.created_at,
+            actualizado: lead.updated_at
+          } : null,
+          nota: 'SARA procesó el mensaje y respondió por WhatsApp (si el teléfono es real)'
+        }));
+
+      } catch (e: any) {
+        console.error('❌ Error en test-lead:', e);
+        return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // 🚨 EMERGENCY STOP - Detener TODOS los broadcasts inmediatamente
     // ═══════════════════════════════════════════════════════════════════════
     if (url.pathname === "/api/emergency-stop" && request.method === "POST") {
