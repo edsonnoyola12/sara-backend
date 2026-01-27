@@ -1748,6 +1748,33 @@ export default {
       return corsResponse(JSON.stringify({ ok: true, deleted: citas?.length || 0, lead: leads[0] }));
     }
 
+    // TEST: Debug lead (ver todos los campos)
+    if (url.pathname === "/test-debug-lead") {
+      const nombre = url.searchParams.get('nombre');
+      if (!nombre) {
+        return corsResponse(JSON.stringify({ error: "Falta ?nombre=X" }), 400);
+      }
+      const { data, error } = await supabase.client
+        .from('leads')
+        .select('*')
+        .ilike('name', `%${nombre}%`)
+        .limit(1);
+      if (error) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+      // También obtener citas del lead
+      if (data && data[0]) {
+        const { data: citas } = await supabase.client
+          .from('appointments')
+          .select('*')
+          .eq('lead_id', data[0].id)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        return corsResponse(JSON.stringify({ ok: true, lead: data[0], citas: citas || [] }));
+      }
+      return corsResponse(JSON.stringify({ ok: true, lead: data?.[0] || null, citas: [] }));
+    }
+
     // TEST: Actualizar property_interest de un lead
     if (url.pathname === "/test-update-interest") {
       const nombre = url.searchParams.get('nombre');

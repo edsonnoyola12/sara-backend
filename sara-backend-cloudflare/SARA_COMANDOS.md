@@ -286,6 +286,7 @@ Los integration tests prueban flujos completos end-to-end:
 | `nuevo lead [nombre] [tel] [desarrollo]` | Registrar lead directo (se queda con el vendedor) | `vendedorNuevoLead` |
 | `hot` / `leads hot` | Ver leads calientes (score >= 70) | `vendedorLeadsHot` |
 | `pendientes` | Ver leads pendientes de contactar | `vendedorLeadsPendientes` |
+| `contactar [nombre]` / `conectar [nombre]` | Enviar template a lead fuera de 24h (seguimiento/crédito) | `vendedorContactarLead` |
 | `coach [nombre]` | Coaching personalizado para un lead | `vendedorCoaching` |
 | `quien es [nombre]` / `info [nombre]` | Ver información completa del lead | `vendedorQuienEs` |
 | `ver [nombre/teléfono]` | Ver historial de conversación con lead | `vendedorVerHistorial` |
@@ -369,6 +370,27 @@ Cambia la hora de una llamada ya programada:
 - `reagendar llamada María 4pm` - Si solo pones hora, asume hoy
 - `cambiar llamada de Pedro lunes 10am` - Formato alternativo
 - El lead SÍ recibe notificación del cambio
+
+### Comando: contactar / conectar [nombre]
+Envía template de WhatsApp a lead que está fuera de la ventana de 24h:
+- `contactar Roberto` - Muestra opciones de template
+- `conectar María` - Alias (funciona igual)
+
+**Opciones de template:**
+1. **Seguimiento** - Template genérico de seguimiento
+2. **Reactivación** - Para leads inactivos
+3. **Info crédito** - Para leads interesados en crédito hipotecario
+
+**Flujo de crédito (opción 3):**
+- Se envía template `info_credito` al lead
+- Cuando el lead responde con fecha/hora → se agenda LLAMADA de crédito
+- Se notifica al asesor hipotecario Y al vendedor
+- La llamada aparece en el calendario del CRM
+- El lead recibe confirmación de la llamada
+
+**Notas:**
+- Solo funciona si el lead está fuera de la ventana de 24h de WhatsApp
+- Si el lead escribió recientemente, usar `bridge [nombre]` en su lugar
 
 ---
 

@@ -250,8 +250,8 @@ export class VendorCommandsService {
     }
 
     // ═══ CONTACTAR [nombre] - Enviar template a lead fuera de 24h ═══
-    // Formato: "contactar Juan", "contactar roberto"
-    const contactarMatch = msg.match(/^contactar\s+([a-záéíóúñü\d]+)$/i);
+    // Formato: "contactar Juan", "contactar roberto", "conectar Juan"
+    const contactarMatch = msg.match(/^(?:contactar|conectar)\s+([a-záéíóúñü\d]+)$/i);
     if (contactarMatch) {
       return {
         matched: true,
