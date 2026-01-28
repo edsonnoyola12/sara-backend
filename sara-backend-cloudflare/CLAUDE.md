@@ -291,10 +291,48 @@ Ver documentación en `docs/`:
 
 ---
 
+## ENDPOINTS DE PRUEBA (QA)
+
+| Endpoint | Uso |
+|----------|-----|
+| `/test-ai-response?msg=X&api_key=Y` | Prueba respuestas de SARA (solo texto, no envía WhatsApp) |
+| `/test-lead?phone=X&name=Y&msg=Z&api_key=W` | Flujo completo como lead real (SÍ envía WhatsApp) |
+| `/test-vendedor-msg?phone=X&msg=Y&api_key=Z` | Simula mensaje de vendedor/CEO |
+
+---
+
+## QA COMPLETADO (2026-01-28)
+
+### SARA responde correctamente:
+- ✅ Preguntas de desarrollos (36 propiedades en catálogo)
+- ✅ Citadella del Nogal = Villa Campelo + Villa Galiano
+- ✅ Monte Verde, Distrito Falco, Los Encinos, Miravalle, Andes, etc.
+- ✅ NO inventa información (dice "no tengo esa info")
+- ✅ Maneja objeciones de precio
+- ✅ Errores ortográficos entendidos
+
+### Recursos enviados automáticamente:
+- ✅ GPS cuando piden ubicación
+- ✅ Brochure PDF cuando piden folleto
+- ✅ Video cuando piden ver el desarrollo
+
+### Flujos de negocio:
+- ✅ Agendar citas (detecta fecha, hora, desarrollo)
+- ✅ Crédito hipotecario (menciona bancos: BBVA, Banorte, Santander, HSBC, INFONAVIT, FOVISSSTE)
+- ✅ Promoción automática en funnel (new → scheduled)
+
+### Nota importante:
+La tabla `properties` NO tiene columna `active`. Todas las propiedades se consideran activas.
+
+---
+
 ## HISTORIAL DE CAMBIOS IMPORTANTES
 
 ### 2026-01-28
+- QA exhaustivo completado: 21 pruebas de IA + flujo completo
+- Nuevo endpoint `/test-ai-response` para pruebas de QA
 - CEO (Oscar) ahora tiene acceso a TODOS los comandos (CEO + Asesor + Vendedor + Marketing)
 - Agregado fallback de comandos en `handleCEOMessage` en whatsapp.ts
 - Citadella del Nogal configurado como sinónimo de Villa Campelo/Galiano en aiConversationService.ts
 - Teléfonos actualizados: Oscar = 5214922019052, Vendedor Test = 5212224558475
+- Fix: query de properties sin filtro `active` (columna no existe)
