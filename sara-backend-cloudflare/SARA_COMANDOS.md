@@ -792,7 +792,7 @@ El CEO tiene fallback a todos los roles. Orden de prioridad:
 
 ---
 
-*Última actualización: 2026-01-28*
+*Última actualización: 2026-01-28 (ventana 24h fix)*
 
 ---
 
@@ -1376,6 +1376,56 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 
 ---
 
+## REGLA DE 24 HORAS DE WHATSAPP (CRÍTICO)
+
+### El problema
+WhatsApp Business API tiene una restricción: **solo puedes enviar mensajes libres si el usuario escribió en las últimas 24 horas**. Si la ventana está cerrada, el mensaje **NO LLEGA**.
+
+### Cómo lo manejamos
+Usamos el campo `last_sara_interaction` en `team_members.notes` para rastrear cuándo fue la última interacción.
+
+**Función helper: `enviarMensajeTeamMember()`**
+```typescript
+// Uso:
+await enviarMensajeTeamMember(supabase, meta, teamMember, mensaje, {
+  tipoMensaje: 'reporte_diario',
+  guardarPending: true,
+  pendingKey: 'pending_reporte_diario'
+});
+```
+
+### Flujo automático
+```
+1. SARA quiere enviar mensaje a team member
+2. Verifica last_sara_interaction
+3. Si < 24h → envía mensaje DIRECTO ✅
+4. Si > 24h → envía template + guarda en pending_*
+5. Team member responde al template
+6. whatsapp.ts detecta pending_* y envía mensaje completo
+```
+
+### Templates disponibles para equipo
+| Template | Uso |
+|----------|-----|
+| `reactivar_equipo` | Reactivar ventana 24h con equipo interno |
+
+### Pending keys soportados
+| Key | Se entrega cuando... |
+|-----|---------------------|
+| `pending_briefing` | Responden después de briefing 8 AM |
+| `pending_recap` | Responden después de recap 7 PM |
+| `pending_reporte_diario` | Responden después de reporte diario |
+| `pending_reporte_semanal` | Responden después de reporte semanal |
+
+### Aplica a
+- ✅ Vendedores
+- ✅ Coordinadores
+- ✅ Asesores hipotecarios
+- ✅ Marketing/Agencia
+- ✅ CEO/Admin
+
+---
+
 ## HISTORIAL DE CAMBIOS
 
 ### 2026-01-28
@@ -1416,6 +1466,34 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
   - Promoción automática en funnel (new → scheduled)
 
 - ✅ Tests: 260 pasando ✅
+
+**Fix Ventana 24h WhatsApp (CRÍTICO)**
+
+- ✅ **Nueva función `enviarMensajeTeamMember()`:**
+  - Verifica si el team member tiene ventana 24h abierta (via `last_sara_interaction`)
+  - Si SÍ → envía mensaje DIRECTO
+  - Si NO → envía template `reactivar_equipo` + guarda mensaje como PENDING
+  - Cuando responden → se entrega el mensaje pendiente automáticamente
+  - Archivo: `src/index.ts`
+
+- ✅ **Funciones actualizadas para respetar ventana 24h:**
+  - `enviarReporteDiarioVendedores` (7 PM L-V)
+  - `enviarReporteDiarioAsesores` (7 PM L-V)
+  - `enviarReporteSemanalAsesores` (Lunes 9 AM)
+
+- ✅ **Soporte para pending messages en whatsapp.ts:**
+  - `pending_reporte_diario` → se entrega cuando responden
+  - `pending_reporte_semanal` → se entrega cuando responden
+  - Archivo: `src/handlers/whatsapp.ts`
+
+- ✅ **Flujo ejemplo:**
+  ```
+  1. 7 PM → SARA intenta enviar reporte a vendedor
+  2. Vendedor NO usó SARA hoy (ventana cerrada)
+  3. SARA envía template + guarda reporte en pending
+  4. Vendedor responde al template
+  5. SARA detecta pending y envía reporte completo
+  ```
 
 ---
 

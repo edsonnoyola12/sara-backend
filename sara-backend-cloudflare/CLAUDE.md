@@ -124,6 +124,21 @@ Lead nuevo → Generar video personalizado → Subir a Meta → Enviar
 ```
 **IMPORTANTE**: Usar `uploadVideoFromBuffer()` + `sendWhatsAppVideoById()`
 
+### 5. Regla de 24 Horas de WhatsApp (CRÍTICO)
+```
+WhatsApp SOLO permite mensajes libres si el usuario escribió en las últimas 24h.
+Si no hay ventana abierta → el mensaje NO LLEGA.
+```
+
+**Solución implementada:**
+- Función `enviarMensajeTeamMember()` en index.ts
+- Verifica `last_sara_interaction` del team member
+- Si ventana abierta → envía mensaje directo
+- Si ventana cerrada → envía template `reactivar_equipo` + guarda en `pending_*`
+- Cuando responden → se entrega el mensaje pendiente
+
+**Aplica a:** Leads, Vendedores, Coordinadores, Asesores, Marketing
+
 ---
 
 ## COMANDOS POR ROL
@@ -336,3 +351,8 @@ La tabla `properties` NO tiene columna `active`. Todas las propiedades se consid
 - Citadella del Nogal configurado como sinónimo de Villa Campelo/Galiano en aiConversationService.ts
 - Teléfonos actualizados: Oscar = 5214922019052, Vendedor Test = 5212224558475
 - Fix: query de properties sin filtro `active` (columna no existe)
+- **CRÍTICO**: Fix ventana 24h de WhatsApp para mensajes a equipo
+  - Nueva función `enviarMensajeTeamMember()` que respeta la ventana de 24h
+  - Si ventana cerrada → envía template + guarda mensaje como pending
+  - Cuando responden → se entrega el mensaje pendiente
+  - Actualizado: reportes 7 PM vendedores, reportes asesores
