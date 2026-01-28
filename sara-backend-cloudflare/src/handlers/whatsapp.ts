@@ -1517,6 +1517,77 @@ export class WhatsAppHandler {
     }
 
     // ╔════════════════════════════════════════════════════════════════════════╗
+    // ║  CRÍTICO: VERIFICAR PENDING MESSAGES PRIMERO (CEO también los recibe)  ║
+    // ╚════════════════════════════════════════════════════════════════════════╝
+
+    // Actualizar last_sara_interaction (ventana 24h ahora está abierta)
+    notasCEO.last_sara_interaction = new Date().toISOString();
+
+    // PENDING BRIEFING
+    const pendingBriefingCEO = notasCEO?.pending_briefing;
+    if (pendingBriefingCEO?.sent_at && pendingBriefingCEO?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingBriefingCEO.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 12) {
+        console.log(`📋 [PENDING PRIORITY] CEO ${nombreCEO} respondió template - enviando briefing`);
+        await this.meta.sendWhatsAppMessage(cleanPhone, pendingBriefingCEO.mensaje_completo);
+
+        const { pending_briefing, ...notasSinPending } = notasCEO;
+        await this.supabase.client.from('team_members').update({
+          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString(), last_briefing_context: { sent_at: new Date().toISOString(), delivered: true } }
+        }).eq('id', ceo.id);
+        return;
+      }
+    }
+
+    // PENDING RECAP
+    const pendingRecapCEO = notasCEO?.pending_recap;
+    if (pendingRecapCEO?.sent_at && pendingRecapCEO?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingRecapCEO.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 12) {
+        console.log(`📋 [PENDING PRIORITY] CEO ${nombreCEO} respondió template - enviando recap`);
+        await this.meta.sendWhatsAppMessage(cleanPhone, pendingRecapCEO.mensaje_completo);
+
+        const { pending_recap, ...notasSinPending } = notasCEO;
+        await this.supabase.client.from('team_members').update({
+          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString(), last_recap_context: { sent_at: new Date().toISOString(), delivered: true } }
+        }).eq('id', ceo.id);
+        return;
+      }
+    }
+
+    // PENDING REPORTE DIARIO
+    const pendingReporteDiarioCEO = notasCEO?.pending_reporte_diario;
+    if (pendingReporteDiarioCEO?.sent_at && pendingReporteDiarioCEO?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingReporteDiarioCEO.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 12) {
+        console.log(`📊 [PENDING PRIORITY] CEO ${nombreCEO} respondió template - enviando reporte diario`);
+        await this.meta.sendWhatsAppMessage(cleanPhone, pendingReporteDiarioCEO.mensaje_completo);
+
+        const { pending_reporte_diario, ...notasSinPending } = notasCEO;
+        await this.supabase.client.from('team_members').update({
+          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString(), last_reporte_diario_context: { sent_at: new Date().toISOString(), delivered: true } }
+        }).eq('id', ceo.id);
+        return;
+      }
+    }
+
+    // PENDING REPORTE SEMANAL
+    const pendingReporteSemanalCEO = notasCEO?.pending_reporte_semanal;
+    if (pendingReporteSemanalCEO?.sent_at && pendingReporteSemanalCEO?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingReporteSemanalCEO.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 12) {
+        console.log(`📊 [PENDING PRIORITY] CEO ${nombreCEO} respondió template - enviando reporte semanal`);
+        await this.meta.sendWhatsAppMessage(cleanPhone, pendingReporteSemanalCEO.mensaje_completo);
+
+        const { pending_reporte_semanal, ...notasSinPending } = notasCEO;
+        await this.supabase.client.from('team_members').update({
+          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString(), last_reporte_semanal_context: { sent_at: new Date().toISOString(), delivered: true } }
+        }).eq('id', ceo.id);
+        return;
+      }
+    }
+
+    // ╔════════════════════════════════════════════════════════════════════════╗
     // ║  CRÍTICO - NO MODIFICAR SIN CORRER TESTS: npm test                      ║
     // ║  Test file: src/tests/conversationLogic.test.ts                         ║
     // ║  Lógica: src/utils/conversationLogic.ts → shouldForwardToLead()         ║
@@ -3797,6 +3868,96 @@ export class WhatsAppHandler {
     // ═══════════════════════════════════════════════════════════
     const { notes, notasVendedor } = await vendorService.getVendedorNotes(vendedor.id);
 
+    // ╔════════════════════════════════════════════════════════════════════════╗
+    // ║  CRÍTICO: VERIFICAR PENDING MESSAGES PRIMERO                           ║
+    // ║  Cuando responden al template, entregar mensaje pendiente y salir      ║
+    // ╚════════════════════════════════════════════════════════════════════════╝
+
+    // Actualizar last_sara_interaction (ventana 24h ahora está abierta)
+    if (notasVendedor) {
+      notasVendedor.last_sara_interaction = new Date().toISOString();
+    }
+
+    // PENDING BRIEFING (mañana)
+    const pendingBriefingInicio = notasVendedor?.pending_briefing;
+    if (pendingBriefingInicio?.sent_at && pendingBriefingInicio?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingBriefingInicio.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 12) {
+        console.log(`📋 [PENDING PRIORITY] ${nombreVendedor} respondió template - enviando briefing`);
+        await this.meta.sendWhatsAppMessage(from, pendingBriefingInicio.mensaje_completo);
+
+        const { pending_briefing, ...notasSinPendingBriefing } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPendingBriefing,
+            last_sara_interaction: new Date().toISOString(),
+            last_briefing_context: { sent_at: new Date().toISOString(), delivered: true }
+          }
+        }).eq('id', vendedor.id);
+        return; // IMPORTANTE: Salir sin más procesamiento
+      }
+    }
+
+    // PENDING RECAP (noche - no usó SARA)
+    const pendingRecapInicio = notasVendedor?.pending_recap;
+    if (pendingRecapInicio?.sent_at && pendingRecapInicio?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingRecapInicio.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 12) {
+        console.log(`📋 [PENDING PRIORITY] ${nombreVendedor} respondió template - enviando recap`);
+        await this.meta.sendWhatsAppMessage(from, pendingRecapInicio.mensaje_completo);
+
+        const { pending_recap, ...notasSinPendingRecap } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPendingRecap,
+            last_sara_interaction: new Date().toISOString(),
+            last_recap_context: { sent_at: new Date().toISOString(), delivered: true }
+          }
+        }).eq('id', vendedor.id);
+        return;
+      }
+    }
+
+    // PENDING REPORTE DIARIO (7 PM)
+    const pendingReporteDiarioInicio = notasVendedor?.pending_reporte_diario;
+    if (pendingReporteDiarioInicio?.sent_at && pendingReporteDiarioInicio?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingReporteDiarioInicio.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 12) {
+        console.log(`📊 [PENDING PRIORITY] ${nombreVendedor} respondió template - enviando reporte diario`);
+        await this.meta.sendWhatsAppMessage(from, pendingReporteDiarioInicio.mensaje_completo);
+
+        const { pending_reporte_diario, ...notasSinPendingReporte } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPendingReporte,
+            last_sara_interaction: new Date().toISOString(),
+            last_reporte_diario_context: { sent_at: new Date().toISOString(), delivered: true }
+          }
+        }).eq('id', vendedor.id);
+        return;
+      }
+    }
+
+    // PENDING REPORTE SEMANAL (lunes)
+    const pendingReporteSemanalInicio = notasVendedor?.pending_reporte_semanal;
+    if (pendingReporteSemanalInicio?.sent_at && pendingReporteSemanalInicio?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingReporteSemanalInicio.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 12) {
+        console.log(`📊 [PENDING PRIORITY] ${nombreVendedor} respondió template - enviando reporte semanal`);
+        await this.meta.sendWhatsAppMessage(from, pendingReporteSemanalInicio.mensaje_completo);
+
+        const { pending_reporte_semanal, ...notasSinPendingSemanal } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPendingSemanal,
+            last_sara_interaction: new Date().toISOString(),
+            last_reporte_semanal_context: { sent_at: new Date().toISOString(), delivered: true }
+          }
+        }).eq('id', vendedor.id);
+        return;
+      }
+    }
+
     // ═══════════════════════════════════════════════════════════
     // SELECCIÓN DE TEMPLATE PENDIENTE (lead fuera de 24h)
     // ═══════════════════════════════════════════════════════════
@@ -4133,119 +4294,8 @@ export class WhatsAppHandler {
     }
 
     // ═══════════════════════════════════════════════════════════
-    // ENVIAR BRIEFING/RECAP PENDIENTE (cuando responden al template)
-    // ═══════════════════════════════════════════════════════════
-    const pendingBriefing = notasVendedor?.pending_briefing;
-    const pendingRecap = notasVendedor?.pending_recap;
-
-    // Verificar si hay briefing pendiente (últimas 12 horas)
-    if (pendingBriefing?.sent_at && pendingBriefing?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingBriefing.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 12) {
-        console.log(`📋 Vendedor ${nombreVendedor} respondió - enviando briefing completo`);
-
-        // Enviar briefing completo
-        await this.meta.sendWhatsAppMessage(from, pendingBriefing.mensaje_completo);
-
-        // Limpiar pending_briefing, guardar como last_briefing_context
-        const { pending_briefing, ...notasSinPending } = notasVendedor;
-        await this.supabase.client.from('team_members').update({
-          notes: {
-            ...notasSinPending,
-            last_briefing_context: {
-              sent_at: new Date().toISOString(),
-              citas: pendingBriefing.citas || 0,
-              delivered: true
-            }
-          }
-        }).eq('id', vendedor.id);
-        return;
-      }
-    }
-
-    // Verificar si hay recap pendiente (últimas 12 horas)
-    if (pendingRecap?.sent_at && pendingRecap?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingRecap.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 12) {
-        console.log(`📋 Vendedor ${nombreVendedor} respondió - enviando recap completo`);
-
-        // Enviar recap completo
-        await this.meta.sendWhatsAppMessage(from, pendingRecap.mensaje_completo);
-
-        // Limpiar pending_recap
-        const { pending_recap, ...notasSinPending } = notasVendedor;
-        await this.supabase.client.from('team_members').update({
-          notes: {
-            ...notasSinPending,
-            last_recap_context: {
-              sent_at: new Date().toISOString(),
-              tipo: pendingRecap.tipo,
-              delivered: true
-            }
-          }
-        }).eq('id', vendedor.id);
-        return;
-      }
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // ENVIAR REPORTE DIARIO PENDIENTE (cuando responden al template)
-    // ═══════════════════════════════════════════════════════════
-    const pendingReporteDiario = notasVendedor?.pending_reporte_diario;
-    if (pendingReporteDiario?.sent_at && pendingReporteDiario?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingReporteDiario.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 12) {
-        console.log(`📊 Vendedor ${nombreVendedor} respondió - enviando reporte diario completo`);
-
-        // Enviar reporte diario completo
-        await this.meta.sendWhatsAppMessage(from, pendingReporteDiario.mensaje_completo);
-
-        // Limpiar pending_reporte_diario
-        const { pending_reporte_diario, ...notasSinPending } = notasVendedor;
-        await this.supabase.client.from('team_members').update({
-          notes: {
-            ...notasSinPending,
-            last_reporte_diario_context: {
-              sent_at: new Date().toISOString(),
-              tipo: pendingReporteDiario.tipo,
-              delivered: true
-            }
-          }
-        }).eq('id', vendedor.id);
-        return;
-      }
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // ENVIAR REPORTE SEMANAL PENDIENTE (cuando responden al template)
-    // ═══════════════════════════════════════════════════════════
-    const pendingReporteSemanal = notasVendedor?.pending_reporte_semanal;
-    if (pendingReporteSemanal?.sent_at && pendingReporteSemanal?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingReporteSemanal.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 12) {
-        console.log(`📊 Vendedor ${nombreVendedor} respondió - enviando reporte semanal completo`);
-
-        // Enviar reporte semanal completo
-        await this.meta.sendWhatsAppMessage(from, pendingReporteSemanal.mensaje_completo);
-
-        // Limpiar pending_reporte_semanal
-        const { pending_reporte_semanal, ...notasSinPending } = notasVendedor;
-        await this.supabase.client.from('team_members').update({
-          notes: {
-            ...notasSinPending,
-            last_reporte_semanal_context: {
-              sent_at: new Date().toISOString(),
-              tipo: pendingReporteSemanal.tipo,
-              delivered: true
-            }
-          }
-        }).eq('id', vendedor.id);
-        return;
-      }
-    }
-
-    // ═══════════════════════════════════════════════════════════
     // RESPUESTA A BRIEFING/RECAP YA ENTREGADO (feedback simple)
+    // (Nota: Los pending se verifican al INICIO del handler)
     // ═══════════════════════════════════════════════════════════
     const briefingContext = notasVendedor?.last_briefing_context;
     const recapContext = notasVendedor?.last_recap_context;

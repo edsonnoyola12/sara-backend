@@ -208,8 +208,8 @@ function requiresAuth(pathname: string): boolean {
     '/status',            // Status dashboard
     '/analytics',         // Analytics dashboard
     '/',                  // Root
-    '/test-ventana-24h',  // Test ventana 24h (diagnóstico)
-    '/test-envio-7pm',    // Test envío 7pm (dry-run por default)
+    // NOTA: /test-ventana-24h y /test-envio-7pm AHORA requieren API key
+    // porque exponen nombres y teléfonos parciales del equipo
   ];
 
   if (publicPaths.includes(pathname)) return false;
