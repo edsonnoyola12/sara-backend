@@ -358,6 +358,257 @@ export class VendorCommandsService {
       return { matched: true, handlerName: 'cerrarBridge' };
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // COMANDOS ADICIONALES (antes estaban sin detección)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ═══ CERRAR VENTA ═══
+    // Formato: "cerrar venta Juan", "venta cerrada Juan 2500000", "cerré Juan"
+    const cerrarVentaMatch = msg.match(/^(?:cerrar\s+venta|venta\s+cerrada|cerr[eé])\s+([a-záéíóúñü\s]+?)(?:\s+(\d+))?$/i);
+    if (cerrarVentaMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorCerrarVenta',
+        handlerParams: { nombreLead: cerrarVentaMatch[1].trim(), monto: cerrarVentaMatch[2] }
+      };
+    }
+
+    // ═══ REGISTRAR APARTADO ═══
+    // Formato: "apartado Juan 150000", "aparto Juan", "reserva Juan 200000"
+    const apartadoMatch = msg.match(/^(?:apartado|aparto|reserva|reservo)\s+([a-záéíóúñü\s]+?)(?:\s+(\d+))?$/i);
+    if (apartadoMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorRegistrarApartado',
+        handlerParams: { nombreLead: apartadoMatch[1].trim(), monto: apartadoMatch[2], match: body.match(/^(?:apartado|aparto|reserva|reservo)\s+([a-záéíóúñü\s]+?)(?:\s+(\d+))?$/i) }
+      };
+    }
+
+    // ═══ GUARDAR CUMPLEAÑOS ═══
+    // Formato: "cumple Juan 15 marzo", "cumpleaños María 3/05", "birthday Pedro 15-03"
+    const cumpleMatch = msg.match(/^(?:cumple(?:años)?|birthday)\s+([a-záéíóúñü\s]+?)\s+(\d{1,2})[\s/-](?:de\s+)?(\d{1,2}|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)$/i);
+    if (cumpleMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorGuardarCumple',
+        handlerParams: { match: body.match(/^(?:cumple(?:años)?|birthday)\s+([a-záéíóúñü\s]+?)\s+(\d{1,2})[\s/-](?:de\s+)?(\d{1,2}|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)$/i) }
+      };
+    }
+
+    // ═══ GUARDAR EMAIL ═══
+    // Formato: "email Juan juan@gmail.com", "correo María maria@hotmail.com"
+    const emailMatch = msg.match(/^(?:email|correo|mail)\s+([a-záéíóúñü]+)\s+([^\s]+@[^\s]+\.[^\s]+)$/i);
+    if (emailMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorGuardarEmail',
+        handlerParams: { match: body.match(/^(?:email|correo|mail)\s+([a-záéíóúñü]+)\s+([^\s]+@[^\s]+\.[^\s]+)$/i) }
+      };
+    }
+
+    // ═══ REGISTRAR REFERIDO ═══
+    // Formato: "referido Juan por María", "referencia Pedro de Carlos"
+    const referidoMatch = msg.match(/^(?:referido|referencia)\s+([a-záéíóúñü\s]+?)\s+(?:por|de)\s+([a-záéíóúñü\s]+)$/i);
+    if (referidoMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorRegistrarReferido',
+        handlerParams: { nombreLead: referidoMatch[1].trim(), referidoPor: referidoMatch[2].trim() }
+      };
+    }
+
+    // ═══ LLAMAR (info de contacto) ═══
+    // Formato: "llamar Juan" (sin fecha = solo mostrar info)
+    const llamarInfoMatch = msg.match(/^llamar\s+([a-záéíóúñü]+)$/i);
+    if (llamarInfoMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorLlamar',
+        handlerParams: { nombre: llamarInfoMatch[1].trim() }
+      };
+    }
+
+    // ═══ PROGRAMAR LLAMADA ═══
+    // Formato: "programar llamada Juan mañana 3pm"
+    const programarLlamadaMatch = msg.match(/^programar\s+llamada\s+([a-záéíóúñü]+)\s+(.+)$/i);
+    if (programarLlamadaMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorProgramarLlamada',
+        handlerParams: { nombreLead: programarLlamadaMatch[1].trim(), fechaHora: programarLlamadaMatch[2].trim() }
+      };
+    }
+
+    // ═══ LLAMADAS PENDIENTES ═══
+    if (/^(?:llamadas\s+pendientes|mis\s+llamadas|pendientes\s+llamadas)$/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorLlamadasPendientes' };
+    }
+
+    // ═══ CREAR RECORDATORIO ═══
+    // Formato: "recordatorio revisar documentos mañana", "recordarme llamar al banco"
+    const recordatorioMatch = msg.match(/^(?:recordatorio|recordarme|reminder)\s+(.+)$/i);
+    if (recordatorioMatch && !/^recordar(?:me)?\s+llamar\s+/i.test(msg)) {
+      return {
+        matched: true,
+        handlerName: 'vendedorCrearRecordatorio',
+        handlerParams: { texto: recordatorioMatch[1].trim() }
+      };
+    }
+
+    // ═══ ENVIAR MATERIAL ═══
+    // Formato: "enviar material Monte Verde a Juan", "material Los Encinos para María"
+    const enviarMaterialMatch = msg.match(/^(?:enviar\s+)?material\s+([a-záéíóúñü\s]+?)\s+(?:a|para)\s+([a-záéíóúñü]+)$/i);
+    if (enviarMaterialMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorEnviarMaterial',
+        handlerParams: { desarrollo: enviarMaterialMatch[1].trim(), nombreLead: enviarMaterialMatch[2].trim() }
+      };
+    }
+
+    // ═══ ENVIAR INFO A LEAD ═══
+    // Formato: "enviar info Juan Monte Verde", "info para María Los Encinos"
+    const enviarInfoMatch = msg.match(/^(?:enviar\s+)?info\s+(?:a\s+|para\s+)?([a-záéíóúñü]+)\s+(.+)$/i);
+    if (enviarInfoMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorEnviarInfoALead',
+        handlerParams: { nombreLead: enviarInfoMatch[1].trim(), desarrollo: enviarInfoMatch[2].trim() }
+      };
+    }
+
+    // ═══ PROPIEDADES / DESARROLLOS ═══
+    if (/^(?:propiedades|desarrollos|proyectos|lista\s+propiedades)$/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorPropiedades' };
+    }
+
+    // ═══ DISPONIBILIDAD ═══
+    if (/^(?:disponibilidad|agenda\s+disponible|horarios\s+disponibles|slots)$/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorDisponibilidad' };
+    }
+
+    // ═══ BUSCAR POR TELÉFONO ═══
+    const buscarTelMatch = msg.match(/^buscar\s+(\d{7,15})$/i);
+    if (buscarTelMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorBuscarPorTelefono',
+        handlerParams: { telefono: buscarTelMatch[1].trim() }
+      };
+    }
+
+    // ═══ MIS HOT ═══
+    if (/^mis\s+hot$/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorMisHot' };
+    }
+
+    // ═══ LEADS HOT (alias adicional) ═══
+    if (/^leads?\s+hot$/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorLeadsHot' };
+    }
+
+    // ═══ LEADS PENDIENTES (alias adicional) ═══
+    if (/^leads?\s+pendientes$/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorLeadsPendientes' };
+    }
+
+    // ═══ ENVIAR A BANCO ═══
+    // Formato: "enviar a banco Juan", "banco Juan", "mandar a banco María"
+    const enviarBancoMatch = msg.match(/^(?:enviar\s+a\s+banco|banco|mandar\s+a\s+banco)\s+([a-záéíóúñü\s]+)$/i);
+    if (enviarBancoMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorEnviarABanco',
+        handlerParams: { nombreLead: enviarBancoMatch[1].trim() }
+      };
+    }
+
+    // ═══ CONFIRMAR ENVÍO A BANCO ═══
+    const confirmarBancoMatch = msg.match(/^confirmar\s+(?:envio\s+)?banco\s+([a-záéíóúñü\s]+)$/i);
+    if (confirmarBancoMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorConfirmarEnvioABanco',
+        handlerParams: { nombreLead: confirmarBancoMatch[1].trim() }
+      };
+    }
+
+    // ═══ CONSULTAR CRÉDITO ═══
+    // Formato: "consultar credito Juan", "status credito María", "como va credito Pedro"
+    const consultarCreditoMatch = msg.match(/^(?:consultar|status|como\s+va)\s+(?:credito|crédito)\s+([a-záéíóúñü\s]+)$/i);
+    if (consultarCreditoMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorConsultarCredito',
+        handlerParams: { nombreLead: consultarCreditoMatch[1].trim() }
+      };
+    }
+
+    // ═══ ASIGNAR ASESOR ═══
+    // Formato: "asignar asesor Juan", "asesor para María"
+    const asignarAsesorMatch = msg.match(/^(?:asignar\s+asesor|asesor\s+para)\s+([a-záéíóúñü\s]+)$/i);
+    if (asignarAsesorMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorAsignarAsesor',
+        handlerParams: { nombreLead: asignarAsesorMatch[1].trim() }
+      };
+    }
+
+    // ═══ PREGUNTAR ASESOR ═══
+    // Formato: "preguntar asesor sobre requisitos", "consulta asesor documentos"
+    const preguntarAsesorMatch = msg.match(/^(?:preguntar|consulta)\s+asesor\s+(?:sobre\s+)?(.+)$/i);
+    if (preguntarAsesorMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorPreguntarAsesor',
+        handlerParams: { tema: preguntarAsesorMatch[1].trim() }
+      };
+    }
+
+    // ═══ CAMBIAR ETAPA ═══
+    // Formato: "cambiar etapa Juan negociación", "etapa María reservado"
+    const cambiarEtapaMatch = msg.match(/^(?:cambiar\s+)?etapa\s+([a-záéíóúñü]+)\s+(?:a\s+)?(.+)$/i);
+    if (cambiarEtapaMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorCambiarEtapa',
+        handlerParams: { nombreLead: cambiarEtapaMatch[1].trim(), etapa: cambiarEtapaMatch[2].trim(), texto: body }
+      };
+    }
+
+    // ═══ CANCELAR LEAD / PERDIDO ═══
+    // Formato: "cancelar lead Juan", "perdido María", "lead perdido Pedro"
+    const cancelarLeadMatch = msg.match(/^(?:cancelar\s+lead|perdido|lead\s+perdido)\s+([a-záéíóúñü\s]+)$/i);
+    if (cancelarLeadMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorCancelarLead',
+        handlerParams: { nombreLead: cancelarLeadMatch[1].trim() }
+      };
+    }
+
+    // ═══ CREAR LEAD (alias de nuevo lead) ═══
+    const crearLeadMatch = msg.match(/^crear\s+lead\s+([a-záéíóúñü\s]+?)\s+(\d{10,15})$/i);
+    if (crearLeadMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorCrearLead',
+        handlerParams: { nombre: crearLeadMatch[1].trim(), telefono: crearLeadMatch[2].trim() }
+      };
+    }
+
+    // ═══ AYUDA CONTEXTUAL ═══
+    // Formato: "ayuda citas", "ayuda credito", "help leads"
+    const ayudaContextualMatch = msg.match(/^(?:ayuda|help)\s+(.+)$/i);
+    if (ayudaContextualMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorAyudaContextual',
+        handlerParams: { tema: ayudaContextualMatch[1].trim() }
+      };
+    }
+
     return { matched: false };
   }
 
