@@ -1384,6 +1384,61 @@ export default {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // 🧪 TEST-VENDEDOR-MSG - Simula mensaje de un VENDEDOR (team member)
+    // USO: /test-vendedor-msg?phone=5212224558475&msg=ok%20roberto
+    // Esto ejecuta el handler completo como si el vendedor enviara por WhatsApp
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/test-vendedor-msg" && request.method === "GET") {
+      const phone = url.searchParams.get('phone') || '5212224558475'; // Default: Vendedor Test
+      const msg = url.searchParams.get('msg') || 'ayuda';
+
+      try {
+        // Verificar que el teléfono pertenece a un team member
+        const phoneLimpio = phone.replace(/\D/g, '');
+        const { data: vendedor } = await supabase.client
+          .from('team_members')
+          .select('id, name, phone, role, active')
+          .or(`phone.ilike.%${phoneLimpio}%,phone.ilike.%${phoneLimpio.slice(-10)}%`)
+          .single();
+
+        if (!vendedor) {
+          return corsResponse(JSON.stringify({
+            ok: false,
+            error: 'Teléfono no pertenece a un team member',
+            phone: phoneLimpio,
+            uso: '/test-vendedor-msg?phone=5212224558475&msg=ok roberto',
+            hint: 'Usa el teléfono de un vendedor registrado en team_members'
+          }), 400);
+        }
+
+        // Inicializar servicios necesarios
+        const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
+        const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+        const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+
+        // Llamar al handler de WhatsApp con el teléfono del vendedor
+        const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
+        await handler.handleIncomingMessage(`whatsapp:+${phoneLimpio}`, msg, env);
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          mensaje_simulado: msg,
+          vendedor: {
+            id: vendedor.id,
+            nombre: vendedor.name,
+            telefono: vendedor.phone,
+            role: vendedor.role
+          },
+          nota: 'Mensaje procesado como si viniera del vendedor. Revisa WhatsApp para ver la respuesta.'
+        }));
+
+      } catch (e: any) {
+        console.error('❌ Error en test-vendedor-msg:', e);
+        return corsResponse(JSON.stringify({ ok: false, error: e.message, stack: e.stack }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // 🚨 EMERGENCY STOP - Detener TODOS los broadcasts inmediatamente
     // ═══════════════════════════════════════════════════════════════════════
     if (url.pathname === "/api/emergency-stop" && request.method === "POST") {
