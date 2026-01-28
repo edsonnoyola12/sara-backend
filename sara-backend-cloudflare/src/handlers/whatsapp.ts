@@ -1793,8 +1793,23 @@ export class WhatsAppHandler {
           return;
         }
 
-        // Si tampoco es comando de asesor, mostrar mensaje original
-        console.log('📤 CEO: Comando no reconocido (ni CEO ni asesor)');
+        // ━━━ FALLBACK 2: Intentar comandos de vendedor ━━━
+        console.log('📤 CEO: Comando no es asesor, intentando comandos de vendedor...');
+        const vendorService = new VendorCommandsService(this.supabase);
+        const vendorResult = vendorService.detectCommand(mensaje, nombreCEO);
+
+        if (vendorResult.action === 'call_handler') {
+          console.log('📤 CEO: Comando reconocido como vendedor:', vendorResult.handlerName);
+          await this.executeVendedorHandler(from, body, ceo, nombreCEO, teamMembers, vendorResult.handlerName!, vendorResult.handlerParams);
+          return;
+        }
+        if (vendorResult.action === 'send_message') {
+          await this.meta.sendWhatsAppMessage(cleanPhone, vendorResult.message!);
+          return;
+        }
+
+        // Si no es ni CEO, ni asesor, ni vendedor, mostrar mensaje original
+        console.log('📤 CEO: Comando no reconocido (ni CEO, ni asesor, ni vendedor)');
         await this.meta.sendWhatsAppMessage(cleanPhone, result.message!);
         return;
     }
@@ -6307,6 +6322,123 @@ export class WhatsAppHandler {
       default:
         console.log('Handler Asesor no reconocido:', handlerName);
         await this.asesorAyuda(from, nombreAsesor);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // EJECUTAR VENDEDOR HANDLER (para CEO usando comandos de vendedor)
+  // ═══════════════════════════════════════════════════════════════
+  private async executeVendedorHandler(from: string, body: string, ceo: any, nombreCEO: string, teamMembers: any[], handlerName: string, params?: any): Promise<void> {
+    const vendorService = new VendorCommandsService(this.supabase);
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+
+    // ━━━ PRIMERO: Intentar ejecutar via servicio centralizado ━━━
+    const handlerResult = await vendorService.executeHandler(
+      handlerName,
+      ceo,
+      nombreCEO,
+      params || {}
+    );
+
+    // Si el servicio manejó el comando exitosamente, enviar mensaje
+    if (handlerResult.message) {
+      await this.meta.sendWhatsAppMessage(cleanPhone, handlerResult.message);
+      return;
+    }
+
+    // Si hay error pero no necesita handler externo, mostrar error
+    if (handlerResult.error && !handlerResult.needsExternalHandler) {
+      await this.meta.sendWhatsAppMessage(cleanPhone, handlerResult.error);
+      return;
+    }
+
+    // ━━━ FALLBACK: Handlers que requieren lógica externa ━━━
+    switch (handlerName) {
+      // ━━━ CITAS ━━━
+      case 'vendedorCitasHoy':
+        await this.vendedorCitasHoy(from, ceo, nombreCEO);
+        break;
+      case 'vendedorCitasManana':
+        await this.vendedorCitasManana(from, ceo, nombreCEO);
+        break;
+      case 'vendedorCancelarCita':
+        await this.vendedorCancelarCita(from, body, ceo, nombreCEO);
+        break;
+      case 'vendedorReagendarCita':
+        await this.vendedorReagendarCita(from, body, ceo, nombreCEO);
+        break;
+      case 'vendedorAgendarCitaCompleta':
+        await this.vendedorAgendarCitaCompleta(from, body, ceo, nombreCEO);
+        break;
+      case 'vendedorAgendarCita':
+        await this.vendedorAgendarCita(from, body, ceo, nombreCEO);
+        break;
+
+      // ━━━ LEADS ━━━
+      case 'vendedorResumenLeads':
+        await this.vendedorResumenLeads(from, ceo, nombreCEO);
+        break;
+      case 'vendedorLeadsHot':
+        await this.vendedorLeadsHot(from, ceo, nombreCEO);
+        break;
+      case 'vendedorAgregarNota':
+        await this.vendedorAgregarNotaConParams(from, params?.nombreLead, params?.textoNota, ceo, nombreCEO);
+        break;
+      case 'vendedorVerNotas':
+        await this.vendedorVerNotasConParams(from, params?.nombreLead, ceo, nombreCEO);
+        break;
+      case 'vendedorCrearLead':
+        await this.vendedorCrearLead(from, body, ceo, nombreCEO);
+        break;
+
+      // ━━━ MATERIALES ━━━
+      case 'vendedorEnviarMaterial':
+        await this.vendedorEnviarMaterial(from, body, ceo, nombreCEO, params?.tipo, params?.nombreLead);
+        break;
+      case 'vendedorEnviarInfoALead':
+        await this.vendedorEnviarInfoALead(from, body, ceo, nombreCEO);
+        break;
+
+      // ━━━ COACHING ━━━
+      case 'vendedorCoaching':
+        await this.vendedorCoaching(from, params?.tema || body, ceo, nombreCEO);
+        break;
+
+      // ━━━ LLAMADAS ━━━
+      case 'vendedorLlamar':
+        await this.vendedorLlamar(from, params?.nombreLead, ceo, nombreCEO);
+        break;
+      case 'vendedorProgramarLlamada':
+        await this.vendedorProgramarLlamada(from, body, ceo, nombreCEO);
+        break;
+      case 'vendedorRecordarLlamar':
+        await this.vendedorRecordarLlamar(from, params?.nombreLead, params?.cuando, ceo, nombreCEO);
+        break;
+      case 'vendedorLlamadasPendientes':
+        await this.vendedorLlamadasPendientes(from, ceo, nombreCEO);
+        break;
+
+      // ━━━ HISTORIAL ━━━
+      case 'vendedorVerHistorial':
+        await this.vendedorVerHistorial(from, params?.nombreLead, ceo, nombreCEO);
+        break;
+
+      // ━━━ BRIDGE ━━━
+      case 'activateBridge':
+        await this.activateBridge(from, params?.nombreLead, ceo, nombreCEO, teamMembers);
+        break;
+
+      // ━━━ HIPOTECA ━━━
+      case 'vendedorEnviarABanco':
+        await this.vendedorEnviarABanco(from, body, ceo);
+        break;
+      case 'vendedorConsultarCredito':
+        await this.vendedorConsultarCredito(from, params?.nombre || body, ceo);
+        break;
+
+      default:
+        console.log('Handler Vendedor (CEO) no reconocido:', handlerName);
+        await this.meta.sendWhatsAppMessage(cleanPhone, '❓ Comando no reconocido. Escribe *ayuda* para ver opciones.');
     }
   }
 
