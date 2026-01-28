@@ -944,6 +944,10 @@ GET /test-video-personalizado/{phone}?nombre={nombre}&desarrollo={desarrollo}
 | `/test-lead?phone=X&name=Y&msg=Z&api_key=W` | Flujo completo como lead real (SÍ envía WhatsApp) |
 | `/test-vendedor-msg?phone=X&msg=Y&api_key=Z` | Simula mensaje de vendedor/CEO |
 | `/debug-lead?phone=X` | Debug de un lead específico |
+| `/test-ventana-24h` | Ver estado ventana 24h de cada team member (PÚBLICO) |
+| `/test-envio-7pm` | Dry-run del reporte 7 PM (PÚBLICO) |
+| `/test-envio-7pm?enviar=true` | Envío REAL del reporte 7 PM |
+| `/test-envio-7pm?enviar=true&phone=XXXX` | Envío REAL a vendedor específico |
 
 ### 🔐 Autenticación de API
 
@@ -1494,6 +1498,18 @@ await enviarMensajeTeamMember(supabase, meta, teamMember, mensaje, {
   4. Vendedor responde al template
   5. SARA detecta pending y envía reporte completo
   ```
+
+- ✅ **Nuevos endpoints de diagnóstico (PÚBLICOS):**
+  - `/test-ventana-24h` - Ver estado de ventana de cada team member
+  - `/test-envio-7pm` - Dry-run del reporte 7 PM
+  - `/test-envio-7pm?enviar=true` - Envío real
+  - `/test-envio-7pm?enviar=true&phone=XXXX` - Envío a uno específico
+
+- ✅ **Pruebas exitosas:**
+  | Vendedor | Ventana | Método | Resultado |
+  |----------|---------|--------|-----------|
+  | Francisco de la Torre | ✅ ABIERTA | DIRECTO | ✅ Llegó |
+  | Karla Muedano | ❌ CERRADA | TEMPLATE + PENDING | ✅ Template enviado |
 
 ---
 

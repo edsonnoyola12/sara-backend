@@ -313,6 +313,10 @@ Ver documentación en `docs/`:
 | `/test-ai-response?msg=X&api_key=Y` | Prueba respuestas de SARA (solo texto, no envía WhatsApp) |
 | `/test-lead?phone=X&name=Y&msg=Z&api_key=W` | Flujo completo como lead real (SÍ envía WhatsApp) |
 | `/test-vendedor-msg?phone=X&msg=Y&api_key=Z` | Simula mensaje de vendedor/CEO |
+| `/test-ventana-24h` | Ver estado de ventana 24h de cada team member (público) |
+| `/test-envio-7pm` | Dry-run del reporte 7 PM (público) |
+| `/test-envio-7pm?enviar=true` | Envío real del reporte 7 PM |
+| `/test-envio-7pm?enviar=true&phone=XXXX` | Envío real a un vendedor específico |
 
 ---
 
@@ -356,3 +360,9 @@ La tabla `properties` NO tiene columna `active`. Todas las propiedades se consid
   - Si ventana cerrada → envía template + guarda mensaje como pending
   - Cuando responden → se entrega el mensaje pendiente
   - Actualizado: reportes 7 PM vendedores, reportes asesores
+- Nuevos endpoints de diagnóstico (públicos):
+  - `/test-ventana-24h` - Ver estado de ventana de cada team member
+  - `/test-envio-7pm` - Probar envío de reportes (dry-run o real)
+- Pruebas exitosas:
+  - Francisco (ventana abierta) → mensaje directo ✅
+  - Karla (ventana cerrada) → template + pending ✅
