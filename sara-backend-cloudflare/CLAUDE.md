@@ -137,6 +137,19 @@ Si no hay ventana abierta → el mensaje NO LLEGA.
 - Si ventana cerrada → envía template `reactivar_equipo` + guarda en `pending_*`
 - Cuando responden → se entrega el mensaje pendiente
 
+**Pending messages se verifican PRIMERO:**
+- En `handleVendedorMessage` (whatsapp.ts ~línea 3810)
+- En `handleCEOMessage` (whatsapp.ts ~línea 1520)
+- ANTES de cualquier otra lógica (comandos, bridge, etc.)
+- Actualiza `last_sara_interaction` al responder
+- Hace `return` después de entregar (sin respuesta genérica)
+
+**Pending keys soportados:**
+- `pending_briefing` - Briefing de mañana (8 AM)
+- `pending_recap` - Recap nocturno (7 PM, solo si no usó SARA)
+- `pending_reporte_diario` - Reporte 7 PM
+- `pending_reporte_semanal` - Reporte lunes
+
 **Aplica a:** Leads, Vendedores, Coordinadores, Asesores, Marketing
 
 ---
@@ -363,6 +376,34 @@ La tabla `properties` NO tiene columna `active`. Todas las propiedades se consid
 - Nuevos endpoints de diagnóstico (públicos):
   - `/test-ventana-24h` - Ver estado de ventana de cada team member
   - `/test-envio-7pm` - Probar envío de reportes (dry-run o real)
-- Pruebas exitosas:
-  - Francisco (ventana abierta) → mensaje directo ✅
-  - Karla (ventana cerrada) → template + pending ✅
+- **CRÍTICO**: Pending messages ahora se verifican PRIMERO en handlers
+  - Movido verificación de pending al INICIO de `handleVendedorMessage`
+  - Movido verificación de pending al INICIO de `handleCEOMessage`
+  - Esto garantiza que cuando responden al template, reciben el mensaje pendiente SIN respuesta genérica
+  - También actualiza `last_sara_interaction` para abrir ventana 24h
+
+### Tests de sistema completados (2026-01-28 15:23 CST):
+| Test | Resultado |
+|------|-----------|
+| Health endpoint | ✅ 23 leads hoy, 3 citas |
+| Envío DIRECTO (Javier) | ✅ Mensaje llegó |
+| Envío TEMPLATE (Refugio) | ✅ Template + pending |
+| Ventanas 24h | ✅ 5 abiertas / 13 cerradas |
+| Dry-run masivo 7PM | ✅ 9 vendedores (4 directo, 5 template) |
+
+### Flujo de reportes 7PM verificado:
+```
+9 vendedores activos
+├── 4 ventana ABIERTA → Mensaje DIRECTO
+│   ├── Francisco de la Torre
+│   ├── Javier Frausto
+│   ├── Karla Muedano
+│   └── Fabian Fernandez
+│
+└── 5 ventana CERRADA → TEMPLATE + PENDING
+    ├── Rosalia del Rio
+    ├── Juanita Lara
+    ├── Jimena Flores
+    ├── Refugio Pulido
+    └── Vendedor Test
+```
