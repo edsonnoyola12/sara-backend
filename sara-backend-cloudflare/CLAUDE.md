@@ -407,3 +407,27 @@ La tabla `properties` NO tiene columna `active`. Todas las propiedades se consid
     ├── Refugio Pulido
     └── Vendedor Test
 ```
+
+### Tests E2E Customer + Vendor Journey (2026-01-28 16:00 CST):
+
+**Teléfonos de prueba:**
+- Lead: 5610016226 (Roberto García)
+- Vendedor: 5212224558475 (Vendedor Test)
+
+| Journey | Test | Resultado |
+|---------|------|-----------|
+| **Lead** | Pregunta por Distrito Falco | ✅ DELIVERED |
+| **Lead** | SARA envía info 4 modelos + precios | ✅ DELIVERED |
+| **Lead** | SARA envía video + recorrido 3D | ✅ DELIVERED |
+| **Lead** | SARA inicia video Veo 3 personalizado | ✅ Generando |
+| **Vendedor** | Comando `mis leads` | ✅ DELIVERED (15 leads) |
+| **Vendedor** | Comando `citas` | ✅ DELIVERED (3 citas) |
+| **Vendedor** | Comando `briefing` | ✅ DELIVERED |
+
+**Sistema 100% funcional:**
+- ✅ IA conversacional
+- ✅ Detección de desarrollos
+- ✅ Envío de recursos automático
+- ✅ Comandos de vendedor
+- ✅ Videos Veo 3
+- ✅ Ventana 24h respetada
