@@ -358,7 +358,7 @@ export class AsesorCommandsService {
       // Buscar leads
       const { data: allLeads } = await this.supabase.client
         .from('leads')
-        .select('id, name, phone, status, created_at, notes')
+        .select('id, name, phone, status, created_at, notes, assigned_to, asesor_banco_id')
         .order('created_at', { ascending: false })
         .limit(100);
 
@@ -367,15 +367,22 @@ export class AsesorCommandsService {
         // Admin ve todos los leads
         misLeads = allLeads || [];
       } else {
-        // Asesor ve solo sus leads
+        // Asesor ve solo sus leads (check multiple fields)
         misLeads = allLeads?.filter(l => {
-          if (!l.notes) return false;
-          try {
-            const notes = this.safeParseNotes(l.notes);
-            return notes?.credit_flow_context?.asesor_id === asesorId || l.assigned_to === asesorId;
-          } catch {
-            return false;
+          // Check direct assignment
+          if (l.assigned_to === asesorId) return true;
+          // Check asesor_banco_id (set by vendedorPasarACredito)
+          if (l.asesor_banco_id === asesorId) return true;
+          // Check notes.credit_flow_context.asesor_id
+          if (l.notes) {
+            try {
+              const notes = this.safeParseNotes(l.notes);
+              if (notes?.credit_flow_context?.asesor_id === asesorId) return true;
+            } catch {
+              // ignore parse errors
+            }
           }
+          return false;
         }) || [];
       }
 
@@ -1123,10 +1130,16 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
       // Admin/CEO puede ver TODOS los leads
       misLeads = allLeads || [];
     } else {
-      // Asesor solo ve sus leads (por credit_flow_context o assigned_to)
+      // Asesor solo ve sus leads (check multiple fields)
       misLeads = allLeads?.filter(l => {
+        // Check direct assignment
+        if (l.assigned_to === asesorId) return true;
+        // Check asesor_banco_id (set by vendedorPasarACredito)
+        if (l.asesor_banco_id === asesorId) return true;
+        // Check notes.credit_flow_context.asesor_id
         const notes = this.safeParseNotes(l.notes);
-        return notes?.credit_flow_context?.asesor_id === asesorId || l.assigned_to === asesorId;
+        if (notes?.credit_flow_context?.asesor_id === asesorId) return true;
+        return false;
       }) || [];
     }
 

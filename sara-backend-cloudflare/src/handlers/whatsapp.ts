@@ -1778,7 +1778,23 @@ export class WhatsAppHandler {
         return;
 
       case 'not_recognized':
-        console.log('📤 CEO: Comando no reconocido');
+        // ━━━ FALLBACK: Intentar comandos de asesor (preaprobado, rechazado, etc.) ━━━
+        console.log('📤 CEO: Comando CEO no reconocido, intentando comandos de asesor...');
+        const asesorService = new AsesorCommandsService(this.supabase);
+        const asesorResult = asesorService.detectCommand(mensaje, body, nombreCEO);
+
+        if (asesorResult.action === 'call_handler') {
+          console.log('📤 CEO: Comando reconocido como asesor:', asesorResult.handlerName);
+          await this.executeAsesorHandler(from, body, ceo, nombreCEO, teamMembers, asesorResult.handlerName!, asesorResult.handlerParams);
+          return;
+        }
+        if (asesorResult.action === 'send_message') {
+          await this.meta.sendWhatsAppMessage(cleanPhone, asesorResult.message!);
+          return;
+        }
+
+        // Si tampoco es comando de asesor, mostrar mensaje original
+        console.log('📤 CEO: Comando no reconocido (ni CEO ni asesor)');
         await this.meta.sendWhatsAppMessage(cleanPhone, result.message!);
         return;
     }

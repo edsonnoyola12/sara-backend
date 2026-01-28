@@ -691,6 +691,40 @@ export default {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // 🔧 SET ONBOARDING - Marcar vendedor como onboarding completado
+    // USO: /set-onboarding?phone=5212224558475
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/set-onboarding" && request.method === "GET") {
+      const phone = url.searchParams.get('phone') || '5212224558475';
+      const phoneLimpio = phone.replace(/\D/g, '').slice(-10);
+
+      const { data: member } = await supabase.client
+        .from('team_members')
+        .select('id, name, notes')
+        .ilike('phone', `%${phoneLimpio}`)
+        .single();
+
+      if (!member) {
+        return corsResponse(JSON.stringify({ error: 'Team member no encontrado', phone: phoneLimpio }), 404);
+      }
+
+      const notas = typeof member.notes === 'object' ? (member.notes || {}) : {};
+      const notasActualizadas = {
+        ...notas,
+        onboarding_completed: true,
+        onboarding_date: new Date().toISOString()
+      };
+
+      await supabase.client.from('team_members').update({ notes: notasActualizadas }).eq('id', member.id);
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        member: member.name,
+        onboarding_completed: true
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // DEBUG CACHE - Ver estadísticas del cache KV
     // USO: /debug-cache
     // ═══════════════════════════════════════════════════════════════════════
