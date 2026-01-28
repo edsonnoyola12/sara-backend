@@ -208,6 +208,8 @@ function requiresAuth(pathname: string): boolean {
     '/status',            // Status dashboard
     '/analytics',         // Analytics dashboard
     '/',                  // Root
+    '/test-ventana-24h',  // Test ventana 24h (diagnóstico)
+    '/test-envio-7pm',    // Test envío 7pm (dry-run por default)
   ];
 
   if (publicPaths.includes(pathname)) return false;
@@ -9855,6 +9857,123 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     if (url.pathname === '/health') {
       const health = await getHealthStatus(supabase);
       return corsResponse(JSON.stringify(health));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST VENTANA 24H - Ver estado de ventana de cada team member
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-ventana-24h') {
+      const { data: teamMembers } = await supabase.client
+        .from('team_members')
+        .select('id, name, phone, role, active, notes')
+        .eq('active', true)
+        .order('name');
+
+      const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const ahora = new Date().toISOString();
+
+      const resultado = teamMembers?.map(tm => {
+        const notas = typeof tm.notes === 'string' ? JSON.parse(tm.notes || '{}') : (tm.notes || {});
+        const lastInteraction = notas.last_sara_interaction;
+        const ventanaAbierta = lastInteraction && lastInteraction > hace24h;
+
+        // Calcular hace cuánto tiempo
+        let tiempoDesde = 'Nunca';
+        if (lastInteraction) {
+          const diff = Date.now() - new Date(lastInteraction).getTime();
+          const horas = Math.floor(diff / (1000 * 60 * 60));
+          const minutos = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+          tiempoDesde = horas > 0 ? `${horas}h ${minutos}m` : `${minutos}m`;
+        }
+
+        // Verificar pending messages
+        const pendingKeys = ['pending_briefing', 'pending_recap', 'pending_reporte_diario', 'pending_reporte_semanal', 'pending_mensaje'];
+        const pendientes = pendingKeys.filter(key => notas[key]?.mensaje_completo);
+
+        return {
+          nombre: tm.name,
+          rol: tm.role,
+          telefono: tm.phone?.slice(-4) || '????',
+          ventana_24h: ventanaAbierta ? '✅ ABIERTA' : '❌ CERRADA',
+          ultima_interaccion: lastInteraction || 'Nunca',
+          hace: tiempoDesde,
+          pending_messages: pendientes.length > 0 ? pendientes : 'Ninguno'
+        };
+      });
+
+      const resumen = {
+        total: resultado?.length || 0,
+        ventana_abierta: resultado?.filter(r => r.ventana_24h.includes('ABIERTA')).length || 0,
+        ventana_cerrada: resultado?.filter(r => r.ventana_24h.includes('CERRADA')).length || 0,
+        con_pending: resultado?.filter(r => Array.isArray(r.pending_messages)).length || 0
+      };
+
+      return corsResponse(JSON.stringify({
+        timestamp: ahora,
+        hace24h_limite: hace24h,
+        resumen,
+        team_members: resultado
+      }, null, 2));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TEST ENVIO 7PM - Simular el envío de reporte diario (dry-run)
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-envio-7pm') {
+      const enviarReal = url.searchParams.get('enviar') === 'true';
+      const soloUno = url.searchParams.get('phone'); // Teléfono específico
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      const { data: vendedores } = await supabase.client
+        .from('team_members')
+        .select('*')
+        .eq('role', 'vendedor')
+        .eq('active', true);
+
+      if (!vendedores) {
+        return corsResponse(JSON.stringify({ error: 'No hay vendedores activos' }));
+      }
+
+      const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const resultados: any[] = [];
+
+      for (const v of vendedores) {
+        if (soloUno && !v.phone?.includes(soloUno)) continue;
+
+        const notas = typeof v.notes === 'string' ? JSON.parse(v.notes || '{}') : (v.notes || {});
+        const lastInteraction = notas.last_sara_interaction;
+        const ventanaAbierta = lastInteraction && lastInteraction > hace24h;
+
+        const resultado: any = {
+          nombre: v.name,
+          telefono: v.phone?.slice(-4) || '????',
+          ventana_24h: ventanaAbierta ? '✅ ABIERTA' : '❌ CERRADA',
+          metodo: ventanaAbierta ? 'DIRECTO' : 'TEMPLATE + PENDING'
+        };
+
+        if (enviarReal) {
+          const mensajeTest = `📊 *TEST REPORTE 7PM*\n\nHola ${v.name?.split(' ')[0]}, esto es una prueba del sistema de reportes.\n\n✅ Tu ventana 24h está: ${ventanaAbierta ? 'ABIERTA' : 'CERRADA'}\n✅ Método usado: ${ventanaAbierta ? 'Mensaje directo' : 'Template + pending'}\n\n_Este es un mensaje de prueba_`;
+
+          const res = await enviarMensajeTeamMember(supabase, meta, v, mensajeTest, {
+            tipoMensaje: 'test_reporte_7pm',
+            guardarPending: true,
+            pendingKey: 'pending_test_7pm'
+          });
+
+          resultado.enviado = res.success;
+          resultado.metodo_usado = res.method;
+        }
+
+        resultados.push(resultado);
+      }
+
+      return corsResponse(JSON.stringify({
+        modo: enviarReal ? 'ENVÍO REAL' : 'DRY-RUN (usa ?enviar=true para enviar)',
+        total_vendedores: resultados.length,
+        ventana_abierta: resultados.filter(r => r.ventana_24h.includes('ABIERTA')).length,
+        ventana_cerrada: resultados.filter(r => r.ventana_24h.includes('CERRADA')).length,
+        resultados
+      }, null, 2));
     }
 
     // ═══════════════════════════════════════════════════════════════
