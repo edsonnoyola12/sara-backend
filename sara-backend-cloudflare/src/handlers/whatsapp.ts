@@ -1808,8 +1808,23 @@ export class WhatsAppHandler {
           return;
         }
 
-        // Si no es ni CEO, ni asesor, ni vendedor, mostrar mensaje original
-        console.log('📤 CEO: Comando no reconocido (ni CEO, ni asesor, ni vendedor)');
+        // ━━━ FALLBACK 3: Intentar comandos de agencia/marketing ━━━
+        console.log('📤 CEO: Comando no es vendedor, intentando comandos de agencia...');
+        const agenciaService = new AgenciaCommandsService(this.supabase);
+        const agenciaResult = agenciaService.detectCommand(mensaje, body, nombreCEO);
+
+        if (agenciaResult.action === 'call_handler') {
+          console.log('📤 CEO: Comando reconocido como agencia:', agenciaResult.handlerName);
+          await this.executeAgenciaHandlerForCEO(from, body, ceo, nombreCEO, agenciaResult.handlerName!);
+          return;
+        }
+        if (agenciaResult.action === 'send_message') {
+          await this.meta.sendWhatsAppMessage(cleanPhone, agenciaResult.message!);
+          return;
+        }
+
+        // Si no es ni CEO, ni asesor, ni vendedor, ni agencia, mostrar mensaje original
+        console.log('📤 CEO: Comando no reconocido (ni CEO, ni asesor, ni vendedor, ni agencia)');
         await this.meta.sendWhatsAppMessage(cleanPhone, result.message!);
         return;
     }
@@ -3211,6 +3226,142 @@ export class WhatsAppHandler {
 
       default:
         console.log('Handler Agencia no reconocido:', handlerName);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // EJECUTAR AGENCIA HANDLER FOR CEO (usa meta en vez de twilio)
+  // ═══════════════════════════════════════════════════════════════
+  private async executeAgenciaHandlerForCEO(from: string, body: string, ceo: any, nombreCEO: string, handlerName: string): Promise<void> {
+    const agenciaService = new AgenciaCommandsService(this.supabase);
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+
+    // ━━━ PRIMERO: Intentar ejecutar via servicio centralizado ━━━
+    const handlerResult = await agenciaService.executeHandler(handlerName, nombreCEO);
+
+    // Si el servicio manejó el comando
+    if (handlerResult.message) {
+      await this.meta.sendWhatsAppMessage(cleanPhone, handlerResult.message);
+      return;
+    }
+
+    // Error sin necesidad de handler externo
+    if (handlerResult.error && !handlerResult.needsExternalHandler) {
+      await this.meta.sendWhatsAppMessage(cleanPhone, handlerResult.error);
+      return;
+    }
+
+    // ━━━ FALLBACK: Handlers que requieren lógica externa ━━━
+    switch (handlerName) {
+      case 'agenciaCampanas':
+        await this.agenciaCampanasForCEO(cleanPhone, nombreCEO);
+        break;
+      case 'agenciaMetricas':
+        await this.agenciaMetricasForCEO(cleanPhone, nombreCEO);
+        break;
+      case 'agenciaLeads':
+        await this.agenciaLeadsForCEO(cleanPhone, nombreCEO);
+        break;
+      case 'verSegmentos':
+        await this.verSegmentosForCEO(cleanPhone, nombreCEO);
+        break;
+      case 'iniciarBroadcast':
+        await this.iniciarBroadcastForCEO(cleanPhone, nombreCEO);
+        break;
+      case 'enviarASegmento':
+        await this.enviarASegmentoForCEO(cleanPhone, body, ceo);
+        break;
+      default:
+        console.log('Handler Agencia (CEO) no reconocido:', handlerName);
+        await this.meta.sendWhatsAppMessage(cleanPhone, '❓ Comando de marketing no reconocido.');
+    }
+  }
+
+  // Helpers para CEO usando Meta en vez de Twilio
+  private async agenciaCampanasForCEO(phone: string, nombre: string): Promise<void> {
+    try {
+      const agenciaService = new AgenciaReportingService(this.supabase);
+      const mensaje = await agenciaService.getMensajeCampanas(nombre);
+      await this.meta.sendWhatsAppMessage(phone, mensaje);
+    } catch (e) {
+      console.error('Error en agenciaCampanas:', e);
+      await this.meta.sendWhatsAppMessage(phone, 'Error al obtener campañas.');
+    }
+  }
+
+  private async agenciaMetricasForCEO(phone: string, nombre: string): Promise<void> {
+    try {
+      const agenciaService = new AgenciaReportingService(this.supabase);
+      const mensaje = await agenciaService.getMensajeMetricas(nombre);
+      await this.meta.sendWhatsAppMessage(phone, mensaje);
+    } catch (e) {
+      console.error('Error en agenciaMetricas:', e);
+      await this.meta.sendWhatsAppMessage(phone, 'Error al obtener métricas.');
+    }
+  }
+
+  private async agenciaLeadsForCEO(phone: string, nombre: string): Promise<void> {
+    try {
+      const agenciaService = new AgenciaReportingService(this.supabase);
+      const mensaje = await agenciaService.getMensajeLeadsRecientes(nombre);
+      await this.meta.sendWhatsAppMessage(phone, mensaje);
+    } catch (e) {
+      console.error('Error en agenciaLeads:', e);
+      await this.meta.sendWhatsAppMessage(phone, 'Error al obtener leads.');
+    }
+  }
+
+  private async verSegmentosForCEO(phone: string, nombre: string): Promise<void> {
+    try {
+      const agenciaService = new AgenciaReportingService(this.supabase);
+      const mensaje = await agenciaService.getMensajeSegmentos(nombre);
+      await this.meta.sendWhatsAppMessage(phone, mensaje);
+    } catch (e) {
+      console.error('Error en verSegmentos:', e);
+      await this.meta.sendWhatsAppMessage(phone, 'Error al obtener segmentos.');
+    }
+  }
+
+  private async iniciarBroadcastForCEO(phone: string, nombre: string): Promise<void> {
+    const agenciaService = new AgenciaReportingService(this.supabase);
+    const mensaje = agenciaService.getMensajeAyudaBroadcast(nombre);
+    await this.meta.sendWhatsAppMessage(phone, mensaje);
+  }
+
+  private async enviarASegmentoForCEO(phone: string, body: string, usuario: any): Promise<void> {
+    try {
+      console.log('📤 BROADCAST (CEO): Iniciando enviarASegmento');
+      const agenciaService = new AgenciaReportingService(this.supabase);
+      const queueService = new BroadcastQueueService(this.supabase);
+
+      // Parsear el comando
+      const parsed = agenciaService.parseEnvioSegmento(body);
+      if (!parsed) {
+        await this.meta.sendWhatsAppMessage(phone,
+          `⚠️ Formato incorrecto.\n\nUsa: *enviar a [segmento]: [mensaje]*\n\nEjemplo: enviar a hot: Hola {nombre}, tenemos promoción!`
+        );
+        return;
+      }
+
+      // Obtener leads del segmento
+      const leads = await agenciaService.getLeadsBySegment(parsed.segmento);
+      if (leads.length === 0) {
+        await this.meta.sendWhatsAppMessage(phone, `❌ No hay leads en el segmento "${parsed.segmento}".`);
+        return;
+      }
+
+      // Agregar a cola de broadcast
+      await queueService.addToBroadcastQueue(leads, parsed.mensaje, usuario.id, parsed.segmento);
+
+      await this.meta.sendWhatsAppMessage(phone,
+        `✅ *Broadcast programado*\n\n` +
+        `📊 Segmento: ${parsed.segmento}\n` +
+        `👥 Destinatarios: ${leads.length}\n` +
+        `📝 Mensaje: ${parsed.mensaje.substring(0, 50)}...`
+      );
+    } catch (e) {
+      console.error('Error en enviarASegmento:', e);
+      await this.meta.sendWhatsAppMessage(phone, '❌ Error al programar broadcast.');
     }
   }
 
