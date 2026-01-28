@@ -3,7 +3,7 @@
  */
 
 import { SupabaseService } from '../services/supabase';
-import { MetaWhatsAppService } from '../services/metaWhatsAppService';
+import { MetaWhatsAppService } from '../services/meta-whatsapp';
 
 export interface EnviarMensajeTeamResult {
   success: boolean;
