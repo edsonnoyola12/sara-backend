@@ -31,6 +31,7 @@ import { LinkTrackingService, createLinkTracking } from './services/linkTracking
 import { SLAMonitoringService, createSLAMonitoring } from './services/slaMonitoringService';
 import { AutoAssignmentService, createAutoAssignment } from './services/autoAssignmentService';
 import { LeadAttributionService, createLeadAttribution } from './services/leadAttributionService';
+import { AIConversationService } from './services/aiConversationService';
 
 export interface Env {
   SUPABASE_URL: string;
@@ -1469,6 +1470,73 @@ export default {
       } catch (e: any) {
         console.error('❌ Error en test-vendedor-msg:', e);
         return corsResponse(JSON.stringify({ ok: false, error: e.message, stack: e.stack }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🧪 TEST-AI-RESPONSE - Prueba respuestas de SARA sin enviar WhatsApp
+    // USO: /test-ai-response?msg=tienen%20casas%20en%20polanco&api_key=XXX
+    // Devuelve la respuesta de la IA directamente para QA
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/test-ai-response" && request.method === "GET") {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const msg = url.searchParams.get('msg') || 'hola';
+      const leadName = url.searchParams.get('name') || 'Lead Prueba';
+
+      try {
+        // Obtener catálogo de propiedades (no hay columna 'active', usar todas)
+        const { data: properties } = await supabase.client
+          .from('properties')
+          .select('id, name, development, price, description, gps_link, bedrooms, bathrooms, area_m2');
+
+        // Crear prompt de SARA
+        const catalogoTexto = (properties || []).map(p =>
+          `- ${p.name} (${p.development}): $${p.price?.toLocaleString() || '?'} MXN, ${p.bedrooms || '?'} rec, ${p.bathrooms || '?'} baños, ${p.area_m2 || '?'}m². ${p.description?.substring(0, 80) || ''}`
+        ).join('\n');
+
+        const systemPrompt = `Eres SARA, asistente virtual de Grupo Santa Rita, inmobiliaria en Querétaro, México.
+
+CATÁLOGO DE DESARROLLOS:
+${catalogoTexto}
+
+SINÓNIMOS IMPORTANTES:
+- "Citadella del Nogal" o "El Nogal" = Villa Campelo y Villa Galiano (SÍ los tenemos)
+- Si preguntan por zonas que NO tenemos (Polanco, Santa Fe, CDMX), sugiere amablemente nuestros desarrollos en Querétaro
+
+REGLAS:
+1. Responde en español, amigable y profesional
+2. Si preguntan por algo que NO tenemos, NO inventes - sugiere alternativas reales
+3. Si preguntan precios, da rangos del catálogo
+4. Si preguntan ubicación, menciona que estamos en Querétaro
+5. Respuestas cortas (máx 3 párrafos)
+6. NO uses markdown ni asteriscos
+
+Nombre del cliente: ${leadName}`;
+
+        const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
+        const startTime = Date.now();
+
+        const response = await claude.chat([
+          { role: 'user', content: msg }
+        ], systemPrompt);
+
+        const responseTime = Date.now() - startTime;
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          pregunta: msg,
+          respuesta_sara: response,
+          tiempo_ms: responseTime,
+          lead_simulado: leadName,
+          desarrollos_disponibles: properties?.length || 0,
+          nota: 'Prueba directa de IA - no envía WhatsApp'
+        }));
+
+      } catch (e: any) {
+        console.error('❌ Error en test-ai-response:', e);
+        return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
       }
     }
 
