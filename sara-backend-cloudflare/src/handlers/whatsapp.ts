@@ -3864,7 +3864,7 @@ export class WhatsAppHandler {
     // 🎓 ONBOARDING - Tutorial para vendedores nuevos
     // Solo mostrar si NO es un comando conocido y NO hay bridge/pending activo
     // ═══════════════════════════════════════════════════════════
-    const esComandoConocido = /^(ver|bridge|citas?|leads?|hoy|ayuda|help|resumen|briefing|meta|brochure|ubicacion|video|coach|quien|info|hot|pendientes|credito|nuevo|reagendar|cambiar|mover|cancelar|agendar|recordar|llamar|nota|notas|contactar|conectar|#)/i.test(mensaje);
+    const esComandoConocido = /^(ver|bridge|citas?|leads?|hoy|ayuda|help|resumen|briefing|meta|brochure|ubicacion|video|coach|quien|info|hot|pendientes|credito|nuevo|reagendar|cambiar|mover|cancelar|agendar|recordar|llamar|nota|notas|contactar|conectar|cerrar|apartado|aparto|reserva|cumple|birthday|email|correo|referido|programar|propiedades|desarrollos|proyectos|disponibilidad|buscar|banco|enviar|consultar|asignar|preguntar|confirmar|etapa|perdido|crear|material|ok|si|sí|editar|mis|status|mensaje|pipeline|historial|#)/i.test(mensaje);
     const tieneBridgeActivo = notasVendedor?.active_bridge && notasVendedor.active_bridge.expires_at && new Date(notasVendedor.active_bridge.expires_at) > new Date();
     const tienePendingMessage = notasVendedor?.pending_message_to_lead;
     // Verificar si hay algún pending state que espera respuesta numérica
@@ -5364,7 +5364,7 @@ export class WhatsAppHandler {
         await this.vendedorMoverEtapa(from, body, mensaje, vendedor, nombreVendedor);
         break;
       case 'vendedorCancelarLead':
-        await this.vendedorCancelarLead(from, body, vendedor, nombreVendedor);
+        await this.vendedorCancelarLeadConParams(from, params.nombreLead, vendedor, nombreVendedor);
         break;
 
       // ━━━ HIPOTECA Y ASESORES (interactúan con externos) ━━━
@@ -6958,6 +6958,30 @@ export class WhatsAppHandler {
     const ventasService = new VentasService(this.supabase);
 
     const nombreLead = ventasService.parseCancelarLead(body);
+    if (!nombreLead) {
+      await this.twilio.sendWhatsAppMessage(from, ventasService.getMensajeAyudaCancelarLead());
+      return;
+    }
+
+    const result = await ventasService.cancelarLead(nombreLead, vendedor);
+
+    if (result.multipleLeads) {
+      await this.twilio.sendWhatsAppMessage(from, ventasService.formatMultipleLeadsCancelar(result.multipleLeads));
+      return;
+    }
+
+    if (!result.success) {
+      await this.twilio.sendWhatsAppMessage(from, `❌ ${result.error}`);
+      return;
+    }
+
+    await this.twilio.sendWhatsAppMessage(from, ventasService.formatCancelarLeadExito(result.lead!));
+  }
+
+  // Versión con params ya parseados (para rutas desde vendorCommandsService)
+  private async vendedorCancelarLeadConParams(from: string, nombreLead: string, vendedor: any, nombre: string): Promise<void> {
+    const ventasService = new VentasService(this.supabase);
+
     if (!nombreLead) {
       await this.twilio.sendWhatsAppMessage(from, ventasService.getMensajeAyudaCancelarLead());
       return;

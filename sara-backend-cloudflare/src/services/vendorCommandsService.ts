@@ -407,13 +407,14 @@ export class VendorCommandsService {
     }
 
     // ═══ REGISTRAR REFERIDO ═══
-    // Formato: "referido Juan por María", "referencia Pedro de Carlos"
-    const referidoMatch = msg.match(/^(?:referido|referencia)\s+([a-záéíóúñü\s]+?)\s+(?:por|de)\s+([a-záéíóúñü\s]+)$/i);
+    // Formato: "referido Ana Torres 5215553334455 Roberto"
+    // Handler expects: [1]=nombre, [2]=telefono, [3]=referidor
+    const referidoMatch = msg.match(/^(?:referido|referencia)\s+([a-záéíóúñü\s]+?)\s+(\d{10,15})\s+([a-záéíóúñü\s]+?)$/i);
     if (referidoMatch) {
       return {
         matched: true,
         handlerName: 'vendedorRegistrarReferido',
-        handlerParams: { nombreLead: referidoMatch[1].trim(), referidoPor: referidoMatch[2].trim() }
+        handlerParams: { match: body.match(/^(?:referido|referencia)\s+([a-záéíóúñü\s]+?)\s+(\d{10,15})\s+([a-záéíóúñü\s]+?)$/i) }
       };
     }
 
@@ -578,8 +579,8 @@ export class VendorCommandsService {
     }
 
     // ═══ CANCELAR LEAD / PERDIDO ═══
-    // Formato: "cancelar lead Juan", "perdido María", "lead perdido Pedro"
-    const cancelarLeadMatch = msg.match(/^(?:cancelar\s+lead|perdido|lead\s+perdido)\s+([a-záéíóúñü\s]+)$/i);
+    // Formato: "cancelar lead Juan", "perdido María sin presupuesto", "lead perdido Pedro"
+    const cancelarLeadMatch = msg.match(/^(?:cancelar\s+lead|perdido|lead\s+perdido|caido|caído|descartar)\s+([a-záéíóúñü\s]+?)(?:\s+(?:sin|por|porque|no|ya).+)?$/i);
     if (cancelarLeadMatch) {
       return {
         matched: true,
@@ -1139,6 +1140,104 @@ export class VendorCommandsService {
     });
     msg += `\n💡 Sé más específico con el nombre`;
     return msg;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // CAMBIAR ETAPA A UN STATUS ESPECÍFICO
+  // ═══════════════════════════════════════════════════════════════════
+  async cambiarEtapa(
+    nombreLead: string,
+    nuevoStatus: string,
+    vendedorId: string,
+    esAdmin: boolean
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    multipleLeads?: any[];
+    lead?: any;
+    oldStatus?: string;
+    newScore?: number;
+    nuevaCategoria?: string;
+  }> {
+    try {
+      console.log(`🔄 cambiarEtapa: "${nombreLead}" → ${nuevoStatus}, vendedorId=${vendedorId}, esAdmin=${esAdmin}`);
+
+      // Buscar leads por nombre
+      let query = this.supabase.client
+        .from('leads')
+        .select('id, name, status, assigned_to, lead_score, phone')
+        .ilike('name', `%${nombreLead}%`);
+
+      if (!esAdmin) {
+        query = query.eq('assigned_to', vendedorId);
+      }
+
+      const { data: leads, error } = await query.limit(10);
+      console.log(`🔍 cambiarEtapa: encontrados=${leads?.length || 0}, error=${error?.message || 'ninguno'}`);
+
+      if (error || !leads || leads.length === 0) {
+        return { success: false, error: `❌ No encontré a "${nombreLead}"` };
+      }
+
+      if (leads.length > 1) {
+        // Si hay match exacto, usarlo
+        const exactMatch = leads.find(l => l.name?.toLowerCase() === nombreLead.toLowerCase());
+        if (!exactMatch) {
+          return { success: false, multipleLeads: leads };
+        }
+        leads.splice(0, leads.length, exactMatch);
+      }
+
+      const lead = leads[0];
+      const oldStatus = lead.status;
+
+      // Calcular nuevo score basado en la etapa
+      const scoreMap: Record<string, number> = {
+        'new': 10,
+        'contacted': 20,
+        'scheduled': 40,
+        'visited': 60,
+        'negotiation': 75,
+        'reserved': 85,
+        'closed': 95,
+        'closed_won': 100,
+        'delivered': 100
+      };
+      const newScore = scoreMap[nuevoStatus] || lead.lead_score || 10;
+
+      // Determinar temperatura
+      let nuevaCategoria = 'warm';
+      if (newScore >= 70) nuevaCategoria = 'hot';
+      else if (newScore < 30) nuevaCategoria = 'cold';
+
+      // Actualizar lead
+      const { error: updateError } = await this.supabase.client
+        .from('leads')
+        .update({
+          status: nuevoStatus,
+          lead_score: newScore,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', lead.id);
+
+      if (updateError) {
+        console.error('❌ Error al actualizar lead:', updateError);
+        return { success: false, error: '❌ Error al actualizar lead' };
+      }
+
+      console.log(`✅ Lead ${lead.name} cambiado de ${oldStatus} a ${nuevoStatus} (score: ${newScore})`);
+
+      return {
+        success: true,
+        lead,
+        oldStatus,
+        newScore,
+        nuevaCategoria
+      };
+    } catch (e) {
+      console.error('Error en cambiarEtapa:', e);
+      return { success: false, error: '❌ Error al cambiar etapa' };
+    }
   }
 
   async moveFunnelStep(
