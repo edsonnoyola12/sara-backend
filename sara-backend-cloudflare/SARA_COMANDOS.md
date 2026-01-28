@@ -113,12 +113,15 @@ Los integration tests prueban flujos completos end-to-end:
 - [ ] Agendar cita → cita se crea correctamente
 - [ ] Preguntar precio → responde con precio
 
-**CEO (teléfono: 5212224558475)**
+**CEO (teléfono: 5214922019052 - Oscar)**
 - [ ] `leads` → lista leads
 - [ ] `hoy` → resumen del día
 - [ ] `bridge [nombre]` → activa chat directo
 - [ ] Mensaje durante bridge → llega al lead
 - [ ] `#cerrar` → cierra bridge
+- [ ] Comandos de vendedor (citas, briefing, nota, etc.)
+- [ ] Comandos de asesor (preaprobado, rechazado, docs, etc.)
+- [ ] Comandos de marketing (campañas, metricas, segmentos)
 
 **Vendedor**
 - [ ] `citas` → muestra citas del día
@@ -631,14 +634,24 @@ Total: 8 actividades
 
 ---
 
-## TELÉFONOS DE PRUEBA
+## TELÉFONOS DEL EQUIPO (ACTUALIZADOS)
 
-| Teléfono | Rol | Nombre |
-|----------|-----|--------|
-| 5212224558475 | CEO/Asesor | CEO Test / Asesor Crédito Test |
-| 5215610016226 | Vendedor | Edson Vendedor |
+| Teléfono | Rol | Nombre | Acceso |
+|----------|-----|--------|--------|
+| **5214922019052** | CEO/Admin | Oscar Castelo | TODOS los comandos |
+| 5212224558475 | Vendedor Test | Vendedor Test | Solo vendedor |
+| 5214929272839 | Asesor | Leticia Lara | Solo asesor (inactiva) |
+| 5210000000001 | Asesor Test | Asesor Crédito Test | Solo asesor (inactivo) |
 
-> **IMPORTANTE**: Solo usar estos 2 teléfonos para pruebas. NO enviar mensajes a otros team_members.
+### Oscar (CEO) tiene acceso a TODOS los comandos
+
+El CEO tiene fallback a todos los roles. Orden de prioridad:
+1. **CEO** → equipo, ventas, leads, adelante/atrás, broadcast
+2. **Asesor** → preaprobado, rechazado, contactado, docs
+3. **Vendedor** → citas, mis leads, hot, briefing, nota, bridge
+4. **Marketing** → campañas, metricas, segmentos, broadcast
+
+> **IMPORTANTE**: Para pruebas usar el teléfono del CEO o Vendedor Test.
 
 ---
 
@@ -779,7 +792,7 @@ Total: 8 actividades
 
 ---
 
-*Última actualización: 2026-01-26 21:30*
+*Última actualización: 2026-01-28*
 
 ---
 
@@ -923,6 +936,14 @@ GET /test-video-personalizado/{phone}?nombre={nombre}&desarrollo={desarrollo}
 ### Debug endpoints
 - `GET /debug-videos` - Ver estado de videos pendientes
 - `GET /test-videos` - Forzar procesamiento de videos
+
+### Endpoints de Prueba (QA)
+| Endpoint | Uso |
+|----------|-----|
+| `/test-ai-response?msg=X&api_key=Y` | Prueba respuestas de SARA (solo texto, no envía WhatsApp) |
+| `/test-lead?phone=X&name=Y&msg=Z&api_key=W` | Flujo completo como lead real (SÍ envía WhatsApp) |
+| `/test-vendedor-msg?phone=X&msg=Y&api_key=Z` | Simula mensaje de vendedor/CEO |
+| `/debug-lead?phone=X` | Debug de un lead específico |
 
 ### 🔐 Autenticación de API
 
@@ -1356,6 +1377,47 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 ---
 
 ## HISTORIAL DE CAMBIOS
+
+### 2026-01-28
+
+**QA Exhaustivo + CEO All Commands**
+
+- ✅ **CEO (Oscar) ahora tiene acceso a TODOS los comandos:**
+  - Fallback 1: Comandos de Asesor (preaprobado, rechazado, contactado, docs)
+  - Fallback 2: Comandos de Vendedor (citas, briefing, nota, hot, bridge)
+  - Fallback 3: Comandos de Marketing (campañas, metricas, segmentos, broadcast)
+  - Archivos modificados: `src/handlers/whatsapp.ts` (handleCEOMessage)
+
+- ✅ **Nuevo endpoint `/test-ai-response`:**
+  - Prueba respuestas de SARA sin enviar WhatsApp
+  - Útil para QA de respuestas de IA
+  - Uso: `/test-ai-response?msg=X&api_key=Y`
+
+- ✅ **Fix: Query de properties sin filtro `active`:**
+  - La tabla `properties` NO tiene columna `active`
+  - Removido `.eq('active', true)` de queries
+  - Todas las 36 propiedades ahora visibles para SARA
+
+- ✅ **QA completado (21 pruebas de IA):**
+  - Preguntas de desarrollos: Monte Verde, Distrito Falco, Los Encinos, etc.
+  - Citadella del Nogal = Villa Campelo + Villa Galiano
+  - NO inventa información (dice "no tengo esa info")
+  - Maneja objeciones de precio
+  - Errores ortográficos entendidos
+
+- ✅ **Recursos enviados correctamente:**
+  - GPS cuando piden ubicación (`send_gps: true`)
+  - Brochure PDF cuando piden folleto (`send_brochure: true`)
+  - Video cuando piden ver el desarrollo (`send_video_desarrollo: true`)
+
+- ✅ **Flujos verificados:**
+  - Agendar citas (detecta fecha, hora, desarrollo)
+  - Crédito hipotecario (menciona bancos: BBVA, Banorte, Santander, HSBC)
+  - Promoción automática en funnel (new → scheduled)
+
+- ✅ Tests: 260 pasando ✅
+
+---
 
 ### 2026-01-27
 
