@@ -4189,6 +4189,62 @@ export class WhatsAppHandler {
     }
 
     // ═══════════════════════════════════════════════════════════
+    // ENVIAR REPORTE DIARIO PENDIENTE (cuando responden al template)
+    // ═══════════════════════════════════════════════════════════
+    const pendingReporteDiario = notasVendedor?.pending_reporte_diario;
+    if (pendingReporteDiario?.sent_at && pendingReporteDiario?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingReporteDiario.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 12) {
+        console.log(`📊 Vendedor ${nombreVendedor} respondió - enviando reporte diario completo`);
+
+        // Enviar reporte diario completo
+        await this.meta.sendWhatsAppMessage(from, pendingReporteDiario.mensaje_completo);
+
+        // Limpiar pending_reporte_diario
+        const { pending_reporte_diario, ...notasSinPending } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPending,
+            last_reporte_diario_context: {
+              sent_at: new Date().toISOString(),
+              tipo: pendingReporteDiario.tipo,
+              delivered: true
+            }
+          }
+        }).eq('id', vendedor.id);
+        return;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ENVIAR REPORTE SEMANAL PENDIENTE (cuando responden al template)
+    // ═══════════════════════════════════════════════════════════
+    const pendingReporteSemanal = notasVendedor?.pending_reporte_semanal;
+    if (pendingReporteSemanal?.sent_at && pendingReporteSemanal?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingReporteSemanal.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 12) {
+        console.log(`📊 Vendedor ${nombreVendedor} respondió - enviando reporte semanal completo`);
+
+        // Enviar reporte semanal completo
+        await this.meta.sendWhatsAppMessage(from, pendingReporteSemanal.mensaje_completo);
+
+        // Limpiar pending_reporte_semanal
+        const { pending_reporte_semanal, ...notasSinPending } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPending,
+            last_reporte_semanal_context: {
+              sent_at: new Date().toISOString(),
+              tipo: pendingReporteSemanal.tipo,
+              delivered: true
+            }
+          }
+        }).eq('id', vendedor.id);
+        return;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // RESPUESTA A BRIEFING/RECAP YA ENTREGADO (feedback simple)
     // ═══════════════════════════════════════════════════════════
     const briefingContext = notasVendedor?.last_briefing_context;

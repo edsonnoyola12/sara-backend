@@ -15808,18 +15808,24 @@ ${insightsText}
 
 _¡Descansa y mañana con todo!_ 🚀`;
 
-      try {
-        await meta.sendWhatsAppMessage(vendedor.phone, msg);
-        console.log(`📊 Reporte diario enviado a ${vendedor.name}`);
-      } catch (e) {
-        console.log(`Error enviando reporte diario a ${vendedor.name}:`, e);
+      // ═══ USAR HELPER QUE RESPETA VENTANA 24H ═══
+      const resultado = await enviarMensajeTeamMember(supabase, meta, vendedor, msg, {
+        tipoMensaje: 'reporte_diario',
+        guardarPending: true,
+        pendingKey: 'pending_reporte_diario'
+      });
+
+      if (resultado.success) {
+        console.log(`📊 Reporte diario ${resultado.method === 'direct' ? 'enviado' : 'template+pending'} a ${vendedor.name}`);
+      } else {
+        console.log(`❌ Error enviando reporte diario a ${vendedor.name}`);
       }
 
       // Esperar 1s entre mensajes
       await new Promise(r => setTimeout(r, 1000));
     }
 
-    console.log(`✅ Reportes diarios enviados a ${vendedores.length} vendedores`);
+    console.log(`✅ Reportes diarios procesados para ${vendedores.length} vendedores`);
   } catch (e) {
     console.log('Error en reporte diario vendedores:', e);
   }
@@ -16212,15 +16218,21 @@ async function enviarReporteDiarioAsesores(supabase: SupabaseService, meta: Meta
 
       const msg = `📊 *TU RESUMEN DEL DÍA*\nHola *${nombreCorto}* 👋\n_${fechaHoy}_\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *HOY*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes nuevas: *${nuevasHoy.length}* ${calcVar(nuevasHoy.length, nuevasAyer.length)}\n• Aprobadas: *${aprobadasAsesorHoy.length}* ${aprobadasAsesorHoy.length > 0 ? '🎉' : ''}\n\n━━━━━━━━━━━━━━━━━━━━━\n📋 *TU PIPELINE*\n━━━━━━━━━━━━━━━━━━━━━\n• Pendientes: ${pendientes}\n• En proceso: ${enProceso}\n• En banco: ${enBanco}\n• Total activo: *${pipelineAsesor.length}*\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Descansa y mañana con todo!_ 🚀`;
 
-      try {
-        await meta.sendWhatsAppMessage(asesor.phone, msg);
-        console.log(`📊 Reporte diario asesor enviado a ${asesor.name}`);
-      } catch (e) {
-        console.log(`Error enviando reporte diario a ${asesor.name}:`, e);
+      // ═══ USAR HELPER QUE RESPETA VENTANA 24H ═══
+      const resultado = await enviarMensajeTeamMember(supabase, meta, asesor, msg, {
+        tipoMensaje: 'reporte_diario_asesor',
+        guardarPending: true,
+        pendingKey: 'pending_reporte_diario'
+      });
+
+      if (resultado.success) {
+        console.log(`📊 Reporte diario asesor ${resultado.method === 'direct' ? 'enviado' : 'template+pending'} a ${asesor.name}`);
+      } else {
+        console.log(`❌ Error enviando reporte diario a ${asesor.name}`);
       }
       await new Promise(r => setTimeout(r, 1000));
     }
-    console.log(`✅ Reportes diarios enviados a ${asesores.length} asesores`);
+    console.log(`✅ Reportes diarios procesados para ${asesores.length} asesores`);
   } catch (e) {
     console.log('Error en reporte diario asesores:', e);
   }
@@ -16275,15 +16287,21 @@ async function enviarReporteSemanalAsesores(supabase: SupabaseService, meta: Met
 
       const msg = `📊 *TU REPORTE SEMANAL*\nHola *${nombreCorto}* 👋\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *ESTA SEMANA*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes nuevas: *${nuevasSem.length}* ${calcVar(nuevasSem.length, nuevasSemAnt.length)}\n• Aprobadas: *${aprobadasAsesor.length}* ${calcVar(aprobadasAsesor.length, aprobadasAnt.length)}\n• Rechazadas: ${rechazadasAsesor.length}\n• Tasa aprobación: *${tasaAprobacion}%*\n\n━━━━━━━━━━━━━━━━━━━━━\n📋 *PIPELINE ACTIVO*\n━━━━━━━━━━━━━━━━━━━━━\n• Pendientes: ${pipelineAsesor.filter(h => h.status === 'pending').length}\n• En proceso: ${pipelineAsesor.filter(h => h.status === 'in_progress').length}\n• En banco: ${pipelineAsesor.filter(h => h.status === 'sent_to_bank').length}\n• Total: *${pipelineAsesor.length}*\n\n━━━━━━━━━━━━━━━━━━━━━\n🏆 *RANKING EQUIPO*\n━━━━━━━━━━━━━━━━━━━━━\n• Posición: *${posicionStr}* de ${asesoresConAprobaciones.length}\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Éxito esta semana!_ 🚀`;
 
-      try {
-        await meta.sendWhatsAppMessage(asesor.phone, msg);
-        console.log(`📊 Reporte semanal asesor enviado a ${asesor.name}`);
-      } catch (e) {
-        console.log(`Error enviando reporte semanal a ${asesor.name}:`, e);
+      // ═══ USAR HELPER QUE RESPETA VENTANA 24H ═══
+      const resultado = await enviarMensajeTeamMember(supabase, meta, asesor, msg, {
+        tipoMensaje: 'reporte_semanal_asesor',
+        guardarPending: true,
+        pendingKey: 'pending_reporte_semanal'
+      });
+
+      if (resultado.success) {
+        console.log(`📊 Reporte semanal asesor ${resultado.method === 'direct' ? 'enviado' : 'template+pending'} a ${asesor.name}`);
+      } else {
+        console.log(`❌ Error enviando reporte semanal a ${asesor.name}`);
       }
       await new Promise(r => setTimeout(r, 1000));
     }
-    console.log(`✅ Reportes semanales enviados a ${asesores.length} asesores`);
+    console.log(`✅ Reportes semanales procesados para ${asesores.length} asesores`);
   } catch (e) {
     console.log('Error en reporte semanal asesores:', e);
   }
@@ -17102,6 +17120,91 @@ async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhats
   console.log(`\n═══════════════════════════════════════════════════════════`);
   console.log(`✅ BRIEFING COMPLETADO para ${vendedor.name}`);
   console.log(`═══════════════════════════════════════════════════════════\n`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FUNCIÓN HELPER: Enviar mensaje a team member respetando ventana 24h
+// ═══════════════════════════════════════════════════════════════════════════
+// CRÍTICO: WhatsApp solo permite mensajes libres si el usuario escribió en 24h
+// Si no hay ventana, enviamos template y guardamos mensaje como pending
+// ═══════════════════════════════════════════════════════════════════════════
+interface EnviarMensajeTeamResult {
+  success: boolean;
+  method: 'direct' | 'template' | 'failed';
+  ventanaAbierta: boolean;
+}
+
+async function enviarMensajeTeamMember(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  teamMember: any,
+  mensaje: string,
+  opciones?: {
+    tipoMensaje?: string;  // 'reporte', 'alerta', 'notificacion', etc.
+    guardarPending?: boolean;  // Guardar mensaje en pending si no hay ventana
+    pendingKey?: string;  // Key para guardar en notes (ej: 'pending_reporte')
+  }
+): Promise<EnviarMensajeTeamResult> {
+  const { tipoMensaje = 'notificacion', guardarPending = true, pendingKey = 'pending_mensaje' } = opciones || {};
+
+  try {
+    // Obtener notas actuales
+    const notasActuales = typeof teamMember.notes === 'string'
+      ? JSON.parse(teamMember.notes || '{}')
+      : (teamMember.notes || {});
+
+    // Verificar ventana 24h
+    const lastInteraction = notasActuales.last_sara_interaction;
+    const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const ventanaAbierta = lastInteraction && lastInteraction > hace24h;
+
+    const nombreCorto = teamMember.name?.split(' ')[0] || 'Hola';
+
+    console.log(`📤 [${tipoMensaje}] ${teamMember.name}: Ventana 24h ${ventanaAbierta ? '✅ ABIERTA' : '❌ CERRADA'}`);
+
+    if (ventanaAbierta) {
+      // ═══ VENTANA ABIERTA: Enviar mensaje directo ═══
+      await meta.sendWhatsAppMessage(teamMember.phone, mensaje);
+      console.log(`   ✅ Mensaje enviado DIRECTO a ${teamMember.name}`);
+      return { success: true, method: 'direct', ventanaAbierta: true };
+    } else {
+      // ═══ VENTANA CERRADA: Enviar template + guardar pending ═══
+
+      // 1. Guardar mensaje en pending si está habilitado
+      if (guardarPending) {
+        notasActuales[pendingKey] = {
+          sent_at: new Date().toISOString(),
+          tipo: tipoMensaje,
+          mensaje_completo: mensaje
+        };
+        await supabase.client
+          .from('team_members')
+          .update({ notes: JSON.stringify(notasActuales) })
+          .eq('id', teamMember.id);
+        console.log(`   💾 Mensaje guardado en ${pendingKey}`);
+      }
+
+      // 2. Enviar template reactivar_equipo
+      const templateComponents = [
+        {
+          type: 'body',
+          parameters: [{ type: 'text', text: nombreCorto }]
+        }
+      ];
+
+      try {
+        await meta.sendTemplate(teamMember.phone, 'reactivar_equipo', 'es_MX', templateComponents);
+        console.log(`   📤 Template enviado a ${teamMember.name} (mensaje guardado como pending)`);
+        return { success: true, method: 'template', ventanaAbierta: false };
+      } catch (templateError) {
+        console.error(`   ❌ Error enviando template a ${teamMember.name}:`, templateError);
+        return { success: false, method: 'failed', ventanaAbierta: false };
+      }
+    }
+  } catch (error) {
+    console.error(`❌ Error en enviarMensajeTeamMember para ${teamMember.name}:`, error);
+    return { success: false, method: 'failed', ventanaAbierta: false };
+  }
 }
 
 async function enviarRecapDiario(supabase: SupabaseService, meta: MetaWhatsAppService, vendedor: any): Promise<void> {
