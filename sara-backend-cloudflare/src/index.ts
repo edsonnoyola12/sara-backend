@@ -1334,11 +1334,21 @@ export default {
         await handler.handleIncomingMessage(`whatsapp:+${phone}`, msg, env);
 
         // Verificar el lead creado/actualizado
-        const { data: lead } = await supabase.client
+        let { data: lead } = await supabase.client
           .from('leads')
           .select('id, name, phone, status, score, assigned_to, created_at, updated_at')
           .like('phone', `%${phone.slice(-10)}`)
           .single();
+
+        // Si el lead existe pero no tiene nombre, guardamos el nombre del parámetro
+        if (lead && !lead.name && name && name !== 'Lead Test') {
+          await supabase.client
+            .from('leads')
+            .update({ name })
+            .eq('id', lead.id);
+          lead.name = name;
+          console.log(`✅ Nombre "${name}" guardado para lead ${phone}`);
+        }
 
         // Obtener nombre del vendedor asignado
         let vendedorNombre = null;
