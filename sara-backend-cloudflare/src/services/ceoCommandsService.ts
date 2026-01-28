@@ -126,7 +126,8 @@ export class CEOCommandsService {
 
     // ═══ NUEVO LEAD ═══
     // Formato: "nuevo lead Juan Pérez 5551234567 Los Encinos"
-    const matchNuevoLead = msgLower.match(/^(?:nuevo\s+lead|agregar\s+lead|crear\s+lead)\s+([a-záéíóúñü\s]+?)\s+(\d{10,15})(?:\s+(.+))?$/i);
+    // Regex usa lookahead para separar nombre de teléfono cuando hay nombres con espacios
+    const matchNuevoLead = msgLower.match(/^(?:nuevo\s+lead|agregar\s+lead|crear\s+lead)\s+(.+?)\s+(\d{10,15})(?:\s+(.+))?$/i);
     if (matchNuevoLead) {
       return {
         action: 'call_handler',
@@ -762,6 +763,10 @@ export class CEOCommandsService {
         case 'vendedorAgregarNota':
         case 'vendedorVerNotas':
         case 'vendedorCoaching':
+          return { needsExternalHandler: true };
+
+        // ━━━ CEO NUEVO LEAD (creación en whatsapp.ts) ━━━
+        case 'ceoNuevoLead':
           return { needsExternalHandler: true };
 
         default:
