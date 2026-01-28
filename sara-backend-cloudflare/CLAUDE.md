@@ -459,3 +459,40 @@ La tabla `properties` NO tiene columna `active`. Todas las propiedades se consid
 - Backend: https://sara-backend.edson-633.workers.dev
 - CRM: https://sara-crm-new.vercel.app
 - Videos: https://sara-videos.onrender.com
+
+### Flujos Adicionales Probados (2026-01-28 17:00 CST):
+
+| Flujo | Tests | Estado |
+|-------|-------|--------|
+| Bridge (chat directo) | Activar, enviar, cerrar | ✅ |
+| Crédito hipotecario | INFONAVIT, ingresos | ✅ |
+| Broadcast | Ayuda, segmentos | ✅ |
+| Post-visita y encuestas | Encuestas OK | ✅ |
+| Remarketing y reactivación | Ambos ejecutados | ✅ |
+| CRONs | Simulación OK | ✅ |
+| Cumpleaños y follow-ups | Ejecutados | ✅ |
+| Google Calendar | Crear/borrar evento | ✅ |
+| Veo3 video | API OK (rate limit) | ⚠️ |
+
+### Seguridad - Endpoints Protegidos (2026-01-28 17:00 CST):
+
+**TODOS los `/test-*` ahora requieren API key:**
+```
+?api_key=<API_SECRET>
+# o header
+Authorization: Bearer <API_SECRET>
+```
+
+**Endpoints públicos (sin auth):**
+- `/webhook` - Meta webhook
+- `/health` - Health check
+- `/status` - Status dashboard
+- `/analytics` - Analytics dashboard
+- `/` - Root
+
+**Antes (vulnerables):**
+- `/test-ventana-24h` - Exponía nombres y teléfonos ❌
+- `/test-envio-7pm` - Exponía nombres y teléfonos ❌
+
+**Ahora (protegidos):**
+- Todos los `/test-*` requieren API key ✅
