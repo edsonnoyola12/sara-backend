@@ -279,6 +279,18 @@ Ver documentación en `docs/`:
 
 ---
 
+## ESTADO DE INTEGRACIONES
+
+| Integración | Estado | Notas |
+|-------------|--------|-------|
+| **Meta/WhatsApp** | ✅ Funcionando | Conexiones sin problema |
+| Supabase | ✅ Funcionando | Base de datos principal |
+| Cloudflare Workers | ✅ Funcionando | Runtime de producción |
+| Google Calendar | ✅ Funcionando | Citas y eventos |
+| Veo 3 (Videos) | ✅ Funcionando | Videos personalizados |
+
+---
+
 ## HISTORIAL DE CAMBIOS IMPORTANTES
 
 ### 2026-01-28
