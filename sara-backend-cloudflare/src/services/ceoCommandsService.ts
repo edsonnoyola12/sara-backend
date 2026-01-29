@@ -29,43 +29,38 @@ export class CEOCommandsService {
         action: 'send_message',
         message: `📋 *COMANDOS CEO - ${nombreCEO || 'Jefe'}*\n\n` +
           `*📊 REPORTES*\n` +
-          `• *reporte* - Resumen rápido\n` +
-          `• *reporte semanal* - Reporte completo semanal\n` +
-          `• *reporte mensual* - Reporte del mes\n` +
-          `• *equipo* - Ver equipo activo\n` +
-          `• *conexiones* - Quién se conectó hoy\n` +
-          `• *leads* - Estado de leads\n` +
-          `• *ventas* - Métricas de ventas\n` +
-          `• *pipeline* - Pipeline de ventas completo\n\n` +
-          `*🏦 FINANCIAMIENTO*\n` +
-          `• *calcular [precio]* - Estimado rápido\n` +
-          `• *bancos* - Ver tasas actuales\n\n` +
-          `*🏠 PROPIEDADES*\n` +
-          `• *comparar [A] vs [B]* - Comparar desarrollos\n\n` +
+          `• *reporte/semanal/mensual*\n` +
+          `• *equipo* - Equipo activo\n` +
+          `• *conexiones* - Actividad hoy\n` +
+          `• *leads* / *ventas* / *pipeline*\n\n` +
           `*📈 ANÁLISIS*\n` +
-          `• *probabilidad* - Probabilidades de cierre\n` +
-          `• *visitas* - Gestión de visitas\n` +
-          `• *alertas* - Alertas inteligentes\n` +
-          `• *mercado* - Inteligencia de mercado\n` +
-          `• *clv* - Valor del cliente y referidos\n\n` +
+          `• *probabilidad* - Cierre\n` +
+          `• *visitas* / *alertas* / *mercado*\n` +
+          `• *clv* - Valor cliente\n\n` +
           `*💰 OFERTAS*\n` +
-          `• *cotizar [lead] [precio]* - Crear oferta\n` +
-          `• *enviar oferta [lead]* - Enviar al cliente\n` +
-          `• *ofertas* - Tracking de cotizaciones\n` +
-          `• *oferta [lead]* - Detalle de oferta\n\n` +
-          `*📡 BROADCASTS*\n` +
-          `• *broadcast* - Enviar mensaje masivo\n` +
-          `• *segmentos* - Ver segmentos disponibles\n\n` +
+          `• *cotizar [lead] [precio]*\n` +
+          `• *enviar oferta [lead]*\n` +
+          `• *ofertas* - Tracking\n\n` +
           `*📅 CITAS*\n` +
-          `• *citas* - Citas de hoy\n` +
-          `• *citas semana* - Citas de la semana\n\n` +
-          `*🎯 EVENTOS*\n` +
-          `• *eventos* - Ver eventos activos\n` +
-          `• *crear evento [nombre]* - Nuevo evento\n\n` +
+          `• *citas* / *citas semana*\n` +
+          `• *agendar cita [lead] [fecha]*\n\n` +
+          `*🔄 GESTIÓN LEADS*\n` +
+          `• *adelante/atrás [lead]*\n` +
+          `• *nota [lead]: [texto]*\n` +
+          `• *nuevo lead [nombre] [tel]*\n` +
+          `• *crédito [lead]* - A asesor\n\n` +
           `*💬 COMUNICACIÓN*\n` +
-          `• *mensaje [nombre]* - Escribir a un lead (Sara intermedia)\n` +
-          `• *bridge [nombre]* - Chat directo 10 min\n` +
-          `• *#cerrar* - Terminar chat directo\n\n` +
+          `• *bridge [lead]* - Chat directo\n` +
+          `• *#cerrar* / *#mas*\n` +
+          `• *llamar [lead]* - Teléfono\n\n` +
+          `*📡 BROADCASTS*\n` +
+          `• *broadcast* / *segmentos*\n\n` +
+          `*🏠 RECURSOS*\n` +
+          `• *brochure/ubicación/video [dev]*\n` +
+          `• *calcular [precio]* / *bancos*\n` +
+          `• *comparar [A] vs [B]*\n\n` +
+          `*🎯 EVENTOS*\n` +
+          `• *eventos* / *crear evento*\n\n` +
           `¿En qué te puedo ayudar? 🏠`
       };
     }

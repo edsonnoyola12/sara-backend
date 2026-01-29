@@ -215,16 +215,37 @@ Si no hay ventana abierta → el mensaje NO LLEGA.
 ### Vendedor
 | Comando | Función |
 |---------|---------|
+| `hoy` / `briefing` | Resumen del día |
 | `citas` / `citas mañana` | Ver agenda |
 | `mis leads` | Leads asignados |
 | `hot` | Leads calientes |
-| `briefing` | Resumen del día |
-| `agendar cita con [nombre]` | Crear cita |
-| `nota [nombre] [texto]` | Agregar nota |
-| `bridge [nombre]` | Chat directo |
-| `recordar llamar [nombre]` | Programar llamada |
-| `coaching [tema]` | Ayuda de IA |
-| `historial [nombre]` | Ver historial del lead |
+| `pendientes` | Leads sin seguimiento |
+| `meta` | Avance de meta mensual |
+| `agendar cita [nombre] [fecha] [hora]` | Crear cita |
+| `reagendar [nombre] [fecha] [hora]` | Cambiar cita |
+| `cancelar cita [nombre]` | Cancelar cita |
+| `adelante/atrás [nombre]` | Mover en funnel |
+| `nota [nombre]: [texto]` | Agregar nota |
+| `notas [nombre]` | Ver notas |
+| `quién es [nombre]` | Info del lead |
+| `historial [nombre]` | Ver conversación |
+| `perdido [nombre]` | Marcar como perdido |
+| `nuevo lead [nombre] [tel] [desarrollo]` | Crear lead |
+| `crédito [nombre]` | Pasar a asesor |
+| `asignar asesor [nombre]` | Asignar asesor específico |
+| `bridge [nombre]` | Chat directo 6 min |
+| `#cerrar` / `#mas` | Control de bridge |
+| `llamar [nombre]` | Ver teléfono |
+| `recordar llamar [nombre] [fecha]` | Programar llamada |
+| `contactar [nombre]` | Enviar template 24h |
+| `cotizar [nombre] [precio]` | Crear oferta |
+| `enviar oferta [nombre]` | Enviar oferta |
+| `ofertas` | Ver ofertas activas |
+| `oferta aceptada/rechazada [nombre]` | Cambiar status |
+| `brochure/ubicación/video [desarrollo]` | Enviar recursos |
+| `cerrar venta [nombre] [propiedad]` | Registrar venta |
+| `apartado [nombre] [propiedad]` | Registrar apartado |
+| `coaching [nombre]` | Consejos IA |
 
 ### Asesor Hipotecario
 | Comando | Función |

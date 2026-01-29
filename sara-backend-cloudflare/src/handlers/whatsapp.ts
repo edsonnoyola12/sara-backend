@@ -8638,32 +8638,49 @@ Responde con fecha y hora:
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   private async vendedorAyuda(from: string, nombre: string): Promise<void> {
-    const mensaje = `*📋 COMANDOS DISPONIBLES*\n\n` +
+    const mensaje = `*📋 COMANDOS - ${nombre}*\n\n` +
       `*📊 REPORTES*\n` +
-      `• *hoy* - Tu resumen del día\n` +
-      `• *citas* - Tus citas de hoy\n` +
-      `• *leads* - Resumen de leads\n` +
-      `• *pendientes* - Leads sin seguimiento\n` +
+      `• *hoy* - Resumen del día\n` +
+      `• *briefing* - Briefing completo\n` +
+      `• *mis leads* - Tus leads\n` +
       `• *hot* - Leads calientes\n` +
-      `• *meta* - Avance de tu meta\n\n` +
-      `*🔄 GESTIÓN*\n` +
-      `• *mover [lead] a [etapa]* - Cambiar etapa\n` +
-      `• *adelante/atrás [lead]* - Mover en funnel\n` +
-      `• *nota [lead]: [texto]* - Agregar nota\n` +
-      `• *notas [lead]* - Ver notas\n\n` +
+      `• *pendientes* - Sin seguimiento\n` +
+      `• *meta* - Avance de meta\n\n` +
       `*📅 CITAS*\n` +
-      `• *agendar [lead] [fecha]* - Nueva cita\n` +
-      `• *cancelar [lead]* - Cancelar cita\n\n` +
+      `• *citas* / *citas mañana*\n` +
+      `• *agendar cita [lead] [fecha] [hora]*\n` +
+      `• *reagendar [lead] [fecha] [hora]*\n` +
+      `• *cancelar cita [lead]*\n\n` +
+      `*🔄 GESTIÓN LEADS*\n` +
+      `• *adelante/atrás [lead]* - Mover funnel\n` +
+      `• *nota [lead]: [texto]* - Agregar nota\n` +
+      `• *notas [lead]* - Ver notas\n` +
+      `• *quién es [lead]* - Info\n` +
+      `• *historial [lead]* - Conversación\n` +
+      `• *perdido [lead]* - Marcar perdido\n\n` +
+      `*➕ CREAR/ASIGNAR*\n` +
+      `• *nuevo lead [nombre] [tel] [desarrollo]*\n` +
+      `• *crédito [lead]* - Pasar a asesor\n` +
+      `• *asignar asesor [lead]*\n\n` +
+      `*💬 COMUNICACIÓN*\n` +
+      `• *bridge [lead]* - Chat directo 6min\n` +
+      `• *#cerrar* / *#mas* - Bridge\n` +
+      `• *llamar [lead]* - Ver teléfono\n` +
+      `• *recordar llamar [lead] [fecha]*\n` +
+      `• *contactar [lead]* - Template 24h\n\n` +
       `*💰 OFERTAS*\n` +
-      `• *cotizar [lead] [precio]* - Crear oferta\n` +
-      `• *enviar oferta [lead]* - Enviar al cliente\n` +
-      `• *ofertas* - Ver mis ofertas activas\n` +
-      `• *oferta [lead]* - Detalle de oferta\n\n` +
-      `*🔍 BÚSQUEDA*\n` +
-      `• *quién es [lead]* - Info del lead\n` +
-      `• *buscar [teléfono]* - Buscar por tel\n\n` +
-      `Escribe cualquier pregunta y te ayudo, ${nombre} 👋`;
-    await this.twilio.sendWhatsAppMessage(from, mensaje);
+      `• *cotizar [lead] [precio]*\n` +
+      `• *enviar oferta [lead]*\n` +
+      `• *ofertas* - Ver activas\n` +
+      `• *oferta aceptada/rechazada [lead]*\n\n` +
+      `*🏠 RECURSOS*\n` +
+      `• *brochure/ubicación/video [desarrollo]*\n\n` +
+      `*✅ VENTAS*\n` +
+      `• *cerrar venta [lead] [propiedad]*\n` +
+      `• *apartado [lead] [propiedad]*\n\n` +
+      `*🤖 IA*\n` +
+      `• *coaching [lead]* - Consejos`;
+    await this.meta.sendWhatsAppMessage(from, mensaje);
   }
 
   private async vendedorCitasHoy(from: string, vendedor: any, nombre: string): Promise<void> {
