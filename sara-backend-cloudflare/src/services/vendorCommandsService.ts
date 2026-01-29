@@ -610,6 +610,74 @@ export class VendorCommandsService {
       };
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // COMANDOS DE OFERTAS / COTIZACIONES
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ═══ COTIZAR [nombre] [precio] - Crear oferta rápida ═══
+    // Formato: "cotizar Juan 2500000", "cotizar María 3.5M", "cotizar Roberto García 2,500,000"
+    const cotizarMatch = msg.match(/^cotizar\s+([a-záéíóúñü][a-záéíóúñü\s]*?)\s+([\d.,]+)(?:m|M)?$/i);
+    if (cotizarMatch) {
+      const nombreLead = cotizarMatch[1].trim();
+      let precioStr = cotizarMatch[2].replace(/,/g, '');
+      // Si termina en M o tiene punto decimal bajo, multiplicar por millón
+      if (/^\d+\.?\d*$/i.test(precioStr) && parseFloat(precioStr) < 1000) {
+        precioStr = String(parseFloat(precioStr) * 1000000);
+      }
+      return {
+        matched: true,
+        handlerName: 'vendedorCotizar',
+        handlerParams: { nombreLead, precio: parseFloat(precioStr) }
+      };
+    }
+
+    // ═══ MIS OFERTAS / OFERTAS - Ver ofertas activas del vendedor ═══
+    if (/^(?:mis\s+)?ofertas$|^(?:mis\s+)?cotizaciones$/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorMisOfertas' };
+    }
+
+    // ═══ OFERTA [nombre] - Ver detalle de oferta de un lead ═══
+    const ofertaDetalleMatch = msg.match(/^oferta\s+([a-záéíóúñü][a-záéíóúñü\s]*)$/i);
+    if (ofertaDetalleMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorVerOferta',
+        handlerParams: { nombreLead: ofertaDetalleMatch[1].trim() }
+      };
+    }
+
+    // ═══ ENVIAR OFERTA [nombre] - Enviar oferta al cliente ═══
+    const enviarOfertaMatch = msg.match(/^enviar\s+oferta\s+([a-záéíóúñü][a-záéíóúñü\s]*)$/i);
+    if (enviarOfertaMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorEnviarOferta',
+        handlerParams: { nombreLead: enviarOfertaMatch[1].trim() }
+      };
+    }
+
+    // ═══ OFERTA ACEPTADA / RECHAZADA [nombre] - Cambiar status de oferta ═══
+    const ofertaAceptadaMatch = msg.match(/^oferta\s+(?:aceptada|acepto|acepta)\s+([a-záéíóúñü][a-záéíóúñü\s]*)$/i);
+    if (ofertaAceptadaMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorOfertaAceptada',
+        handlerParams: { nombreLead: ofertaAceptadaMatch[1].trim() }
+      };
+    }
+
+    const ofertaRechazadaMatch = msg.match(/^oferta\s+(?:rechazada|rechazo|rechaza)\s+([a-záéíóúñü][a-záéíóúñü\s]*?)(?:\s+(.+))?$/i);
+    if (ofertaRechazadaMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorOfertaRechazada',
+        handlerParams: {
+          nombreLead: ofertaRechazadaMatch[1].trim(),
+          razon: ofertaRechazadaMatch[2]?.trim() || null
+        }
+      };
+    }
+
     return { matched: false };
   }
 

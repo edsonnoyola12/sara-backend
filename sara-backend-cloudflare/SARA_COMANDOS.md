@@ -747,6 +747,12 @@ El CEO tiene fallback a todos los roles. Orden de prioridad:
 | `ver [nombre/teléfono]` | ✅ Probado 2026-01-24 (historial de conversación) |
 | `nota [nombre] [texto]` | ✅ Probado 2026-01-24 (agregar nota a lead) |
 | `notas [nombre]` | ✅ Probado 2026-01-24 (ver notas de lead) |
+| `cotizar [nombre] [precio]` | ✅ Probado 2026-01-29 (crear oferta, soporta nombres multi-palabra) |
+| `ofertas` / `mis ofertas` | ✅ Probado 2026-01-29 (ver ofertas activas) |
+| `oferta [nombre]` | ✅ Probado 2026-01-29 (detalle de oferta de lead) |
+| `enviar oferta [nombre]` | ✅ Probado 2026-01-29 (enviar cotización al cliente) |
+| `oferta aceptada [nombre]` | ✅ Probado 2026-01-29 (marcar aceptada) |
+| `oferta rechazada [nombre] [razón]` | ✅ Probado 2026-01-29 (marcar rechazada) |
 
 ### Bugs arreglados en pruebas
 10. ✅ JSON parsing en `asesorCommandsService.ts` - algunos leads tenían `notes` como texto plano, agregado `safeParseNotes()` helper

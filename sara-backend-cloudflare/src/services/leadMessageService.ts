@@ -9,6 +9,7 @@
 
 import { SupabaseService } from './supabase';
 import { BroadcastQueueService } from './broadcastQueueService';
+import { OfferTrackingService } from './offerTrackingService';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // INTERFACES
@@ -68,6 +69,10 @@ export class LeadMessageService {
     // 0.5. ENCUESTA DE SATISFACCIÓN POST-VISITA (respuestas 1-4)
     const satisfactionResult = await this.checkSatisfactionSurvey(lead, body, mensajeLower, notasLead);
     if (satisfactionResult.action === 'handled') return satisfactionResult;
+
+    // 0.6. RESPUESTA A OFERTA/COTIZACIÓN
+    const offerResult = await this.checkOfferResponse(lead, body, mensajeLower);
+    if (offerResult.action === 'handled') return offerResult;
 
     // 1. REGISTRO A EVENTOS
     const eventResult = await this.checkEventRegistration(lead, body, mensajeLower, notasLead);
@@ -169,6 +174,130 @@ export class LeadMessageService {
       sendVia: 'meta',
       updateLead: { notes: notasLead }
     };
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // RESPUESTA A OFERTA/COTIZACIÓN
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  private async checkOfferResponse(
+    lead: any,
+    body: string,
+    mensajeLower: string
+  ): Promise<LeadMessageResult> {
+    try {
+      // Buscar ofertas enviadas a este lead en las últimas 48 horas
+      const hace48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+      const { data: recentOffer, error } = await this.supabase.client
+        .from('offers')
+        .select('*, team_members(id, name, phone)')
+        .eq('lead_id', lead.id)
+        .in('status', ['sent', 'viewed', 'negotiating'])
+        .gte('sent_at', hace48h)
+        .order('sent_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error || !recentOffer) {
+        return { action: 'continue_to_ai' };
+      }
+
+      // Hay una oferta reciente enviada a este lead
+      console.log(`📋 Lead ${lead.name} respondió a oferta de ${recentOffer.property_name}`);
+
+      const nombreLead = lead.name?.split(' ')[0] || 'Cliente';
+      const vendedor = recentOffer.team_members;
+      const propiedad = recentOffer.property_name;
+      const desarrollo = recentOffer.development;
+      const precioFmt = recentOffer.offered_price?.toLocaleString('es-MX', { maximumFractionDigits: 0 });
+
+      // Detectar tipo de respuesta
+      const respuestasPositivas = ['si', 'sí', 'quiero', 'me interesa', 'interesado', 'interesada', 'va', 'sale', 'ok', 'dale', 'perfecto', 'acepto', 'de acuerdo', 'claro'];
+      const respuestasNegativas = ['no', 'no me interesa', 'no gracias', 'paso', 'muy caro', 'no puedo', 'no tengo', 'descartado'];
+      const respuestasPregunta = ['cuanto', 'cuánto', 'precio', 'enganche', 'financiamiento', 'mensualidad', 'credito', 'crédito', 'banco', 'requisitos', 'cuando', 'cuándo', 'donde', 'dónde', 'que incluye', 'qué incluye'];
+
+      const esPositivo = respuestasPositivas.some(r => mensajeLower.includes(r));
+      const esNegativo = respuestasNegativas.some(r => mensajeLower.includes(r));
+      const esPregunta = respuestasPregunta.some(r => mensajeLower.includes(r));
+
+      // Actualizar oferta a "viewed" o más según respuesta
+      const offerService = new OfferTrackingService(this.supabase);
+
+      let respuestaLead = '';
+      let nuevoStatus = 'viewed';
+      let notaVendedor = '';
+
+      if (esPositivo) {
+        nuevoStatus = 'negotiating';
+        respuestaLead = `¡Excelente ${nombreLead}! 🎉\n\n` +
+          `Me alegra que te interese *${propiedad}* en *${desarrollo}*.\n\n` +
+          `Le aviso a *${vendedor?.name || 'tu asesor'}* para que te contacte y te ayude con los siguientes pasos.\n\n` +
+          `Puedes preguntarme cualquier duda sobre:\n` +
+          `• Financiamiento y créditos\n` +
+          `• Requisitos de compra\n` +
+          `• Agendar una visita`;
+        notaVendedor = `🔥 *¡LEAD INTERESADO EN OFERTA!*\n\n` +
+          `*${lead.name}* respondió *"${body}"* a la oferta de:\n` +
+          `📦 ${propiedad} - ${desarrollo}\n` +
+          `💰 $${precioFmt}\n\n` +
+          `📞 Contáctalo: ${lead.phone}\n\n` +
+          `_Escribe "bridge ${nombreLead}" para chatear directo_`;
+      } else if (esNegativo) {
+        nuevoStatus = 'rejected';
+        respuestaLead = `Entendido ${nombreLead}, sin problema. 👍\n\n` +
+          `¿Puedo preguntarte qué no te convenció?\n` +
+          `• ¿El precio?\n` +
+          `• ¿La ubicación?\n` +
+          `• ¿El tamaño?\n\n` +
+          `Tenemos otras opciones que podrían interesarte.`;
+        notaVendedor = `❌ *Lead rechazó oferta*\n\n` +
+          `*${lead.name}* respondió *"${body}"* a:\n` +
+          `📦 ${propiedad} - ${desarrollo}\n` +
+          `💰 $${precioFmt}\n\n` +
+          `Podrías contactarlo para conocer sus objeciones.`;
+      } else if (esPregunta) {
+        nuevoStatus = 'negotiating';
+        respuestaLead = `¡Claro ${nombreLead}! 📋\n\n` +
+          `Sobre *${propiedad}* en *${desarrollo}* a *$${precioFmt}*:\n\n` +
+          `Le paso tu pregunta a *${vendedor?.name || 'tu asesor'}* para que te dé información detallada.\n\n` +
+          `Mientras tanto, ¿hay algo más que pueda ayudarte?`;
+        notaVendedor = `❓ *Lead tiene preguntas sobre oferta*\n\n` +
+          `*${lead.name}* preguntó: *"${body}"*\n\n` +
+          `Sobre: ${propiedad} - ${desarrollo}\n` +
+          `💰 $${precioFmt}\n\n` +
+          `📞 Contáctalo: ${lead.phone}`;
+      } else {
+        // Cualquier otra respuesta - notificar al vendedor
+        nuevoStatus = 'viewed';
+        respuestaLead = `Gracias por responder ${nombreLead}. 😊\n\n` +
+          `Le paso tu mensaje a *${vendedor?.name || 'tu asesor'}* quien te contactará pronto para darte más detalles sobre *${propiedad}*.\n\n` +
+          `Si tienes alguna pregunta mientras tanto, aquí estoy.`;
+        notaVendedor = `💬 *Lead respondió a oferta*\n\n` +
+          `*${lead.name}* respondió: *"${body}"*\n\n` +
+          `Sobre: ${propiedad} - ${desarrollo}\n` +
+          `💰 $${precioFmt}\n\n` +
+          `📞 Contáctalo: ${lead.phone}`;
+      }
+
+      // Actualizar status de la oferta
+      await offerService.updateOfferStatus(recentOffer.id, nuevoStatus, vendedor?.id, body);
+
+      // Retornar respuesta con notificación al vendedor
+      return {
+        action: 'handled',
+        response: respuestaLead,
+        sendVia: 'meta',
+        notifyVendor: vendedor?.phone ? {
+          phone: vendedor.phone,
+          message: notaVendedor
+        } : undefined
+      };
+
+    } catch (err) {
+      console.error('Error en checkOfferResponse:', err);
+      return { action: 'continue_to_ai' };
+    }
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

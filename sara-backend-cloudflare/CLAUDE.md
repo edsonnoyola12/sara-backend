@@ -621,3 +621,45 @@ El archivo `index.ts` fue refactorizado de ~22,700 líneas a ~14,300 líneas (-3
 - **Comparador:** Comparar desarrollos, precio/m², score automático, recomendaciones
 - **Probabilidad:** Cálculo ML-like con factores positivos/negativos, confianza, fechas esperadas
 - **Visitas:** Analytics de completación, no-shows, conversión, métricas por desarrollo y vendedor
+
+### 2026-01-29 (Sesión 3) - Sistema de Ofertas/Cotizaciones
+
+**Nueva funcionalidad completa de ofertas vía WhatsApp:**
+
+| Comando Vendedor | Descripción |
+|------------------|-------------|
+| `cotizar [nombre] [precio]` | Crear oferta (soporta nombres con espacios: "cotizar Roberto García 2500000") |
+| `ofertas` / `mis ofertas` | Ver ofertas activas del vendedor |
+| `oferta [nombre]` | Ver detalle de oferta de un lead |
+| `enviar oferta [nombre]` | Enviar oferta al cliente vía WhatsApp |
+| `oferta aceptada [nombre]` | Marcar oferta como aceptada |
+| `oferta rechazada [nombre] [razón]` | Marcar oferta como rechazada |
+
+**Respuestas automáticas a ofertas (leadMessageService):**
+
+Cuando un lead responde a una oferta enviada (últimas 48h), SARA detecta automáticamente:
+
+| Respuesta Lead | Nuevo Status | Acción |
+|----------------|--------------|--------|
+| "Si", "me interesa", "quiero" | `negotiating` | Notifica vendedor 🔥 LEAD INTERESADO |
+| "No", "muy caro", "paso" | `rejected` | Notifica vendedor ❌ + pregunta razón al lead |
+| "Cuánto enganche?", "requisitos" | `negotiating` | Notifica vendedor ❓ con la pregunta |
+| Cualquier otra respuesta | `viewed` | Notifica vendedor 💬 |
+
+**Archivos modificados:**
+- `src/services/vendorCommandsService.ts` - Comandos de ofertas (regex multi-palabra)
+- `src/services/leadMessageService.ts` - Detección de respuestas a ofertas
+- `src/handlers/whatsapp.ts` - Handlers de comandos de ofertas
+
+**SQL para crear tabla:**
+```sql
+-- Ejecutar offers_table.sql en Supabase Dashboard → SQL Editor
+```
+
+**Estados del ciclo de vida de oferta:**
+```
+draft → sent → viewed → negotiating → accepted → reserved → contracted
+                    ↘ rejected
+                    ↘ expired
+                    ↘ cancelled
+```

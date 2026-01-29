@@ -31,6 +31,7 @@ import { CEOCommandsService } from '../services/ceoCommandsService';
 import { AgenciaCommandsService } from '../services/agenciaCommandsService';
 import { LeadMessageService, LeadMessageResult } from '../services/leadMessageService';
 import { BroadcastQueueService } from '../services/broadcastQueueService';
+import { OfferTrackingService, CreateOfferParams, OfferStatus } from '../services/offerTrackingService';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MÓDULOS REFACTORIZADOS
@@ -2067,6 +2068,11 @@ export class WhatsAppHandler {
         await this.vendedorCoaching(from, '', ceo, nombreCEO);
         break;
 
+      // ━━━ TRACKING DE OFERTAS ━━━
+      case 'trackingOfertas':
+        await this.ceoTrackingOfertas(from, nombreCEO);
+        break;
+
       default:
         console.log('Handler CEO no reconocido:', handlerName);
     }
@@ -3047,6 +3053,70 @@ export class WhatsAppHandler {
     } catch (e) {
       console.error('❌ Error en ceoVideo:', e);
       await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al obtener video.`);
+    }
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // CEO TRACKING OFERTAS - Ver métricas de ofertas por vendedor
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  private async ceoTrackingOfertas(from: string, nombreCEO: string): Promise<void> {
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+    console.log(`📊 CEO ${nombreCEO} consulta tracking de ofertas`);
+
+    try {
+      const offerService = new OfferTrackingService(this.supabase);
+      const summary = await offerService.getOfferSummary(30);
+
+      let msg = `📋 *TRACKING DE OFERTAS*\n`;
+      msg += `_Últimos 30 días_\n\n`;
+
+      // Resumen general
+      msg += `*📊 RESUMEN GENERAL*\n`;
+      msg += `• Total ofertas: ${summary.total_offers}\n`;
+      msg += `• Enviadas: ${summary.sent_count}\n`;
+      msg += `• Aceptadas: ${summary.accepted_count} (${summary.acceptance_rate})\n`;
+      msg += `• Apartados: ${summary.reserved_count} (${summary.reservation_rate})\n`;
+      msg += `• Rechazadas: ${summary.rejected_count} (${summary.rejection_rate})\n\n`;
+
+      // Valores
+      msg += `*💰 VALORES*\n`;
+      msg += `• Total ofertado: $${summary.total_offered_value.toLocaleString()}\n`;
+      msg += `• Total aceptado: $${summary.total_accepted_value.toLocaleString()}\n`;
+      msg += `• Descuento promedio: ${summary.avg_discount_percent}%\n\n`;
+
+      // Por vendedor (CLAVE: muestra descuentos por vendedor)
+      if (summary.by_vendor && summary.by_vendor.length > 0) {
+        msg += `*👥 POR VENDEDOR*\n`;
+        summary.by_vendor.slice(0, 5).forEach((v: any) => {
+          const discountStr = v.avg_discount > 0 ? ` (dto: ${v.avg_discount}%)` : '';
+          msg += `• ${v.vendor_name}: ${v.offers} ofertas`;
+          msg += ` → ${v.accepted} aceptadas${discountStr}\n`;
+        });
+        msg += `\n`;
+      }
+
+      // Por desarrollo
+      if (summary.by_development && summary.by_development.length > 0) {
+        msg += `*🏘️ POR DESARROLLO*\n`;
+        summary.by_development.slice(0, 5).forEach((d: any) => {
+          msg += `• ${d.development}: ${d.offers} ofertas → ${d.accepted} aceptadas\n`;
+        });
+        msg += `\n`;
+      }
+
+      // Por vencer
+      if (summary.expiring_soon && summary.expiring_soon.length > 0) {
+        msg += `⚠️ *POR VENCER* (${summary.expiring_soon.length})\n`;
+        summary.expiring_soon.slice(0, 3).forEach((o: any) => {
+          msg += `• ${o.lead_name} - ${o.development}\n`;
+        });
+      }
+
+      await this.meta.sendWhatsAppMessage(cleanPhone, msg);
+
+    } catch (e) {
+      console.error('Error en ceoTrackingOfertas:', e);
+      await this.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al obtener tracking de ofertas. Verifica que la tabla *offers* existe en Supabase.`);
     }
   }
 
@@ -5847,6 +5917,26 @@ export class WhatsAppHandler {
         break;
       case 'vendedorContactarLead':
         await this.vendedorContactarLead(from, params.nombreLead, vendedor, nombreVendedor);
+        break;
+
+      // ━━━ OFERTAS / COTIZACIONES ━━━
+      case 'vendedorCotizar':
+        await this.vendedorCotizar(from, params.nombreLead, params.precio, vendedor, nombreVendedor);
+        break;
+      case 'vendedorMisOfertas':
+        await this.vendedorMisOfertas(from, vendedor, nombreVendedor);
+        break;
+      case 'vendedorVerOferta':
+        await this.vendedorVerOferta(from, params.nombreLead, vendedor);
+        break;
+      case 'vendedorEnviarOferta':
+        await this.vendedorEnviarOferta(from, params.nombreLead, vendedor, nombreVendedor);
+        break;
+      case 'vendedorOfertaAceptada':
+        await this.vendedorOfertaAceptada(from, params.nombreLead, vendedor);
+        break;
+      case 'vendedorOfertaRechazada':
+        await this.vendedorOfertaRechazada(from, params.nombreLead, params.razon, vendedor);
         break;
 
       default:
@@ -9082,6 +9172,468 @@ Responde con fecha y hora:
     } catch (e) {
       console.log('Error en leads pendientes:', e);
       await this.twilio.sendWhatsAppMessage(from, '❌ Error al obtener leads pendientes.');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // OFERTAS / COTIZACIONES - Handlers de vendedor
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Crear oferta rápida para un lead
+   * Comando: cotizar [nombre] [precio]
+   */
+  private async vendedorCotizar(from: string, nombreLead: string, precio: number, vendedor: any, nombreVendedor: string): Promise<void> {
+    console.log(`💰 vendedorCotizar: ${nombreVendedor} cotiza $${precio} para ${nombreLead}`);
+
+    try {
+      // Buscar lead por nombre
+      const { data: leads, error } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone, property_interest, assigned_to')
+        .eq('assigned_to', vendedor.id)
+        .ilike('name', `%${nombreLead}%`)
+        .limit(5);
+
+      if (error || !leads || leads.length === 0) {
+        await this.meta.sendWhatsAppMessage(from,
+          `❌ No encontré ningún lead con nombre *${nombreLead}* en tu cartera.\n\n` +
+          `Escribe *mis leads* para ver tus leads.`
+        );
+        return;
+      }
+
+      if (leads.length > 1) {
+        let msg = `🔍 Encontré ${leads.length} leads:\n\n`;
+        leads.forEach((l: any, i: number) => {
+          msg += `${i + 1}. *${l.name}*\n`;
+        });
+        msg += `\n💡 Sé más específico con el nombre`;
+        await this.meta.sendWhatsAppMessage(from, msg);
+        return;
+      }
+
+      const lead = leads[0];
+      const desarrollo = lead.property_interest || 'Sin especificar';
+
+      // Buscar propiedad si hay property_interest
+      let propertyId: string | undefined = undefined;
+      let propertyName = desarrollo;
+      let listPrice = precio; // Por defecto el precio ofertado = precio lista
+
+      if (lead.property_interest) {
+        const { data: property } = await this.supabase.client
+          .from('properties')
+          .select('id, name, price, development')
+          .or(`name.ilike.%${lead.property_interest}%,development.ilike.%${lead.property_interest}%`)
+          .limit(1)
+          .single();
+
+        if (property) {
+          propertyId = property.id;
+          propertyName = property.name;
+          listPrice = property.price || precio;
+        }
+      }
+
+      // Crear oferta usando OfferTrackingService
+      const offerService = new OfferTrackingService(this.supabase);
+      const offerParams: CreateOfferParams = {
+        lead_id: lead.id,
+        property_id: propertyId,
+        property_name: propertyName,
+        development: desarrollo,
+        list_price: listPrice,
+        offered_price: precio,
+        vendor_id: vendedor.id,
+        expires_days: 7,
+        notes: `Creada vía WhatsApp por ${nombreVendedor}`
+      };
+
+      const offer = await offerService.createOffer(offerParams);
+
+      if (!offer) {
+        await this.meta.sendWhatsAppMessage(from,
+          `❌ Error al crear la oferta. Verifica que la tabla *offers* existe en Supabase.`
+        );
+        return;
+      }
+
+      // Calcular fecha de vencimiento
+      const vencimiento = new Date(offer.expires_at!);
+      const vencimientoStr = vencimiento.toLocaleDateString('es-MX', {
+        day: 'numeric',
+        month: 'long'
+      });
+
+      // Formatear precio
+      const precioFmt = precio.toLocaleString('es-MX', { maximumFractionDigits: 0 });
+      const descuentoStr = offer.discount_percent > 0
+        ? `📉 Descuento: ${offer.discount_percent}%`
+        : '';
+
+      await this.meta.sendWhatsAppMessage(from,
+        `✅ *Oferta creada para ${lead.name}*\n\n` +
+        `📦 *Propiedad:* ${propertyName}\n` +
+        `🏘️ *Desarrollo:* ${desarrollo}\n` +
+        `💰 *Precio ofertado:* $${precioFmt}\n` +
+        (descuentoStr ? `${descuentoStr}\n` : '') +
+        `📅 *Válida hasta:* ${vencimientoStr}\n\n` +
+        `📋 Status: *Borrador*\n\n` +
+        `💡 Escribe *enviar oferta ${lead.name.split(' ')[0]}* para enviarla al cliente.`
+      );
+
+    } catch (e) {
+      console.error('Error en vendedorCotizar:', e);
+      await this.meta.sendWhatsAppMessage(from, '❌ Error al crear la oferta.');
+    }
+  }
+
+  /**
+   * Ver ofertas activas del vendedor
+   * Comando: ofertas / mis ofertas
+   */
+  private async vendedorMisOfertas(from: string, vendedor: any, nombreVendedor: string): Promise<void> {
+    console.log(`📋 vendedorMisOfertas: ${nombreVendedor} consulta ofertas`);
+
+    try {
+      const { data: offers, error } = await this.supabase.client
+        .from('offers')
+        .select('*, leads(name, phone)')
+        .eq('vendor_id', vendedor.id)
+        .in('status', ['draft', 'sent', 'viewed', 'negotiating', 'counter_offer', 'accepted'])
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (error) {
+        console.error('Error obteniendo ofertas:', error);
+        await this.meta.sendWhatsAppMessage(from, '❌ Error al obtener ofertas.');
+        return;
+      }
+
+      if (!offers || offers.length === 0) {
+        await this.meta.sendWhatsAppMessage(from,
+          `📋 *${nombreVendedor}, no tienes ofertas activas*\n\n` +
+          `Para crear una oferta escribe:\n` +
+          `*cotizar [nombre] [precio]*\n\n` +
+          `Ejemplo: cotizar Juan 2500000`
+        );
+        return;
+      }
+
+      const statusEmoji: Record<string, string> = {
+        draft: '📝', sent: '📤', viewed: '👁️', negotiating: '🤝',
+        counter_offer: '↩️', accepted: '✅', reserved: '🏠',
+        contracted: '📄', rejected: '❌', expired: '⏰', cancelled: '🚫'
+      };
+
+      const statusName: Record<string, string> = {
+        draft: 'Borrador', sent: 'Enviada', viewed: 'Vista', negotiating: 'Negociando',
+        counter_offer: 'Contraoferta', accepted: 'Aceptada', reserved: 'Apartado',
+        contracted: 'Contrato', rejected: 'Rechazada', expired: 'Expirada', cancelled: 'Cancelada'
+      };
+
+      let msg = `📋 *TUS OFERTAS ACTIVAS* (${offers.length})\n\n`;
+
+      offers.forEach((o: any, i: number) => {
+        const emoji = statusEmoji[o.status] || '❓';
+        const status = statusName[o.status] || o.status;
+        const leadName = o.leads?.name || 'Sin nombre';
+        const precio = Number(o.offered_price).toLocaleString('es-MX', { maximumFractionDigits: 0 });
+
+        msg += `${i + 1}. ${emoji} *${leadName}*\n`;
+        msg += `   💰 $${precio} • ${status}\n`;
+        msg += `   🏘️ ${o.development || 'Sin desarrollo'}\n\n`;
+      });
+
+      msg += `💡 Comandos:\n`;
+      msg += `• *oferta [nombre]* - Ver detalle\n`;
+      msg += `• *enviar oferta [nombre]* - Enviar al cliente`;
+
+      await this.meta.sendWhatsAppMessage(from, msg);
+
+    } catch (e) {
+      console.error('Error en vendedorMisOfertas:', e);
+      await this.meta.sendWhatsAppMessage(from, '❌ Error al obtener ofertas.');
+    }
+  }
+
+  /**
+   * Ver detalle de oferta de un lead
+   * Comando: oferta [nombre]
+   */
+  private async vendedorVerOferta(from: string, nombreLead: string, vendedor: any): Promise<void> {
+    console.log(`🔍 vendedorVerOferta: Buscando oferta de ${nombreLead}`);
+
+    try {
+      // Buscar lead
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name')
+        .eq('assigned_to', vendedor.id)
+        .ilike('name', `%${nombreLead}%`)
+        .limit(1);
+
+      if (!leads || leads.length === 0) {
+        await this.meta.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
+        return;
+      }
+
+      const lead = leads[0];
+
+      // Buscar oferta más reciente del lead
+      const { data: offer } = await this.supabase.client
+        .from('offers')
+        .select('*')
+        .eq('lead_id', lead.id)
+        .eq('vendor_id', vendedor.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (!offer) {
+        await this.meta.sendWhatsAppMessage(from,
+          `📋 *${lead.name}* no tiene ofertas.\n\n` +
+          `Para crear una escribe:\n` +
+          `*cotizar ${lead.name.split(' ')[0]} [precio]*`
+        );
+        return;
+      }
+
+      const offerService = new OfferTrackingService(this.supabase);
+      const mappedOffer = await offerService.getOfferById(offer.id);
+
+      if (mappedOffer) {
+        const formattedOffer = offerService.formatOfferForWhatsApp(mappedOffer);
+        await this.meta.sendWhatsAppMessage(from, formattedOffer);
+      } else {
+        await this.meta.sendWhatsAppMessage(from, '❌ Error al formatear oferta.');
+      }
+
+    } catch (e) {
+      console.error('Error en vendedorVerOferta:', e);
+      await this.meta.sendWhatsAppMessage(from, '❌ Error al buscar oferta.');
+    }
+  }
+
+  /**
+   * Enviar oferta al cliente
+   * Comando: enviar oferta [nombre]
+   */
+  private async vendedorEnviarOferta(from: string, nombreLead: string, vendedor: any, nombreVendedor: string): Promise<void> {
+    console.log(`📤 vendedorEnviarOferta: ${nombreVendedor} envía oferta a ${nombreLead}`);
+
+    try {
+      // Buscar lead
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name, phone, last_message_at')
+        .eq('assigned_to', vendedor.id)
+        .ilike('name', `%${nombreLead}%`)
+        .limit(1);
+
+      if (!leads || leads.length === 0) {
+        await this.meta.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
+        return;
+      }
+
+      const lead = leads[0];
+
+      // Buscar oferta en estado draft
+      const { data: offer, error } = await this.supabase.client
+        .from('offers')
+        .select('*')
+        .eq('lead_id', lead.id)
+        .eq('vendor_id', vendedor.id)
+        .eq('status', 'draft')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error || !offer) {
+        await this.meta.sendWhatsAppMessage(from,
+          `⚠️ *${lead.name}* no tiene ofertas pendientes de envío.\n\n` +
+          `Las ofertas en borrador se envían con este comando.\n` +
+          `Si ya fue enviada, usa *oferta ${lead.name.split(' ')[0]}* para ver su status.`
+        );
+        return;
+      }
+
+      // Verificar ventana de 24h
+      const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const dentroVentana = lead.last_message_at && lead.last_message_at > hace24h;
+
+      if (!dentroVentana) {
+        await this.meta.sendWhatsAppMessage(from,
+          `⚠️ *${lead.name}* no ha escrito en las últimas 24h.\n\n` +
+          `WhatsApp no permite enviar mensajes fuera de la ventana de 24h.\n\n` +
+          `Usa *contactar ${lead.name.split(' ')[0]}* para enviar un template y reactivar la conversación.`
+        );
+        return;
+      }
+
+      // Formatear y enviar oferta al lead
+      const leadPhone = lead.phone?.startsWith('521')
+        ? lead.phone
+        : '521' + (lead.phone || '').replace(/\D/g, '').slice(-10);
+
+      const precioFmt = Number(offer.offered_price).toLocaleString('es-MX', { maximumFractionDigits: 0 });
+      const vencimiento = new Date(offer.expires_at);
+      const vencimientoStr = vencimiento.toLocaleDateString('es-MX', {
+        day: 'numeric',
+        month: 'long'
+      });
+
+      const ofertaMsg =
+        `🏠 *COTIZACIÓN PARA TI*\n\n` +
+        `📦 *Propiedad:* ${offer.property_name}\n` +
+        `🏘️ *Desarrollo:* ${offer.development}\n\n` +
+        `💰 *Precio especial:* $${precioFmt} MXN\n` +
+        (offer.discount_percent > 0 ? `📉 *Descuento:* ${offer.discount_percent}%\n` : '') +
+        `📅 *Válido hasta:* ${vencimientoStr}\n\n` +
+        `¿Te interesa? Responde a este mensaje para que te ayude con los siguientes pasos. 🙌`;
+
+      await this.meta.sendWhatsAppMessage(leadPhone, ofertaMsg);
+
+      // Actualizar status de la oferta
+      const offerService = new OfferTrackingService(this.supabase);
+      await offerService.updateOfferStatus(offer.id, 'sent', 'Enviada vía WhatsApp', vendedor.id);
+
+      await this.meta.sendWhatsAppMessage(from,
+        `✅ *Oferta enviada a ${lead.name}*\n\n` +
+        `📤 La cotización fue enviada por WhatsApp.\n\n` +
+        `💡 Cuando responda puedes actualizar el status:\n` +
+        `• *oferta aceptada ${lead.name.split(' ')[0]}*\n` +
+        `• *oferta rechazada ${lead.name.split(' ')[0]} [razón]*`
+      );
+
+    } catch (e) {
+      console.error('Error en vendedorEnviarOferta:', e);
+      await this.meta.sendWhatsAppMessage(from, '❌ Error al enviar oferta.');
+    }
+  }
+
+  /**
+   * Marcar oferta como aceptada
+   * Comando: oferta aceptada [nombre]
+   */
+  private async vendedorOfertaAceptada(from: string, nombreLead: string, vendedor: any): Promise<void> {
+    console.log(`✅ vendedorOfertaAceptada: ${nombreLead}`);
+
+    try {
+      // Buscar lead
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name')
+        .eq('assigned_to', vendedor.id)
+        .ilike('name', `%${nombreLead}%`)
+        .limit(1);
+
+      if (!leads || leads.length === 0) {
+        await this.meta.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
+        return;
+      }
+
+      const lead = leads[0];
+
+      // Buscar oferta activa
+      const { data: offer } = await this.supabase.client
+        .from('offers')
+        .select('*')
+        .eq('lead_id', lead.id)
+        .eq('vendor_id', vendedor.id)
+        .in('status', ['sent', 'viewed', 'negotiating', 'counter_offer'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (!offer) {
+        await this.meta.sendWhatsAppMessage(from,
+          `⚠️ *${lead.name}* no tiene ofertas activas para aceptar.`
+        );
+        return;
+      }
+
+      const offerService = new OfferTrackingService(this.supabase);
+      await offerService.updateOfferStatus(offer.id, 'accepted', 'Aceptada por el cliente', vendedor.id);
+
+      const precioFmt = Number(offer.offered_price).toLocaleString('es-MX', { maximumFractionDigits: 0 });
+
+      await this.meta.sendWhatsAppMessage(from,
+        `🎉 *¡OFERTA ACEPTADA!*\n\n` +
+        `👤 ${lead.name}\n` +
+        `💰 $${precioFmt}\n` +
+        `🏘️ ${offer.development}\n\n` +
+        `El lead ha sido movido a negociación.\n` +
+        `¡Felicidades! 🏆`
+      );
+
+    } catch (e) {
+      console.error('Error en vendedorOfertaAceptada:', e);
+      await this.meta.sendWhatsAppMessage(from, '❌ Error al actualizar oferta.');
+    }
+  }
+
+  /**
+   * Marcar oferta como rechazada
+   * Comando: oferta rechazada [nombre] [razón]
+   */
+  private async vendedorOfertaRechazada(from: string, nombreLead: string, razon: string | null, vendedor: any): Promise<void> {
+    console.log(`❌ vendedorOfertaRechazada: ${nombreLead}, razón: ${razon}`);
+
+    try {
+      // Buscar lead
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('id, name')
+        .eq('assigned_to', vendedor.id)
+        .ilike('name', `%${nombreLead}%`)
+        .limit(1);
+
+      if (!leads || leads.length === 0) {
+        await this.meta.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
+        return;
+      }
+
+      const lead = leads[0];
+
+      // Buscar oferta activa
+      const { data: offer } = await this.supabase.client
+        .from('offers')
+        .select('*')
+        .eq('lead_id', lead.id)
+        .eq('vendor_id', vendedor.id)
+        .in('status', ['sent', 'viewed', 'negotiating', 'counter_offer'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (!offer) {
+        await this.meta.sendWhatsAppMessage(from,
+          `⚠️ *${lead.name}* no tiene ofertas activas para rechazar.`
+        );
+        return;
+      }
+
+      const offerService = new OfferTrackingService(this.supabase);
+      await offerService.updateOfferStatus(
+        offer.id,
+        'rejected',
+        razon || 'Rechazada por el cliente',
+        vendedor.id
+      );
+
+      await this.meta.sendWhatsAppMessage(from,
+        `📋 *Oferta rechazada registrada*\n\n` +
+        `👤 ${lead.name}\n` +
+        (razon ? `📝 Razón: ${razon}\n\n` : '\n') +
+        `💡 Puedes crear una nueva oferta:\n` +
+        `*cotizar ${lead.name.split(' ')[0]} [nuevo precio]*`
+      );
+
+    } catch (e) {
+      console.error('Error en vendedorOfertaRechazada:', e);
+      await this.meta.sendWhatsAppMessage(from, '❌ Error al actualizar oferta.');
     }
   }
 
