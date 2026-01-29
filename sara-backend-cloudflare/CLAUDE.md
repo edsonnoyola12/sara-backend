@@ -188,29 +188,71 @@ Si no hay ventana abierta → el mensaje NO LLEGA.
 ## COMANDOS POR ROL
 
 ### CEO (Oscar - 5214922019052)
+
+**REPORTES:**
 | Comando | Función |
 |---------|---------|
 | `leads` / `hoy` | Ver leads del día |
+| `briefing` | Briefing completo |
 | `equipo` / `ventas` | Métricas del equipo |
-| `pipeline` / `funnel` | Pipeline de ventas completo |
-| `probabilidad` | Probabilidades de cierre |
+| `conexiones` | Actividad de vendedores |
+| `reporte semanal` | Reporte semanal |
+| `reporte mensual` | Reporte mensual |
+| `meta` / `metas` | Ver metas de ventas |
+
+**ANÁLISIS:**
+| Comando | Función |
+|---------|---------|
+| `pipeline` / `funnel` | Pipeline de ventas |
+| `probabilidad` / `forecast` | Probabilidades de cierre |
 | `visitas` | Gestión de visitas |
-| `ofertas` / `cotizaciones` | Tracking de ofertas |
 | `alertas` / `riesgos` | Alertas inteligentes |
 | `mercado` / `competencia` | Inteligencia de mercado |
 | `clv` / `referidos` | Valor del cliente |
-| `reporte semanal` | Reporte completo semanal |
-| `reporte mensual` | Reporte mensual |
-| `calcular [precio]` | Calculadora hipotecaria |
-| `comparar [A] vs [B]` | Comparar propiedades |
-| `adelante [nombre]` | Mover lead al siguiente status |
-| `atrás [nombre]` | Mover lead al status anterior |
-| `bridge [nombre]` | Chat directo con lead |
-| `mensaje [nombre] [texto]` | Enviar via SARA |
-| `broadcast [mensaje]` | Envío masivo |
-| `conexiones` | Ver actividad de vendedores |
 | `segmentos` | Ver segmentos de leads |
-| + Todos los de Asesor, Vendedor y Marketing |
+
+**FINANCIAMIENTO:**
+| Comando | Función |
+|---------|---------|
+| `calcular [precio]` | Calculadora hipotecaria |
+| `bancos` | Comparativa de bancos |
+| `comparar [A] vs [B]` | Comparar propiedades |
+
+**COMUNICACIÓN:**
+| Comando | Función |
+|---------|---------|
+| `bridge [nombre]` | Chat directo con lead |
+| `#cerrar` / `#mas` | Controlar bridge |
+| `mensaje [nombre] [texto]` | Enviar mensaje via SARA |
+| `broadcast [mensaje]` | Envío masivo |
+| `enviar a [segmento]: [msg]` | Broadcast a segmento |
+
+**GESTIÓN LEADS:**
+| Comando | Función |
+|---------|---------|
+| `adelante [nombre]` | Mover al siguiente status |
+| `atrás [nombre]` | Mover al status anterior |
+| `quién es [nombre]` | Ver info de lead |
+| `historial [nombre]` | Ver conversación |
+| `nota [nombre]: [texto]` | Agregar nota |
+| `notas [nombre]` | Ver notas |
+| `asignar [lead] a [vendedor]` | Reasignar lead |
+
+**OFERTAS:**
+| Comando | Función |
+|---------|---------|
+| `ofertas` / `cotizaciones` | Ver ofertas activas |
+| `oferta [nombre]` | Ver detalle de oferta |
+
+**RECURSOS:**
+| Comando | Función |
+|---------|---------|
+| `brochure [desarrollo]` | Enviar brochure |
+| `ubicación [desarrollo]` | Enviar GPS |
+| `video [desarrollo]` | Enviar video |
+| `propiedades` / `inventario` | Ver propiedades |
+
+**+ Todos los comandos de Asesor, Vendedor y Marketing**
 
 ### Vendedor
 | Comando | Función |

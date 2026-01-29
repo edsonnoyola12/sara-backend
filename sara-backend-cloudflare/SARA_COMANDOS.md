@@ -683,26 +683,54 @@ El CEO tiene fallback a todos los roles. Orden de prioridad:
 ### CEO
 | Comando | Estado |
 |---------|--------|
-| `bridge [nombre]` | ✅ Probado |
-| `#cerrar` | ✅ Probado |
-| `#mas` | ✅ Probado |
-| `mensaje [nombre]` | ✅ Probado |
-| `actividad` | ✅ Probado |
-| `ayuda` | ✅ Probado |
-| `reporte` | ✅ Probado |
-| `hoy` | ✅ Probado |
-| Selección `1`, `2`, `3` | ✅ Probado |
-| `adelante [nombre]` | ✅ Probado 2026-01-20 |
-| `atras [nombre]` | ✅ Probado 2026-01-20 |
-| `quien es [nombre]` | ✅ Probado 2026-01-20 |
-| `brochure [desarrollo/modelo]` | ✅ Probado 2026-01-20 |
-| `ubicacion [desarrollo/modelo]` | ✅ Probado 2026-01-20 |
-| `video [desarrollo/modelo]` | ✅ Probado 2026-01-20 |
-| `equipo` | ✅ Verificado 2026-01-22 (lista team activo) |
-| `ventas` | ✅ Implementado 2026-01-22 (métricas reales) |
-| `broadcast` | ✅ Verificado 2026-01-22 (muestra ayuda broadcast) |
-| `segmentos` | ✅ Verificado 2026-01-22 (lista segmentos) |
-| `eventos` | ✅ Verificado 2026-01-22 (lista eventos) |
+| **📊 REPORTES** | |
+| `reporte` / `reporte semanal` / `reporte mensual` | ✅ Probado 2026-01-29 |
+| `equipo` | ✅ Probado 2026-01-29 (lista team activo) |
+| `conexiones` | ✅ Probado 2026-01-29 (actividad del día) |
+| `leads` | ✅ Probado 2026-01-29 (estado de leads) |
+| `ventas` | ✅ Probado 2026-01-29 (métricas ventas) |
+| `pipeline` | ✅ Probado 2026-01-29 (pipeline completo) |
+| `hoy` | ✅ Probado 2026-01-29 (resumen del día) |
+| **📈 ANÁLISIS** | |
+| `probabilidad` | ✅ Probado 2026-01-29 (probabilidades cierre) |
+| `visitas` | ✅ Probado 2026-01-29 (gestión visitas) |
+| `ofertas` | ✅ Probado 2026-01-29 (tracking ofertas) |
+| `alertas` | ✅ Probado 2026-01-29 (alertas inteligentes) |
+| `mercado` | ✅ Probado 2026-01-29 (inteligencia mercado) |
+| `clv` | ✅ Probado 2026-01-29 (valor cliente) |
+| **🏦 FINANCIAMIENTO** | |
+| `calcular [precio]` | ✅ Probado 2026-01-29 (calculadora) |
+| `bancos` | ✅ Probado 2026-01-29 (tasas actuales) |
+| `comparar [A] vs [B]` | ✅ Probado 2026-01-29 (comparar desarrollos) |
+| **💬 COMUNICACIÓN** | |
+| `bridge [nombre]` | ✅ Probado 2026-01-29 |
+| `#cerrar` / `#mas` | ✅ Probado 2026-01-29 |
+| `mensaje [nombre]` | ✅ Probado 2026-01-29 |
+| **🔄 GESTIÓN LEADS** | |
+| `adelante [nombre]` | ✅ Probado 2026-01-29 |
+| `atrás [nombre]` | ✅ Probado 2026-01-29 |
+| `quien es [nombre]` | ✅ Probado 2026-01-29 |
+| `nota [nombre]: [texto]` | ✅ Probado 2026-01-29 |
+| `notas [nombre]` | ✅ Probado 2026-01-29 |
+| `historial [nombre]` | ✅ Probado 2026-01-29 |
+| `nuevo lead [nombre] [tel] [desarrollo]` | ✅ Probado 2026-01-29 |
+| **💰 OFERTAS** | |
+| `cotizar [nombre] [precio]` | ✅ Probado 2026-01-29 |
+| `enviar oferta [nombre]` | ✅ Probado 2026-01-29 |
+| **🏠 RECURSOS** | |
+| `brochure [desarrollo]` | ✅ Probado 2026-01-29 |
+| `ubicación [desarrollo]` | ✅ Probado 2026-01-29 |
+| `video [desarrollo]` | ✅ Probado 2026-01-29 |
+| **📡 BROADCASTS** | |
+| `broadcast` | ✅ Probado 2026-01-29 |
+| `segmentos` | ✅ Probado 2026-01-29 |
+| **🎯 EVENTOS** | |
+| `eventos` | ✅ Probado 2026-01-29 |
+| **🤖 OTROS** | |
+| `ayuda` | ✅ Probado 2026-01-29 |
+| `mis leads` / `hot` / `pendientes` | ✅ Probado 2026-01-29 |
+| `meta` | ✅ Probado 2026-01-29 |
+| `coaching [nombre]` | ✅ Probado 2026-01-29 |
 
 ### Asesor Hipotecario
 | Comando | Estado |
