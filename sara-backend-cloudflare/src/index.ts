@@ -230,7 +230,8 @@ function getCorsOrigin(request: Request): string {
 }
 
 function corsResponse(body: string | null, status: number = 200, contentType: string = 'application/json', request?: Request): Response {
-  const allowedOrigin = request ? getCorsOrigin(request) : ALLOWED_ORIGINS[0];
+  // When request is provided, use the actual origin; otherwise use wildcard for flexibility
+  const allowedOrigin = request ? getCorsOrigin(request) : '*';
   return new Response(body, {
     status,
     headers: {
