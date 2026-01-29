@@ -753,6 +753,21 @@ El CEO tiene fallback a todos los roles. Orden de prioridad:
 | `enviar oferta [nombre]` | ✅ Probado 2026-01-29 (enviar cotización al cliente) |
 | `oferta aceptada [nombre]` | ✅ Probado 2026-01-29 (marcar aceptada) |
 | `oferta rechazada [nombre] [razón]` | ✅ Probado 2026-01-29 (marcar rechazada) |
+| `hot` | ✅ Probado 2026-01-29 (leads calientes) |
+| `pendientes` | ✅ Probado 2026-01-29 (leads sin seguimiento) |
+| `adelante [nombre]` | ✅ Probado 2026-01-29 (avanzar en funnel) |
+| `atrás [nombre]` | ✅ Probado 2026-01-29 (retroceder en funnel) |
+| `llamar [nombre]` | ✅ Probado 2026-01-29 (ver teléfono del lead) |
+| `recordar llamar [nombre] [fecha]` | ✅ Probado 2026-01-29 (programar llamada) |
+| `contactar [nombre]` | ✅ Probado 2026-01-29 (enviar template fuera de 24h) |
+| `perdido [nombre]` | ✅ Probado 2026-01-29 (marcar lead como perdido) |
+| `asignar asesor [nombre]` | ✅ Probado 2026-01-29 (asignar asesor hipotecario) |
+| `cerrar venta [nombre] [propiedad]` | ✅ Probado 2026-01-29 (registrar venta) |
+| `apartado [nombre] [propiedad]` | ✅ Probado 2026-01-29 (registrar apartado) |
+| `quién es [nombre]` | ✅ Probado 2026-01-29 (info del lead) |
+| `historial [nombre]` | ✅ Probado 2026-01-29 (ver conversación) |
+| `#cerrar` | ✅ Probado 2026-01-29 (terminar bridge) |
+| `#mas` | ✅ Probado 2026-01-29 (extender bridge 6 min) |
 
 ### Bugs arreglados en pruebas
 10. ✅ JSON parsing en `asesorCommandsService.ts` - algunos leads tenían `notes` como texto plano, agregado `safeParseNotes()` helper
