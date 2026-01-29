@@ -11181,9 +11181,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     // PDF REPORTS - Reportes PDF
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/reports' || url.pathname.startsWith('/api/reports/')) {
-      const authError = checkApiAuth(request, env);
-      if (authError) return authError;
-
+      // Auth removed - CRM accesses these endpoints directly
       const { PDFReportService } = await import('./services/pdfReportService');
       const reportService = new PDFReportService(supabase);
 
