@@ -748,3 +748,17 @@ draft → sent → viewed → negotiating → accepted → reserved → contract
 - ✅ Gestión de citas (crear, cambiar, cancelar)
 - ✅ Reasignar leads
 - ✅ Agregar notas
+
+---
+
+## ⚠️ TELÉFONOS DE PRUEBA (CRÍTICO)
+
+**SOLO usar estos dos teléfonos para pruebas:**
+
+| Teléfono | Uso |
+|----------|-----|
+| **5610016226** | Lead de prueba (Roberto García) |
+| **5212224558475** | Vendedor Test |
+
+**NUNCA usar el teléfono de Oscar (5214922019052) para pruebas.**
+
