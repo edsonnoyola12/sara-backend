@@ -232,11 +232,8 @@ export class LeadMessageService {
         nuevoStatus = 'negotiating';
         respuestaLead = `¡Excelente ${nombreLead}! 🎉\n\n` +
           `Me alegra que te interese *${propiedad}* en *${desarrollo}*.\n\n` +
-          `Le aviso a *${vendedor?.name || 'tu asesor'}* para que te contacte y te ayude con los siguientes pasos.\n\n` +
-          `Puedes preguntarme cualquier duda sobre:\n` +
-          `• Financiamiento y créditos\n` +
-          `• Requisitos de compra\n` +
-          `• Agendar una visita`;
+          `Para avanzar con la compra, lo ideal es que conozcas la propiedad en persona.\n\n` +
+          `*¿Te funciona mejor el sábado o el domingo para visitarla?* 🏠`;
         notaVendedor = `🔥 *¡LEAD INTERESADO EN OFERTA!*\n\n` +
           `*${lead.name}* respondió *"${body}"* a la oferta de:\n` +
           `📦 ${propiedad} - ${desarrollo}\n` +
@@ -245,12 +242,12 @@ export class LeadMessageService {
           `_Escribe "bridge ${nombreLead}" para chatear directo_`;
       } else if (esNegativo) {
         nuevoStatus = 'rejected';
-        respuestaLead = `Entendido ${nombreLead}, sin problema. 👍\n\n` +
-          `¿Puedo preguntarte qué no te convenció?\n` +
-          `• ¿El precio?\n` +
-          `• ¿La ubicación?\n` +
-          `• ¿El tamaño?\n\n` +
-          `Tenemos otras opciones que podrían interesarte.`;
+        respuestaLead = `¡Claro ${nombreLead}! Solo una pregunta rápida:\n\n` +
+          `¿Qué te hizo dudar?\n` +
+          `• ¿El precio? Tenemos opciones desde $1.5M\n` +
+          `• ¿La ubicación? Tenemos en varias zonas\n` +
+          `• ¿El tamaño? Hay desde 2 hasta 4 recámaras\n\n` +
+          `A veces hay opciones que no conoces 😉`;
         notaVendedor = `❌ *Lead rechazó oferta*\n\n` +
           `*${lead.name}* respondió *"${body}"* a:\n` +
           `📦 ${propiedad} - ${desarrollo}\n` +
@@ -363,7 +360,7 @@ export class LeadMessageService {
 
     if (esNegativo) {
       return this.limpiarPendingEvent(lead, notasLead,
-        `Entendido, sin problema. 👍\n\nSi cambias de opinión o necesitas algo más, aquí estoy.`
+        `¡Claro! Solo una pregunta: ¿rentas actualmente o ya tienes casa propia? 🏠\n\nMuchos clientes que rentaban ahora tienen su casa propia pagando lo mismo.`
       );
     }
 
@@ -808,7 +805,7 @@ export class LeadMessageService {
     if (esRechazo) {
       return {
         action: 'handled',
-        response: `Entendido, sin problema. 👍\n\nSi cambias de opinión, aquí estoy para ayudarte.`,
+        response: `¡Claro! Solo una pregunta: ¿rentas actualmente o ya tienes casa propia? 🏠\n\nA veces hay opciones que no conoces.`,
         sendVia: 'meta',
         notifyVendor
       };
@@ -971,13 +968,12 @@ export class LeadMessageService {
       case 'reengagement':
         if (esPositiva) {
           respuesta = `¡Qué gusto ${nombreLead}! 😊\n\n` +
-                      `Me encanta que sigas interesado en ${propiedad}. ` +
-                      `Tu asesor te contactará en breve para darte toda la información actualizada.\n\n` +
-                      `¿Hay algo específico que te gustaría saber?`;
+                      `Me encanta que sigas interesado en ${propiedad}.\n\n` +
+                      `Para que conozcas todos los detalles, *¿te funciona el sábado o el domingo para una visita?* 🏠`;
           updateLead = { status: 'contacted', notes: { ...notasLead, reactivado: new Date().toISOString() } };
         } else if (esNegativa) {
-          respuesta = `Entendido ${nombreLead}, sin problema. 👍\n\n` +
-                      `Si en algún momento cambias de opinión, aquí estamos para ayudarte. ¡Que tengas un excelente día!`;
+          respuesta = `¡Claro ${nombreLead}! Solo una pregunta rápida: ¿rentas actualmente o ya tienes casa propia? 🏠\n\n` +
+                      `A veces hay opciones de financiamiento que podrían sorprenderte.`;
         } else {
           respuesta = `¡Gracias por responder ${nombreLead}! 😊\n\n` +
                       `¿Te gustaría que tu asesor te contacte para platicar sobre ${propiedad}?`;
@@ -1022,10 +1018,11 @@ export class LeadMessageService {
         // Respuesta genérica
         if (esPositiva) {
           respuesta = `¡Perfecto ${nombreLead}! 😊\n\n` +
-                      `Tu asesor te contactará pronto con más información.`;
+                      `Para avanzar, lo ideal es que conozcas las opciones en persona.\n\n` +
+                      `*¿Te funciona mejor el sábado o el domingo?* 🏠`;
         } else if (esNegativa) {
-          respuesta = `Entendido ${nombreLead}, sin problema. 👍\n\n` +
-                      `Si cambias de opinión, aquí estamos.`;
+          respuesta = `¡Claro ${nombreLead}! Solo una pregunta: ¿buscas casa para ti o para inversión? 🏠\n\n` +
+                      `Tenemos opciones desde $1.5M con excelente plusvalía.`;
         } else {
           respuesta = `¡Gracias por tu respuesta ${nombreLead}! 😊\n\n` +
                       `Tu asesor revisará tu mensaje y te contactará si es necesario.`;
