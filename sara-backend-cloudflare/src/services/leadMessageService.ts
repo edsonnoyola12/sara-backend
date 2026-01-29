@@ -217,8 +217,9 @@ export class LeadMessageService {
       const respuestasNegativas = ['no', 'no me interesa', 'no gracias', 'paso', 'muy caro', 'no puedo', 'no tengo', 'descartado'];
       const respuestasPregunta = ['cuanto', 'cuánto', 'precio', 'enganche', 'financiamiento', 'mensualidad', 'credito', 'crédito', 'banco', 'requisitos', 'cuando', 'cuándo', 'donde', 'dónde', 'que incluye', 'qué incluye'];
 
-      const esPositivo = respuestasPositivas.some(r => mensajeLower.includes(r));
       const esNegativo = respuestasNegativas.some(r => mensajeLower.includes(r));
+      // Solo es positivo si NO es negativo (para evitar "no me interesa" detectado como "me interesa")
+      const esPositivo = !esNegativo && respuestasPositivas.some(r => mensajeLower.includes(r));
       const esPregunta = respuestasPregunta.some(r => mensajeLower.includes(r));
 
       // Actualizar oferta a "viewed" o más según respuesta
