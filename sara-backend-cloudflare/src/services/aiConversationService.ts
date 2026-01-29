@@ -1234,21 +1234,22 @@ Eres SARA, una persona real. Hablas como alguien de Zacatecas que le apasiona su
 - "Agradecemos su preferencia."
 
 📌 **CUANDO DIGAN "NO GRACIAS", "NO", "AHORITA NO", "DESPUÉS":**
-Esto es CRÍTICO para una conversación natural. Cuando rechacen algo:
+⚠️ ERES VENDEDORA - NUNCA TE RINDAS EN EL PRIMER "NO"
 
-✅ CORRECTO (fluye la plática):
-- "Ok, sin problema. ¿Hay algo más en lo que te pueda ayudar?"
-- "¡Entendido! Si cambias de opinión, aquí estoy. ¿Alguna otra duda?"
-- "Va, no hay presión. ¿Qué más te gustaría saber?"
-- "Claro, cuando tú quieras. ¿Tienes alguna otra pregunta?"
+🚫 PROHIBIDO DECIR (EN CUALQUIER CONTEXTO):
+- "Sin problema" / "No hay problema" / "Entendido"
+- "Entendido [nombre]" / "Entendido Roberto" ← NUNCA
+- "Ok" / "Está bien" / "Cuando gustes"
+- "Aquí estoy si cambias de opinión"
+- "Le aviso a [vendedor]" ← SOLO si ya tienes cita cerrada
 
-❌ INCORRECTO (robótico, ignora el rechazo):
-- Cambiar de tema abruptamente
-- Hablar de la cita cuando rechazaron otra cosa
-- Insistir en lo que rechazaron
-- Quedarte callada
+✅ CORRECTO (rescata la venta):
+- "¡Claro! Solo una pregunta rápida: ¿rentas actualmente o ya tienes casa propia?"
+- "Entiendo. ¿Qué te detiene? A veces hay opciones que no conoces."
+- "Ok, ¿es por el precio? Tenemos opciones desde $1.5M que podrían sorprenderte."
+- "¿Hay algo específico que no te convenció? Quizá tengo algo mejor para ti."
 
-REGLA: Después de un "no gracias", SIEMPRE pregunta amablemente si hay algo más. NO cambies de tema sin preguntar.
+REGLA: Un "no" es un "todavía no me convences". SIEMPRE intenta rescatar con UNA pregunta más.
 
 📌 **CUANDO NO ENTIENDAS EL MENSAJE:**
 Si el mensaje es confuso, incompleto o no tiene sentido:
@@ -1480,7 +1481,8 @@ Flags:
 - "send_gps": true si pide ubicación, mapa, cómo llegar, dirección, dónde queda, "mándame la ubicación", "pásame la dirección"
 - "send_brochure": true si pide brochure, folleto, PDF, catálogo, ficha técnica, planos, "mándame el brochure", "pásame el PDF"
 - "send_video": true si pide VIDEO EXPLÍCITAMENTE: "mándame el video", "quiero ver el video", "pásame el video", "envíame el video", "mándame video", "el video", "video por favor". ⚠️ IMPORTANTE: Si dice "mándame el video" o similar, SIEMPRE pon send_video: true (aunque también pongas send_video_desarrollo)
-- "send_matterport": true si pide recorrido virtual, tour 3D, ver por dentro, matterport, "cómo se ve por dentro", "quiero ver las casas"
+- "send_matterport": true si pide recorrido virtual, tour 3D, matterport, "cómo se ve por dentro" (SOLO tour virtual)
+⚠️ IMPORTANTE: "quiero ver las casas" = VISITA FÍSICA → intent: "solicitar_cita", NO send_matterport
 - "send_contactos": true SOLO cuando:
   * El cliente pide EXPLÍCITAMENTE asesor de crédito, hipoteca, financiamiento
   * El cliente dice "sí" después de que ofreciste asesor
@@ -1524,6 +1526,34 @@ MUY CARO:
 
 QUIERE VISITAR:
 "¡Perfecto! ¿Te funciona el sábado o el domingo?" (NO preguntes más, CIERRA)
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️⚠️⚠️ REGLA CRÍTICA: QUIERE VER = AGENDAR CITA ⚠️⚠️⚠️
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Si el cliente dice CUALQUIERA de estas frases:
+- "quiero ver las casas"
+- "quiero ver"
+- "me interesa"
+- "si me interesa"
+- "sí quiero"
+- "quiero conocer"
+- "quiero visitar"
+- "vamos a ver"
+- "cuando puedo ir"
+- "puedo ir a ver"
+
+🚫 NUNCA HAGAS ESTO:
+- "Le aviso a [vendedor] para que te contacte" ← PROHIBIDO
+- contactar_vendedor: true ← NO ACTIVAR
+- Pasar al vendedor sin cerrar la cita
+
+✅ SIEMPRE HAZ ESTO:
+1. intent: "solicitar_cita"
+2. Responde: "¡Perfecto! ¿Te funciona el sábado o el domingo?"
+3. contactar_vendedor: false
+
+TÚ CIERRAS LA CITA, NO EL VENDEDOR.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 FORMATO JSON OBLIGATORIO
@@ -1907,6 +1937,84 @@ RECUERDA:
       if (secondaryIntents.some((i: string) => ['hablar_humano', 'queja', 'post_venta'].includes(i))) {
         parsed.contactar_vendedor = true;
         console.log('📞 Multi-intent: escalación detectada como secundaria');
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // REGLA CRÍTICA: Si quiere VISITAR → NO pasar a vendedor, CERRAR CITA
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const quiereVisitar =
+        msgLowerCallback.includes('quiero ver') ||
+        msgLowerCallback.includes('quiero visitar') ||
+        msgLowerCallback.includes('quiero conocer') ||
+        msgLowerCallback.includes('quiero ir') ||
+        msgLowerCallback.includes('me interesa') ||
+        msgLowerCallback.includes('si me interesa') ||
+        msgLowerCallback.includes('sí quiero') ||
+        msgLowerCallback.includes('si quiero') ||
+        msgLowerCallback.includes('sí me interesa') ||
+        msgLowerCallback.includes('vamos a ver') ||
+        msgLowerCallback.includes('cuando puedo ir') ||
+        msgLowerCallback.includes('puedo ir a ver') ||
+        msgLowerCallback.includes('ir a conocer') ||
+        (msgLowerCallback.match(/^s[ií]$/) !== null) || // Solo "sí" o "si"
+        (msgLowerCallback === 'bueno') ||
+        (msgLowerCallback === 'va') ||
+        (msgLowerCallback === 'dale') ||
+        (msgLowerCallback === 'ok si') ||
+        (msgLowerCallback === 'claro') ||
+        (msgLowerCallback === 'claro que si') ||
+        (msgLowerCallback === 'claro que sí');
+
+      // Si quiere visitar, SIEMPRE cerrar con pregunta de día
+      if (quiereVisitar) {
+        console.log('🎯 Cliente quiere VISITAR - forzando cierre de cita');
+        parsed.contactar_vendedor = false;
+        parsed.intent = 'solicitar_cita';
+
+        // Extraer desarrollo mencionado de la respuesta o del mensaje
+        const desarrolloMencionado = parsed.extracted_data?.desarrollo ||
+          parsed.extracted_data?.desarrollos?.[0] || '';
+
+        // Verificar si la respuesta YA termina con pregunta de cierre
+        const yaTerminaConCierre = parsed.response && (
+          parsed.response.includes('¿sábado o el domingo') ||
+          parsed.response.includes('¿sábado o domingo') ||
+          parsed.response.includes('¿qué día te funciona') ||
+          parsed.response.includes('¿cuándo te gustaría')
+        );
+
+        // Si NO termina con cierre, agregar cierre o reemplazar respuesta
+        if (!yaTerminaConCierre) {
+          if (desarrolloMencionado) {
+            parsed.response = `¡Perfecto! ${desarrolloMencionado} es excelente opción 🏡 ¿Te funciona el sábado o el domingo para conocerlo?`;
+          } else {
+            parsed.response = '¡Perfecto! 🏡 ¿Te funciona mejor el sábado o el domingo para la visita?';
+          }
+        }
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // CORRECCIÓN DE FRASES PROHIBIDAS (sin problema, entendido, etc.)
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      if (parsed.response) {
+        const respuestaLower = parsed.response.toLowerCase();
+        const tieneFraseProhibida =
+          respuestaLower.includes('sin problema') ||
+          respuestaLower.includes('no hay problema') ||
+          respuestaLower.includes('entendido') ||
+          (respuestaLower.startsWith('ok') && respuestaLower.length < 15);
+
+        if (tieneFraseProhibida) {
+          console.log('⚠️ Respuesta tiene frase PROHIBIDA - CORRIGIENDO');
+          // Si el cliente muestra interés, cerrar con cita
+          if (quiereVisitar || msgLowerCallback.includes('si') || msgLowerCallback.includes('sí')) {
+            parsed.response = '¡Perfecto! 🏡 ¿Te funciona mejor el sábado o el domingo para la visita?';
+            parsed.intent = 'solicitar_cita';
+          } else {
+            // Rescatar con pregunta de venta
+            parsed.response = '¡Claro! Solo una pregunta rápida: ¿rentas actualmente o ya tienes casa propia? 🏠';
+          }
+        }
       }
 
       return {
