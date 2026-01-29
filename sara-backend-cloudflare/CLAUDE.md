@@ -762,3 +762,34 @@ draft → sent → viewed → negotiating → accepted → reserved → contract
 
 **NUNCA usar el teléfono de Oscar (5214922019052) para pruebas.**
 
+
+### 2026-01-29 (Sesión 5) - QA Completo Meta + Marketing
+
+**Conexión Meta verificada:**
+- ✅ Webhook WhatsApp: `/webhook/meta` (token: `sara_verify_token`)
+- ✅ Webhook Facebook Leads: `/webhook/facebook-leads` (token: `sara_fb_leads_token`)
+- ✅ META_ACCESS_TOKEN configurado
+- ✅ META_PHONE_NUMBER_ID configurado
+- ✅ META_WHATSAPP_BUSINESS_ID configurado
+
+**Flujo completo probado:**
+```
+Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado ✅
+```
+
+**Panel Marketing CRM probado:**
+- ✅ Dashboard con KPIs (ROI 4500%, CPL $1,351)
+- ✅ Funnel de conversión
+- ✅ Performance por fuente
+- ✅ AI Insights
+- ✅ Exportar PDF
+
+**APIs Marketing probadas:**
+- ✅ `/api/attribution/track` - Tracking UTM
+- ✅ `/api/tracking/links` - Links rastreables
+- ✅ `/api/reports/weekly` - Reporte semanal
+- ✅ `/api/reports/weekly/html` - HTML para PDF
+
+**Comandos WhatsApp Marketing:**
+- ✅ campañas, metricas, segmentos, broadcast
+- ✅ enviar a [segmento]: [mensaje]
