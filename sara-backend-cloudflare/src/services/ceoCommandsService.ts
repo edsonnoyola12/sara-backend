@@ -4,6 +4,11 @@ import { FinancingCalculatorService } from './financingCalculatorService';
 import { PropertyComparatorService } from './propertyComparatorService';
 import { CloseProbabilityService } from './closeProbabilityService';
 import { VisitManagementService } from './visitManagementService';
+import { OfferTrackingService } from './offerTrackingService';
+import { SmartAlertsService } from './smartAlertsService';
+import { MarketIntelligenceService } from './marketIntelligenceService';
+import { CustomerValueService } from './customerValueService';
+import { PDFReportService } from './pdfReportService';
 
 export interface CEOCommandResult {
   handled: boolean;
@@ -24,7 +29,9 @@ export class CEOCommandsService {
         action: 'send_message',
         message: `📋 *COMANDOS CEO - ${nombreCEO || 'Jefe'}*\n\n` +
           `*📊 REPORTES*\n` +
-          `• *reporte* - Resumen semanal\n` +
+          `• *reporte* - Resumen rápido\n` +
+          `• *reporte semanal* - Reporte completo semanal\n` +
+          `• *reporte mensual* - Reporte del mes\n` +
           `• *equipo* - Ver equipo activo\n` +
           `• *conexiones* - Quién se conectó hoy\n` +
           `• *leads* - Estado de leads\n` +
@@ -37,7 +44,11 @@ export class CEOCommandsService {
           `• *comparar [A] vs [B]* - Comparar desarrollos\n\n` +
           `*📈 ANÁLISIS*\n` +
           `• *probabilidad* - Probabilidades de cierre\n` +
-          `• *visitas* - Gestión de visitas\n\n` +
+          `• *visitas* - Gestión de visitas\n` +
+          `• *ofertas* - Tracking de cotizaciones\n` +
+          `• *alertas* - Alertas inteligentes\n` +
+          `• *mercado* - Inteligencia de mercado\n` +
+          `• *clv* - Valor del cliente y referidos\n\n` +
           `*📡 BROADCASTS*\n` +
           `• *broadcast* - Enviar mensaje masivo\n` +
           `• *segmentos* - Ver segmentos disponibles\n\n` +
@@ -156,6 +167,42 @@ export class CEOCommandsService {
     if (msgLower === 'visitas' || msgLower === 'visitas hoy' ||
         msgLower === 'recorridos' || msgLower === 'gestion visitas' || msgLower === 'gestión visitas') {
       return { action: 'call_handler', handlerName: 'gestionVisitas' };
+    }
+
+    // ═══ TRACKING DE OFERTAS ═══
+    if (msgLower === 'ofertas' || msgLower === 'cotizaciones' ||
+        msgLower === 'negociaciones' || msgLower === 'apartados') {
+      return { action: 'call_handler', handlerName: 'trackingOfertas' };
+    }
+
+    // ═══ ALERTAS INTELIGENTES ═══
+    if (msgLower === 'alertas' || msgLower === 'warnings' ||
+        msgLower === 'riesgos' || msgLower === 'pendientes urgentes') {
+      return { action: 'call_handler', handlerName: 'alertasInteligentes' };
+    }
+
+    // ═══ INTELIGENCIA DE MERCADO ═══
+    if (msgLower === 'mercado' || msgLower === 'inteligencia' ||
+        msgLower === 'competencia' || msgLower === 'tendencias' ||
+        msgLower === 'analisis mercado' || msgLower === 'análisis mercado') {
+      return { action: 'call_handler', handlerName: 'inteligenciaMercado' };
+    }
+
+    // ═══ VALOR DEL CLIENTE (CLV) ═══
+    if (msgLower === 'clv' || msgLower === 'valor cliente' ||
+        msgLower === 'referidos' || msgLower === 'programa referidos' ||
+        msgLower === 'clientes vip' || msgLower === 'top clientes') {
+      return { action: 'call_handler', handlerName: 'valorCliente' };
+    }
+
+    // ═══ REPORTES PDF ═══
+    if (msgLower === 'reporte semanal' || msgLower === 'reporte semana' ||
+        msgLower === 'weekly report') {
+      return { action: 'call_handler', handlerName: 'reporteSemanal' };
+    }
+    if (msgLower === 'reporte mensual' || msgLower === 'reporte mes' ||
+        msgLower === 'monthly report') {
+      return { action: 'call_handler', handlerName: 'reporteMensual' };
     }
 
     // ═══ HOY (resumen del día) ═══
@@ -837,6 +884,56 @@ export class CEOCommandsService {
           const visitService = new VisitManagementService(this.supabase);
           const summary = await visitService.getVisitSummary(30);
           const message = visitService.formatSummaryForWhatsApp(summary);
+          return { message };
+        }
+
+        // ═══ TRACKING DE OFERTAS ═══
+        case 'trackingOfertas': {
+          const offerService = new OfferTrackingService(this.supabase);
+          const summary = await offerService.getOfferSummary(30);
+          const message = offerService.formatSummaryForWhatsApp(summary);
+          return { message };
+        }
+
+        // ═══ ALERTAS INTELIGENTES ═══
+        case 'alertasInteligentes': {
+          const alertsService = new SmartAlertsService(this.supabase);
+          const summary = await alertsService.getAlertsSummary();
+          const message = alertsService.formatSummaryForWhatsApp(summary);
+          return { message };
+        }
+
+        // ═══ INTELIGENCIA DE MERCADO ═══
+        case 'inteligenciaMercado': {
+          const marketService = new MarketIntelligenceService(this.supabase);
+          const analysis = await marketService.getMarketAnalysis(30);
+          const message = marketService.formatForWhatsApp(analysis);
+          return { message };
+        }
+
+        // ═══ VALOR DEL CLIENTE (CLV) ═══
+        case 'valorCliente': {
+          const clvService = new CustomerValueService(this.supabase);
+          const analysis = await clvService.getCLVAnalysis();
+          const message = clvService.formatAnalysisForWhatsApp(analysis);
+          return { message };
+        }
+
+        // ═══ REPORTE SEMANAL ═══
+        case 'reporteSemanal': {
+          const reportService = new PDFReportService(this.supabase);
+          const config = reportService.getWeeklyReportConfig(nombreCEO);
+          const data = await reportService.generateReportData(config);
+          const message = reportService.formatForWhatsApp(data);
+          return { message };
+        }
+
+        // ═══ REPORTE MENSUAL ═══
+        case 'reporteMensual': {
+          const reportService = new PDFReportService(this.supabase);
+          const config = reportService.getMonthlyReportConfig(nombreCEO);
+          const data = await reportService.generateReportData(config);
+          const message = reportService.formatForWhatsApp(data);
           return { message };
         }
 

@@ -31,6 +31,8 @@ import { FinancingCalculatorService } from './services/financingCalculatorServic
 import { PropertyComparatorService } from './services/propertyComparatorService';
 import { CloseProbabilityService } from './services/closeProbabilityService';
 import { VisitManagementService } from './services/visitManagementService';
+import { OfferTrackingService } from './services/offerTrackingService';
+import { SmartAlertsService } from './services/smartAlertsService';
 import { LeadDeduplicationService, createLeadDeduplication } from './services/leadDeduplicationService';
 import { LinkTrackingService, createLinkTracking } from './services/linkTrackingService';
 import { SLAMonitoringService, createSLAMonitoring } from './services/slaMonitoringService';
@@ -10943,6 +10945,565 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
           success,
           message: success ? 'Visita actualizada' : 'Error actualizando visita'
         }), success ? 200 : 500, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // OFFER TRACKING - Tracking de ofertas y negociaciones
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/offers' || url.pathname.startsWith('/api/offers/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const offerService = new OfferTrackingService(supabase);
+
+      // GET /api/offers - Offer summary
+      if (request.method === 'GET' && url.pathname === '/api/offers') {
+        const days = parseInt(url.searchParams.get('days') || '30');
+        const summary = await offerService.getOfferSummary(days);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          ...summary
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/offers/active - Active offers
+      if (request.method === 'GET' && url.pathname === '/api/offers/active') {
+        const offers = await offerService.getActiveOffers();
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: offers.length,
+          offers
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/offers/expiring - Expiring soon
+      if (request.method === 'GET' && url.pathname === '/api/offers/expiring') {
+        const days = parseInt(url.searchParams.get('days') || '3');
+        const offers = await offerService.getExpiringSoon(days);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: offers.length,
+          offers
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/offers/lead/:id - Offers for a lead
+      if (request.method === 'GET' && url.pathname.match(/^\/api\/offers\/lead\/[^\/]+$/)) {
+        const leadId = url.pathname.split('/').pop() || '';
+        const offers = await offerService.getOffersByLead(leadId);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: offers.length,
+          offers
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/offers/whatsapp - WhatsApp formatted summary
+      if (request.method === 'GET' && url.pathname === '/api/offers/whatsapp') {
+        const summary = await offerService.getOfferSummary(30);
+        const message = offerService.formatSummaryForWhatsApp(summary);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          message
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/offers/:id/status - Update offer status
+      if (request.method === 'POST' && url.pathname.match(/^\/api\/offers\/[^\/]+\/status$/)) {
+        const offerId = url.pathname.split('/')[3];
+        const body = await request.json() as any;
+
+        const success = await offerService.updateOfferStatus(
+          offerId,
+          body.status,
+          body.notes,
+          body.changed_by
+        );
+
+        return corsResponse(JSON.stringify({
+          success,
+          message: success ? 'Oferta actualizada' : 'Error actualizando oferta'
+        }), success ? 200 : 500, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SMART ALERTS - Alertas inteligentes
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/alerts' || url.pathname.startsWith('/api/alerts/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const alertsService = new SmartAlertsService(supabase);
+
+      // GET /api/alerts - All alerts summary
+      if (request.method === 'GET' && url.pathname === '/api/alerts') {
+        const summary = await alertsService.getAlertsSummary();
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          ...summary
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/alerts/scan - Force scan for new alerts
+      if (request.method === 'GET' && url.pathname === '/api/alerts/scan') {
+        const alerts = await alertsService.scanForAlerts();
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: alerts.length,
+          alerts
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/alerts/whatsapp - WhatsApp formatted
+      if (request.method === 'GET' && url.pathname === '/api/alerts/whatsapp') {
+        const summary = await alertsService.getAlertsSummary();
+        const message = alertsService.formatSummaryForWhatsApp(summary);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          message
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MARKET INTELLIGENCE - Inteligencia de mercado
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/market' || url.pathname.startsWith('/api/market/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const { MarketIntelligenceService } = await import('./services/marketIntelligenceService');
+      const marketService = new MarketIntelligenceService(supabase);
+
+      // GET /api/market - Full market analysis
+      if (request.method === 'GET' && url.pathname === '/api/market') {
+        const days = parseInt(url.searchParams.get('days') || '30');
+        const analysis = await marketService.getMarketAnalysis(days);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          analysis
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/market/whatsapp - WhatsApp formatted
+      if (request.method === 'GET' && url.pathname === '/api/market/whatsapp') {
+        const days = parseInt(url.searchParams.get('days') || '30');
+        const analysis = await marketService.getMarketAnalysis(days);
+        const message = marketService.formatForWhatsApp(analysis);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          message
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // CUSTOMER VALUE (CLV) - Valor del cliente y referidos
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/clv' || url.pathname.startsWith('/api/clv/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const { CustomerValueService } = await import('./services/customerValueService');
+      const clvService = new CustomerValueService(supabase);
+
+      // GET /api/clv - Full CLV analysis
+      if (request.method === 'GET' && url.pathname === '/api/clv') {
+        const analysis = await clvService.getCLVAnalysis();
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          analysis
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/clv/customer/:id - Customer profile
+      const customerMatch = url.pathname.match(/^\/api\/clv\/customer\/([^\/]+)$/);
+      if (request.method === 'GET' && customerMatch) {
+        const customerId = customerMatch[1];
+        const profile = await clvService.getCustomerProfile(customerId);
+
+        if (!profile) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Cliente no encontrado'
+          }), 404, 'application/json', request);
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          customer: profile
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/clv/referrals/:id - Customer referral chain
+      const referralMatch = url.pathname.match(/^\/api\/clv\/referrals\/([^\/]+)$/);
+      if (request.method === 'GET' && referralMatch) {
+        const customerId = referralMatch[1];
+        const chain = await clvService.getReferralChain(customerId);
+
+        if (!chain) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Cliente no encontrado'
+          }), 404, 'application/json', request);
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          referrals: chain
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/clv/whatsapp - WhatsApp formatted
+      if (request.method === 'GET' && url.pathname === '/api/clv/whatsapp') {
+        const analysis = await clvService.getCLVAnalysis();
+        const message = clvService.formatAnalysisForWhatsApp(analysis);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          message
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PDF REPORTS - Reportes PDF
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/reports' || url.pathname.startsWith('/api/reports/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const { PDFReportService } = await import('./services/pdfReportService');
+      const reportService = new PDFReportService(supabase);
+
+      // GET /api/reports/weekly - Weekly report
+      if (request.method === 'GET' && url.pathname === '/api/reports/weekly') {
+        const config = reportService.getWeeklyReportConfig();
+        const data = await reportService.generateReportData(config);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          report: data
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/reports/monthly - Monthly report
+      if (request.method === 'GET' && url.pathname === '/api/reports/monthly') {
+        const config = reportService.getMonthlyReportConfig();
+        const data = await reportService.generateReportData(config);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          report: data
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/reports/weekly/html - Weekly report as HTML
+      if (request.method === 'GET' && url.pathname === '/api/reports/weekly/html') {
+        const config = reportService.getWeeklyReportConfig();
+        const data = await reportService.generateReportData(config);
+        const html = reportService.generateHTML(data);
+
+        return new Response(html, {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' }
+        });
+      }
+
+      // GET /api/reports/monthly/html - Monthly report as HTML
+      if (request.method === 'GET' && url.pathname === '/api/reports/monthly/html') {
+        const config = reportService.getMonthlyReportConfig();
+        const data = await reportService.generateReportData(config);
+        const html = reportService.generateHTML(data);
+
+        return new Response(html, {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' }
+        });
+      }
+
+      // GET /api/reports/weekly/whatsapp - Weekly WhatsApp formatted
+      if (request.method === 'GET' && url.pathname === '/api/reports/weekly/whatsapp') {
+        const config = reportService.getWeeklyReportConfig();
+        const data = await reportService.generateReportData(config);
+        const message = reportService.formatForWhatsApp(data);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          message
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/reports/vendor/:id - Vendor personal report
+      const vendorReportMatch = url.pathname.match(/^\/api\/reports\/vendor\/([^\/]+)$/);
+      if (request.method === 'GET' && vendorReportMatch) {
+        const vendorId = vendorReportMatch[1];
+
+        // Get vendor info
+        const { data: vendor } = await supabase.client
+          .from('team_members')
+          .select('id, name')
+          .eq('id', vendorId)
+          .single();
+
+        if (!vendor) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Vendedor no encontrado'
+          }), 404, 'application/json', request);
+        }
+
+        const config = reportService.getVendorReportConfig(vendorId, vendor.name);
+        const data = await reportService.generateReportData(config);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          report: data
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/reports/custom - Custom report
+      if (request.method === 'POST' && url.pathname === '/api/reports/custom') {
+        try {
+          const config = await request.json() as any;
+
+          if (!config.start_date || !config.end_date) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren start_date y end_date'
+            }), 400, 'application/json', request);
+          }
+
+          const data = await reportService.generateReportData({
+            type: 'custom',
+            title: config.title || 'Reporte Personalizado',
+            start_date: config.start_date,
+            end_date: config.end_date,
+            include_sections: config.include_sections || [
+              'executive_summary',
+              'leads_overview',
+              'sales_metrics',
+              'recommendations'
+            ],
+            recipient_name: config.recipient_name,
+            recipient_role: config.recipient_role,
+            vendor_id: config.vendor_id
+          });
+
+          const format = url.searchParams.get('format');
+          if (format === 'html') {
+            const html = reportService.generateHTML(data);
+            return new Response(html, {
+              status: 200,
+              headers: { 'Content-Type': 'text/html; charset=utf-8' }
+            });
+          }
+
+          if (format === 'whatsapp') {
+            const message = reportService.formatForWhatsApp(data);
+            return corsResponse(JSON.stringify({
+              success: true,
+              message
+            }, null, 2), 200, 'application/json', request);
+          }
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            report: data
+          }, null, 2), 200, 'application/json', request);
+
+        } catch (e: any) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: e.message
+          }), 400, 'application/json', request);
+        }
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // WEBHOOKS - Configuración y gestión de webhooks
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/webhooks' || url.pathname.startsWith('/api/webhooks/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const { WebhookService } = await import('./services/webhookService');
+      const webhookService = new WebhookService(supabase, env.SARA_CACHE);
+
+      // GET /api/webhooks - List all webhooks
+      if (request.method === 'GET' && url.pathname === '/api/webhooks') {
+        const webhooks = await webhookService.loadWebhooks();
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: webhooks.length,
+          webhooks
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/webhooks - Create webhook
+      if (request.method === 'POST' && url.pathname === '/api/webhooks') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.name || !body.url || !body.events) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren name, url y events'
+            }), 400, 'application/json', request);
+          }
+
+          const webhook = await webhookService.createWebhook({
+            name: body.name,
+            url: body.url,
+            events: body.events,
+            headers: body.headers || {},
+            active: body.active !== false,
+            retry_count: body.retry_count || 3
+          });
+
+          if (!webhook) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Error al crear webhook'
+            }), 500, 'application/json', request);
+          }
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            webhook
+          }, null, 2), 201, 'application/json', request);
+
+        } catch (e: any) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: e.message
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // GET /api/webhooks/:id/stats - Webhook stats
+      const statsMatch = url.pathname.match(/^\/api\/webhooks\/([^\/]+)\/stats$/);
+      if (request.method === 'GET' && statsMatch) {
+        const webhookId = statsMatch[1];
+        const stats = await webhookService.getWebhookStats(webhookId);
+
+        if (!stats) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'No hay estadísticas disponibles'
+          }), 404, 'application/json', request);
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          stats
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // PUT /api/webhooks/:id - Update webhook
+      const updateMatch = url.pathname.match(/^\/api\/webhooks\/([^\/]+)$/);
+      if (request.method === 'PUT' && updateMatch) {
+        const webhookId = updateMatch[1];
+
+        try {
+          const body = await request.json() as any;
+          const updated = await webhookService.updateWebhook(webhookId, body);
+
+          if (!updated) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Error al actualizar webhook'
+            }), 500, 'application/json', request);
+          }
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            message: 'Webhook actualizado'
+          }, null, 2), 200, 'application/json', request);
+
+        } catch (e: any) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: e.message
+          }), 400, 'application/json', request);
+        }
+      }
+
+      // DELETE /api/webhooks/:id - Delete webhook
+      const deleteMatch = url.pathname.match(/^\/api\/webhooks\/([^\/]+)$/);
+      if (request.method === 'DELETE' && deleteMatch) {
+        const webhookId = deleteMatch[1];
+        const deleted = await webhookService.deleteWebhook(webhookId);
+
+        if (!deleted) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Error al eliminar webhook'
+          }), 500, 'application/json', request);
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          message: 'Webhook eliminado'
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/webhooks/test - Test webhook delivery
+      if (request.method === 'POST' && url.pathname === '/api/webhooks/test') {
+        try {
+          const body = await request.json() as any;
+
+          if (!body.url) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requiere url'
+            }), 400, 'application/json', request);
+          }
+
+          // Send test payload
+          const testPayload = {
+            event: 'test',
+            timestamp: new Date().toISOString(),
+            webhook_id: 'test',
+            data: { message: 'Test webhook from SARA CRM' }
+          };
+
+          const response = await fetch(body.url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': 'SARA-CRM-Webhook/1.0'
+            },
+            body: JSON.stringify(testPayload)
+          });
+
+          return corsResponse(JSON.stringify({
+            success: response.ok,
+            status: response.status,
+            message: response.ok ? 'Test exitoso' : 'Test fallido'
+          }, null, 2), 200, 'application/json', request);
+
+        } catch (e: any) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: e.message
+          }), 400, 'application/json', request);
+        }
       }
     }
 

@@ -76,6 +76,13 @@ npm test
 | `src/services/propertyComparatorService.ts` | ~500 | Comparador de propiedades |
 | `src/services/closeProbabilityService.ts` | ~450 | Probabilidad de cierre ML-like |
 | `src/services/visitManagementService.ts` | ~450 | Gestión de visitas y analytics |
+| `src/services/offerTrackingService.ts` | ~650 | Tracking de ofertas/cotizaciones |
+| `src/services/smartAlertsService.ts` | ~600 | Alertas proactivas inteligentes |
+| `src/services/marketIntelligenceService.ts` | ~725 | Inteligencia de mercado y competencia |
+| `src/services/customerValueService.ts` | ~565 | CLV, referidos, segmentación |
+| `src/services/pdfReportService.ts` | ~700 | Generador de reportes PDF/HTML |
+| `src/services/webhookService.ts` | ~500 | Webhooks salientes para integraciones |
+| `src/services/cacheService.ts` | ~270 | Cache inteligente con KV |
 
 ### Secciones Protegidas
 
@@ -185,6 +192,17 @@ Si no hay ventana abierta → el mensaje NO LLEGA.
 |---------|---------|
 | `leads` / `hoy` | Ver leads del día |
 | `equipo` / `ventas` | Métricas del equipo |
+| `pipeline` / `funnel` | Pipeline de ventas completo |
+| `probabilidad` | Probabilidades de cierre |
+| `visitas` | Gestión de visitas |
+| `ofertas` / `cotizaciones` | Tracking de ofertas |
+| `alertas` / `riesgos` | Alertas inteligentes |
+| `mercado` / `competencia` | Inteligencia de mercado |
+| `clv` / `referidos` | Valor del cliente |
+| `reporte semanal` | Reporte completo semanal |
+| `reporte mensual` | Reporte mensual |
+| `calcular [precio]` | Calculadora hipotecaria |
+| `comparar [A] vs [B]` | Comparar propiedades |
 | `adelante [nombre]` | Mover lead al siguiente status |
 | `atrás [nombre]` | Mover lead al status anterior |
 | `bridge [nombre]` | Chat directo con lead |
@@ -393,6 +411,38 @@ La tabla `properties` NO tiene columna `active`. Todas las propiedades se consid
 ---
 
 ## HISTORIAL DE CAMBIOS IMPORTANTES
+
+### 2026-01-29 (Sesión 2)
+
+**Servicios Avanzados de Inteligencia de Negocio:**
+
+| Servicio | Comandos CEO | Endpoints API |
+|----------|--------------|---------------|
+| Offer Tracking | `ofertas`, `cotizaciones` | `/api/offers/*` |
+| Smart Alerts | `alertas`, `riesgos` | `/api/alerts/*` |
+| Market Intelligence | `mercado`, `competencia` | `/api/market/*` |
+| Customer Value (CLV) | `clv`, `referidos` | `/api/clv/*` |
+| PDF Reports | `reporte semanal`, `reporte mensual` | `/api/reports/*` |
+| Webhooks | - | `/api/webhooks/*` |
+| Cache Service | - | (interno) |
+
+**Nuevas funcionalidades:**
+- **Tracking de Ofertas**: Ciclo de vida de cotizaciones (draft → sent → viewed → negotiating → accepted → reserved → contracted)
+- **Alertas Inteligentes**: Notificaciones proactivas para leads fríos, ofertas por vencer, citas próximas, vendedores inactivos
+- **Inteligencia de Mercado**: Análisis de demanda, precios, competencia, fuentes y timing
+- **CLV (Customer Lifetime Value)**: Perfiles de cliente, cadenas de referidos, segmentación (VIP, high_value, at_risk)
+- **Reportes PDF**: Generador de reportes semanales/mensuales con HTML exportable
+- **Webhooks**: Sistema de notificaciones a sistemas externos con retry y firma HMAC
+- **Cache Optimizado**: Cache inteligente con Cloudflare KV, TTLs por tipo de dato
+
+**Nuevos comandos CEO:**
+```
+mercado / inteligencia / competencia → Análisis de mercado
+clv / valor cliente / referidos → Valor del cliente
+reporte semanal / reporte mensual → Reportes completos
+ofertas / cotizaciones / negociaciones → Tracking de ofertas
+alertas / warnings / riesgos → Alertas inteligentes
+```
 
 ### 2026-01-28
 - QA exhaustivo completado: 21 pruebas de IA + flujo completo
