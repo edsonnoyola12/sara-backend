@@ -363,6 +363,11 @@ function requiresAuth(pathname: string): boolean {
     /^\/api\/team/,                          // Endpoints de equipo
     /^\/api\/appointments$/,                 // Lista/crear citas
     /^\/api\/developments/,                  // Desarrollos
+    /^\/api\/pipeline/,                      // Business Intelligence - Pipeline
+    /^\/api\/alerts/,                        // Business Intelligence - Alerts
+    /^\/api\/market/,                        // Business Intelligence - Market
+    /^\/api\/clv/,                           // Business Intelligence - CLV
+    /^\/api\/offers/,                        // Business Intelligence - Offers
   ];
 
   for (const pattern of crmPublicPatterns) {
@@ -10538,9 +10543,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     // PIPELINE - Sales Pipeline Intelligence
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/pipeline' || url.pathname.startsWith('/api/pipeline/')) {
-      const authError = checkApiAuth(request, env);
-      if (authError) return authError;
-
+      // Auth removed - CRM accesses these endpoints directly
       const pipelineService = new PipelineService(supabase);
 
       // GET /api/pipeline - Full pipeline summary
@@ -10952,9 +10955,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     // OFFER TRACKING - Tracking de ofertas y negociaciones
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/offers' || url.pathname.startsWith('/api/offers/')) {
-      const authError = checkApiAuth(request, env);
-      if (authError) return authError;
-
+      // Auth removed - CRM accesses these endpoints directly
       const offerService = new OfferTrackingService(supabase);
 
       // GET /api/offers - Offer summary
@@ -11037,9 +11038,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     // SMART ALERTS - Alertas inteligentes
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/alerts' || url.pathname.startsWith('/api/alerts/')) {
-      const authError = checkApiAuth(request, env);
-      if (authError) return authError;
-
+      // Auth removed - CRM accesses these endpoints directly
       const alertsService = new SmartAlertsService(supabase);
 
       // GET /api/alerts - All alerts summary
@@ -11079,9 +11078,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     // MARKET INTELLIGENCE - Inteligencia de mercado
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/market' || url.pathname.startsWith('/api/market/')) {
-      const authError = checkApiAuth(request, env);
-      if (authError) return authError;
-
+      // Auth removed - CRM accesses these endpoints directly
       const { MarketIntelligenceService } = await import('./services/marketIntelligenceService');
       const marketService = new MarketIntelligenceService(supabase);
 
@@ -11113,9 +11110,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     // CUSTOMER VALUE (CLV) - Valor del cliente y referidos
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/clv' || url.pathname.startsWith('/api/clv/')) {
-      const authError = checkApiAuth(request, env);
-      if (authError) return authError;
-
+      // Auth removed - CRM accesses these endpoints directly
       const { CustomerValueService } = await import('./services/customerValueService');
       const clvService = new CustomerValueService(supabase);
 
