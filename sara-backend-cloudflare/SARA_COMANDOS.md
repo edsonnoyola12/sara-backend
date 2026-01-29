@@ -2472,6 +2472,31 @@ POST /api/visits/:id/status    - Actualizar estado
 | Envío automático de GPS | ✅ |
 | Envío automático de brochure | ✅ |
 | Envío automático de video | ✅ |
+| **Cierre directo de citas** | ✅ |
+| **Rescate de objeciones** | ✅ |
+
+#### 🎯 Comportamiento de Ventas (Actualizado 2026-01-29)
+
+SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
+
+**✅ CORRECTO (lo que SARA hace ahora):**
+| Situación | Respuesta |
+|-----------|-----------|
+| "quiero ver las casas" | "¿Te funciona el sábado o el domingo?" |
+| "me interesa" | "¡Perfecto! ¿Sábado o domingo para visitarlo?" |
+| "no me interesa" | "¿Qué te hizo dudar? ¿Precio/ubicación/tamaño?" |
+| "lo voy a pensar" | Ofrece valor + pregunta de seguimiento |
+| Lead dice objeción | Presenta alternativas específicas |
+
+**🚫 PROHIBIDO (frases que SARA ya NO usa):**
+- "Sin problema" / "Entendido" / "Ok"
+- "Le aviso a [vendedor] para que te contacte"
+- "Aquí estoy si cambias de opinión"
+- Respuestas largas sin pregunta de cierre
+
+**Archivos que controlan este comportamiento:**
+- `aiConversationService.ts` - Reglas del prompt + corrección post-Claude
+- `leadMessageService.ts` - Respuestas a ofertas/cotizaciones
 
 ### 📱 COMANDOS WHATSAPP (Verificados 2026-01-29)
 
@@ -2550,4 +2575,23 @@ POST /api/visits/:id/status    - Actualizar estado
 | CRM | https://sara-crm-new.vercel.app |
 | Videos | https://sara-videos.onrender.com |
 
-**Sistema 100% operativo - Última verificación: 2026-01-29**
+**Sistema 100% operativo - Última verificación: 2026-01-29 (Sesión 7)**
+
+---
+
+## 📝 HISTORIAL DE CAMBIOS RECIENTES
+
+### 2026-01-29 (Sesión 7) - Fix Comportamiento de Ventas
+
+**Problema:** SARA actuaba como "asistente" pasiva en lugar de "vendedora experta"
+- Decía "Le aviso a Vendedor Test para que te contacte"
+- Usaba frases pasivas: "Sin problema", "Entendido"
+- "quiero ver" activaba tour virtual en lugar de cita física
+
+**Solución:**
+1. Regla crítica en prompt: "QUIERE VER = AGENDAR CITA"
+2. Corrección post-Claude: fuerza cierre de cita si cliente muestra interés
+3. Fix detección negativo/positivo en ofertas
+4. Respuestas hardcodeadas corregidas en leadMessageService
+
+**Commits:** `bb3d7229`, `0ec6912d`, `d51a44eb`

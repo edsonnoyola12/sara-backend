@@ -941,3 +941,55 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Videos | https://sara-videos.onrender.com |
 
 **Sistema 100% operativo - Última verificación: 2026-01-29**
+
+### 2026-01-29 (Sesión 7) - Fix Comportamiento de Ventas de SARA
+
+**Problema identificado:**
+SARA actuaba como "asistente" en lugar de "vendedora experta":
+- Decía "Le aviso a Vendedor Test para que te contacte" en lugar de cerrar la cita
+- Usaba frases pasivas: "Sin problema", "Entendido", "Ok"
+- "quiero ver las casas" activaba tour virtual (matterport) en lugar de cita física
+
+**Correcciones aplicadas:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `aiConversationService.ts` | Regla crítica: "QUIERE VER = AGENDAR CITA" |
+| `aiConversationService.ts` | Frases prohibidas: "Sin problema", "Entendido", "Le aviso a vendedor" |
+| `aiConversationService.ts` | Corrección post-Claude: fuerza cierre de cita si cliente muestra interés |
+| `leadMessageService.ts` | Respuestas a ofertas ahora cierran con "¿sábado o domingo?" |
+| `leadMessageService.ts` | Fix detección negativo vs positivo ("no me interesa" antes detectaba "me interesa") |
+| `index.ts` | Endpoint de prueba corregido: Zacatecas (no Querétaro) |
+
+**Lógica de corrección automática (aiConversationService.ts:1942-1990):**
+```
+Si cliente dice: "quiero ver", "me interesa", "sí quiero", "claro", "dale", etc.
+→ intent = "solicitar_cita"
+→ contactar_vendedor = false
+→ response = "¿Te funciona el sábado o el domingo?"
+```
+
+**Detección de respuestas a ofertas (leadMessageService.ts:220-222):**
+```typescript
+// ANTES (bug): "no me interesa" detectaba "me interesa" como positivo
+const esPositivo = respuestasPositivas.some(r => mensajeLower.includes(r));
+const esNegativo = respuestasNegativas.some(r => mensajeLower.includes(r));
+
+// AHORA (fix): negativo se evalúa primero
+const esNegativo = respuestasNegativas.some(r => mensajeLower.includes(r));
+const esPositivo = !esNegativo && respuestasPositivas.some(r => mensajeLower.includes(r));
+```
+
+**Tests de flujo verificados:**
+
+| Mensaje Lead | Antes | Ahora |
+|--------------|-------|-------|
+| "si quiero ver las casas" | "Le aviso a Vendedor Test" | "¿Sábado o domingo?" ✅ |
+| "no gracias no me interesa" | "🔥 LEAD INTERESADO" | "¿Qué te hizo dudar?" ✅ |
+| "ok lo voy a pensar" | "Sin problema" | Ofrece valor + pregunta ✅ |
+| "El tamaño" (objeción) | Respuesta genérica | Opciones específicas (60-115m²) ✅ |
+
+**Commits:**
+- `bb3d7229` - fix: detectar respuestas negativas antes que positivas en ofertas
+- `0ec6912d` - fix: corregir respuestas hardcodeadas en leadMessageService
+- `d51a44eb` - fix: SARA cierra citas directamente en lugar de pasar a vendedor
