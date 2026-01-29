@@ -726,3 +726,25 @@ draft → sent → viewed → negotiating → accepted → reserved → contract
                     ↘ expired
                     ↘ cancelled
 ```
+
+### 2026-01-29 (Sesión 4) - Panel Coordinador y APIs
+
+**Nuevos endpoints para CRM:**
+
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/appointments` | GET | Listar citas con filtros |
+| `/api/properties` | GET | Listar propiedades (ahora público) |
+
+**Filtros de `/api/appointments`:**
+- `?start_date=2026-01-29` - Desde fecha
+- `?end_date=2026-02-05` - Hasta fecha
+- `?vendor_id=xxx` - Por vendedor
+
+**Panel Coordinador verificado:**
+- ✅ Crear leads desde panel
+- ✅ Asignar a vendedor automáticamente
+- ✅ Ver disponibilidad del equipo
+- ✅ Gestión de citas (crear, cambiar, cancelar)
+- ✅ Reasignar leads
+- ✅ Agregar notas

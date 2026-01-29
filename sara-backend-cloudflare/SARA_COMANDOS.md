@@ -431,6 +431,31 @@ Las llamadas (tipo `llamada`) y citas presenciales (tipo `visita`) tienen notifi
 
 Los coordinadores tienen acceso a los mismos comandos que los vendedores, más la capacidad de ver leads de su equipo.
 
+### Panel CRM Coordinador
+
+El panel de coordinador en el CRM permite:
+
+| Funcionalidad | Descripción |
+|---------------|-------------|
+| **Crear Lead** | Formulario con nombre, teléfono, fuente, desarrollo, vendedor |
+| **Ver Disponibilidad** | Grid de horarios del equipo (9:00-18:00) |
+| **Agendar Citas** | Click en horario verde para agendar |
+| **Gestionar Citas** | Ver, cambiar, cancelar citas próximas |
+| **Reasignar Leads** | Cambiar vendedor asignado |
+| **Agregar Notas** | Notas rápidas a leads recientes |
+
+### Endpoints API Coordinador
+
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/leads` | POST | Crear lead |
+| `/api/leads` | GET | Listar leads |
+| `/api/appointments` | GET | Listar citas |
+| `/api/appointments` | POST | Crear cita |
+| `/api/appointments/notify-change` | POST | Notificar cambio/cancelación |
+| `/api/team-members` | GET | Listar equipo |
+| `/api/properties` | GET | Listar propiedades |
+
 ---
 
 ## FLUJOS DE COMUNICACIÓN
