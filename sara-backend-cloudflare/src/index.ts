@@ -369,6 +369,8 @@ function requiresAuth(pathname: string): boolean {
     /^\/api\/market/,                        // Business Intelligence - Market
     /^\/api\/clv/,                           // Business Intelligence - CLV
     /^\/api\/offers/,                        // Business Intelligence - Offers
+    /^\/api\/reports/,                       // Business Intelligence - Reports
+    /^\/api\/reportes/,                      // Reportes legacy
   ];
 
   for (const pattern of crmPublicPatterns) {
