@@ -792,7 +792,7 @@ El CEO tiene fallback a todos los roles. Orden de prioridad:
 
 ---
 
-*Última actualización: 2026-01-28 (ventana 24h fix)*
+*Última actualización: 2026-01-29 (refactoring modular + 5 nuevos servicios de inteligencia)*
 
 ---
 
@@ -1431,6 +1431,81 @@ await enviarMensajeTeamMember(supabase, meta, teamMember, mensaje, {
 ---
 
 ## HISTORIAL DE CAMBIOS
+
+### 2026-01-29
+
+**Refactoring Masivo - Modularización de index.ts**
+
+El archivo `index.ts` fue refactorizado de ~22,700 líneas a ~14,300 líneas (-37%) extrayendo funciones CRON a módulos separados en `src/crons/`:
+
+| Fase | Módulo | Líneas | Funciones |
+|------|--------|--------|-----------|
+| 1 | `reports.ts` | ~400 | Reportes diarios/semanales/mensuales |
+| 2 | `briefings.ts` | ~500 | Briefings matutinos, logEvento |
+| 2 | `alerts.ts` | ~450 | Alertas leads fríos/calientes, cumpleaños |
+| 3 | `followups.ts` | ~800 | Follow-ups, nurturing, broadcasts |
+| 4 | `leadScoring.ts` | ~550 | Scoring, señales calientes, objeciones |
+| 4 | `nurturing.ts` | ~700 | Recuperación crédito, NPS, referidos |
+| 5 | `maintenance.ts` | ~340 | Bridges, leads estancados, aniversarios |
+| 6 | `videos.ts` | ~710 | Videos Veo 3 personalizados |
+| 7 | `dashboard.ts` | ~700 | Status, analytics, health, backup |
+
+**Total extraído:** ~5,150 líneas en 9 módulos
+
+**Beneficios:**
+- Código más mantenible y organizado
+- Imports claros entre módulos
+- Más fácil de testear y debuggear
+- 260 tests siguen pasando ✅
+
+**Nuevos Servicios de Inteligencia de Negocio:**
+
+| Servicio | Función | Comandos CEO | API |
+|----------|---------|--------------|-----|
+| `pipelineService.ts` | Pipeline ventas + forecast | `pipeline`, `funnel`, `embudo` | `/api/pipeline/*` |
+| `financingCalculatorService.ts` | Calculadora hipotecaria | `calcular [precio]`, `bancos`, `tasas` | `/api/financing/*` |
+| `propertyComparatorService.ts` | Comparador propiedades | `comparar [A] vs [B]` | `/api/compare/*` |
+| `closeProbabilityService.ts` | Probabilidad cierre | `probabilidad`, `pronostico` | `/api/probability/*` |
+| `visitManagementService.ts` | Gestión visitas | `visitas`, `recorridos` | `/api/visits/*` |
+
+**Nuevos Endpoints API:**
+
+```
+# Pipeline
+GET /api/pipeline              - Resumen completo del pipeline
+GET /api/pipeline/stages       - Desglose por etapa
+GET /api/pipeline/at-risk      - Leads en riesgo
+GET /api/pipeline/forecast     - Pronóstico mensual
+GET /api/pipeline/whatsapp     - Formato WhatsApp
+
+# Financiamiento
+POST /api/financing/calculate  - Calcular para un banco
+POST /api/financing/compare    - Comparar todos los bancos
+GET /api/financing/quick       - Estimado rápido
+GET /api/financing/banks       - Lista de bancos
+POST /api/financing/qualify    - Verificar calificación
+
+# Comparador
+POST /api/compare              - Comparar por IDs
+POST /api/compare/developments - Comparar por desarrollo
+GET /api/compare/search        - Buscar propiedades
+GET /api/compare/quick         - Comparación rápida texto
+
+# Probabilidad
+GET /api/probability           - Todas las probabilidades
+GET /api/probability/lead/:id  - Probabilidad de un lead
+GET /api/probability/high      - Leads alta probabilidad
+GET /api/probability/at-risk   - Leads en riesgo
+
+# Visitas
+GET /api/visits                - Resumen de visitas
+GET /api/visits/today          - Visitas de hoy
+GET /api/visits/tomorrow       - Visitas de mañana
+GET /api/visits/week           - Visitas de la semana
+POST /api/visits/:id/status    - Actualizar estado
+```
+
+---
 
 ### 2026-01-28
 

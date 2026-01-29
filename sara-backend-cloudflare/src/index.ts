@@ -26,6 +26,11 @@ import { OutgoingWebhooksService, createOutgoingWebhooks } from './services/outg
 import { SentimentAnalysisService, createSentimentAnalysis, analyzeSentiment } from './services/sentimentAnalysisService';
 import { WhatsAppTemplatesService, createWhatsAppTemplates } from './services/whatsappTemplatesService';
 import { TeamDashboardService, createTeamDashboard } from './services/teamDashboardService';
+import { PipelineService, formatPipelineForWhatsApp, formatCurrency } from './services/pipelineService';
+import { FinancingCalculatorService } from './services/financingCalculatorService';
+import { PropertyComparatorService } from './services/propertyComparatorService';
+import { CloseProbabilityService } from './services/closeProbabilityService';
+import { VisitManagementService } from './services/visitManagementService';
 import { LeadDeduplicationService, createLeadDeduplication } from './services/leadDeduplicationService';
 import { LinkTrackingService, createLinkTracking } from './services/linkTrackingService';
 import { SLAMonitoringService, createSLAMonitoring } from './services/slaMonitoringService';
@@ -10524,6 +10529,420 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
           count: list.length,
           templates: list
         }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PIPELINE - Sales Pipeline Intelligence
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/pipeline' || url.pathname.startsWith('/api/pipeline/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const pipelineService = new PipelineService(supabase);
+
+      // GET /api/pipeline - Full pipeline summary
+      if (request.method === 'GET' && url.pathname === '/api/pipeline') {
+        const timeframe = parseInt(url.searchParams.get('timeframe') || '90');
+        const summary = await pipelineService.getPipelineSummary(timeframe);
+        return corsResponse(JSON.stringify({
+          success: true,
+          ...summary
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/pipeline/stages - Pipeline by stage
+      if (request.method === 'GET' && url.pathname === '/api/pipeline/stages') {
+        const stages = await pipelineService.getPipelineByStage();
+        return corsResponse(JSON.stringify({
+          success: true,
+          stages
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/pipeline/at-risk - At-risk leads
+      if (request.method === 'GET' && url.pathname === '/api/pipeline/at-risk') {
+        const limit = parseInt(url.searchParams.get('limit') || '20');
+        const atRisk = await pipelineService.getAtRiskLeads(limit);
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: atRisk.length,
+          at_risk_leads: atRisk
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/pipeline/forecast - Monthly forecast
+      if (request.method === 'GET' && url.pathname === '/api/pipeline/forecast') {
+        const forecast = await pipelineService.getMonthlyForecast();
+        return corsResponse(JSON.stringify({
+          success: true,
+          ...forecast
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/pipeline/whatsapp - Pipeline formatted for WhatsApp
+      if (request.method === 'GET' && url.pathname === '/api/pipeline/whatsapp') {
+        const timeframe = parseInt(url.searchParams.get('timeframe') || '30');
+        const summary = await pipelineService.getPipelineSummary(timeframe);
+        const formatted = formatPipelineForWhatsApp(summary);
+        return corsResponse(JSON.stringify({
+          success: true,
+          message: formatted
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // FINANCING CALCULATOR - Calculadora de crédito hipotecario
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/financing' || url.pathname.startsWith('/api/financing/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const financingService = new FinancingCalculatorService(supabase);
+
+      // POST /api/financing/calculate - Calculate mortgage for single bank
+      if (request.method === 'POST' && url.pathname === '/api/financing/calculate') {
+        const body = await request.json() as any;
+        const bank = body.bank || 'BBVA';
+        const result = financingService.calculateMortgage({
+          property_price: body.property_price || 0,
+          down_payment_percent: body.down_payment_percent || 20,
+          term_years: body.term_years || 20,
+          annual_rate: body.annual_rate,
+          income: body.income
+        }, bank);
+
+        if (!result) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'No se pudo calcular. Verifica los parámetros.'
+          }), 400, 'application/json', request);
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          result
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/financing/compare - Compare all banks
+      if (request.method === 'POST' && url.pathname === '/api/financing/compare') {
+        const body = await request.json() as any;
+        const comparison = financingService.compareBanks({
+          property_price: body.property_price || 0,
+          down_payment_percent: body.down_payment_percent || 20,
+          term_years: body.term_years || 20,
+          income: body.income,
+          infonavit_credit: body.infonavit_credit,
+          fovissste_credit: body.fovissste_credit
+        });
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          ...comparison
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/financing/quick - Quick estimate
+      if (request.method === 'GET' && url.pathname === '/api/financing/quick') {
+        const price = parseFloat(url.searchParams.get('price') || '0');
+        const downPayment = parseFloat(url.searchParams.get('down_payment') || '20');
+        const term = parseInt(url.searchParams.get('term') || '20');
+
+        if (price <= 0) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Se requiere el parámetro price (precio de la propiedad)'
+          }), 400, 'application/json', request);
+        }
+
+        const estimate = financingService.quickEstimate(price, downPayment, term);
+        return corsResponse(JSON.stringify({
+          success: true,
+          message: estimate
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/financing/banks - List available banks
+      if (request.method === 'GET' && url.pathname === '/api/financing/banks') {
+        const banks = financingService.getAvailableBanks();
+        return corsResponse(JSON.stringify({
+          success: true,
+          banks
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/financing/qualify - Check qualification
+      if (request.method === 'POST' && url.pathname === '/api/financing/qualify') {
+        const body = await request.json() as any;
+        const result = financingService.checkQualification(
+          body.income || 0,
+          body.property_price || 0,
+          body.down_payment_percent || 20
+        );
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          ...result
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PROPERTY COMPARATOR - Comparador de propiedades
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/compare' || url.pathname.startsWith('/api/compare/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const comparatorService = new PropertyComparatorService(supabase);
+
+      // POST /api/compare - Compare properties by IDs
+      if (request.method === 'POST' && url.pathname === '/api/compare') {
+        const body = await request.json() as any;
+        const ids = body.property_ids || [];
+
+        if (ids.length < 2) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Se requieren al menos 2 property_ids para comparar'
+          }), 400, 'application/json', request);
+        }
+
+        const comparison = await comparatorService.compare(ids);
+        if (!comparison) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'No se encontraron propiedades para comparar'
+          }), 404, 'application/json', request);
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          ...comparison
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/compare/developments - Compare by development names
+      if (request.method === 'POST' && url.pathname === '/api/compare/developments') {
+        const body = await request.json() as any;
+        const developments = body.developments || [];
+
+        if (developments.length < 2) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Se requieren al menos 2 desarrollos para comparar'
+          }), 400, 'application/json', request);
+        }
+
+        const comparison = await comparatorService.compareByDevelopments(developments);
+        if (!comparison) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'No se encontraron propiedades en estos desarrollos'
+          }), 404, 'application/json', request);
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          ...comparison
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/compare/search - Search properties with filters
+      if (request.method === 'GET' && url.pathname === '/api/compare/search') {
+        const filters = {
+          min_price: url.searchParams.get('min_price') ? parseInt(url.searchParams.get('min_price')!) : undefined,
+          max_price: url.searchParams.get('max_price') ? parseInt(url.searchParams.get('max_price')!) : undefined,
+          min_bedrooms: url.searchParams.get('min_bedrooms') ? parseInt(url.searchParams.get('min_bedrooms')!) : undefined,
+          type: url.searchParams.get('type') || undefined,
+          development: url.searchParams.get('development') || undefined
+        };
+
+        const properties = await comparatorService.searchProperties(filters);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: properties.length,
+          properties
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/compare/quick - Quick comparison via text query
+      if (request.method === 'GET' && url.pathname === '/api/compare/quick') {
+        const query = url.searchParams.get('q') || '';
+
+        if (!query) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Se requiere el parámetro q con los desarrollos a comparar'
+          }), 400, 'application/json', request);
+        }
+
+        const message = await comparatorService.quickCompare(query);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          message
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // CLOSE PROBABILITY - Probabilidad de cierre
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/probability' || url.pathname.startsWith('/api/probability/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const probService = new CloseProbabilityService(supabase);
+
+      // GET /api/probability - All leads probability summary
+      if (request.method === 'GET' && url.pathname === '/api/probability') {
+        const limit = parseInt(url.searchParams.get('limit') || '100');
+        const data = await probService.calculateForAllLeads(limit);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          ...data
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/probability/lead/:id - Single lead probability
+      if (request.method === 'GET' && url.pathname.startsWith('/api/probability/lead/')) {
+        const leadId = url.pathname.split('/').pop() || '';
+        const result = await probService.calculateForLead(leadId);
+
+        if (!result) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: 'Lead no encontrado'
+          }), 404, 'application/json', request);
+        }
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          ...result
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/probability/high - High probability leads
+      if (request.method === 'GET' && url.pathname === '/api/probability/high') {
+        const threshold = parseInt(url.searchParams.get('threshold') || '70');
+        const leads = await probService.getHighProbabilityLeads(threshold);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: leads.length,
+          threshold,
+          leads
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/probability/at-risk - At-risk leads
+      if (request.method === 'GET' && url.pathname === '/api/probability/at-risk') {
+        const leads = await probService.getAtRiskLeads();
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: leads.length,
+          leads
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/probability/whatsapp - WhatsApp formatted
+      if (request.method === 'GET' && url.pathname === '/api/probability/whatsapp') {
+        const data = await probService.calculateForAllLeads(50);
+        const message = probService.formatForWhatsApp(data);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          message
+        }, null, 2), 200, 'application/json', request);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // VISIT MANAGEMENT - Gestión de visitas
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/visits' || url.pathname.startsWith('/api/visits/')) {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const visitService = new VisitManagementService(supabase);
+
+      // GET /api/visits - Visit summary
+      if (request.method === 'GET' && url.pathname === '/api/visits') {
+        const days = parseInt(url.searchParams.get('days') || '30');
+        const summary = await visitService.getVisitSummary(days);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          ...summary
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/visits/today - Today's visits
+      if (request.method === 'GET' && url.pathname === '/api/visits/today') {
+        const visits = await visitService.getTodayVisits();
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: visits.length,
+          visits
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/visits/tomorrow - Tomorrow's visits
+      if (request.method === 'GET' && url.pathname === '/api/visits/tomorrow') {
+        const visits = await visitService.getTomorrowVisits();
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: visits.length,
+          visits
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/visits/week - This week's visits
+      if (request.method === 'GET' && url.pathname === '/api/visits/week') {
+        const visits = await visitService.getWeekVisits();
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          count: visits.length,
+          visits
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // GET /api/visits/whatsapp - WhatsApp formatted summary
+      if (request.method === 'GET' && url.pathname === '/api/visits/whatsapp') {
+        const summary = await visitService.getVisitSummary(30);
+        const message = visitService.formatSummaryForWhatsApp(summary);
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          message
+        }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/visits/:id/status - Update visit status
+      if (request.method === 'POST' && url.pathname.match(/^\/api\/visits\/[^\/]+\/status$/)) {
+        const visitId = url.pathname.split('/')[3];
+        const body = await request.json() as any;
+
+        const success = await visitService.updateVisitStatus(
+          visitId,
+          body.status,
+          body.feedback,
+          body.rating
+        );
+
+        return corsResponse(JSON.stringify({
+          success,
+          message: success ? 'Visita actualizada' : 'Error actualizando visita'
+        }), success ? 200 : 500, 'application/json', request);
       }
     }
 

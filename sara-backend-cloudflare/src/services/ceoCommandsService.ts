@@ -1,4 +1,9 @@
 import { SupabaseService } from './supabase';
+import { PipelineService, formatPipelineForWhatsApp } from './pipelineService';
+import { FinancingCalculatorService } from './financingCalculatorService';
+import { PropertyComparatorService } from './propertyComparatorService';
+import { CloseProbabilityService } from './closeProbabilityService';
+import { VisitManagementService } from './visitManagementService';
 
 export interface CEOCommandResult {
   handled: boolean;
@@ -23,7 +28,16 @@ export class CEOCommandsService {
           `• *equipo* - Ver equipo activo\n` +
           `• *conexiones* - Quién se conectó hoy\n` +
           `• *leads* - Estado de leads\n` +
-          `• *ventas* - Métricas de ventas\n\n` +
+          `• *ventas* - Métricas de ventas\n` +
+          `• *pipeline* - Pipeline de ventas completo\n\n` +
+          `*🏦 FINANCIAMIENTO*\n` +
+          `• *calcular [precio]* - Estimado rápido\n` +
+          `• *bancos* - Ver tasas actuales\n\n` +
+          `*🏠 PROPIEDADES*\n` +
+          `• *comparar [A] vs [B]* - Comparar desarrollos\n\n` +
+          `*📈 ANÁLISIS*\n` +
+          `• *probabilidad* - Probabilidades de cierre\n` +
+          `• *visitas* - Gestión de visitas\n\n` +
           `*📡 BROADCASTS*\n` +
           `• *broadcast* - Enviar mensaje masivo\n` +
           `• *segmentos* - Ver segmentos disponibles\n\n` +
@@ -101,6 +115,47 @@ export class CEOCommandsService {
     // ═══ VENTAS ═══
     if (msgLower.startsWith('ventas') || msgLower.startsWith('sales')) {
       return { action: 'call_handler', handlerName: 'reporteVentas' };
+    }
+
+    // ═══ PIPELINE ═══
+    if (msgLower === 'pipeline' || msgLower === 'funnel' || msgLower === 'embudo') {
+      return { action: 'call_handler', handlerName: 'reportePipeline' };
+    }
+
+    // ═══ CALCULADORA DE FINANCIAMIENTO ═══
+    // Matches: "calcular 2.5m", "financiamiento 3 millones", "credito hipotecario"
+    const financingMatch = msgLower.match(/^(?:calcular|financiamiento|credito|crédito|hipoteca)\s*(.*)$/);
+    if (financingMatch || msgLower === 'bancos' || msgLower === 'tasas') {
+      const amount = financingMatch?.[1]?.trim() || '';
+      return {
+        action: 'call_handler',
+        handlerName: 'calculadoraFinanciamiento',
+        handlerParams: { amount }
+      };
+    }
+
+    // ═══ COMPARADOR DE PROPIEDADES ═══
+    // Matches: "comparar monte verde vs distrito falco", "vs miravalle encinos"
+    const compareMatch = msgLower.match(/^(?:comparar|compara|vs)\s+(.+)$/);
+    if (compareMatch || msgLower.includes(' vs ')) {
+      const query = compareMatch?.[1] || msgLower;
+      return {
+        action: 'call_handler',
+        handlerName: 'compararPropiedades',
+        handlerParams: { query }
+      };
+    }
+
+    // ═══ PROBABILIDAD DE CIERRE ═══
+    if (msgLower === 'probabilidad' || msgLower === 'probabilidades' ||
+        msgLower === 'prob cierre' || msgLower === 'pronostico' || msgLower === 'pronóstico') {
+      return { action: 'call_handler', handlerName: 'probabilidadCierre' };
+    }
+
+    // ═══ GESTIÓN DE VISITAS ═══
+    if (msgLower === 'visitas' || msgLower === 'visitas hoy' ||
+        msgLower === 'recorridos' || msgLower === 'gestion visitas' || msgLower === 'gestión visitas') {
+      return { action: 'call_handler', handlerName: 'gestionVisitas' };
     }
 
     // ═══ HOY (resumen del día) ═══
@@ -708,6 +763,81 @@ export class CEOCommandsService {
           }
 
           return { message: msg };
+        }
+
+        // ═══ REPORTE PIPELINE ═══
+        case 'reportePipeline': {
+          const pipelineService = new PipelineService(this.supabase);
+          const summary = await pipelineService.getPipelineSummary(90);
+          const msgPipeline = formatPipelineForWhatsApp(summary);
+          return { message: msgPipeline };
+        }
+
+        // ═══ CALCULADORA DE FINANCIAMIENTO ═══
+        case 'calculadoraFinanciamiento': {
+          const financingService = new FinancingCalculatorService(this.supabase);
+          const amountText = handlerParams?.amount || '';
+
+          // If amount provided, do a quick estimate
+          if (amountText) {
+            const amount = financingService.parseAmount(amountText);
+            if (amount && amount > 0) {
+              const estimate = financingService.quickEstimate(amount, 20, 20);
+              return { message: estimate };
+            }
+          }
+
+          // Otherwise show help menu for financing
+          const banks = financingService.getAvailableBanks();
+          const banksMsg = banks.slice(0, 6).map(b => `• ${b.name}: ${b.rate}%`).join('\n');
+
+          const msg = `🏦 *CALCULADORA DE FINANCIAMIENTO*\n\n` +
+            `*Uso:*\n` +
+            `• _calcular 2.5 millones_ - Estimado rápido\n` +
+            `• _financiamiento 3m_ - Comparar bancos\n` +
+            `• _credito_ - Ver opciones\n\n` +
+            `*Tasas Actuales:*\n${banksMsg}\n\n` +
+            `_Escribe el precio de la propiedad para comenzar_`;
+
+          return { message: msg };
+        }
+
+        // ═══ COMPARADOR DE PROPIEDADES ═══
+        case 'compararPropiedades': {
+          const comparatorService = new PropertyComparatorService(this.supabase);
+          const query = handlerParams?.query || '';
+
+          if (!query) {
+            const msg = `🏠 *COMPARADOR DE PROPIEDADES*\n\n` +
+              `*Uso:*\n` +
+              `• _comparar Monte Verde vs Distrito Falco_\n` +
+              `• _vs Miravalle Los Encinos_\n\n` +
+              `*Desarrollos disponibles:*\n` +
+              `• Monte Verde\n• Distrito Falco\n• Los Encinos\n` +
+              `• Miravalle\n• Villa Campelo\n• Villa Galiano\n` +
+              `• Colinas del Padre\n\n` +
+              `_Escribe los desarrollos que quieres comparar_`;
+            return { message: msg };
+          }
+
+          const result = await comparatorService.quickCompare(query);
+          return { message: result };
+        }
+
+        // ═══ PROBABILIDAD DE CIERRE ═══
+        case 'probabilidadCierre': {
+          const probService = new CloseProbabilityService(this.supabase);
+          const data = await probService.calculateForAllLeads(50);
+          const message = probService.formatForWhatsApp(data);
+          return { message };
+        }
+
+        // ═══ GESTIÓN DE VISITAS ═══
+        case 'gestionVisitas': {
+          const visitService = new VisitManagementService(this.supabase);
+          const summary = await visitService.getVisitSummary(30);
+          const message = visitService.formatSummaryForWhatsApp(summary);
+          return { message };
         }
 
         // Handlers que requieren lógica externa (en whatsapp.ts)

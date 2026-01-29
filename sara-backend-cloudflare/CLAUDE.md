@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-01-28
+> Última actualización: 2026-01-29
 
 ---
 
@@ -48,10 +48,34 @@ npm test
 
 | Archivo | Líneas | Función | Riesgo |
 |---------|--------|---------|--------|
-| `src/index.ts` | ~25,000 | Router principal + CRONs | ALTO |
+| `src/index.ts` | ~14,300 | Router principal + CRONs | ALTO |
 | `src/handlers/whatsapp.ts` | ~11,000 | Handler de mensajes | ALTO |
 | `src/services/aiConversationService.ts` | ~7,300 | IA + prompts | ALTO |
 | `src/services/creditFlowService.ts` | ~1,400 | Flujo hipotecario | MEDIO |
+
+### Módulos CRON Extraídos (2026-01-29)
+
+| Módulo | Líneas | Funciones |
+|--------|--------|-----------|
+| `src/crons/reports.ts` | ~400 | Reportes diarios/semanales |
+| `src/crons/briefings.ts` | ~500 | Briefings matutinos, logEvento |
+| `src/crons/alerts.ts` | ~450 | Alertas de leads, cumpleaños |
+| `src/crons/followups.ts` | ~800 | Follow-ups, nurturing, broadcasts |
+| `src/crons/leadScoring.ts` | ~550 | Scoring, señales calientes, objeciones |
+| `src/crons/nurturing.ts` | ~700 | Recuperación crédito, NPS, referidos |
+| `src/crons/maintenance.ts` | ~340 | Bridges, leads estancados, aniversarios |
+| `src/crons/videos.ts` | ~710 | Videos Veo 3 personalizados |
+| `src/crons/dashboard.ts` | ~700 | Status, analytics, health, backup |
+
+### Servicios de Inteligencia de Negocio (2026-01-29)
+
+| Servicio | Líneas | Funcionalidad |
+|----------|--------|---------------|
+| `src/services/pipelineService.ts` | ~700 | Pipeline de ventas, forecast, at-risk |
+| `src/services/financingCalculatorService.ts` | ~550 | Calculadora hipotecaria, comparar bancos |
+| `src/services/propertyComparatorService.ts` | ~500 | Comparador de propiedades |
+| `src/services/closeProbabilityService.ts` | ~450 | Probabilidad de cierre ML-like |
+| `src/services/visitManagementService.ts` | ~450 | Gestión de visitas y analytics |
 
 ### Secciones Protegidas
 
@@ -212,9 +236,19 @@ Si no hay ventana abierta → el mensaje NO LLEGA.
 ```
 sara-backend-cloudflare/
 ├── src/
-│   ├── index.ts              # Router principal (25K líneas)
+│   ├── index.ts              # Router principal (~14K líneas)
 │   ├── handlers/
 │   │   └── whatsapp.ts       # Handler WhatsApp (11K líneas)
+│   ├── crons/                # Módulos CRON extraídos
+│   │   ├── reports.ts        # Reportes diarios/semanales
+│   │   ├── briefings.ts      # Briefings, logEvento
+│   │   ├── alerts.ts         # Alertas de leads
+│   │   ├── followups.ts      # Follow-ups automáticos
+│   │   ├── leadScoring.ts    # Scoring y objeciones
+│   │   ├── nurturing.ts      # Nurturing y NPS
+│   │   ├── maintenance.ts    # Bridges y mantenimiento
+│   │   ├── videos.ts         # Videos Veo 3
+│   │   └── dashboard.ts      # Status y analytics
 │   ├── services/
 │   │   ├── aiConversationService.ts  # IA (7K líneas)
 │   │   ├── ceoCommandsService.ts
@@ -496,3 +530,44 @@ Authorization: Bearer <API_SECRET>
 
 **Ahora (protegidos):**
 - Todos los `/test-*` requieren API key ✅
+
+### 2026-01-29
+
+**Refactoring Masivo - Modularización de index.ts**
+
+El archivo `index.ts` fue refactorizado de ~22,700 líneas a ~14,300 líneas (-37%) extrayendo funciones CRON a módulos separados:
+
+| Fase | Módulo Creado | Funciones Extraídas |
+|------|---------------|---------------------|
+| 1 | `crons/reports.ts` | Reportes diarios, semanales, mensuales |
+| 2 | `crons/briefings.ts` | Briefings matutinos, logEvento |
+| 2 | `crons/alerts.ts` | Alertas leads fríos, calientes, cumpleaños |
+| 3 | `crons/followups.ts` | Follow-ups, nurturing, broadcasts |
+| 4 | `crons/leadScoring.ts` | Scoring, señales calientes, objeciones |
+| 4 | `crons/nurturing.ts` | Recuperación crédito, NPS, referidos |
+| 5 | `crons/maintenance.ts` | Bridges, leads estancados, aniversarios |
+| 6 | `crons/videos.ts` | Videos Veo 3 personalizados |
+| 7 | `crons/dashboard.ts` | Status, analytics, health, backup |
+
+**Beneficios:**
+- Código más mantenible y organizado
+- Imports claros entre módulos
+- Más fácil de testear y debuggear
+- 260 tests siguen pasando ✅
+
+**Nuevas Funcionalidades de Inteligencia de Negocio:**
+
+| Funcionalidad | Servicio | Comandos CEO | Endpoints API |
+|---------------|----------|--------------|---------------|
+| Pipeline de Ventas | `pipelineService.ts` | `pipeline`, `funnel` | `/api/pipeline/*` |
+| Calculadora Hipotecaria | `financingCalculatorService.ts` | `calcular [precio]`, `bancos` | `/api/financing/*` |
+| Comparador Propiedades | `propertyComparatorService.ts` | `comparar [A] vs [B]` | `/api/compare/*` |
+| Probabilidad de Cierre | `closeProbabilityService.ts` | `probabilidad`, `pronostico` | `/api/probability/*` |
+| Gestión de Visitas | `visitManagementService.ts` | `visitas` | `/api/visits/*` |
+
+**Características principales:**
+- **Pipeline:** Forecast mensual, leads at-risk, conversión por etapa, métricas por vendedor
+- **Financiamiento:** Comparativa 8 bancos (BBVA, Banorte, Santander, HSBC, Scotiabank, INFONAVIT, FOVISSSTE, Cofinavit)
+- **Comparador:** Comparar desarrollos, precio/m², score automático, recomendaciones
+- **Probabilidad:** Cálculo ML-like con factores positivos/negativos, confianza, fechas esperadas
+- **Visitas:** Analytics de completación, no-shows, conversión, métricas por desarrollo y vendedor
