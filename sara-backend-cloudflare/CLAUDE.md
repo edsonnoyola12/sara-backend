@@ -793,3 +793,115 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 **Comandos WhatsApp Marketing:**
 - ✅ campañas, metricas, segmentos, broadcast
 - ✅ enviar a [segmento]: [mensaje]
+
+---
+
+## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES
+
+### 🔗 CONEXIONES E INTEGRACIONES
+
+| Integración | Estado | Descripción |
+|-------------|--------|-------------|
+| Meta WhatsApp API | ✅ | Webhook `/webhook/meta` |
+| Facebook Lead Ads | ✅ | Webhook `/webhook/facebook-leads` |
+| Supabase (PostgreSQL) | ✅ | Base de datos principal |
+| Cloudflare Workers | ✅ | Runtime de producción |
+| Cloudflare KV Cache | ✅ | Cache optimizado |
+| Google Calendar | ✅ | Citas y eventos |
+| Google Veo 3 | ✅ | Videos personalizados |
+| Claude (Anthropic) | ✅ | IA conversacional |
+
+### 🤖 IA CONVERSACIONAL (SARA)
+
+| Funcionalidad | Estado |
+|---------------|--------|
+| Responder preguntas de desarrollos | ✅ |
+| Información de 36 propiedades | ✅ |
+| Precios y disponibilidad | ✅ |
+| Manejo de objeciones | ✅ |
+| Detectar errores ortográficos | ✅ |
+| NO inventar información | ✅ |
+| Detectar intención de cita | ✅ |
+| Detectar interés en crédito | ✅ |
+| Envío automático de GPS | ✅ |
+| Envío automático de brochure | ✅ |
+| Envío automático de video | ✅ |
+
+### 📱 COMANDOS WHATSAPP (Todos verificados 2026-01-29)
+
+**CEO:** leads, briefing, equipo, ventas, pipeline, probabilidad, visitas, alertas, mercado, clv, calcular, bancos, comparar, bridge, broadcast, adelante/atrás, nota, ofertas, brochure/ubicación/video ✅
+
+**Vendedor:** citas, mis leads, hot, pendientes, meta, agendar/reagendar/cancelar cita, nota, notas, bridge, cotizar, ofertas, brochure/ubicación/video, crédito, llamar, coaching ✅
+
+**Asesor:** mis leads, docs, preaprobado, rechazado, contactado, status, reporte ✅
+
+**Marketing:** campañas, metricas, segmentos, broadcast, enviar a [segmento] ✅
+
+### 🖥️ PANELES CRM
+
+| Panel | Estado | Funcionalidades |
+|-------|--------|-----------------|
+| Vendedor | ✅ | Leads, citas, pipeline, notas |
+| Coordinador | ✅ | Crear leads, asignar, reasignar, citas |
+| Marketing | ✅ | Dashboard KPIs, funnel, ROI, CPL, PDF |
+| CEO/Admin | ✅ | Todo + métricas equipo |
+
+### 📊 APIs (Todas verificadas)
+
+| Categoría | Endpoints |
+|-----------|-----------|
+| Core | `/health`, `/api/leads`, `/api/team-members`, `/api/appointments`, `/api/properties` |
+| Inteligencia | `/api/pipeline/*`, `/api/probability/*`, `/api/visits/*`, `/api/offers/*`, `/api/alerts/*` |
+| Finanzas | `/api/financing/*`, `/api/compare/*` |
+| Marketing | `/api/attribution/*`, `/api/tracking/*`, `/api/market/*`, `/api/clv/*` |
+| Reportes | `/api/reports/*` |
+
+### ⏰ CRONs AUTOMATIZADOS
+
+| CRON | Frecuencia | Estado |
+|------|------------|--------|
+| Leads sin asignar | Cada 2 min | ✅ |
+| Follow-ups | 2 PM L-V | ✅ |
+| Briefing matutino | 8 AM | ✅ |
+| Reporte 7 PM | 7 PM | ✅ |
+| Alertas/Cumpleaños | Diario | ✅ |
+| Scoring leads | Diario | ✅ |
+| NPS/Encuestas | Semanal | ✅ |
+
+### 🔒 FLUJOS DE NEGOCIO
+
+| Flujo | Estado |
+|-------|--------|
+| Lead → CRM → Vendedor (notificación automática) | ✅ |
+| Ventana 24h WhatsApp (templates si cerrada) | ✅ |
+| Bridge chat directo (6 min, #cerrar, #mas) | ✅ |
+| Crédito hipotecario (calificación + asesor) | ✅ |
+| Videos Veo 3 personalizados | ✅ |
+| Ofertas/Cotizaciones ciclo completo | ✅ |
+| Funnel de ventas (new → delivered) | ✅ |
+
+### 🧪 TESTING
+
+| Categoría | Tests | Estado |
+|-----------|-------|--------|
+| Unit tests | 260 | ✅ |
+| E2E Lead Journey | 7 | ✅ |
+| E2E Vendor Journey | 5 | ✅ |
+| E2E CEO Journey | 5 | ✅ |
+
+### 👥 EQUIPO ACTIVO
+
+- 9 vendedores listos para recibir leads
+- 1 CEO (Oscar) con acceso total
+- 2 asesores hipotecarios
+- 1 agencia marketing
+
+### 📍 URLs PRODUCCIÓN
+
+| Servicio | URL |
+|----------|-----|
+| Backend | https://sara-backend.edson-633.workers.dev |
+| CRM | https://sara-crm-new.vercel.app |
+| Videos | https://sara-videos.onrender.com |
+
+**Sistema 100% operativo - Última verificación: 2026-01-29**
