@@ -8654,6 +8654,11 @@ Responde con fecha y hora:
       `*📅 CITAS*\n` +
       `• *agendar [lead] [fecha]* - Nueva cita\n` +
       `• *cancelar [lead]* - Cancelar cita\n\n` +
+      `*💰 OFERTAS*\n` +
+      `• *cotizar [lead] [precio]* - Crear oferta\n` +
+      `• *enviar oferta [lead]* - Enviar al cliente\n` +
+      `• *ofertas* - Ver mis ofertas activas\n` +
+      `• *oferta [lead]* - Detalle de oferta\n\n` +
       `*🔍 BÚSQUEDA*\n` +
       `• *quién es [lead]* - Info del lead\n` +
       `• *buscar [teléfono]* - Buscar por tel\n\n` +

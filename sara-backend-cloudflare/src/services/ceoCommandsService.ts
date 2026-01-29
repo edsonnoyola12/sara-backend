@@ -45,10 +45,14 @@ export class CEOCommandsService {
           `*📈 ANÁLISIS*\n` +
           `• *probabilidad* - Probabilidades de cierre\n` +
           `• *visitas* - Gestión de visitas\n` +
-          `• *ofertas* - Tracking de cotizaciones\n` +
           `• *alertas* - Alertas inteligentes\n` +
           `• *mercado* - Inteligencia de mercado\n` +
           `• *clv* - Valor del cliente y referidos\n\n` +
+          `*💰 OFERTAS*\n` +
+          `• *cotizar [lead] [precio]* - Crear oferta\n` +
+          `• *enviar oferta [lead]* - Enviar al cliente\n` +
+          `• *ofertas* - Tracking de cotizaciones\n` +
+          `• *oferta [lead]* - Detalle de oferta\n\n` +
           `*📡 BROADCASTS*\n` +
           `• *broadcast* - Enviar mensaje masivo\n` +
           `• *segmentos* - Ver segmentos disponibles\n\n` +
