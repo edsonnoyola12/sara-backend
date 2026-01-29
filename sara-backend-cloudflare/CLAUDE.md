@@ -794,6 +794,42 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 - ✅ campañas, metricas, segmentos, broadcast
 - ✅ enviar a [segmento]: [mensaje]
 
+### 2026-01-29 (Sesión 6) - QA Exhaustivo Respuestas SARA a Leads
+
+**42 tests ejecutados - TODOS PASARON**
+
+| Categoría | Tests | Estado |
+|-----------|-------|--------|
+| Info desarrollos (Monte Verde, Alpes, Miravalle, etc.) | 5 | ✅ |
+| Solicitud recursos (GPS/video/brochure) | 6 | ✅ |
+| Precios y financiamiento | 3 | ✅ |
+| Respuestas negativas ("no me interesa", "muy caro") | 5 | ✅ |
+| Crédito/INFONAVIT | 3 | ✅ |
+| Citas y visitas | 3 | ✅ |
+| Saludos simples (hola, ok, 👍) | 4 | ✅ |
+| Casos especiales (typos, spam, competencia) | 10 | ✅ |
+| Flujo real WhatsApp | 3 | ✅ |
+
+**Respuestas verificadas:**
+- ✅ Precios correctos de 36 propiedades
+- ✅ Sinónimos: Citadella del Nogal = Villa Campelo/Galiano
+- ✅ Errores ortográficos: "informasion monteverde" → entiende
+- ✅ NO inventa tasas de interés → redirige a bancos
+- ✅ Objeciones de precio → ofrece opciones económicas desde $1.5M
+- ✅ Objeciones de ubicación → pregunta zona de trabajo
+- ✅ Menciones de competencia → no critica, ofrece valor
+- ✅ "Ya compré en otro lado" → felicita, ofrece referidos
+- ✅ Respuestas negativas → respeta decisión, deja puerta abierta
+- ✅ Urgencia de compra → detecta y prioriza
+- ✅ Preguntas fuera de tema → responde + redirige a inmobiliaria
+- ✅ Mensajes spam/gibberish → responde amablemente
+- ✅ GPS, video, brochure → se envían correctamente
+
+**Flujo real verificado (teléfono 5610016226):**
+- ✅ Lead pregunta por Monte Verde → SARA responde con info
+- ✅ Lead pide ubicación → GPS enviado
+- ✅ Mensajes llegan a WhatsApp correctamente
+
 ---
 
 ## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES
