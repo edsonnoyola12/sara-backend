@@ -2371,6 +2371,34 @@ Si quieres, te muestro cómo funciona sin compromiso.`;
       return corsResponse(JSON.stringify({ ok: true, updated: data }));
     }
 
+    // TEST: Actualizar fechas de lead (para pruebas post-compra)
+    if (url.pathname === "/test-update-dates" && request.method === "POST") {
+      const body = await request.json() as any;
+      const { phone, delivery_date, purchase_date, status_changed_at } = body;
+      if (!phone) {
+        return corsResponse(JSON.stringify({ error: "Falta phone" }), 400);
+      }
+      const phoneSuffix = phone.replace(/\D/g, '').slice(-10);
+      const updateData: Record<string, string> = {};
+      if (delivery_date) updateData.delivery_date = delivery_date;
+      if (purchase_date) updateData.purchase_date = purchase_date;
+      if (status_changed_at) updateData.status_changed_at = status_changed_at;
+
+      if (Object.keys(updateData).length === 0) {
+        return corsResponse(JSON.stringify({ error: "No hay fechas para actualizar" }), 400);
+      }
+
+      const { data, error } = await supabase.client
+        .from('leads')
+        .update(updateData)
+        .ilike('phone', `%${phoneSuffix}`)
+        .select('id, name, phone, delivery_date, purchase_date, status_changed_at');
+      if (error) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+      return corsResponse(JSON.stringify({ ok: true, updated: data }));
+    }
+
     // TEST: Eliminar citas de un lead (para pruebas)
     if (url.pathname === "/test-delete-appointments") {
       const nombre = url.searchParams.get('nombre');
@@ -5081,21 +5109,48 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
             category: 'UTILITY',
             text: '👋 ¡Hola {{1}}!\n\nSoy SARA, tu asistente de Grupo Santa Rita. 🏠\n\nResponde cualquier mensaje para activar nuestra conversación y poder enviarte reportes, alertas y notificaciones.\n\nEscribe *ayuda* para ver comandos disponibles. 💪',
             example: [['Oscar']]
+          },
+          {
+            name: 'appointment_confirmation_v2',
+            category: 'UTILITY',
+            text: '¡Hola {{1}}! Gracias por agendar con {{2}}. Tu cita {{3}} el {{4}} a las {{5}} está confirmada.',
+            example: [['María', 'Grupo Santa Rita', 'visita a Monte Verde', 'sábado 25 de enero', '10:00 AM']],
+            hasButton: true,
+            buttonText: 'Ver ubicación 📍',
+            buttonUrl: 'https://maps.app.goo.gl/{{1}}',
+            buttonExample: ['qR8vK3xYz9M']
           }
         ];
 
         for (const tmpl of templates) {
+          const components: any[] = [
+            {
+              type: 'BODY',
+              text: tmpl.text,
+              example: { body_text: tmpl.example }
+            }
+          ];
+
+          // Add button component if template has a button
+          if ((tmpl as any).hasButton) {
+            components.push({
+              type: 'BUTTONS',
+              buttons: [
+                {
+                  type: 'URL',
+                  text: (tmpl as any).buttonText,
+                  url: (tmpl as any).buttonUrl,
+                  example: (tmpl as any).buttonExample
+                }
+              ]
+            });
+          }
+
           const payload = {
             name: tmpl.name,
-            language: 'es_MX',
+            language: tmpl.name === 'appointment_confirmation_v2' ? 'es' : 'es_MX',
             category: tmpl.category,
-            components: [
-              {
-                type: 'BODY',
-                text: tmpl.text,
-                example: { body_text: tmpl.example }
-              }
-            ]
+            components
           };
 
           const response = await fetch(`https://graph.facebook.com/v22.0/${WABA_ID}/message_templates`, {
@@ -11316,6 +11371,59 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
           message: `Sincronizados ${synced.length} templates`,
           templates: synced
         }, null, 2), 200, 'application/json', request);
+      }
+
+      // POST /api/templates/create - Crear un template en Meta
+      if (request.method === 'POST' && url.pathname === '/api/templates/create') {
+        try {
+          const body = await request.json() as any;
+          const WABA_ID = '1227849769248437';
+
+          if (!body.name || !body.components) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'Se requieren los campos "name" y "components"'
+            }), 400, 'application/json', request);
+          }
+
+          const payload = {
+            name: body.name,
+            language: body.language || 'es',
+            category: body.category || 'UTILITY',
+            components: body.components
+          };
+
+          const response = await fetch(`https://graph.facebook.com/v22.0/${WABA_ID}/message_templates`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${env.META_ACCESS_TOKEN}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          const result = await response.json() as any;
+
+          if (result.error) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: result.error.message,
+              details: result.error
+            }), 400, 'application/json', request);
+          }
+
+          return corsResponse(JSON.stringify({
+            success: true,
+            id: result.id,
+            name: body.name,
+            status: 'PENDING'
+          }, null, 2), 200, 'application/json', request);
+        } catch (e) {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: e instanceof Error ? e.message : 'Error desconocido'
+          }), 500, 'application/json', request);
+        }
       }
 
       // POST /api/templates/send - Enviar un template
