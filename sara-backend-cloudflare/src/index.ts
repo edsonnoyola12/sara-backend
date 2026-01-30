@@ -4311,6 +4311,148 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
     }
 
     // ═══════════════════════════════════════════════════════════
+    // API Routes - Métricas de Conversación
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/api/metrics/conversation' && request.method === 'GET') {
+      const dias = parseInt(url.searchParams.get('days') || '7');
+      const fechaInicio = new Date();
+      fechaInicio.setDate(fechaInicio.getDate() - dias);
+
+      const { data: leads } = await supabase.client
+        .from('leads')
+        .select('id, name, status, score, created_at, conversation_history, property_interest, source')
+        .gte('created_at', fechaInicio.toISOString());
+
+      const { data: appointments } = await supabase.client
+        .from('appointments')
+        .select('id, lead_id, status, scheduled_date')
+        .gte('created_at', fechaInicio.toISOString());
+
+      // Calcular métricas
+      const leadsConHistorial = (leads || []).filter((l: any) => l.conversation_history?.length > 0);
+      const totalMensajes = leadsConHistorial.reduce((sum: number, l: any) => sum + (l.conversation_history?.length || 0), 0);
+      const mensajesUsuario = leadsConHistorial.reduce((sum: number, l: any) =>
+        sum + (l.conversation_history?.filter((m: any) => m.role === 'user').length || 0), 0);
+      const mensajesSara = leadsConHistorial.reduce((sum: number, l: any) =>
+        sum + (l.conversation_history?.filter((m: any) => m.role === 'assistant').length || 0), 0);
+
+      // Detectar intenciones en mensajes
+      const intenciones: Record<string, number> = {
+        saludo: 0,
+        precio: 0,
+        ubicacion: 0,
+        cita: 0,
+        credito: 0,
+        objecion: 0,
+        otro: 0
+      };
+
+      // Detectar objeciones
+      const objeciones: Record<string, number> = {
+        'muy caro': 0,
+        'no me interesa': 0,
+        'lo voy a pensar': 0,
+        'ya compré': 0,
+        'no me alcanza': 0
+      };
+
+      leadsConHistorial.forEach((lead: any) => {
+        (lead.conversation_history || []).forEach((msg: any) => {
+          if (msg.role === 'user') {
+            const content = (msg.content || '').toLowerCase();
+
+            // Detectar intención
+            if (content.match(/hola|buenos|buenas|hi|hello/)) intenciones.saludo++;
+            else if (content.match(/precio|costo|cuanto|cuánto|presupuesto/)) intenciones.precio++;
+            else if (content.match(/donde|ubicación|ubicacion|gps|dirección/)) intenciones.ubicacion++;
+            else if (content.match(/cita|visita|ver|conocer|agendar/)) intenciones.cita++;
+            else if (content.match(/crédito|credito|infonavit|fovissste|banco|financ/)) intenciones.credito++;
+            else if (content.match(/caro|no me interesa|pensar|no gracias|no puedo/)) intenciones.objecion++;
+            else intenciones.otro++;
+
+            // Detectar objeciones específicas
+            if (content.includes('muy caro') || content.includes('caro')) objeciones['muy caro']++;
+            if (content.includes('no me interesa') || content.includes('no gracias')) objeciones['no me interesa']++;
+            if (content.includes('pensar') || content.includes('después')) objeciones['lo voy a pensar']++;
+            if (content.includes('ya compré') || content.includes('ya tengo casa')) objeciones['ya compré']++;
+            if (content.includes('no me alcanza') || content.includes('no tengo')) objeciones['no me alcanza']++;
+          }
+        });
+      });
+
+      // Calcular conversiones
+      const statusCounts: Record<string, number> = {};
+      (leads || []).forEach((l: any) => {
+        statusCounts[l.status] = (statusCounts[l.status] || 0) + 1;
+      });
+
+      // Fuentes de leads
+      const sourcesCounts: Record<string, number> = {};
+      (leads || []).forEach((l: any) => {
+        const source = l.source || 'desconocido';
+        sourcesCounts[source] = (sourcesCounts[source] || 0) + 1;
+      });
+
+      // Desarrollos más consultados
+      const desarrollosCounts: Record<string, number> = {};
+      (leads || []).forEach((l: any) => {
+        if (l.property_interest) {
+          desarrollosCounts[l.property_interest] = (desarrollosCounts[l.property_interest] || 0) + 1;
+        }
+      });
+
+      // Citas completadas vs no-shows
+      const citasCompletadas = (appointments || []).filter((a: any) => a.status === 'completed').length;
+      const citasNoShow = (appointments || []).filter((a: any) => a.status === 'no_show').length;
+      const citasCanceladas = (appointments || []).filter((a: any) => a.status === 'cancelled').length;
+
+      const metrics = {
+        periodo: `últimos ${dias} días`,
+        fecha_inicio: fechaInicio.toISOString().split('T')[0],
+        fecha_fin: new Date().toISOString().split('T')[0],
+
+        leads: {
+          total: leads?.length || 0,
+          con_conversacion: leadsConHistorial.length,
+          sin_conversacion: (leads?.length || 0) - leadsConHistorial.length,
+          por_status: statusCounts,
+          por_fuente: sourcesCounts
+        },
+
+        conversaciones: {
+          total_mensajes: totalMensajes,
+          mensajes_usuario: mensajesUsuario,
+          mensajes_sara: mensajesSara,
+          promedio_por_lead: leadsConHistorial.length > 0 ? Math.round(totalMensajes / leadsConHistorial.length) : 0
+        },
+
+        intenciones: intenciones,
+        objeciones: objeciones,
+
+        desarrollos_populares: Object.entries(desarrollosCounts)
+          .sort(([,a], [,b]) => (b as number) - (a as number))
+          .slice(0, 5)
+          .map(([nombre, count]) => ({ nombre, count })),
+
+        citas: {
+          total: appointments?.length || 0,
+          completadas: citasCompletadas,
+          no_show: citasNoShow,
+          canceladas: citasCanceladas,
+          tasa_completacion: appointments?.length ? Math.round((citasCompletadas / appointments.length) * 100) : 0
+        },
+
+        conversion: {
+          lead_a_cita: leads?.length ? Math.round((appointments?.length || 0) / leads.length * 100) : 0,
+          lead_a_visita: leads?.length ? Math.round((statusCounts['visited'] || 0) / leads.length * 100) : 0,
+          lead_a_venta: leads?.length ? Math.round(((statusCounts['sold'] || 0) + (statusCounts['delivered'] || 0)) / leads.length * 100) : 0
+        }
+      };
+
+      return corsResponse(JSON.stringify(metrics, null, 2));
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // API Routes - Reportes CEO (Diario, Semanal, Mensual)
     // ═══════════════════════════════════════════════════════════
 
