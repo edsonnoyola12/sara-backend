@@ -666,7 +666,7 @@ El archivo `index.ts` fue refactorizado de ~22,700 líneas a ~14,300 líneas (-3
 - Código más mantenible y organizado
 - Imports claros entre módulos
 - Más fácil de testear y debuggear
-- 260 tests siguen pasando ✅
+- 304 tests siguen pasando ✅
 
 **Nuevas Funcionalidades de Inteligencia de Negocio:**
 
@@ -1385,7 +1385,7 @@ const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana',
 | 8 | QA 40+ tests verificados | (documentación) |
 | 9 | Eliminar nombres alucinados sin lead.name | `8d9b2d92` |
 
-**Tests:** 260 unitarios + 40+ E2E = **300+ tests totales**
+**Tests:** 304 unitarios (todos pasan)
 
 **Sistema 100% operativo - Última verificación: 2026-01-29**
 
@@ -1412,7 +1412,7 @@ const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana',
 | **Ahorro mensual** | - | **~$15** |
 
 **Verificación:**
-- ✅ 260 tests pasando
+- ✅ 304 tests pasando
 - ✅ Saludos funcionan correctamente
 - ✅ Objeciones manejadas
 - ✅ Citadella del Nogal = Villa Campelo/Galiano

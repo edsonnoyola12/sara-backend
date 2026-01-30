@@ -39,10 +39,11 @@ npx wrangler tail --format=pretty
 - KV Cache separado
 - Mismos secrets que producción
 
-### Tests Automatizados (260 tests)
+### Tests Automatizados (304 tests)
 
 | Archivo | Tests | Qué protege |
 |---------|-------|-------------|
+| `aiResponses.test.ts` | 44 | **Validación IA**: nombres inventados, Nogal, alberca, renta, objeciones, inglés, edge cases |
 | `newFeatures.test.ts` | 43 | Notas en CRM, recap condicional, sugerencias IA, regresión comandos |
 | `integration.test.ts` | 38 | **Flujos end-to-end**: endpoints, auth, webhook, comandos, CORS, cache |
 | `conversationLogic.test.ts` | 35 | GPS solo, recursos completos, bridge |
@@ -1530,7 +1531,7 @@ El archivo `index.ts` fue refactorizado de ~22,700 líneas a ~14,300 líneas (-3
 - Código más mantenible y organizado
 - Imports claros entre módulos
 - Más fácil de testear y debuggear
-- 260 tests siguen pasando ✅
+- 304 tests siguen pasando ✅
 
 **Nuevos Servicios de Inteligencia de Negocio:**
 
@@ -1902,7 +1903,7 @@ POST /api/visits/:id/status    - Actualizar estado
   - Comandos CEO, Vendedor, Asesor
   - Rate limiting, CORS, Cache KV
   - Flujos de Lead y Crédito
-  - **Total: 260 tests**
+  - **Total: 304 tests**
 
 - ✅ **Load Tests:**
   - Scripts en `scripts/load-tests/`
@@ -2759,7 +2760,7 @@ WhatsApp → Descarga → Whisper transcribe → SARA responde
 | 14 días | Follow-up 3 |
 | 21+ días | Lead FRÍO |
 
-**Sistema 100% operativo con 260 tests unitarios + 40+ tests E2E**
+**Sistema 100% operativo con 304 tests unitarios**
 
 ---
 
@@ -2836,6 +2837,69 @@ Guadalupe, Lupita, Javier, Sergio, Adriana, Claudia, Monica, etc.
 | 8 | QA 40+ tests verificados | (documentación) |
 | 9 | Eliminar nombres alucinados sin lead.name | `8d9b2d92` |
 
-**Tests:** 260 unitarios + 40+ E2E = **300+ tests totales**
+**Tests:** 304 unitarios (todos pasan)
 
 **Sistema 100% operativo - Última verificación: 2026-01-29**
+
+---
+
+## 📊 RESUMEN SESIÓN 8 COMPLETA (2026-01-30)
+
+### Parte 1: Optimización de Costos
+- Prompt reducido: 75,177 → 68,977 chars (~8% ahorro)
+- Eliminadas líneas decorativas y emojis redundantes
+
+### Parte 2: Documentación de APIs
+- `docs/api-reference.md` actualizado con 50+ endpoints
+- Secciones: auth, leads, citas, créditos, webhooks, etc.
+
+### Parte 3: QA y Monitoreo
+- 12/12 tests de conversaciones reales
+- Monitoreo: 38 leads, 18 team activos
+- Prompt adicional: -827 chars
+- Schemas Supabase documentados (10 tablas)
+
+### Parte 4: Calidad y Edge Cases
+
+**Nuevas funcionalidades:**
+
+1. **Detección de mensajes duplicados** (`leadMessageService.ts`)
+   - Si lead envía 3+ mensajes idénticos → respuesta especial con menú
+   - Previene spam y loops
+
+2. **Endpoint de calidad** (`/api/metrics/quality`)
+   - Analiza respuestas de SARA de últimos N días
+   - Detecta: truncados, nombres inventados, frases prohibidas
+   - Agrupa por tipo y genera recomendaciones
+
+3. **Limpieza de código**
+   - Eliminado `index.ts.backup` (22,701 líneas de código muerto)
+
+4. **13 nuevos tests de edge cases** (`aiResponses.test.ts`)
+   - Emojis solos (👍, 🏠)
+   - Mensajes largos
+   - Local comercial
+   - Horarios de atención
+   - Competencia (no criticar)
+   - Spanglish
+   - Typos comunes
+   - Mensajes duplicados/spam
+   - Urgencia de compra
+   - Financiamiento (no inventar tasas)
+   - Mascotas
+   - Preguntas fuera de tema
+
+**Commits Sesión 8:**
+
+| Commit | Descripción |
+|--------|-------------|
+| `2cb10ba5` | perf: optimize prompt size |
+| `3817e382` | docs: update api-reference |
+| `d6f31ac2` | perf: remove duplicate objeciones |
+| `0b66b9a1` | docs: database schemas |
+| `2a36b614` | feat: quality metrics, duplicate detection, edge cases |
+| `69b68744` | docs: update with quality metrics |
+
+**Tests:** 291 → **304** (todos pasan)
+
+**Sistema 100% operativo - Última verificación: 2026-01-30**
