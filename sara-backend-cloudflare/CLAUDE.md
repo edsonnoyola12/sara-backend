@@ -26,7 +26,7 @@
 # 1. Lee la documentación completa
 cat SARA_COMANDOS.md | head -500
 
-# 2. Verifica tests (OBLIGATORIO - 260 tests)
+# 2. Verifica tests (OBLIGATORIO - 304 tests)
 npm test
 
 # 3. Si falla algún test, NO hagas cambios
@@ -1529,3 +1529,38 @@ const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana',
 | Schemas Supabase (Parte 3) | ✅ 10 tablas |
 
 **Ahorro total de tokens:** ~9% (~1,750 tokens/mensaje)
+
+### 2026-01-30 (Sesión 8 - Parte 4) - Calidad y Edge Cases
+
+**Nuevas funcionalidades:**
+
+1. **Detección de mensajes duplicados (leadMessageService.ts)**
+   - Si un lead envía 3+ mensajes idénticos consecutivos
+   - SARA responde con menú de opciones en lugar de repetir
+
+2. **Endpoint de calidad `/api/metrics/quality`**
+   - Analiza respuestas de SARA de los últimos N días
+   - Detecta: truncados, nombres inventados, frases prohibidas
+   - Agrupa problemas por tipo
+   - Genera recomendaciones automáticas
+
+3. **Limpieza de código muerto**
+   - Eliminado `index.ts.backup` (17,000+ líneas)
+
+4. **13 nuevos tests de edge cases**
+   - Emojis solos (👍, 🏠)
+   - Mensajes largos
+   - Local comercial
+   - Horarios de atención
+   - Competencia (no criticar)
+   - Spanglish
+   - Typos comunes
+   - Mensajes duplicados/spam
+   - Urgencia de compra
+   - Financiamiento (no inventar tasas)
+   - Mascotas
+   - Preguntas fuera de tema
+
+**Tests:** 291 → **304** (todos pasan)
+
+**Commit:** `2a36b614`

@@ -310,6 +310,64 @@ Consulta con IA.
 ### POST /api/dashboard/ask
 Consulta dashboard con IA.
 
+### GET /api/metrics/conversation
+Métricas de conversación de los últimos N días.
+
+**Query params:**
+- `days` (opcional, default: 7)
+
+```json
+{
+  "periodo": "últimos 7 días",
+  "leads": {
+    "total": 45,
+    "con_conversacion": 38,
+    "por_status": { "new": 10, "contacted": 15, "scheduled": 8 }
+  },
+  "conversaciones": {
+    "total_mensajes": 320,
+    "mensajes_usuario": 180,
+    "mensajes_sara": 140,
+    "promedio_por_lead": 8
+  },
+  "intenciones": { "saludo": 45, "precio": 30, "cita": 25 },
+  "objeciones": { "muy caro": 8, "lo voy a pensar": 5 }
+}
+```
+
+### GET /api/metrics/quality
+Reporte de calidad de respuestas de SARA.
+
+**Query params:**
+- `days` (opcional, default: 7)
+
+```json
+{
+  "periodo": "últimos 7 días",
+  "resumen": {
+    "leads_analizados": 45,
+    "total_respuestas_sara": 140,
+    "respuestas_ok": 138,
+    "respuestas_con_problemas": 2,
+    "tasa_calidad": 99
+  },
+  "problemas_por_tipo": {
+    "truncada": 1,
+    "nombre_hallucinated": 1
+  },
+  "ultimos_problemas": [
+    {
+      "lead_name": "Sin nombre",
+      "problemas": ["nombre_hallucinated:María"],
+      "preview": "¡Hola María! Tenemos casas..."
+    }
+  ],
+  "recomendaciones": [
+    "Reforzar eliminación de nombres inventados"
+  ]
+}
+```
+
 ---
 
 ## Webhooks
