@@ -10822,6 +10822,116 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // QUALITY DASHBOARD - Calidad de respuestas SARA
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/quality') {
+      const dias = parseInt(url.searchParams.get('days') || '7');
+      const fechaInicio = new Date();
+      fechaInicio.setDate(fechaInicio.getDate() - dias);
+
+      const { data: leads } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, conversation_history, updated_at')
+        .gte('updated_at', fechaInicio.toISOString());
+
+      // Análisis de calidad
+      const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana', 'Luis', 'Carlos'];
+      const frasesProhibidas = ['Le aviso a', 'Sin problema', 'no lo tenemos disponible', 'Citadella del Nogal no'];
+
+      let totalRespuestas = 0;
+      let respuestasOk = 0;
+      const problemasPorTipo: Record<string, number> = {};
+      const problemasRecientes: any[] = [];
+
+      (leads || []).forEach((lead: any) => {
+        (lead.conversation_history || []).forEach((msg: any, idx: number) => {
+          if (msg.role !== 'assistant') return;
+          totalRespuestas++;
+          const content = (msg.content || '').trim();
+          let tieneProblema = false;
+
+          if (content.endsWith(',') || (content.length > 0 && content.length < 20)) {
+            problemasPorTipo['truncada'] = (problemasPorTipo['truncada'] || 0) + 1;
+            tieneProblema = true;
+          }
+          if (!lead.name) {
+            for (const n of nombresHallucinated) {
+              if (content.includes(n)) { problemasPorTipo['nombre_inventado'] = (problemasPorTipo['nombre_inventado'] || 0) + 1; tieneProblema = true; break; }
+            }
+          }
+          for (const f of frasesProhibidas) {
+            if (content.toLowerCase().includes(f.toLowerCase())) { problemasPorTipo['frase_prohibida'] = (problemasPorTipo['frase_prohibida'] || 0) + 1; tieneProblema = true; break; }
+          }
+
+          if (tieneProblema) {
+            problemasRecientes.push({ lead: lead.name || '???', preview: content.slice(0, 60), timestamp: msg.timestamp });
+          } else {
+            respuestasOk++;
+          }
+        });
+      });
+
+      const tasaCalidad = totalRespuestas > 0 ? Math.round((respuestasOk / totalRespuestas) * 100) : 100;
+
+      // Renderizar HTML
+      const html = `<!DOCTYPE html>
+<html><head><title>SARA - Calidad</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;margin:0;padding:20px;background:#1a1a2e;color:#eee}
+.container{max-width:900px;margin:0 auto}
+h1{color:#00d4ff;margin-bottom:5px}
+.subtitle{color:#888;margin-bottom:30px}
+.card{background:#16213e;border-radius:12px;padding:20px;margin-bottom:20px}
+.metric{display:inline-block;margin-right:40px;text-align:center}
+.metric .value{font-size:48px;font-weight:bold}
+.metric .label{font-size:14px;color:#888}
+.ok{color:#00ff88}.warn{color:#ffaa00}.bad{color:#ff4444}
+.bar{height:8px;background:#333;border-radius:4px;margin:10px 0}
+.bar-fill{height:100%;border-radius:4px;transition:width 0.5s}
+table{width:100%;border-collapse:collapse;margin-top:15px}
+th,td{padding:10px;text-align:left;border-bottom:1px solid #333}
+th{color:#00d4ff}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;margin-right:5px}
+.tag-truncada{background:#ff444433;color:#ff4444}
+.tag-nombre{background:#ffaa0033;color:#ffaa00}
+.tag-frase{background:#ff880033;color:#ff8800}
+</style></head>
+<body><div class="container">
+<h1>📊 Dashboard de Calidad SARA</h1>
+<p class="subtitle">Últimos ${dias} días • Actualizado: ${new Date().toLocaleString('es-MX')}</p>
+
+<div class="card">
+<div class="metric"><div class="value ${tasaCalidad >= 95 ? 'ok' : tasaCalidad >= 85 ? 'warn' : 'bad'}">${tasaCalidad}%</div><div class="label">Calidad</div></div>
+<div class="metric"><div class="value">${totalRespuestas}</div><div class="label">Respuestas</div></div>
+<div class="metric"><div class="value ok">${respuestasOk}</div><div class="label">OK</div></div>
+<div class="metric"><div class="value ${totalRespuestas - respuestasOk > 0 ? 'warn' : 'ok'}">${totalRespuestas - respuestasOk}</div><div class="label">Con problemas</div></div>
+</div>
+
+<div class="card">
+<h3>Problemas por Tipo</h3>
+${Object.entries(problemasPorTipo).map(([tipo, count]) => `
+<div style="margin:10px 0">
+  <span>${tipo}: <strong>${count}</strong></span>
+  <div class="bar"><div class="bar-fill" style="width:${Math.min((count as number / totalRespuestas) * 100 * 10, 100)}%;background:${tipo === 'truncada' ? '#ff4444' : tipo === 'nombre_inventado' ? '#ffaa00' : '#ff8800'}"></div></div>
+</div>`).join('') || '<p style="color:#888">Sin problemas detectados ✅</p>'}
+</div>
+
+<div class="card">
+<h3>Últimos Problemas</h3>
+${problemasRecientes.length > 0 ? `<table>
+<tr><th>Lead</th><th>Preview</th><th>Fecha</th></tr>
+${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td style="font-size:12px;color:#aaa">${p.preview}...</td><td style="font-size:12px">${new Date(p.timestamp).toLocaleString('es-MX')}</td></tr>`).join('')}
+</table>` : '<p style="color:#00ff88">✅ Sin problemas recientes</p>'}
+</div>
+
+<p style="text-align:center;color:#666;margin-top:30px">SARA CRM v2.0 • <a href="/status" style="color:#00d4ff">Status</a> • <a href="/analytics" style="color:#00d4ff">Analytics</a></p>
+</div></body></html>`;
+
+      return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // FEATURE FLAGS - Control de funcionalidades sin deploy
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/flags' || url.pathname === '/flags') {

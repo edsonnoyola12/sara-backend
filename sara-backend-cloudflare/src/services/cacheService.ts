@@ -53,6 +53,11 @@ export const CACHE_TTLS = {
   // Config/static
   webhooks_config: 300, // 5 minutes
   company_goals: 600, // 10 minutes
+
+  // AI Response cache (for common questions)
+  ai_response_greeting: 1800, // 30 minutes - saludos genéricos
+  ai_response_development: 600, // 10 minutes - info de desarrollos
+  ai_response_prices: 300, // 5 minutes - precios
 } as const;
 
 // ═══════════════════════════════════════════════════════════════════════════

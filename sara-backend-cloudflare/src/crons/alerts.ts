@@ -1969,3 +1969,106 @@ export async function felicitarCumpleañosEquipo(supabase: SupabaseService, meta
     console.error('❌ Error en felicitaciones de cumpleaños equipo:', error);
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// ALERTA DE CALIDAD DE RESPUESTAS - Diario 9am
+// ═══════════════════════════════════════════════════════════════
+export async function alertaCalidadRespuestas(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  ceoPhone: string
+): Promise<void> {
+  try {
+    console.log('📊 Verificando calidad de respuestas SARA...');
+
+    const ayer = new Date();
+    ayer.setDate(ayer.getDate() - 1);
+
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, conversation_history, updated_at')
+      .gte('updated_at', ayer.toISOString());
+
+    // Analizar calidad
+    const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana', 'Luis', 'Carlos', 'Carmen'];
+    const frasesProhibidas = [
+      'Le aviso a',
+      'Sin problema',
+      'no lo tenemos disponible',
+      'Citadella del Nogal no',
+      'El Nogal no es',
+      'sí tenemos rentas'
+    ];
+
+    let totalRespuestas = 0;
+    let problemas: any[] = [];
+
+    (leads || []).forEach((lead: any) => {
+      const history = lead.conversation_history || [];
+      history.forEach((msg: any, idx: number) => {
+        if (msg.role !== 'assistant') return;
+
+        // Solo mensajes de ayer
+        const msgDate = new Date(msg.timestamp || '');
+        if (msgDate < ayer) return;
+
+        totalRespuestas++;
+        const content = (msg.content || '').trim();
+        const problemasMsg: string[] = [];
+
+        // Truncada
+        if (content.endsWith(',') || (content.length > 0 && content.length < 20)) {
+          problemasMsg.push('truncada');
+        }
+
+        // Nombre alucinado
+        if (!lead.name) {
+          for (const nombre of nombresHallucinated) {
+            if (content.includes(nombre)) {
+              problemasMsg.push(`nombre:${nombre}`);
+              break;
+            }
+          }
+        }
+
+        // Frases prohibidas
+        for (const frase of frasesProhibidas) {
+          if (content.toLowerCase().includes(frase.toLowerCase())) {
+            problemasMsg.push('frase_prohibida');
+            break;
+          }
+        }
+
+        if (problemasMsg.length > 0) {
+          problemas.push({
+            lead: lead.name || lead.phone?.slice(-4),
+            problemas: problemasMsg
+          });
+        }
+      });
+    });
+
+    // Solo alertar si hay problemas significativos (>5% o >3 absolutos)
+    const tasaProblemas = totalRespuestas > 0 ? (problemas.length / totalRespuestas) * 100 : 0;
+
+    if (problemas.length >= 3 || tasaProblemas > 5) {
+      const mensaje = `⚠️ *ALERTA CALIDAD SARA*\n\n` +
+        `📊 Últimas 24h:\n` +
+        `• Respuestas: ${totalRespuestas}\n` +
+        `• Con problemas: ${problemas.length}\n` +
+        `• Tasa calidad: ${(100 - tasaProblemas).toFixed(1)}%\n\n` +
+        `🔍 Problemas detectados:\n` +
+        problemas.slice(0, 5).map(p => `• ${p.lead}: ${p.problemas.join(', ')}`).join('\n') +
+        (problemas.length > 5 ? `\n...y ${problemas.length - 5} más` : '') +
+        `\n\n💡 Revisar: /api/metrics/quality`;
+
+      await meta.sendWhatsAppMessage(ceoPhone, mensaje);
+      console.log(`⚠️ Alerta de calidad enviada: ${problemas.length} problemas`);
+    } else {
+      console.log(`✅ Calidad OK: ${totalRespuestas} respuestas, ${problemas.length} problemas (${tasaProblemas.toFixed(1)}%)`);
+    }
+
+  } catch (error) {
+    console.error('❌ Error en alerta de calidad:', error);
+  }
+}
