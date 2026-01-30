@@ -1447,3 +1447,85 @@ const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana',
 **Formato:** Markdown con ejemplos de request/response JSON
 
 **Commit:** `3817e382`
+
+---
+
+### 2026-01-30 (Sesión 8 - Parte 3) - QA Conversaciones + Monitoreo + Optimización + Schemas
+
+**1. QA de Conversaciones Reales (12/12 tests)**
+
+| Test | Resultado |
+|------|-----------|
+| Saludo | ✅ Pregunta 2 o 3 recámaras |
+| Monte Verde | ✅ Lista 5 modelos con precios |
+| Alberca | ✅ SOLO Priv. Andes |
+| Citadella del Nogal | ✅ Villa Campelo + Galiano |
+| Renta | ✅ "Solo vendemos, no rentamos" |
+| No contacto | ✅ Respeta decisión |
+| Objeción precio | ✅ Ofrece desde $1.5M |
+| English | ✅ Responde en inglés + USD |
+| Ya compré | ✅ Felicita + referidos |
+| Persona real | ✅ "Soy SARA" |
+| INFONAVIT | ✅ Pregunta precalificación |
+| Fuera tema | ✅ Redirige a casas |
+
+**2. Monitoreo de Producción**
+
+| Métrica | Valor |
+|---------|-------|
+| Status | ✅ healthy |
+| Supabase | ✅ ok (38 leads) |
+| Team members | 20 (18 activos) |
+| Vendedores | 9 |
+| Coordinadores | 8 |
+
+**3. Optimización Adicional del Prompt**
+
+| Métrica | Antes | Ahora |
+|---------|-------|-------|
+| Prompt (chars) | ~68,977 | ~68,150 |
+| Ahorro adicional | - | ~827 chars |
+
+**Cambio:** Eliminadas 18 líneas de objeciones duplicadas
+
+**Commit:** `d6f31ac2`
+**Deploy:** Version ID `f1edae6a-63b1-43e7-8bce-faf3f168367d`
+
+**4. Documentación de Schemas Supabase**
+
+**Archivo creado:** `docs/database-schema.md`
+
+**Tablas documentadas:**
+1. `leads` - 20+ campos, estados del funnel
+2. `team_members` - roles, pending messages
+3. `appointments` - citas con Google Calendar
+4. `properties` - catálogo de 36 propiedades
+5. `mortgage_applications` - créditos hipotecarios
+6. `pending_videos` - videos Veo 3
+7. `offers` - ciclo de vida de ofertas
+8. `surveys` - encuestas post-visita
+9. `system_config` - configuración
+10. Tablas secundarias (activities, followups, goals, campaigns)
+
+**Incluye:**
+- Diagramas de estados (lead funnel, ofertas)
+- Estructuras JSONB (conversation_history, notes)
+- Índices recomendados
+- Diagrama de relaciones
+
+**Commit:** `0b66b9a1`
+
+---
+
+**Resumen Sesión 8 Completa:**
+
+| Tarea | Estado |
+|-------|--------|
+| Optimización costos (Parte 1) | ✅ -8% tokens |
+| Documentación APIs (Parte 2) | ✅ 50+ endpoints |
+| QA Conversaciones (Parte 3) | ✅ 12/12 tests |
+| Monitoreo (Parte 3) | ✅ Sistema healthy |
+| Optimización adicional (Parte 3) | ✅ -827 chars |
+| Schemas Supabase (Parte 3) | ✅ 10 tablas |
+
+**Ahorro total de tokens:** ~9% (~1,750 tokens/mensaje)
