@@ -1216,3 +1216,65 @@ Priv. Andes es nuestro único fraccionamiento con ALBERCA:
 
 **Commit:** `aa953096`
 **Deploy:** Version ID `60e1fc3b-78ae-4439-8656-c6a8a6f6c8ef`
+
+---
+
+### 2026-01-29 (Sesión 7 - Parte 7) - Manejo de Mensajes Multimedia
+
+**Problema detectado:**
+SARA no manejaba correctamente mensajes que no fueran texto:
+- Audios/notas de voz → se ignoraban
+- Stickers/GIFs → se ignoraban
+- Ubicación → se ignoraba
+- Emojis solos → respuesta genérica
+- Videos → se ignoraban
+- Contactos compartidos → se ignoraban
+- Reacciones → se ignoraban
+
+**Correcciones implementadas en `src/index.ts` (webhook handler):**
+
+| Tipo de mensaje | Antes | Ahora |
+|----------------|-------|-------|
+| **Audio/Voz** 🎤 | Ignorado | Transcribe con Whisper + responde |
+| **Sticker** 😄 | Ignorado | "¡Me encanta tu sticker! ¿Buscas casa?" |
+| **Ubicación** 📍 | Ignorado | Info de zonas + pregunta qué les queda cerca |
+| **Video** 🎬 | Ignorado | "¡Gracias! Prefiero texto ¿Qué necesitas?" |
+| **Contacto** 👤 | Ignorado | "¿Le escribo o le das mi número?" |
+| **Reacción** 👍 | Ignorado | Positivas: log silencioso. Negativas: no responder |
+| **Emoji solo** | IA genérica | Respuesta específica por tipo de emoji |
+
+**Manejo de emojis solos:**
+
+| Emoji | Interpretación | Respuesta |
+|-------|---------------|-----------|
+| 👍 👌 ✅ ❤️ 😊 | Positivo | "¿Te gustaría agendar visita?" |
+| 👎 😢 😔 | Negativo | "¿Hay algo que te preocupe?" |
+| 🤔 😐 | Neutral | "¿Tienes alguna duda?" |
+| 🏠 🏡 | Casa | "¿De 2 o 3 recámaras?" |
+| 💰 💵 | Dinero | "Hablemos de números: desde $1.5M" |
+
+**Audios/Notas de voz:**
+
+```
+1. Recibe audio de WhatsApp
+2. Descarga con Meta API
+3. Transcribe con OpenAI Whisper (si OPENAI_API_KEY existe)
+4. Procesa texto transcrito como mensaje normal
+5. Si falla → "¿Podrías escribirme tu mensaje?"
+```
+
+**Archivos modificados:**
+- `src/index.ts` - Webhook handler con manejo de todos los tipos de mensaje
+
+**Follow-ups automáticos (ya existían):**
+
+| Tiempo sin respuesta | Acción |
+|---------------------|--------|
+| 24h | Alerta al vendedor |
+| 48h | Re-engagement alert |
+| 3 días | Follow-up paso 1 |
+| 7 días | Follow-up paso 2 |
+| 14 días | Follow-up paso 3 |
+| 21+ días | Lead marcado FRÍO |
+
+**Deploy:** Version ID `92e10885-18e7-4fbe-ba3f-c524b84e13fa`

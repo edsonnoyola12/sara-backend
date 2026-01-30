@@ -5572,6 +5572,151 @@ Mensaje: ${mensaje}`;
           }
           // ═══ FIN MANEJO DE IMÁGENES ═══
 
+          // ═══ MANEJO DE AUDIOS/NOTAS DE VOZ ═══
+          if (messageType === 'audio') {
+            console.log(`🎤 Mensaje de audio recibido`);
+
+            const audioId = message.audio?.id;
+            const audioMimeType = message.audio?.mime_type || 'audio/ogg';
+
+            if (audioId && env.OPENAI_API_KEY) {
+              try {
+                const audioService = createAudioTranscription(env.OPENAI_API_KEY, env.META_ACCESS_TOKEN);
+                const transcription = await audioService.processWhatsAppAudio({
+                  mediaId: audioId,
+                  mimeType: audioMimeType
+                });
+
+                if (transcription.success && transcription.text) {
+                  console.log(`✅ Audio transcrito: "${transcription.text.substring(0, 100)}..."`);
+
+                  // Procesar el texto transcrito como si fuera un mensaje normal
+                  const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
+                  await handler.handleIncomingMessage(`whatsapp:+${from}`, transcription.text, env);
+
+                  console.log('✅ Audio procesado correctamente');
+                  return new Response('OK', { status: 200 });
+                } else {
+                  // Si falla la transcripción, responder amigablemente
+                  console.log(`⚠️ No se pudo transcribir audio: ${transcription.error}`);
+                  await meta.sendWhatsAppMessage(from,
+                    '🎤 Recibí tu nota de voz, pero no pude escucharla bien. ¿Podrías escribirme tu mensaje? Así te ayudo mejor 😊');
+                  return new Response('OK', { status: 200 });
+                }
+              } catch (audioErr) {
+                console.error('❌ Error procesando audio:', audioErr);
+                await meta.sendWhatsAppMessage(from,
+                  '🎤 Recibí tu audio. Por el momento prefiero mensajes de texto para atenderte mejor. ¿En qué te puedo ayudar? 🏠');
+                return new Response('OK', { status: 200 });
+              }
+            } else {
+              // No hay API key de OpenAI - respuesta genérica
+              await meta.sendWhatsAppMessage(from,
+                '🎤 Recibí tu nota de voz. Por el momento trabajo mejor con mensajes de texto. ¿Podrías escribirme en qué te puedo ayudar? 🏠');
+              return new Response('OK', { status: 200 });
+            }
+          }
+          // ═══ FIN MANEJO DE AUDIOS ═══
+
+          // ═══ MANEJO DE STICKERS Y GIFS ═══
+          if (messageType === 'sticker') {
+            console.log(`😄 Sticker recibido`);
+
+            // Respuesta amigable a stickers
+            await meta.sendWhatsAppMessage(from,
+              '😄 ¡Me encanta tu sticker! Soy SARA de Grupo Santa Rita.\n\n¿Buscas casa en Zacatecas? Tengo opciones increíbles desde $1.5 millones 🏠\n\n¿Qué tipo de casa te interesa?');
+            return new Response('OK', { status: 200 });
+          }
+          // ═══ FIN MANEJO DE STICKERS ═══
+
+          // ═══ MANEJO DE UBICACIÓN ═══
+          if (messageType === 'location') {
+            console.log(`📍 Ubicación recibida`);
+
+            const lat = message.location?.latitude;
+            const lon = message.location?.longitude;
+
+            await meta.sendWhatsAppMessage(from,
+              `📍 ¡Gracias por compartir tu ubicación!\n\nNuestros desarrollos están en *Zacatecas, México*. Tenemos casas en varias zonas:\n\n🏘️ *Monte Verde* - Zona sur\n🏘️ *Los Encinos* - Zona centro\n🏘️ *Miravalle* - Zona premium\n🏘️ *Distrito Falco* - Zona exclusiva\n\n¿Te gustaría conocer cuál te queda más cerca o cuál se ajusta mejor a tu presupuesto?`);
+            return new Response('OK', { status: 200 });
+          }
+          // ═══ FIN MANEJO DE UBICACIÓN ═══
+
+          // ═══ MANEJO DE REACCIONES ═══
+          if (messageType === 'reaction') {
+            console.log(`👍 Reacción recibida: ${message.reaction?.emoji}`);
+
+            const emoji = message.reaction?.emoji;
+
+            // Ignorar reacciones negativas silenciosamente
+            if (emoji === '👎' || emoji === '😡' || emoji === '😠') {
+              console.log('⚠️ Reacción negativa - no responder');
+              return new Response('OK', { status: 200 });
+            }
+
+            // Para reacciones positivas, no responder para no ser invasivo
+            // Solo logueamos
+            console.log(`✅ Reacción positiva registrada: ${emoji}`);
+            return new Response('OK', { status: 200 });
+          }
+          // ═══ FIN MANEJO DE REACCIONES ═══
+
+          // ═══ MANEJO DE VIDEO ═══
+          if (messageType === 'video') {
+            console.log(`🎬 Video recibido`);
+
+            await meta.sendWhatsAppMessage(from,
+              '🎬 ¡Gracias por el video! Por ahora trabajo mejor con mensajes de texto.\n\n¿Buscas casa en Zacatecas? Cuéntame qué tipo de casa necesitas y te muestro nuestras opciones 🏠');
+            return new Response('OK', { status: 200 });
+          }
+          // ═══ FIN MANEJO DE VIDEO ═══
+
+          // ═══ MANEJO DE CONTACTOS ═══
+          if (messageType === 'contacts') {
+            console.log(`👤 Contacto compartido`);
+
+            await meta.sendWhatsAppMessage(from,
+              '👤 ¡Gracias por compartir el contacto! Si es alguien que busca casa, con gusto lo puedo atender.\n\n¿Te gustaría que le escriba directamente o prefieres darle mi número para que me contacte?');
+            return new Response('OK', { status: 200 });
+          }
+          // ═══ FIN MANEJO DE CONTACTOS ═══
+
+          // ═══ MANEJO DE EMOJIS SOLOS ═══
+          const textoLimpio = text.trim();
+          const esEmojiSolo = textoLimpio.length <= 4 && /^[\p{Emoji}\s]+$/u.test(textoLimpio);
+
+          if (esEmojiSolo && textoLimpio.length > 0) {
+            console.log(`😊 Emoji solo recibido: "${textoLimpio}"`);
+
+            // Interpretar emojis comunes
+            const emojisPositivos = ['👍', '👌', '✅', '🙌', '💪', '👏', '🔥', '❤️', '😍', '🥰', '😊', '🙂', '😃', '😄', '🤩', '💯'];
+            const emojisNegativos = ['👎', '❌', '😢', '😭', '😔', '😞', '🙁', '☹️'];
+            const emojisNeutrales = ['🤔', '😐', '😑', '🙄'];
+            const emojisCasa = ['🏠', '🏡', '🏘️', '🏢', '🏗️'];
+            const emojisDinero = ['💰', '💵', '💸', '🤑'];
+
+            let respuesta = '';
+
+            if (emojisPositivos.some(e => textoLimpio.includes(e))) {
+              respuesta = '¡Perfecto! 😊 Me da gusto que te interese.\n\n¿Te gustaría agendar una visita para conocer las casas en persona? Te puedo mostrar las mejores opciones este fin de semana 🏠';
+            } else if (emojisNegativos.some(e => textoLimpio.includes(e))) {
+              respuesta = 'Entiendo 😊 ¿Hay algo en específico que te preocupe o que pueda ayudarte a resolver?\n\nEstoy aquí para apoyarte en lo que necesites.';
+            } else if (emojisNeutrales.some(e => textoLimpio.includes(e))) {
+              respuesta = '¿Tienes alguna duda? 🤔 Con gusto te ayudo a resolver cualquier pregunta sobre nuestras casas o el proceso de compra.';
+            } else if (emojisCasa.some(e => textoLimpio.includes(e))) {
+              respuesta = '¡Veo que te interesan las casas! 🏠\n\nTenemos opciones desde $1.5 millones en Zacatecas. ¿Qué tipo de casa buscas? ¿De 2 o 3 recámaras?';
+            } else if (emojisDinero.some(e => textoLimpio.includes(e))) {
+              respuesta = '¡Hablemos de números! 💰\n\nTenemos casas desde $1.5M hasta $5M. Aceptamos INFONAVIT, FOVISSSTE y créditos bancarios.\n\n¿Cuál es tu presupuesto aproximado?';
+            } else {
+              // Emoji no reconocido - respuesta genérica amigable
+              respuesta = `¡Hola! 😊 Soy SARA de Grupo Santa Rita.\n\n¿En qué te puedo ayudar hoy? Tenemos casas increíbles en Zacatecas desde $1.5 millones 🏠`;
+            }
+
+            await meta.sendWhatsAppMessage(from, respuesta);
+            return new Response('OK', { status: 200 });
+          }
+          // ═══ FIN MANEJO DE EMOJIS SOLOS ═══
+
           // ═══ DETECCIÓN DE LEADS CALIENTES Y OBJECIONES ═══
           // Detectar señales de compra y objeciones ANTES de procesar el mensaje
           if (text && text.length > 3) {
