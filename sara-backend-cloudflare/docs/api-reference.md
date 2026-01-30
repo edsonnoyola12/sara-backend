@@ -505,6 +505,38 @@ Probar comando de CEO.
 ### GET /test-comando-vendedor
 Probar comando de vendedor.
 
+### POST /test-update-dates
+Actualizar fechas de lead para pruebas de CRONs post-compra.
+
+```bash
+curl -X POST "https://...?api_key=XXX" \
+  -H "Content-Type: application/json" \
+  -d '{"phone": "5214921234567", "delivery_date": "2025-01-25", "purchase_date": "2025-01-15"}'
+```
+
+**Body params:**
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `phone` | string | Teléfono del lead (requerido) |
+| `delivery_date` | string | Fecha de entrega (ISO 8601) |
+| `purchase_date` | string | Fecha de compra (ISO 8601) |
+| `status_changed_at` | string | Fecha de cambio de status (ISO 8601) |
+
+**Response:**
+```json
+{
+  "ok": true,
+  "updated": [{
+    "id": "xxx",
+    "name": "Test Lead",
+    "phone": "5214921234567",
+    "delivery_date": "2025-01-25",
+    "purchase_date": "2025-01-15",
+    "status_changed_at": "2025-01-15T00:00:00Z"
+  }]
+}
+```
+
 ---
 
 ## Endpoints de Debug

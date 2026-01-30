@@ -1694,3 +1694,43 @@ delivered → 3-7 días: 🔑 Seguimiento entrega
 
 **Tests:** 304/304 pasando ✅
 **Deploy:** Version ID `44701c5a-192b-4281-8881-e9af4764f4e6`
+
+---
+
+### 2026-01-30 (Sesión 10) - Templates y Leads de Prueba Post-Compra
+
+**1. Template `appointment_confirmation_v2` creado en Meta:**
+
+| Campo | Valor |
+|-------|-------|
+| ID | `1439144957721245` |
+| Status | PENDING (aprobación Meta) |
+| Categoría | UTILITY |
+| Texto | `¡Hola {{1}}! Gracias por agendar con {{2}}. Tu cita {{3}} el {{4}} a las {{5}} está confirmada.` |
+| Botón | URL dinámica "Ver ubicación 📍" → `https://maps.app.goo.gl/{{1}}` |
+
+**2. Nuevo endpoint `/test-update-dates`:**
+
+```typescript
+POST /test-update-dates
+Body: { phone, delivery_date?, purchase_date?, status_changed_at? }
+// Actualiza fechas de leads para pruebas de CRONs post-compra
+```
+
+**3. Leads de prueba para CRONs post-compra:**
+
+| Lead | Phone | Status | Fecha | CRON Objetivo |
+|------|-------|--------|-------|---------------|
+| Test PostEntrega 5dias | 5210000000101 | delivered | delivery: 2026-01-25 | Lun/Jue 10am |
+| Test Satisfaccion 4meses | 5210000000102 | delivered | delivery: 2025-09-30 | Martes 11am |
+| Test Mantenimiento 1año | 5210000000103 | delivered | delivery: 2025-01-30 | Sábado 10am |
+| Test Referidos 60dias | 5210000000104 | sold | purchase: 2026-01-15 | Viernes 10am (NPS) |
+| Test NPS 15dias | 5210000000105 | sold | purchase: 2025-12-01 | Miércoles 11am (Referidos) |
+
+**Verificación de elegibilidad:**
+- Los leads tienen teléfonos ficticios (521000000010X) para no enviar WhatsApp real
+- Fechas configuradas para que cada CRON los detecte en su ventana de tiempo
+- Usar endpoints `/run-*` para probar manualmente
+
+**Commit:** `629a5111`
+**Deploy:** Version ID `a386f140-5942-4696-b13e-b5239451a52c`
