@@ -1172,3 +1172,47 @@ SARA ignoraba peticiones de no contacto y seguía vendiendo.
 
 **Commit:** `5f6aca3e`
 **Deploy:** Version ID `c24bd307-931d-47e1-9d8b-e5a25c31941a`
+
+---
+
+### 2026-01-29 (Sesión 7 - Parte 6) - Fix Alberca (SOLO Andes)
+
+**Problema detectado en revisión de respuestas:**
+SARA decía incorrectamente que Distrito Falco o Miravalle tenían alberca.
+
+**Realidad:** SOLO **Priv. Andes** tiene ALBERCA.
+
+| Mensaje | Antes | Ahora |
+|---------|-------|-------|
+| "tienen alberca" | "No incluyen alberca" ❌ | "Sí, Priv. Andes tiene alberca" ✅ |
+| "cual tiene alberca" | "Distrito Falco tiene alberca" ❌ | "SOLO Priv. Andes" ✅ |
+
+**Correcciones aplicadas:**
+
+1. **Instrucciones reforzadas en prompt:**
+```
+⚠️⚠️⚠️ ALBERCA - CRÍTICO ⚠️⚠️⚠️
+🏊 SOLO **Priv. Andes** tiene ALBERCA
+🚫 Distrito Falco NO tiene alberca
+🚫 Monte Verde NO tiene alberca
+🚫 Los Encinos NO tiene alberca
+🚫 Miravalle NO tiene alberca
+```
+
+2. **Post-procesamiento:**
+- Detecta respuestas incorrectas sobre alberca
+- Si dice Falco/Miravalle tienen alberca → corrige a Andes
+- Respuesta estandarizada con precios de Andes
+
+**Respuesta correcta:**
+```
+¡Sí tenemos desarrollo con alberca! 🏊
+Priv. Andes es nuestro único fraccionamiento con ALBERCA:
+• Laurel - $1,514,957 (2 rec)
+• Lavanda - $2,699,071 (3 rec, vestidor)
+```
+
+**30+ edge-cases verificados en esta sesión**
+
+**Commit:** `aa953096`
+**Deploy:** Version ID `60e1fc3b-78ae-4439-8656-c6a8a6f6c8ef`

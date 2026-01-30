@@ -2663,3 +2663,24 @@ SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
 
 **Commit:** `5f6aca3e`
 **Deploy:** Version ID `c24bd307-931d-47e1-9d8b-e5a25c31941a`
+
+### 2026-01-29 (Sesión 7 - Parte 6) - Fix Alberca
+
+**Problema:** SARA decía que Distrito Falco tenía alberca (FALSO).
+
+**Realidad:** SOLO **Priv. Andes** tiene ALBERCA.
+
+| Mensaje | Antes | Ahora |
+|---------|-------|-------|
+| "tienen alberca" | "No incluyen" ❌ | "Sí, Andes tiene" ✅ |
+| "cual tiene alberca" | "Distrito Falco" ❌ | "SOLO Andes" ✅ |
+
+**Corrección:**
+- Instrucciones reforzadas con lista explícita de desarrollos SIN alberca
+- Post-procesamiento para corregir respuestas incorrectas
+- Respuesta estandarizada: Laurel $1.5M, Lavanda $2.7M
+
+**30+ edge-cases verificados**
+
+**Commit:** `aa953096`
+**Deploy:** Version ID `60e1fc3b-78ae-4439-8656-c6a8a6f6c8ef`
