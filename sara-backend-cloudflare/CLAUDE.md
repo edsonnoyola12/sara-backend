@@ -1388,3 +1388,35 @@ const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana',
 **Tests:** 260 unitarios + 40+ E2E = **300+ tests totales**
 
 **Sistema 100% operativo - Última verificación: 2026-01-29**
+
+---
+
+### 2026-01-30 (Sesión 8) - Optimización de Costos
+
+**Análisis del prompt de IA:**
+- Prompt original: 75,177 caracteres (~18,794 tokens)
+- Prompt optimizado: 68,977 caracteres (~17,244 tokens)
+- **Ahorro: 8% (~1,550 tokens por mensaje)**
+
+**Cambios realizados:**
+1. Eliminadas 165 líneas decorativas (━━━)
+2. Reducidos emojis triples a simples (⚠️⚠️⚠️ → ⚠️)
+3. Mantenida toda la funcionalidad crítica
+
+**Impacto en costos:**
+| Métrica | Antes | Después |
+|---------|-------|---------|
+| Tokens/mensaje | ~18,800 | ~17,250 |
+| Costo/mensaje | $0.056 | $0.051 |
+| Costo mensual (100 msgs/día) | ~$170 | ~$155 |
+| **Ahorro mensual** | - | **~$15** |
+
+**Verificación:**
+- ✅ 260 tests pasando
+- ✅ Saludos funcionan correctamente
+- ✅ Objeciones manejadas
+- ✅ Citadella del Nogal = Villa Campelo/Galiano
+- ✅ Alberca solo en Andes
+
+**Commit:** `2cb10ba5`
+**Deploy:** Version ID `f0ea754f-7c70-460a-9019-46535db0a4eb`
