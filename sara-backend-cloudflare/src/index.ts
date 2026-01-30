@@ -1787,6 +1787,31 @@ To recommend the perfect option, what's your approximate budget? 💰`;
           }
         }
 
+        // Post-procesamiento: Alberca - SOLO Andes tiene
+        const preguntaPorAlberca =
+          msgLower.includes('alberca') ||
+          msgLower.includes('piscina') ||
+          msgLower.includes('pool');
+
+        if (preguntaPorAlberca) {
+          const respLower = response.toLowerCase();
+          const diceAlbercaFalco = respLower.includes('falco') && respLower.includes('alberca');
+          const diceAlbercaMiravalle = respLower.includes('miravalle') && respLower.includes('alberca');
+          const diceNoTienenAlberca = respLower.includes('no incluyen alberca') || respLower.includes('no tienen alberca');
+
+          if (diceAlbercaFalco || diceAlbercaMiravalle || diceNoTienenAlberca) {
+            response = `¡Sí tenemos desarrollo con alberca! 🏊
+
+**Priv. Andes** es nuestro único fraccionamiento con ALBERCA:
+• Laurel - $1,514,957 (2 rec)
+• Lavanda - $2,699,071 (3 rec, vestidor)
+
+Además tiene vigilancia 24/7, áreas verdes y es pet-friendly 🐕
+
+¿Te gustaría visitarlo este fin de semana?`;
+          }
+        }
+
         return corsResponse(JSON.stringify({
           ok: true,
           pregunta: msg,

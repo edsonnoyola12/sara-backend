@@ -501,7 +501,17 @@ Si preguntan "¿tienen casas en renta?" → Responder:
 **Distrito Falco:** Área de juegos, áreas verdes, CCTV, vigilancia 24/7, acceso controlado (NO mascotas)
 **Priv. Andes:** ALBERCA, área de juegos, áreas verdes, CCTV, vigilancia 24/7, acceso controlado, pet-friendly
 
-⚠️ SOLO Priv. Andes tiene ALBERCA. Los demás NO tienen alberca ni gimnasio.
+⚠️⚠️⚠️ ALBERCA - CRÍTICO ⚠️⚠️⚠️
+🏊 SOLO **Priv. Andes** tiene ALBERCA
+🚫 Distrito Falco NO tiene alberca (solo áreas verdes y juegos)
+🚫 Monte Verde NO tiene alberca
+🚫 Los Encinos NO tiene alberca
+🚫 Miravalle NO tiene alberca
+
+📝 Si preguntan por alberca, responde:
+"¡Sí tenemos! Priv. Andes es nuestro único desarrollo con ALBERCA 🏊
+Casas desde $1,514,957 (Laurel) hasta $2,699,071 (Lavanda).
+¿Te gustaría visitarlo este fin de semana?"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️⚠️⚠️ CITADELLA DEL NOGAL / EL NOGAL - CRÍTICO ⚠️⚠️⚠️
@@ -2286,6 +2296,33 @@ Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte
           console.log('⚠️ CORRIGIENDO: Número equivocado - disculparse y cerrar');
           parsed.response = `¡Disculpa la confusión! Este es el WhatsApp de Grupo Santa Rita, inmobiliaria en Zacatecas. Si conoces a alguien que busque casa, con gusto lo atiendo. ¡Que tengas buen día! 👋`;
           parsed.intent = 'despedida';
+        }
+      }
+
+      // ═══ CORRECCIÓN: Alberca - SOLO Andes tiene ═══
+      const preguntaPorAlberca =
+        msgLowerCallback.includes('alberca') ||
+        msgLowerCallback.includes('piscina') ||
+        msgLowerCallback.includes('pool');
+
+      if (preguntaPorAlberca && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        // Si dice que Distrito Falco, Miravalle u otro tiene alberca (FALSO)
+        const diceAlbercaFalco = respLower.includes('falco') && respLower.includes('alberca');
+        const diceAlbercaMiravalle = respLower.includes('miravalle') && respLower.includes('alberca');
+        const diceNoTienenAlberca = respLower.includes('no incluyen alberca') || respLower.includes('no tienen alberca');
+
+        if (diceAlbercaFalco || diceAlbercaMiravalle || diceNoTienenAlberca) {
+          console.log('⚠️ CORRIGIENDO: Info incorrecta de alberca - SOLO Andes tiene');
+          parsed.response = `¡Sí tenemos desarrollo con alberca! 🏊
+
+**Priv. Andes** es nuestro único fraccionamiento con ALBERCA:
+• Laurel - $1,514,957 (2 rec)
+• Lavanda - $2,699,071 (3 rec, vestidor)
+
+Además tiene vigilancia 24/7, áreas verdes y es pet-friendly 🐕
+
+¿Te gustaría visitarlo este fin de semana?`;
         }
       }
 
