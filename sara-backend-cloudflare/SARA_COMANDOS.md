@@ -2684,3 +2684,79 @@ SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
 
 **Commit:** `aa953096`
 **Deploy:** Version ID `60e1fc3b-78ae-4439-8656-c6a8a6f6c8ef`
+
+### 2026-01-29 (Sesión 7 - Parte 7) - Manejo de Mensajes Multimedia
+
+**Problema:** SARA no manejaba mensajes que no fueran texto puro.
+
+**Tipos de mensaje ahora soportados:**
+
+| Tipo | Antes | Ahora |
+|------|-------|-------|
+| 🎤 **Audio/Voz** | Ignorado | Transcribe con Whisper → procesa |
+| 😄 **Stickers** | Ignorado | "¡Me encanta! ¿Buscas casa?" |
+| 📍 **Ubicación** | Ignorado | Info de zonas de Zacatecas |
+| 🎬 **Video** | Ignorado | "Prefiero texto ¿Qué necesitas?" |
+| 👤 **Contacto** | Ignorado | "¿Le escribo o le das mi número?" |
+| 👍 **Reacciones** | Ignorado | Log silencioso (no spam) |
+| 😊 **Emoji solo** | IA genérica | Respuesta específica por tipo |
+
+**Interpretación de emojis:**
+- 👍 👌 ❤️ → "¿Agendar visita?"
+- 👎 😢 → "¿Algo te preocupa?"
+- 🤔 → "¿Tienes dudas?"
+- 🏠 → "¿2 o 3 recámaras?"
+- 💰 → "Desde $1.5M..."
+
+**Flujo de audio:**
+```
+WhatsApp → Descarga → Whisper transcribe → SARA responde
+         ↓ si falla
+         "¿Podrías escribirme tu mensaje?"
+```
+
+**Archivo:** `src/index.ts` (webhook handler)
+
+**Commit:** `e2d445b3`
+**Deploy:** Version ID `92e10885-18e7-4fbe-ba3f-c524b84e13fa`
+
+### 2026-01-29 (Sesión 7 - Parte 8) - QA Completo 40+ Tests
+
+**Pruebas exhaustivas ejecutadas:**
+
+| Categoría | Tests | Resultado |
+|-----------|-------|-----------|
+| Financiamiento (INFONAVIT, FOVISSSTE, enganche, tasa) | 4 | ✅ |
+| Objeciones (caro, pensar, lejos, competencia) | 4 | ✅ |
+| Casos extremos (English, requisitos, crédito, lotes) | 4 | ✅ |
+| Especificaciones (barata, grande, estacionamiento, vigilancia) | 4 | ✅ |
+| Desarrollos (Monte Verde, Falco, Andes, Nogal) | 4 | ✅ |
+| Fixes críticos (mascotas, no interesa, renta, ya compré) | 4 | ✅ |
+| No contacto (no escribas, paz, equivocado, persona) | 4 | ✅ |
+| Adicionales (urgencia, escuelas, local, cotización) | 4 | ✅ |
+| Básicos (ok, gracias, hola, desarrollos) | 4 | ✅ |
+| Fuera de tema (hamburguesas, pizza, medicinas, coches) | 4 | ✅ |
+
+**Verificación de respuestas fuera de tema:**
+
+| Pregunta | Respuesta SARA |
+|----------|----------------|
+| "venden hamburguesas" | "vendemos casas, no hamburguesas" ✅ |
+| "quiero una pizza" | "te equivocaste de número" ✅ |
+| "venden medicinas" | "vendemos casas, no medicamentos" ✅ |
+| "busco carro usado" | "nos especializamos en casas" ✅ |
+| "cuéntame un chisme" | "¡Hay casas desde $1.5M!" 😄 ✅ |
+| "eres tonta" (insulto) | Ignora, sigue profesional ✅ |
+
+**Follow-ups automáticos verificados:**
+
+| Tiempo sin respuesta | Acción |
+|---------------------|--------|
+| 24h | Alerta vendedor |
+| 48h | Re-engagement |
+| 3 días | Follow-up 1 |
+| 7 días | Follow-up 2 |
+| 14 días | Follow-up 3 |
+| 21+ días | Lead FRÍO |
+
+**Sistema 100% operativo con 260 tests unitarios + 40+ tests E2E**
