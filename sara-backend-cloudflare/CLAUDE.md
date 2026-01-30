@@ -1033,3 +1033,43 @@ if (preguntaPorNogal && dijoNoTenemos) {
 | "Me interesa Citadella del Nogal" | "no es de nuestros desarrollos" | "Tenemos Villa Campelo ($450k) y Villa Galiano ($550k)" ✅ |
 
 **Commit:** `c3d9defe` - fix: corregir respuestas de Citadella del Nogal / El Nogal
+
+---
+
+### 2026-01-29 (Sesión 7 - Parte 3) - Fix "Ya compré en otro lado"
+
+**Problema detectado en pruebas edge-case:**
+Cuando cliente dice "ya compré en otro lado", SARA seguía indagando en lugar de felicitar.
+
+**Antes:** "¿Qué tipo de propiedad compraste? Me da curiosidad..."
+**Ahora:** "¡Muchas felicidades por tu nueva casa! 🎉"
+
+**Corrección aplicada:**
+
+1. **Instrucciones en prompt (aiConversationService.ts):**
+```
+🏡 SI DICE "YA COMPRÉ EN OTRO LADO":
+- Felicítalo genuinamente
+- NO indagues qué compró
+- Ofrece atender referidos
+- Cierra amablemente
+```
+
+2. **Corrección automática post-Claude:**
+```typescript
+if (yaComproOtroLado && sigueIndagando) {
+  response = "¡Muchas felicidades por tu nueva casa! 🎉...
+    Si algún familiar busca casa, con gusto lo atiendo.";
+}
+```
+
+3. **Endpoint de prueba también actualizado (index.ts)**
+
+**Tests verificados:**
+
+| Mensaje | Antes | Ahora |
+|---------|-------|-------|
+| "ya compré en otro lado" | "¿Qué tipo compraste?" | "¡Felicidades! 🎉" ✅ |
+| "ya tengo casa gracias" | Seguía vendiendo | "¡Felicidades! Si algún familiar..." ✅ |
+
+**Commit:** `18b3038f` - fix: felicitar cuando cliente dice 'ya compré en otro lado'

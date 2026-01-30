@@ -2487,6 +2487,7 @@ SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
 | "no me interesa" | "¿Qué te hizo dudar? ¿Precio/ubicación/tamaño?" |
 | "lo voy a pensar" | Ofrece valor + pregunta de seguimiento |
 | Lead dice objeción | Presenta alternativas específicas |
+| "ya compré en otro lado" | "¡Felicidades! 🎉 Si algún familiar busca casa..." |
 
 **🚫 PROHIBIDO (frases que SARA ya NO usa):**
 - "Sin problema" / "Entendido" / "Ok"
@@ -2609,3 +2610,17 @@ SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
 **Ahora:** "Tengo terrenos en Villa Campelo ($450k) y Villa Galiano ($550k)"
 
 **Commit:** `c3d9defe`
+
+### 2026-01-29 (Sesión 7 - Parte 3) - Fix "Ya compré en otro lado"
+
+**Problema:** SARA seguía indagando cuando cliente ya compró con competencia
+
+**Solución:**
+1. Instrucciones para felicitar y cerrar amablemente
+2. Corrección automática si Claude sigue indagando
+3. Ofrecer atender referidos sin presión
+
+**Antes:** "¿Qué tipo de propiedad compraste? Me da curiosidad..."
+**Ahora:** "¡Muchas felicidades por tu nueva casa! 🎉 Si algún familiar busca casa..."
+
+**Commit:** `18b3038f`
