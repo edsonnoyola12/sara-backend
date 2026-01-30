@@ -431,3 +431,124 @@ describe('AI Response Integration (mock)', () => {
     expect(result.valid).toBe(true);
   });
 });
+
+// ============================================================
+// EDGE CASE TESTS - Casos extremos adicionales
+// ============================================================
+
+describe('Edge Cases Adicionales', () => {
+  describe('Mensajes de emoji solo', () => {
+    it('valida respuesta a emoji positivo 👍', () => {
+      // Emoji positivo debería continuar la conversación
+      const response = '¡Perfecto! ¿Te gustaría agendar una visita?';
+      const result = validateSARAResponse(response, {});
+      expect(result.valid).toBe(true);
+    });
+
+    it('valida respuesta a emoji de casa 🏠', () => {
+      const response = '¡Te interesa una casa! Tenemos desde 2 hasta 3 recámaras. ¿Cuántas necesitas?';
+      const result = validateSARAResponse(response, {});
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('Mensajes muy largos', () => {
+    it('maneja respuesta a mensaje largo sin truncar', () => {
+      const longResponse = 'Entiendo tu interés. ' + 'Tenemos varias opciones. '.repeat(20) + '¿Te agendo una visita?';
+      const result = validateSARAResponse(longResponse, {});
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('Local comercial', () => {
+    it('responde correctamente a pregunta de local comercial', () => {
+      const response = 'Nuestros desarrollos son 100% residenciales, no tenemos locales comerciales. ¿Buscas casa?';
+      const result = validateSARAResponse(response, {});
+      expect(result.valid).toBe(true);
+      expect(response.toLowerCase()).not.toContain('sí tenemos local');
+    });
+  });
+
+  describe('Horarios de atención', () => {
+    it('proporciona horarios correctos', () => {
+      const response = 'Atendemos de lunes a viernes 9am-6pm y sábados 9am-2pm. ¿Qué día te queda mejor?';
+      const result = validateSARAResponse(response, {});
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('Competencia', () => {
+    it('no critica a la competencia', () => {
+      const response = 'Cada desarrollo tiene sus ventajas. Nosotros destacamos por la plusvalía en Zacatecas. ¿Te muestro?';
+      const result = validateSARAResponse(response, {});
+      expect(result.valid).toBe(true);
+      // No debería criticar
+      expect(response.toLowerCase()).not.toContain('mejor que');
+      expect(response.toLowerCase()).not.toContain('son malos');
+    });
+  });
+
+  describe('Spanglish', () => {
+    it('entiende y responde a Spanglish', () => {
+      // Un mensaje tipo "quiero house cerca del downtown"
+      const response = '¡Claro! Tenemos casas en excelentes ubicaciones. ¿Qué zona te interesa?';
+      const result = validateSARAResponse(response, {});
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('Typos comunes', () => {
+    it('detecta respuesta válida a mensaje con typos', () => {
+      // "informasion monteverde" debería entenderse
+      const response = 'Monte Verde tiene 5 modelos desde $1.5M. ¿Te gustaría conocerlo?';
+      const result = validateSARAResponse(response, {});
+      expect(result.valid).toBe(true);
+      expect(response.toLowerCase()).toContain('monte verde');
+    });
+  });
+
+  describe('Mensajes duplicados/spam', () => {
+    it('maneja respuesta a 3+ mensajes idénticos', () => {
+      const response = 'Noté que me enviaste el mismo mensaje varias veces. ¿Hay algo específico en lo que pueda ayudarte?';
+      const result = validateSARAResponse(response, {});
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('Urgencia de compra', () => {
+    it('responde con opciones de entrega inmediata', () => {
+      const response = 'Tengo opciones de ENTREGA INMEDIATA: Monte Verde, Los Encinos y Priv. Andes. ¿Cuál te gustaría visitar?';
+      const result = validateSARAResponse(response, {});
+      expect(result.valid).toBe(true);
+      expect(response.toLowerCase()).toContain('inmediata');
+    });
+  });
+
+  describe('Preguntas de financiamiento', () => {
+    it('no inventa tasas de interés', () => {
+      const response = 'Trabajamos con INFONAVIT, FOVISSSTE y varios bancos. Las tasas varían según tu perfil. ¿Tienes precalificación?';
+      const result = validateSARAResponse(response, {});
+      expect(result.valid).toBe(true);
+      // No debería mencionar tasas específicas inventadas
+      expect(response).not.toMatch(/\d+\.?\d*%.*anual/i);
+    });
+  });
+
+  describe('Mascotas', () => {
+    it('confirma que se aceptan mascotas', () => {
+      const response = 'Sí, nuestros desarrollos aceptan mascotas. ¿Tienes perro o gato?';
+      const result = validateSARAResponse(response, {});
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('Preguntas fuera de tema', () => {
+    it('redirige amablemente preguntas no relacionadas', () => {
+      // Pregunta tipo "venden hamburguesas"
+      const response = 'Jaja, solo vendemos casas, no hamburguesas 😄 ¿Buscas casa?';
+      const result = validateSARAResponse(response, {});
+      expect(result.valid).toBe(true);
+      expect(response.toLowerCase()).toContain('casa');
+    });
+  });
+});

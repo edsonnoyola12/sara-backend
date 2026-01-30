@@ -62,6 +62,30 @@ export class LeadMessageService {
     const mensajeLower = body.toLowerCase().trim();
     const notasLead = typeof lead.notes === 'object' ? lead.notes : {};
 
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // DETECCIÓN DE MENSAJES REPETIDOS (spam/duplicados)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    const duplicateResult = this.checkDuplicateMessage(lead, body);
+    if (duplicateResult.isDuplicate) {
+      console.log(`⚠️ Mensaje repetido detectado de ${lead.name || lead.phone}: "${body.slice(0, 50)}..." (${duplicateResult.count}x)`);
+
+      // Si es el 3er mensaje idéntico consecutivo, responder diferente
+      if (duplicateResult.count >= 3) {
+        return {
+          action: 'handled',
+          response: `¡Hola! Noté que me enviaste el mismo mensaje varias veces 😊
+
+¿Hay algo específico en lo que pueda ayudarte? Si tienes alguna duda o problema, cuéntame y con gusto te asisto.
+
+¿Te gustaría:
+1. Información de desarrollos
+2. Agendar una visita
+3. Hablar con un asesor`
+        };
+      }
+      // Si es 2do mensaje, continuar normal pero logear
+    }
+
     // 0. RESPUESTA A MENSAJE AUTOMÁTICO (lead frío, aniversario, cumpleaños, etc.)
     const autoResponseResult = await this.checkAutoMessageResponse(lead, body, mensajeLower, notasLead);
     if (autoResponseResult.action === 'handled') return autoResponseResult;
@@ -109,6 +133,42 @@ export class LeadMessageService {
 
     // No se detectó ningún patrón especial, continuar a IA
     return { action: 'continue_to_ai' };
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // DETECCIÓN DE MENSAJES DUPLICADOS
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  private checkDuplicateMessage(lead: any, currentMessage: string): { isDuplicate: boolean; count: number } {
+    const history = lead.conversation_history || [];
+    if (history.length === 0) return { isDuplicate: false, count: 1 };
+
+    const currentMsgNormalized = currentMessage.toLowerCase().trim();
+
+    // Contar mensajes idénticos consecutivos del usuario (últimos 10 mensajes)
+    const recentUserMsgs = history
+      .slice(-10)
+      .filter((m: any) => m.role === 'user')
+      .map((m: any) => (m.content || '').toLowerCase().trim());
+
+    // Contar cuántos de los últimos mensajes son idénticos al actual
+    let consecutiveCount = 0;
+    for (let i = recentUserMsgs.length - 1; i >= 0; i--) {
+      if (recentUserMsgs[i] === currentMsgNormalized) {
+        consecutiveCount++;
+      } else {
+        break; // Dejar de contar si encontramos uno diferente
+      }
+    }
+
+    // Si el mensaje actual es igual al último
+    const lastUserMsg = recentUserMsgs[recentUserMsgs.length - 1] || '';
+    const isDuplicate = lastUserMsg === currentMsgNormalized;
+
+    return {
+      isDuplicate,
+      count: consecutiveCount + 1 // +1 por el mensaje actual
+    };
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

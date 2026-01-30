@@ -4453,6 +4453,130 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
       return corsResponse(JSON.stringify(metrics, null, 2));
     }
 
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // GET /api/metrics/quality - Reporte de calidad de respuestas SARA
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if (url.pathname === '/api/metrics/quality' && request.method === 'GET') {
+      const dias = parseInt(url.searchParams.get('days') || '7');
+      const fechaInicio = new Date();
+      fechaInicio.setDate(fechaInicio.getDate() - dias);
+
+      const { data: leads } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, conversation_history, updated_at')
+        .gte('updated_at', fechaInicio.toISOString());
+
+      // Analizar calidad de respuestas
+      const problemas: any[] = [];
+      let totalRespuestas = 0;
+      let respuestasOk = 0;
+
+      // Patrones de problemas
+      const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana', 'Luis', 'Carlos', 'Carmen'];
+      const frasesProhibidas = [
+        'Le aviso a',
+        'Sin problema',
+        'no lo tenemos disponible',
+        'Citadella del Nogal no',
+        'El Nogal no es',
+        'sí tenemos rentas',
+        'tenemos casas en renta'
+      ];
+
+      (leads || []).forEach((lead: any) => {
+        const history = lead.conversation_history || [];
+        history.forEach((msg: any, idx: number) => {
+          if (msg.role !== 'assistant') return;
+          totalRespuestas++;
+
+          const content = (msg.content || '').trim();
+          let tieneProblema = false;
+          const problemasMsg: string[] = [];
+
+          // 1. Respuesta truncada (termina en coma o muy corta)
+          if (content.endsWith(',') || (content.length > 0 && content.length < 20)) {
+            problemasMsg.push('truncada');
+            tieneProblema = true;
+          }
+
+          // 2. Nombre alucinado (cuando lead no tiene nombre)
+          if (!lead.name) {
+            for (const nombre of nombresHallucinated) {
+              if (content.includes(nombre)) {
+                problemasMsg.push(`nombre_hallucinated:${nombre}`);
+                tieneProblema = true;
+                break;
+              }
+            }
+          }
+
+          // 3. Frases prohibidas
+          for (const frase of frasesProhibidas) {
+            if (content.toLowerCase().includes(frase.toLowerCase())) {
+              problemasMsg.push(`frase_prohibida:${frase.slice(0, 20)}`);
+              tieneProblema = true;
+            }
+          }
+
+          // 4. Respuesta genérica sin valor
+          if (content.match(/^(ok|entendido|perfecto|listo)\.?$/i)) {
+            problemasMsg.push('respuesta_generica');
+            tieneProblema = true;
+          }
+
+          if (tieneProblema) {
+            problemas.push({
+              lead_id: lead.id,
+              lead_name: lead.name || 'Sin nombre',
+              phone_last4: (lead.phone || '').slice(-4),
+              msg_index: idx,
+              timestamp: msg.timestamp,
+              problemas: problemasMsg,
+              preview: content.slice(0, 100)
+            });
+          } else {
+            respuestasOk++;
+          }
+        });
+      });
+
+      // Agrupar por tipo de problema
+      const problemasAgrupados: Record<string, number> = {};
+      problemas.forEach(p => {
+        p.problemas.forEach((prob: string) => {
+          const tipo = prob.split(':')[0];
+          problemasAgrupados[tipo] = (problemasAgrupados[tipo] || 0) + 1;
+        });
+      });
+
+      const quality = {
+        periodo: `últimos ${dias} días`,
+        fecha_inicio: fechaInicio.toISOString().split('T')[0],
+        fecha_fin: new Date().toISOString().split('T')[0],
+
+        resumen: {
+          leads_analizados: leads?.length || 0,
+          total_respuestas_sara: totalRespuestas,
+          respuestas_ok: respuestasOk,
+          respuestas_con_problemas: problemas.length,
+          tasa_calidad: totalRespuestas > 0 ? Math.round((respuestasOk / totalRespuestas) * 100) : 100
+        },
+
+        problemas_por_tipo: problemasAgrupados,
+
+        ultimos_problemas: problemas.slice(-10).reverse(),
+
+        recomendaciones: [
+          problemas.filter(p => p.problemas.includes('truncada')).length > 0 && 'Revisar respuestas truncadas',
+          problemasAgrupados['nombre_hallucinated'] > 0 && 'Reforzar eliminación de nombres inventados',
+          problemasAgrupados['frase_prohibida'] > 0 && 'Revisar post-procesamiento de frases prohibidas',
+          problemasAgrupados['respuesta_generica'] > 0 && 'Mejorar respuestas genéricas'
+        ].filter(Boolean)
+      };
+
+      return corsResponse(JSON.stringify(quality, null, 2));
+    }
+
     // ═══════════════════════════════════════════════════════════
     // API Routes - Reportes CEO (Diario, Semanal, Mensual)
     // ═══════════════════════════════════════════════════════════
