@@ -2595,3 +2595,17 @@ SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
 4. Respuestas hardcodeadas corregidas en leadMessageService
 
 **Commits:** `bb3d7229`, `0ec6912d`, `d51a44eb`
+
+### 2026-01-29 (Sesión 7 - Parte 2) - Fix Citadella del Nogal
+
+**Problema:** SARA decía "El Nogal no lo tenemos" cuando SÍ lo tenemos (Villa Campelo/Galiano)
+
+**Solución:**
+1. Instrucciones reforzadas con frases prohibidas explícitas
+2. Corrección automática post-Claude si dice "no tenemos El Nogal"
+3. Reemplazo de "visitar El Nogal" → "visitar Villa Campelo/Galiano"
+
+**Antes:** "El Nogal no lo tenemos disponible"
+**Ahora:** "Tengo terrenos en Villa Campelo ($450k) y Villa Galiano ($550k)"
+
+**Commit:** `c3d9defe`

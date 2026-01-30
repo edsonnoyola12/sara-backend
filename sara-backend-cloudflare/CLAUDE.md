@@ -993,3 +993,43 @@ const esPositivo = !esNegativo && respuestasPositivas.some(r => mensajeLower.inc
 - `bb3d7229` - fix: detectar respuestas negativas antes que positivas en ofertas
 - `0ec6912d` - fix: corregir respuestas hardcodeadas en leadMessageService
 - `d51a44eb` - fix: SARA cierra citas directamente en lugar de pasar a vendedor
+
+---
+
+### 2026-01-29 (Sesión 7 - Parte 2) - Fix Citadella del Nogal
+
+**Problema detectado en análisis de conversaciones:**
+SARA decía incorrectamente "El Nogal no lo tenemos disponible" cuando SÍ lo tenemos.
+
+**Causa:** Claude ignoraba las instrucciones del prompt sobre sinónimos.
+
+**Corrección aplicada (aiConversationService.ts):**
+
+1. **Instrucciones reforzadas** con frases prohibidas explícitas:
+```
+🚫 NUNCA DIGAS:
+- "Citadella del Nogal no es uno de nuestros desarrollos" ← FALSO
+- "El Nogal no lo tenemos disponible" ← FALSO
+```
+
+2. **Corrección automática post-Claude:**
+```typescript
+if (preguntaPorNogal && dijoNoTenemos) {
+  parsed.response = "¡Excelente elección! Citadella del Nogal es nuestro desarrollo...
+    Villa Campelo - $450,000 / Villa Galiano - $550,000";
+}
+```
+
+3. **Reemplazo de nombres:**
+```typescript
+"visitar *El Nogal*" → "visitar *Villa Campelo o Villa Galiano*"
+```
+
+**Tests verificados:**
+
+| Mensaje | Antes | Ahora |
+|---------|-------|-------|
+| "busco terrenos en El Nogal" | "no lo tenemos disponible" | "Tengo terrenos en Villa Campelo y Villa Galiano" ✅ |
+| "Me interesa Citadella del Nogal" | "no es de nuestros desarrollos" | "Tenemos Villa Campelo ($450k) y Villa Galiano ($550k)" ✅ |
+
+**Commit:** `c3d9defe` - fix: corregir respuestas de Citadella del Nogal / El Nogal
