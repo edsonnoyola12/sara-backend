@@ -1119,8 +1119,8 @@ CUANDO QUIERA "HABLAR CON ASESOR":
 ⚠️⚠️⚠️ INTELIGENCIA CONVERSACIONAL - CASOS ESPECIALES ⚠️⚠️⚠️
 ────────────────────────────
 
-🏠 **CLIENTES QUE YA COMPRARON (POST-VENTA):**
-Si dice: "ya compré", "soy propietario", "ya tengo casa con ustedes", "compré en [desarrollo]", "soy dueño", "mi casa en [desarrollo]"
+🏠 **CLIENTES QUE YA COMPRARON CON NOSOTROS (POST-VENTA):**
+Si dice: "ya compré con ustedes", "soy propietario", "ya tengo casa con ustedes", "compré en [desarrollo nuestro]", "soy dueño", "mi casa en [desarrollo nuestro]"
 
 DEBES:
 1) Felicitarlo genuinamente: "¡Qué gusto saludarte! Bienvenido a la familia Santa Rita 🏠"
@@ -1132,6 +1132,27 @@ DEBES:
 Ejemplos de respuesta:
 - "¡Qué gusto que seas parte de la familia Santa Rita! 🏠 ¿En qué puedo ayudarte hoy?"
 - "¡Felicidades por tu casa! Cuéntame, ¿tienes alguna duda o necesitas algo?"
+
+🏡 **CLIENTES QUE YA COMPRARON EN OTRO LADO (COMPETENCIA):**
+Si dice: "ya compré en otro lado", "ya compré con otra inmobiliaria", "compré en [competencia]", "ya tengo casa", "ya adquirí una propiedad"
+
+⚠️ IMPORTANTE: NO sigas vendiendo, NO preguntes qué compraron, NO insistas.
+
+DEBES:
+1) Felicitarlo genuinamente por su compra
+2) Desearle éxito con su nueva propiedad
+3) Ofrecer referidos (opcional, sin presión)
+4) Cerrar amablemente
+
+✅ RESPUESTA CORRECTA:
+"¡Muchas felicidades por tu nueva casa! 🎉 Comprar una propiedad es una gran decisión y me da gusto que lo hayas logrado.
+
+Si algún familiar o amigo busca casa en el futuro, con gusto lo atiendo. ¡Te deseo mucho éxito en tu nuevo hogar! 🏠"
+
+🚫 RESPUESTA INCORRECTA (NO hagas esto):
+- "¿Qué tipo de propiedad compraste?" ← NO indagues
+- "¿Por qué no nos consideraste?" ← NO cuestiones
+- "Si cambias de opinión..." ← NO insistas
 
 📌 **PREGUNTAS SOBRE SEGURIDAD:**
 Si pregunta: "¿es seguro?", "¿tiene vigilancia?", "¿hay robos?", "¿es privada?", "seguridad del fraccionamiento"
@@ -2057,6 +2078,34 @@ Ambos con excelente plusvalía y muy tranquilos. *¿Te gustaría visitarlos? ¿T
           parsed.response = parsed.response
             .replace(/visitar \*El Nogal\*/g, 'visitar *Villa Campelo o Villa Galiano* (Citadella del Nogal)')
             .replace(/visitar \*Citadella del Nogal\*/g, 'visitar *Villa Campelo o Villa Galiano* (Citadella del Nogal)');
+        }
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // CORRECCIÓN: "Ya compré en otro lado" → Felicitar y cerrar
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const yaComproOtroLado =
+        (msgLowerCallback.includes('ya compr') && (msgLowerCallback.includes('otro lado') || msgLowerCallback.includes('otra'))) ||
+        msgLowerCallback.includes('ya tengo casa') ||
+        msgLowerCallback.includes('ya adquir');
+
+      if (yaComproOtroLado && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        // Si Claude sigue indagando en lugar de felicitar
+        const sigueIndagando =
+          respLower.includes('qué tipo de propiedad') ||
+          respLower.includes('qué compraste') ||
+          respLower.includes('me da curiosidad') ||
+          respLower.includes('por qué no') ||
+          respLower.includes('si cambias de opinión');
+
+        if (sigueIndagando || !respLower.includes('felicidades') && !respLower.includes('felicitar')) {
+          console.log('⚠️ CORRIGIENDO: Cliente compró en otro lado - felicitar y cerrar');
+          parsed.response = `¡Muchas felicidades por tu nueva casa! 🎉 Comprar una propiedad es una gran decisión y me da gusto que lo hayas logrado.
+
+Si algún familiar o amigo busca casa en el futuro, con gusto lo atiendo. ¡Te deseo mucho éxito en tu nuevo hogar! 🏠`;
+          parsed.intent = 'cerrar_conversacion';
+          parsed.contactar_vendedor = false;
         }
       }
 

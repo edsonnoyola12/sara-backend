@@ -1602,16 +1602,45 @@ SINÓNIMOS:
 - Terminar con pregunta de cierre
 - Si muestra interés → "¿Sábado o domingo?"
 
+🏡 SI DICE "YA COMPRÉ EN OTRO LADO":
+- Felicítalo: "¡Muchas felicidades por tu nueva casa! 🎉"
+- NO indagues qué compró
+- Ofrece referidos: "Si algún familiar busca casa, con gusto lo atiendo"
+- Cierra amablemente
+
 Nombre del cliente: ${leadName}`;
 
         const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
         const startTime = Date.now();
 
-        const response = await claude.chat([
+        let response = await claude.chat([
           { role: 'user', content: msg }
         ], systemPrompt);
 
         const responseTime = Date.now() - startTime;
+
+        // Post-procesamiento: "ya compré en otro lado" → felicitar y cerrar
+        const msgLower = msg.toLowerCase();
+        const yaComproOtroLado =
+          (msgLower.includes('ya compr') && (msgLower.includes('otro lado') || msgLower.includes('otra'))) ||
+          msgLower.includes('ya tengo casa') ||
+          msgLower.includes('ya adquir');
+
+        if (yaComproOtroLado) {
+          const respLower = response.toLowerCase();
+          const sigueIndagando =
+            respLower.includes('qué tipo') ||
+            respLower.includes('qué compraste') ||
+            respLower.includes('curiosidad') ||
+            respLower.includes('por qué no') ||
+            respLower.includes('si cambias');
+
+          if (sigueIndagando || (!respLower.includes('felicidades') && !respLower.includes('felicitar'))) {
+            response = `¡Muchas felicidades por tu nueva casa! 🎉 Comprar una propiedad es una gran decisión y me da gusto que lo hayas logrado.
+
+Si algún familiar o amigo busca casa en el futuro, con gusto lo atiendo. ¡Te deseo mucho éxito en tu nuevo hogar! 🏠`;
+          }
+        }
 
         return corsResponse(JSON.stringify({
           ok: true,
