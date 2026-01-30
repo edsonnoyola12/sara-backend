@@ -2760,3 +2760,82 @@ WhatsApp → Descarga → Whisper transcribe → SARA responde
 | 21+ días | Lead FRÍO |
 
 **Sistema 100% operativo con 260 tests unitarios + 40+ tests E2E**
+
+---
+
+### 2026-01-29 (Sesión 7 - Parte 9) - Fix Nombres Alucinados + Análisis Conversaciones
+
+**Problema detectado en análisis de conversaciones reales:**
+Claude inventaba nombres cuando el lead no tenía nombre en la base de datos.
+
+**Caso real encontrado (Oscar - 5214929090486):**
+- Mensaje [11]: SARA dijo "¡Hola de nuevo María!"
+- Oscar corrigió: "No soy Maria"
+- Causa: Claude alucinó el nombre "María" sin ninguna base
+
+**Solución implementada:**
+
+1. **Lista expandida de 46 nombres comunes** que Claude podría inventar:
+```
+Salma, María, Maria, Juan, Pedro, Ana, Luis, Carlos, Carmen, José...
+Guadalupe, Lupita, Javier, Sergio, Adriana, Claudia, Monica, etc.
+```
+
+2. **Dos casos de manejo:**
+
+| Caso | Condición | Acción |
+|------|-----------|--------|
+| **1** | lead.name existe | Reemplazar nombre falso → nombre real |
+| **2** | lead.name NO existe | ELIMINAR nombre inventado |
+
+3. **Patrones de eliminación automática:**
+```
+"¡Hola de nuevo María!" → "¡Hola de nuevo!"
+"Perfecto María," → "Perfecto,"
+"Listo María!" → "¡Listo!"
+```
+
+**Análisis de conversaciones realizado:**
+
+| Estadística | Valor |
+|-------------|-------|
+| Total leads con historial | 25 |
+| Mensajes últimas 24h | 26 |
+| Mensajes truncados recientes | 0 ✅ |
+| Nombres alucinados detectados | 1 (Oscar→María) |
+
+**Estado de problemas:**
+
+| Problema | Estado | Notas |
+|----------|--------|-------|
+| Nombres alucinados | ✅ CORREGIDO | Fix deployado |
+| Mensajes truncados | ✅ RESUELTO | Era histórico, 0 recientes |
+| Citadella del Nogal | ✅ FUNCIONANDO | Responde Villa Campelo/Galiano |
+
+**Commits:**
+- `8d9b2d92` - fix: eliminar nombres alucinados cuando no hay lead.name
+- `3f6b17ec` - docs: agregar fix de nombres alucinados a documentación
+
+**Deploy:** Version ID `639ae8f5-8a9a-468e-ab0a-ac7bb9dfa300`
+
+---
+
+## 📊 RESUMEN SESIÓN 7 COMPLETA (2026-01-29)
+
+**Total de fixes aplicados:** 9 partes
+
+| Parte | Fix | Commit |
+|-------|-----|--------|
+| 1 | SARA cierra citas directamente | `d51a44eb` |
+| 2 | Citadella del Nogal = Villa Campelo/Galiano | `c3d9defe` |
+| 3 | "Ya compré en otro lado" → felicitar | `18b3038f` |
+| 4 | Renta, persona real, urgencia, English | `934ff302` |
+| 5 | Respetar no contacto | `5f6aca3e` |
+| 6 | Alberca SOLO en Andes | `aa953096` |
+| 7 | Mensajes multimedia (audio, stickers, etc.) | `e2d445b3` |
+| 8 | QA 40+ tests verificados | (documentación) |
+| 9 | Eliminar nombres alucinados sin lead.name | `8d9b2d92` |
+
+**Tests:** 260 unitarios + 40+ E2E = **300+ tests totales**
+
+**Sistema 100% operativo - Última verificación: 2026-01-29**
