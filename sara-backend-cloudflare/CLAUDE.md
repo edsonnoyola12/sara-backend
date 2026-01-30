@@ -1322,9 +1322,56 @@ SARA ya maneja correctamente preguntas que no tienen que ver con inmobiliaria:
 
 ---
 
+### 2026-01-29 (Sesión 7 - Parte 9) - Fix Nombres Alucinados por Claude
+
+**Problema detectado en análisis de conversaciones reales:**
+Claude inventaba nombres cuando el lead no tenía nombre registrado en la base de datos.
+
+**Caso real:** Oscar escribió a SARA y Claude le respondió "¡Hola de nuevo María!" - María nunca existió.
+
+**Corrección aplicada (aiConversationService.ts):**
+
+1. **Lista expandida de nombres comunes (46 nombres):**
+```typescript
+const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana',
+  'Luis', 'Carlos', 'Carmen', 'José', 'Jose', 'Rosa', 'Miguel', 'Laura',
+  'Antonio', 'Sofía', 'Sofia', 'Diana', 'Jorge', 'Patricia', 'Roberto',
+  'Andrea', 'Fernando', 'Manuel', 'Isabel', 'Francisco', 'Alejandro',
+  'Ricardo', 'Gabriela', 'Daniel', 'Eduardo', 'Martha', 'Marta',
+  'Guadalupe', 'Lupita', 'Javier', 'Sergio', 'Adriana', 'Claudia',
+  'Monica', 'Mónica', 'Leticia', 'Lety', 'Teresa', 'Tere', 'Elena', 'Silvia'];
+```
+
+2. **Dos casos de manejo:**
+
+| Caso | Condición | Acción |
+|------|-----------|--------|
+| **1** | lead.name existe | Reemplazar nombre falso → nombre real |
+| **2** | lead.name NO existe | ELIMINAR nombre inventado |
+
+3. **Patrones de eliminación:**
+```typescript
+// "¡Hola de nuevo María!" → "¡Hola de nuevo!"
+// "Perfecto María," → "Perfecto,"
+// "Listo María " → "Listo "
+```
+
+**Ejemplo de corrección:**
+
+| Antes | Ahora |
+|-------|-------|
+| "¡Hola de nuevo María!" | "¡Hola de nuevo!" |
+| "Perfecto María, te agendo" | "Perfecto, te agendo" |
+| "Listo María!" | "¡Listo!" |
+
+**Commit:** `8d9b2d92`
+**Deploy:** Version ID `639ae8f5-8a9a-468e-ab0a-ac7bb9dfa300`
+
+---
+
 ## 📊 RESUMEN SESIÓN 7 COMPLETA (2026-01-29)
 
-**Total de fixes aplicados:** 8 partes
+**Total de fixes aplicados:** 9 partes
 
 | Parte | Fix | Commit |
 |-------|-----|--------|
@@ -1336,6 +1383,7 @@ SARA ya maneja correctamente preguntas que no tienen que ver con inmobiliaria:
 | 6 | Alberca SOLO en Andes | `aa953096` |
 | 7 | Mensajes multimedia (audio, stickers, etc.) | `e2d445b3` |
 | 8 | QA 40+ tests verificados | (documentación) |
+| 9 | Eliminar nombres alucinados sin lead.name | `8d9b2d92` |
 
 **Tests:** 260 unitarios + 40+ E2E = **300+ tests totales**
 
