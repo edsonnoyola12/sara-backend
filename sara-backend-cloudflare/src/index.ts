@@ -5774,9 +5774,30 @@ Mensaje: ${mensaje}`;
         if (messages && messages.length > 0) {
           const message = messages[0];
           const from = message.from;
-          const text = message.text?.body || '';
           const messageId = message.id; // WhatsApp message ID para dedup
-          const messageType = message.type; // text, image, document, etc.
+          const messageType = message.type; // text, image, document, interactive, etc.
+
+          // ═══ EXTRAER TEXTO DEL MENSAJE (incluyendo respuestas interactivas) ═══
+          let text = '';
+          if (messageType === 'text') {
+            text = message.text?.body || '';
+          } else if (messageType === 'interactive') {
+            // Respuesta a lista o botones
+            const interactiveType = message.interactive?.type;
+            if (interactiveType === 'list_reply') {
+              // Respuesta a lista: usar el ID o título
+              text = message.interactive.list_reply?.id || message.interactive.list_reply?.title || '';
+              console.log(`📋 Respuesta a LISTA: id="${message.interactive.list_reply?.id}", title="${message.interactive.list_reply?.title}"`);
+            } else if (interactiveType === 'button_reply') {
+              // Respuesta a botones: usar el ID o título
+              text = message.interactive.button_reply?.id || message.interactive.button_reply?.title || '';
+              console.log(`🔘 Respuesta a BOTÓN: id="${message.interactive.button_reply?.id}", title="${message.interactive.button_reply?.title}"`);
+            }
+          } else if (messageType === 'button') {
+            // Botón de template (diferente a interactive button)
+            text = message.button?.text || message.button?.payload || '';
+            console.log(`🔲 Respuesta a TEMPLATE BUTTON: "${text}"`);
+          }
 
           console.log(`📥 Procesando mensaje de ${from}: tipo=${messageType}, texto="${text.substring(0, 50)}..."`);
 
