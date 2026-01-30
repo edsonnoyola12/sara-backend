@@ -481,6 +481,10 @@ SOBRE GRUPO SANTA RITA (INFORMACIÓN DE LA EMPRESA)
 - SÍ se permite uso comercial
 - Edad mínima del comprador: 21 años
 
+🐕 SI PREGUNTAN POR MASCOTAS:
+Responde DIRECTAMENTE: "¡Sí, aceptamos mascotas! 🐕 Todos nuestros desarrollos son pet-friendly excepto Distrito Falco. ¿Qué tipo de mascota tienes?"
+🚫 NO cambies el tema ni preguntes si renta - responde sobre mascotas primero.
+
 ⚠️ IMPORTANTE - SOLO VENDEMOS, NO RENTAMOS:
 Santa Rita SOLO VENDE casas y terrenos. NO tenemos propiedades en RENTA.
 Si preguntan "¿tienen casas en renta?" → Responder:
@@ -556,6 +560,12 @@ Muchas familias pensaban lo mismo y encontraron opciones perfectas para su bolsi
 "¡Claro! Solo una pregunta rápida: ¿ya tienes casa propia o rentas?
 Es que muchos clientes que rentaban se dieron cuenta que con lo de la renta pueden pagar su propia casa.
 ¿Te muestro cómo funciona? Solo son 5 minutos y puede cambiarte la vida."
+
+⚠️ IMPORTANTE: Si dicen "no me interesa" o "no gracias":
+🚫 NUNCA respondas con "¿sábado o domingo?" - eso es para interesados
+🚫 NUNCA ignores su objeción - reconócela primero
+✅ Primero reconoce: "¡Claro, entiendo!"
+✅ Luego haz pregunta de rescate suave
 
 📌 "LO VOY A PENSAR":
 ➜ TÉCNICA: Urgencia + Escasez + Compromiso bajo
@@ -2323,6 +2333,52 @@ Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte
 Además tiene vigilancia 24/7, áreas verdes y es pet-friendly 🐕
 
 ¿Te gustaría visitarlo este fin de semana?`;
+        }
+      }
+
+      // ═══ CORRECCIÓN: Mascotas - responder directamente ═══
+      const preguntaPorMascotas =
+        msgLowerCallback.includes('mascota') ||
+        msgLowerCallback.includes('perro') ||
+        msgLowerCallback.includes('gato') ||
+        msgLowerCallback.includes('pet');
+
+      if (preguntaPorMascotas && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        // Si no menciona mascotas/pet-friendly en la respuesta
+        if (!respLower.includes('mascota') && !respLower.includes('pet') && !respLower.includes('perro')) {
+          console.log('⚠️ CORRIGIENDO: Preguntó por mascotas - responder directamente');
+          parsed.response = `¡Sí, aceptamos mascotas! 🐕
+
+Casi todos nuestros desarrollos son pet-friendly:
+• Monte Verde ✅
+• Los Encinos ✅
+• Miravalle ✅
+• Andes ✅ (además tiene alberca 🏊)
+
+⚠️ Solo Distrito Falco NO permite mascotas.
+
+¿Qué tipo de mascota tienes? ¿Te gustaría conocer alguno de estos desarrollos?`;
+        }
+      }
+
+      // ═══ CORRECCIÓN: "No me interesa" - NO ofrecer cita ═══
+      const diceNoInteresa =
+        msgLowerCallback.includes('no me interesa') ||
+        msgLowerCallback.includes('no gracias') ||
+        msgLowerCallback.includes('no thank');
+
+      if (diceNoInteresa && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        // Si ofrece cita cuando dijeron que no les interesa
+        if (respLower.includes('sábado o domingo') || respLower.includes('sabado o domingo') ||
+            respLower.includes('agendar') || respLower.includes('visita')) {
+          console.log('⚠️ CORRIGIENDO: Dijo no interesa - no ofrecer cita directa');
+          parsed.response = `¡Entendido! Solo una pregunta rápida: ¿ya tienes casa propia o rentas actualmente?
+
+Es que muchos clientes que rentaban se dieron cuenta que con lo de la renta pueden pagar su propia casa 🏠
+
+Si quieres, te muestro cómo funciona sin compromiso.`;
         }
       }
 

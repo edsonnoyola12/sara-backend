@@ -1812,6 +1812,48 @@ Además tiene vigilancia 24/7, áreas verdes y es pet-friendly 🐕
           }
         }
 
+        // Post-procesamiento: Mascotas - responder directamente
+        const preguntaPorMascotas =
+          msgLower.includes('mascota') ||
+          msgLower.includes('perro') ||
+          msgLower.includes('gato') ||
+          msgLower.includes('pet');
+
+        if (preguntaPorMascotas) {
+          const respLower = response.toLowerCase();
+          if (!respLower.includes('mascota') && !respLower.includes('pet') && !respLower.includes('perro')) {
+            response = `¡Sí, aceptamos mascotas! 🐕
+
+Casi todos nuestros desarrollos son pet-friendly:
+• Monte Verde ✅
+• Los Encinos ✅
+• Miravalle ✅
+• Andes ✅ (además tiene alberca 🏊)
+
+⚠️ Solo Distrito Falco NO permite mascotas.
+
+¿Qué tipo de mascota tienes? ¿Te gustaría conocer alguno de estos desarrollos?`;
+          }
+        }
+
+        // Post-procesamiento: "No me interesa" - NO ofrecer cita
+        const diceNoInteresa =
+          msgLower.includes('no me interesa') ||
+          msgLower.includes('no gracias') ||
+          msgLower.includes('no thank');
+
+        if (diceNoInteresa) {
+          const respLower = response.toLowerCase();
+          if (respLower.includes('sábado o domingo') || respLower.includes('sabado o domingo') ||
+              respLower.includes('agendar') || respLower.includes('visita')) {
+            response = `¡Entendido! Solo una pregunta rápida: ¿ya tienes casa propia o rentas actualmente?
+
+Es que muchos clientes que rentaban se dieron cuenta que con lo de la renta pueden pagar su propia casa 🏠
+
+Si quieres, te muestro cómo funciona sin compromiso.`;
+          }
+        }
+
         return corsResponse(JSON.stringify({
           ok: true,
           pregunta: msg,
