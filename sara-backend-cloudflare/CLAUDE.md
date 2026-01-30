@@ -1734,3 +1734,56 @@ Body: { phone, delivery_date?, purchase_date?, status_changed_at? }
 
 **Commit:** `629a5111`
 **Deploy:** Version ID `a386f140-5942-4696-b13e-b5239451a52c`
+
+---
+
+### 2026-01-30 (Sesión 11) - Análisis Completo de Templates y Respuestas
+
+**Auditoría de todos los templates que SARA envía y cómo maneja las respuestas:**
+
+#### Templates CON handler específico ✅
+
+| Template | Handler | Ubicación | Qué hace |
+|----------|---------|-----------|----------|
+| `appointment_confirmation` | ✅ | `whatsapp.ts:777-815` | Detecta "sí/confirmo" vs "no/cambiar" |
+| `info_credito` | ✅ | `whatsapp.ts:818-939` | Detecta interés, agenda llamada con asesor |
+| `reagendar_noshow` | ✅ | `whatsapp.ts:11305-11348` | Notifica vendedor, responde al lead |
+| Encuestas NPS/post_cita | ✅ | `whatsapp.ts:11370+` | Procesa calificación 1-4 o 0-10 |
+
+#### Templates CON contexto para SARA ✅
+
+| Template | Contexto | Ubicación |
+|----------|----------|-----------|
+| `promo_desarrollo` | `broadcastContext` | `leadMessageService.ts:794-883` |
+| `recordatorio_cita_*` | `citaExistenteInfo` | `aiConversationService.ts:152-161` |
+| `seguimiento_lead` | Historial | `whatsapp.ts:942-945` |
+
+#### Templates CON pending states ✅
+
+| Template | Pending State | Handler |
+|----------|---------------|---------|
+| `feliz_cumple` | `pending_birthday_response` | `leadMessageService.ts:661-700` |
+| Aniversario | `Aniversario YYYY` | `leadMessageService.ts:707-729` |
+| `referidos_postventa` | Regex detección | `leadMessageService.ts:736-788` |
+
+#### Flujos verificados:
+
+**Promociones:**
+```
+1. promo_desarrollo enviado → last_broadcast guardado
+2. Lead responde → checkBroadcastResponse() detecta
+3. broadcastContext pasado a SARA
+4. SARA responde con contexto de la promoción ✅
+```
+
+**Reagendar (no-show):**
+```
+1. reagendar_noshow enviado → pending_noshow_response guardado
+2. Lead responde → handler línea 11305 detecta
+3. Vendedor notificado: "María respondió: [mensaje]"
+4. Lead recibe: "¡Gracias! Tu asesor te contactará..." ✅
+```
+
+**Conclusión:** Todos los 13 templates tienen handlers o contexto adecuado.
+
+**Tests:** 351/351 pasando ✅
