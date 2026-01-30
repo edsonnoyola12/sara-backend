@@ -4298,7 +4298,8 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
     // API Routes - Dashboard
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/api/dashboard/kpis' && request.method === 'GET') {
-      const { data: leads } = await supabase.client.from('leads').select('*');
+      // OPTIMIZADO: Solo seleccionar campo 'status' en lugar de '*'
+      const { data: leads } = await supabase.client.from('leads').select('status');
       const kpis = {
         total: leads?.length || 0,
         new: leads?.filter((l: any) => l.status === 'new').length || 0,
@@ -4464,14 +4465,15 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
       ayer.setDate(ayer.getDate() - 1);
       const inicioAyer = new Date(ayer.getFullYear(), ayer.getMonth(), ayer.getDate()).toISOString();
 
-      const { data: leadsAyer } = await supabase.client.from('leads').select('*').gte('created_at', inicioAyer).lt('created_at', inicioHoy);
-      const { data: leadsHoy } = await supabase.client.from('leads').select('*').gte('created_at', inicioHoy);
-      const { data: cierresAyer } = await supabase.client.from('leads').select('*').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioAyer).lt('status_changed_at', inicioHoy);
+      // OPTIMIZADO: Seleccionar solo campos necesarios
+      const { data: leadsAyer } = await supabase.client.from('leads').select('id, name, source, status').gte('created_at', inicioAyer).lt('created_at', inicioHoy);
+      const { data: leadsHoy } = await supabase.client.from('leads').select('id').gte('created_at', inicioHoy);
+      const { data: cierresAyer } = await supabase.client.from('leads').select('id').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioAyer).lt('status_changed_at', inicioHoy);
       const hoyStr = hoy.toISOString().split('T')[0];
-      const { data: citasHoy } = await supabase.client.from('appointments').select('*, leads(name, phone)').eq('scheduled_date', hoyStr);
-      const { data: leadsHot } = await supabase.client.from('leads').select('*').in('status', ['negotiation', 'reserved']);
+      const { data: citasHoy } = await supabase.client.from('appointments').select('id, scheduled_time, status, property_interest, lead_name, leads(name, phone)').eq('scheduled_date', hoyStr);
+      const { data: leadsHot } = await supabase.client.from('leads').select('id, name, status, phone').in('status', ['negotiation', 'reserved']);
       const limiteFrio = new Date(hoy); limiteFrio.setDate(limiteFrio.getDate() - 1);
-      const { data: estancados } = await supabase.client.from('leads').select('*').eq('status', 'new').lt('created_at', limiteFrio.toISOString());
+      const { data: estancados } = await supabase.client.from('leads').select('id, name, created_at, phone').eq('status', 'new').lt('created_at', limiteFrio.toISOString());
 
       return corsResponse(JSON.stringify({
         fecha: hoyStr,
