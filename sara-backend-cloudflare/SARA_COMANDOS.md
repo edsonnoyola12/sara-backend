@@ -2646,3 +2646,20 @@ SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
 **Archivos:** `aiConversationService.ts`, `index.ts`
 
 **Deploy:** Version ID `934ff302-8954-4bcc-9a98-b10e46e44a81`
+
+### 2026-01-29 (Sesión 7 - Parte 5) - Respetar No Contacto
+
+**Problema:** SARA ignoraba peticiones de no contacto y seguía vendiendo.
+
+**Casos corregidos:**
+
+| Mensaje | Antes | Ahora |
+|---------|-------|-------|
+| "ya no me escribas" | Vendía | "Respeto tu decisión" ✅ |
+| "dejame en paz" | Preguntaba | "Respeto tu decisión" ✅ |
+| "numero equivocado" | Vendía | "Disculpa la confusión" ✅ |
+
+**25+ edge-cases probados:** competencia, objeciones, ubicación, especificaciones, financiamiento, mascotas, terrenos, personalización, inglés, USA.
+
+**Commit:** `5f6aca3e`
+**Deploy:** Version ID `c24bd307-931d-47e1-9d8b-e5a25c31941a`

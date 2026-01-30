@@ -1135,3 +1135,40 @@ Post-procesamiento inteligente: Detecta mensaje en inglés, si Claude respondió
 | "What is the price of Monte Verde" | "$1,500,000 MXN (~$88,000 USD)" ✅ |
 
 **Deploy:** Version ID `934ff302-8954-4bcc-9a98-b10e46e44a81`
+
+---
+
+### 2026-01-29 (Sesión 7 - Parte 5) - Respetar Peticiones de No Contacto
+
+**Problema detectado en edge-case testing:**
+SARA ignoraba peticiones de no contacto y seguía vendiendo.
+
+**Casos corregidos:**
+
+| Mensaje | Antes | Ahora |
+|---------|-------|-------|
+| "ya no me escribas" | Seguía vendiendo | "Respeto tu decisión..." ✅ |
+| "dejame en paz" | Seguía preguntando | "Respeto tu decisión..." ✅ |
+| "no me contactes" | Insistía | "Respeto tu decisión..." ✅ |
+| "numero equivocado" | Intentaba vender | "Disculpa la confusión..." ✅ |
+
+**Correcciones aplicadas:**
+
+1. **Instrucciones en prompt:**
+```
+⚠️ CRÍTICO: Si el cliente dice "ya no me escribas", "dejame en paz", "stop":
+📝 RESPUESTA: "Entendido, respeto tu decisión. Si en el futuro te interesa buscar casa, aquí estaré. ¡Excelente día! 👋"
+```
+
+2. **Post-procesamiento:**
+- Detecta frases de no contacto
+- Si SARA sigue vendiendo → fuerza respuesta de respeto
+- Marca intent como "despedida"
+
+**25+ edge-cases probados exitosamente:**
+- No contacto, errores, competencia, objeciones, ubicación
+- Especificaciones, financiamiento, mascotas, terrenos
+- Local comercial, personalización, idioma inglés, USA
+
+**Commit:** `5f6aca3e`
+**Deploy:** Version ID `c24bd307-931d-47e1-9d8b-e5a25c31941a`
