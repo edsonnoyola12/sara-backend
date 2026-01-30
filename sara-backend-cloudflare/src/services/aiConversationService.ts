@@ -591,6 +591,29 @@ Casas listas para mudarte YA:
 Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte hoy mismo."
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
+🚫🚫🚫 RESPETAR PETICIONES DE NO CONTACTO 🚫🚫🚫
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ CRÍTICO: Si el cliente dice alguna de estas frases, RESPETA SU DECISIÓN:
+- "ya no me escribas"
+- "dejame en paz"
+- "no me contactes"
+- "borra mi número"
+- "no quiero que me escriban"
+- "stop"
+
+📝 RESPUESTA OBLIGATORIA (no intentes vender más):
+"Entendido, respeto tu decisión. Si en el futuro te interesa buscar casa, aquí estaré para ayudarte. ¡Que tengas excelente día! 👋"
+
+🚫 NUNCA hagas esto si piden que no les escribas:
+- Seguir vendiendo o haciendo preguntas
+- Insistir con "solo una pregunta más"
+- Ignorar su petición
+
+📌 "NÚMERO EQUIVOCADO":
+Respuesta: "¡Disculpa la confusión! Este es el WhatsApp de Grupo Santa Rita, inmobiliaria en Zacatecas. Si conoces a alguien que busque casa, con gusto lo atiendo. ¡Que tengas buen día! 👋"
+
+━━━━━━━━━━━━━━━━━━━━━━━━
 🌐 IDIOMA INGLÉS
 ━━━━━━━━━━━━━━━━━━━━━━━━
 Si el cliente escribe en INGLÉS (hello, hi, I want, information, house, etc.):
@@ -2214,6 +2237,55 @@ Casas listas para mudarte YA:
 
 Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte hoy mismo.`;
           parsed.intent = 'solicitar_cita';
+        }
+      }
+
+      // ═══ CORRECCIÓN: Petición de NO CONTACTO ═══
+      const pideNoContacto =
+        msgLowerCallback.includes('no me escribas') ||
+        msgLowerCallback.includes('dejame en paz') ||
+        msgLowerCallback.includes('déjame en paz') ||
+        msgLowerCallback.includes('no me contactes') ||
+        msgLowerCallback.includes('borra mi numero') ||
+        msgLowerCallback.includes('no quiero que me escriban') ||
+        msgLowerCallback.includes('stop') ||
+        (msgLowerCallback.includes('ya no') && msgLowerCallback.includes('escrib'));
+
+      if (pideNoContacto && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        // Si SARA sigue vendiendo o haciendo preguntas
+        const sigueVendiendo =
+          respLower.includes('te gustaría') ||
+          respLower.includes('qué tipo') ||
+          respLower.includes('te muestro') ||
+          respLower.includes('recámaras') ||
+          respLower.includes('presupuesto') ||
+          respLower.includes('tienes casa');
+
+        if (sigueVendiendo || !respLower.includes('respeto')) {
+          console.log('⚠️ CORRIGIENDO: Cliente pidió no contacto - respetando decisión');
+          parsed.response = `Entendido, respeto tu decisión. Si en el futuro te interesa buscar casa, aquí estaré para ayudarte. ¡Que tengas excelente día! 👋`;
+          parsed.intent = 'despedida';
+          parsed.contactar_vendedor = false;
+        }
+      }
+
+      // ═══ CORRECCIÓN: Número equivocado ═══
+      const numeroEquivocado =
+        msgLowerCallback.includes('numero equivocado') ||
+        msgLowerCallback.includes('número equivocado') ||
+        msgLowerCallback.includes('me equivoqué de numero') ||
+        msgLowerCallback.includes('wrong number');
+
+      if (numeroEquivocado && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        // Si SARA intenta vender en lugar de disculparse
+        if (respLower.includes('tienes casa') || respLower.includes('buscas casa') ||
+            respLower.includes('coinc') || respLower.includes('te interesaría') ||
+            respLower.includes('casas que tenemos') || respLower.includes('qué tipo')) {
+          console.log('⚠️ CORRIGIENDO: Número equivocado - disculparse y cerrar');
+          parsed.response = `¡Disculpa la confusión! Este es el WhatsApp de Grupo Santa Rita, inmobiliaria en Zacatecas. Si conoces a alguien que busque casa, con gusto lo atiendo. ¡Que tengas buen día! 👋`;
+          parsed.intent = 'despedida';
         }
       }
 

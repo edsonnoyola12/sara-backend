@@ -1744,6 +1744,49 @@ To recommend the perfect option, what's your approximate budget? 💰`;
           }
         }
 
+        // Post-procesamiento: Petición de NO CONTACTO
+        const pideNoContacto =
+          msgLower.includes('no me escribas') ||
+          msgLower.includes('dejame en paz') ||
+          msgLower.includes('déjame en paz') ||
+          msgLower.includes('no me contactes') ||
+          msgLower.includes('borra mi numero') ||
+          msgLower.includes('no quiero que me escriban') ||
+          msgLower.includes('stop') ||
+          (msgLower.includes('ya no') && msgLower.includes('escrib'));
+
+        if (pideNoContacto) {
+          const respLower = response.toLowerCase();
+          const sigueVendiendo =
+            respLower.includes('te gustaría') ||
+            respLower.includes('qué tipo') ||
+            respLower.includes('te muestro') ||
+            respLower.includes('recámaras') ||
+            respLower.includes('presupuesto') ||
+            respLower.includes('tienes casa');
+
+          if (sigueVendiendo || !respLower.includes('respeto')) {
+            response = `Entendido, respeto tu decisión. Si en el futuro te interesa buscar casa, aquí estaré para ayudarte. ¡Que tengas excelente día! 👋`;
+          }
+        }
+
+        // Post-procesamiento: Número equivocado
+        const numeroEquivocado =
+          msgLower.includes('numero equivocado') ||
+          msgLower.includes('número equivocado') ||
+          msgLower.includes('me equivoqué de numero') ||
+          msgLower.includes('wrong number');
+
+        if (numeroEquivocado) {
+          const respLower = response.toLowerCase();
+          // Si intenta vender de cualquier forma
+          if (respLower.includes('tienes casa') || respLower.includes('buscas casa') ||
+              respLower.includes('coinc') || respLower.includes('te interesaría') ||
+              respLower.includes('casas que tenemos') || respLower.includes('qué tipo')) {
+            response = `¡Disculpa la confusión! Este es el WhatsApp de Grupo Santa Rita, inmobiliaria en Zacatecas. Si conoces a alguien que busque casa, con gusto lo atiendo. ¡Que tengas buen día! 👋`;
+          }
+        }
+
         return corsResponse(JSON.stringify({
           ok: true,
           pregunta: msg,
