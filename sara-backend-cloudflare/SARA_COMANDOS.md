@@ -39,7 +39,7 @@ npx wrangler tail --format=pretty
 - KV Cache separado
 - Mismos secrets que producción
 
-### Tests Automatizados (304 tests)
+### Tests Automatizados (351 tests)
 
 | Archivo | Tests | Qué protege |
 |---------|-------|-------------|
@@ -1520,7 +1520,7 @@ El archivo `index.ts` fue refactorizado de ~22,700 líneas a ~14,300 líneas (-3
 | 2 | `alerts.ts` | ~450 | Alertas leads fríos/calientes, cumpleaños |
 | 3 | `followups.ts` | ~800 | Follow-ups, nurturing, broadcasts |
 | 4 | `leadScoring.ts` | ~550 | Scoring, señales calientes, objeciones |
-| 4 | `nurturing.ts` | ~700 | Recuperación crédito, NPS, referidos |
+| 4 | `nurturing.ts` | ~1200 | Recuperación crédito, NPS, referidos, post-compra |
 | 5 | `maintenance.ts` | ~340 | Bridges, leads estancados, aniversarios |
 | 6 | `videos.ts` | ~710 | Videos Veo 3 personalizados |
 | 7 | `dashboard.ts` | ~700 | Status, analytics, health, backup |
@@ -2539,7 +2539,29 @@ SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
 | Reporte 7 PM | 7 PM | ✅ |
 | Alertas/Cumpleaños | Diario | ✅ |
 | Scoring leads | Diario | ✅ |
-| NPS/Encuestas | Semanal | ✅ |
+| NPS/Encuestas | Viernes 10am | ✅ |
+| Seguimiento post-entrega | Lun/Jue 10am | ✅ |
+| Satisfacción casa | Martes 11am | ✅ |
+| Check-in mantenimiento | Sábado 10am | ✅ |
+| Referidos | Miércoles 11am | ✅ |
+
+### 🏠 FLUJOS POST-COMPRA
+
+```
+delivered → 3-7 días: 🔑 Seguimiento entrega (llaves, escrituras, servicios)
+         → 30-90 días: 🤝 Referidos
+         → 3-6 meses: 🏡 Satisfacción casa (1-4)
+         → 7-30 días: 📊 NPS (0-10)
+         → ~1 año: 🔧 Mantenimiento
+         → Cada año: 🎉 Aniversario
+```
+
+**Endpoints manuales:**
+- `/run-post-entrega` - Seguimiento post-entrega
+- `/run-satisfaccion-casa` - Encuesta satisfacción
+- `/run-mantenimiento` - Check-in mantenimiento
+- `/run-referidos` - Solicitud de referidos
+- `/run-nps` - Encuestas NPS
 
 ### 🔒 FLUJOS DE NEGOCIO
 
@@ -2552,12 +2574,19 @@ SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
 | Videos Veo 3 personalizados | ✅ |
 | Ofertas/Cotizaciones ciclo completo | ✅ |
 | Funnel de ventas (new → delivered) | ✅ |
+| **Post-compra: Seguimiento entrega** | ✅ |
+| **Post-compra: Satisfacción casa** | ✅ |
+| **Post-compra: Check-in mantenimiento** | ✅ |
+| **Post-compra: Referidos** | ✅ |
+| **Post-compra: NPS** | ✅ |
+| **Post-compra: Aniversario** | ✅ |
 
 ### 🧪 TESTING
 
 | Categoría | Tests | Estado |
 |-----------|-------|--------|
-| Unit tests | 260 | ✅ |
+| Unit tests | 304 | ✅ |
+| Post-compra tests | 47 | ✅ |
 | E2E Lead Journey | 7 | ✅ |
 | E2E Vendor Journey | 5 | ✅ |
 | E2E CEO Journey | 5 | ✅ |

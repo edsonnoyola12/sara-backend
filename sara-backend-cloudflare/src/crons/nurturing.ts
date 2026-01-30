@@ -945,3 +945,625 @@ Status: ${lead.status}
   console.log(`📊 NPS procesado: ${lead.name} = ${score} (${categoria})`);
   return true;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// SEGUIMIENTO POST-ENTREGA
+// Verifica que todo esté bien después de recibir las llaves
+// ═══════════════════════════════════════════════════════════════
+export async function seguimientoPostEntrega(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace3dias = new Date(ahora.getTime() - 3 * 24 * 60 * 60 * 1000);
+    const hace7dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar clientes que:
+    // 1. Recibieron su casa hace 3-7 días (status: delivered)
+    // 2. No han recibido seguimiento post-entrega
+    const { data: clientes } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, property_interest, status_changed_at, assigned_to')
+      .eq('status', 'delivered')
+      .lt('status_changed_at', hace3dias.toISOString())
+      .gt('status_changed_at', hace7dias.toISOString())
+      .not('phone', 'is', null)
+      .limit(10);
+
+    if (!clientes || clientes.length === 0) {
+      console.log('🔑 No hay clientes para seguimiento post-entrega');
+      return;
+    }
+
+    // Filtrar los que no han recibido seguimiento
+    const clientesElegibles = clientes.filter(cliente => {
+      const notas = typeof cliente.notes === 'object' ? cliente.notes : {};
+      return !(notas as any)?.seguimiento_entrega_enviado;
+    });
+
+    if (clientesElegibles.length === 0) {
+      console.log('🔑 Todos los clientes ya tienen seguimiento post-entrega');
+      return;
+    }
+
+    console.log(`🔑 Clientes para seguimiento post-entrega: ${clientesElegibles.length}`);
+
+    let enviados = 0;
+    const maxEnvios = 5;
+
+    for (const cliente of clientesElegibles) {
+      if (enviados >= maxEnvios) break;
+
+      const notas = typeof cliente.notes === 'object' ? cliente.notes : {};
+      const nombre = cliente.name?.split(' ')[0] || 'vecino';
+      const desarrollo = cliente.property_interest || 'tu nuevo hogar';
+
+      const mensaje = `¡Hola ${nombre}! 🏠🔑
+
+¡Felicidades por tu nueva casa en ${desarrollo}!
+
+Queremos asegurarnos de que todo esté perfecto. Por favor, confirma:
+
+1️⃣ ¿Recibiste todas las llaves correctamente?
+2️⃣ ¿Las escrituras están en orden?
+3️⃣ ¿Todos los servicios (agua, luz, gas) funcionan bien?
+
+Si hay algo pendiente o algún detalle por resolver, responde y te ayudamos de inmediato.
+
+¡Bienvenido a la familia Santa Rita! 🎉`;
+
+      try {
+        await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+        enviados++;
+        console.log(`🔑 Seguimiento post-entrega enviado a: ${cliente.name}`);
+
+        // Marcar como enviado
+        const notasActualizadas = {
+          ...notas,
+          seguimiento_entrega_enviado: hoyStr,
+          esperando_respuesta_entrega: true
+        };
+
+        await supabase.client
+          .from('leads')
+          .update({ notes: notasActualizadas })
+          .eq('id', cliente.id);
+
+        // Notificar al vendedor
+        if (cliente.assigned_to) {
+          const { data: vendedor } = await supabase.client
+            .from('team_members')
+            .select('name, phone')
+            .eq('id', cliente.assigned_to)
+            .single();
+
+          if (vendedor?.phone) {
+            await meta.sendWhatsAppMessage(vendedor.phone,
+              `🔑 *Seguimiento post-entrega enviado*
+
+Cliente: ${cliente.name}
+Casa: ${desarrollo}
+
+💡 Si responde con algún problema, atiéndelo de inmediato.`);
+          }
+        }
+
+        await new Promise(r => setTimeout(r, 2000));
+
+      } catch (err) {
+        console.error(`Error enviando seguimiento post-entrega a ${cliente.name}:`, err);
+      }
+    }
+
+    console.log(`🔑 Seguimiento post-entrega completado: ${enviados} mensajes enviados`);
+
+  } catch (e) {
+    console.error('Error en seguimientoPostEntrega:', e);
+  }
+}
+
+// Procesar respuesta de seguimiento post-entrega
+export async function procesarRespuestaEntrega(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  lead: any,
+  mensaje: string
+): Promise<boolean> {
+  const notas = typeof lead.notes === 'object' ? lead.notes : {};
+
+  // Verificar si estamos esperando respuesta de entrega
+  if (!(notas as any)?.esperando_respuesta_entrega) {
+    return false;
+  }
+
+  const nombre = lead.name?.split(' ')[0] || 'vecino';
+  const mensajeLower = mensaje.toLowerCase();
+
+  // Detectar si hay problemas
+  const palabrasProblema = ['no', 'falta', 'problema', 'pendiente', 'mal', 'error', 'todavía', 'aún', 'ayuda', 'revisar'];
+  const palabrasBien = ['sí', 'si', 'todo bien', 'perfecto', 'excelente', 'ok', 'listo', 'correcto', 'gracias'];
+
+  const hayProblema = palabrasProblema.some(p => mensajeLower.includes(p));
+  const todoBien = palabrasBien.some(p => mensajeLower.includes(p));
+
+  let respuesta: string;
+  let requiereAtencion = false;
+
+  if (hayProblema && !todoBien) {
+    respuesta = `Gracias por avisarnos, ${nombre}.
+
+Lamento que haya algún pendiente. Un asesor te contactará hoy mismo para resolverlo.
+
+¿Puedes darnos más detalles de qué necesitas? 📝`;
+    requiereAtencion = true;
+  } else {
+    respuesta = `¡Excelente, ${nombre}! 🎉
+
+Nos da mucho gusto que todo esté en orden.
+
+Recuerda que estamos aquí si necesitas algo. ¡Disfruta tu nuevo hogar! 🏠✨`;
+  }
+
+  await meta.sendWhatsAppMessage(lead.phone, respuesta);
+
+  // Actualizar notas
+  const notasActualizadas = {
+    ...notas,
+    esperando_respuesta_entrega: false,
+    respuesta_entrega: mensaje,
+    entrega_problema: requiereAtencion,
+    entrega_respondido: new Date().toISOString()
+  };
+
+  await supabase.client
+    .from('leads')
+    .update({ notes: notasActualizadas })
+    .eq('id', lead.id);
+
+  // Si hay problema, alertar al vendedor
+  if (requiereAtencion && lead.assigned_to) {
+    const { data: vendedor } = await supabase.client
+      .from('team_members')
+      .select('phone')
+      .eq('id', lead.assigned_to)
+      .single();
+
+    if (vendedor?.phone) {
+      await meta.sendWhatsAppMessage(vendedor.phone,
+        `🚨 *PROBLEMA POST-ENTREGA*
+
+Cliente: ${lead.name}
+📱 ${lead.phone}
+
+Mensaje: "${mensaje}"
+
+⚠️ Requiere atención inmediata.
+📞 bridge ${nombre}`);
+    }
+  }
+
+  console.log(`🔑 Respuesta entrega procesada: ${lead.name} - ${requiereAtencion ? 'CON PROBLEMA' : 'OK'}`);
+  return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ENCUESTA DE SATISFACCIÓN CON LA CASA
+// Pregunta cómo les va 3-6 meses después de la entrega
+// ═══════════════════════════════════════════════════════════════
+export async function encuestaSatisfaccionCasa(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace3meses = new Date(ahora.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const hace6meses = new Date(ahora.getTime() - 180 * 24 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar clientes que:
+    // 1. Recibieron su casa hace 3-6 meses (status: delivered)
+    // 2. No han recibido encuesta de satisfacción
+    const { data: clientes } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, property_interest, status_changed_at, assigned_to')
+      .eq('status', 'delivered')
+      .lt('status_changed_at', hace3meses.toISOString())
+      .gt('status_changed_at', hace6meses.toISOString())
+      .not('phone', 'is', null)
+      .limit(10);
+
+    if (!clientes || clientes.length === 0) {
+      console.log('🏡 No hay clientes para encuesta de satisfacción con la casa');
+      return;
+    }
+
+    // Filtrar los que no han recibido encuesta
+    const clientesElegibles = clientes.filter(cliente => {
+      const notas = typeof cliente.notes === 'object' ? cliente.notes : {};
+      return !(notas as any)?.encuesta_satisfaccion_casa_enviada;
+    });
+
+    if (clientesElegibles.length === 0) {
+      console.log('🏡 Todos los clientes ya tienen encuesta de satisfacción');
+      return;
+    }
+
+    console.log(`🏡 Clientes para encuesta de satisfacción: ${clientesElegibles.length}`);
+
+    let enviados = 0;
+    const maxEnvios = 5;
+
+    for (const cliente of clientesElegibles) {
+      if (enviados >= maxEnvios) break;
+
+      const notas = typeof cliente.notes === 'object' ? cliente.notes : {};
+      const nombre = cliente.name?.split(' ')[0] || 'vecino';
+      const desarrollo = cliente.property_interest || 'tu casa';
+
+      // Calcular meses desde entrega
+      const mesesDesdeEntrega = Math.floor(
+        (ahora.getTime() - new Date(cliente.status_changed_at).getTime()) / (1000 * 60 * 60 * 24 * 30)
+      );
+
+      const mensaje = `¡Hola ${nombre}! 🏠
+
+Ya llevas ${mesesDesdeEntrega} meses disfrutando tu casa en ${desarrollo}. ¡Qué rápido pasa el tiempo!
+
+Queremos saber cómo te ha ido:
+
+*¿Cómo calificarías tu satisfacción con tu casa?*
+
+1️⃣ Excelente - ¡Me encanta!
+2️⃣ Buena - Estoy contento
+3️⃣ Regular - Algunas cosas por mejorar
+4️⃣ Mala - Tengo problemas
+
+Tu opinión nos ayuda a mejorar 🙏`;
+
+      try {
+        await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+        enviados++;
+        console.log(`🏡 Encuesta de satisfacción enviada a: ${cliente.name} (${mesesDesdeEntrega} meses)`);
+
+        // Marcar como enviada
+        const notasActualizadas = {
+          ...notas,
+          encuesta_satisfaccion_casa_enviada: hoyStr,
+          meses_en_casa: mesesDesdeEntrega,
+          esperando_respuesta_satisfaccion_casa: true
+        };
+
+        await supabase.client
+          .from('leads')
+          .update({ notes: notasActualizadas })
+          .eq('id', cliente.id);
+
+        await new Promise(r => setTimeout(r, 2000));
+
+      } catch (err) {
+        console.error(`Error enviando encuesta de satisfacción a ${cliente.name}:`, err);
+      }
+    }
+
+    console.log(`🏡 Encuestas de satisfacción enviadas: ${enviados}`);
+
+  } catch (e) {
+    console.error('Error en encuestaSatisfaccionCasa:', e);
+  }
+}
+
+// Procesar respuesta de encuesta de satisfacción con la casa
+export async function procesarRespuestaSatisfaccionCasa(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  lead: any,
+  mensaje: string
+): Promise<boolean> {
+  const notas = typeof lead.notes === 'object' ? lead.notes : {};
+
+  // Verificar si estamos esperando respuesta
+  if (!(notas as any)?.esperando_respuesta_satisfaccion_casa) {
+    return false;
+  }
+
+  const nombre = lead.name?.split(' ')[0] || 'vecino';
+  const mensajeLower = mensaje.toLowerCase();
+
+  // Detectar calificación
+  let calificacion: number | null = null;
+  let categoria = '';
+
+  if (mensaje.includes('1') || mensajeLower.includes('excelente') || mensajeLower.includes('encanta')) {
+    calificacion = 1;
+    categoria = 'excelente';
+  } else if (mensaje.includes('2') || mensajeLower.includes('buena') || mensajeLower.includes('contento')) {
+    calificacion = 2;
+    categoria = 'buena';
+  } else if (mensaje.includes('3') || mensajeLower.includes('regular') || mensajeLower.includes('mejorar')) {
+    calificacion = 3;
+    categoria = 'regular';
+  } else if (mensaje.includes('4') || mensajeLower.includes('mala') || mensajeLower.includes('problema')) {
+    calificacion = 4;
+    categoria = 'mala';
+  }
+
+  if (!calificacion) {
+    return false; // No es una respuesta válida
+  }
+
+  let respuesta: string;
+  let requiereAtencion = false;
+
+  switch (calificacion) {
+    case 1:
+      respuesta = `¡Nos alegra muchísimo, ${nombre}! 🎉
+
+Es un placer saber que amas tu casa. Gracias por confiar en nosotros.
+
+¿Conoces a alguien que también busque su hogar ideal? ¡Con gusto lo atendemos! 🏠`;
+      break;
+    case 2:
+      respuesta = `¡Qué bueno saberlo, ${nombre}! 😊
+
+Nos da gusto que estés contento. Si hay algo que podamos mejorar, no dudes en decirnos.
+
+¡Gracias por ser parte de nuestra comunidad! 🏡`;
+      break;
+    case 3:
+      respuesta = `Gracias por tu honestidad, ${nombre}.
+
+Queremos que estés 100% satisfecho. ¿Podrías contarnos qué aspectos podemos mejorar?
+
+Un asesor te contactará para ayudarte. 🤝`;
+      requiereAtencion = true;
+      break;
+    case 4:
+      respuesta = `Lamentamos mucho escuchar eso, ${nombre}. 😔
+
+Tu satisfacción es nuestra prioridad. Por favor, cuéntanos qué ha pasado y un asesor te contactará HOY para resolver cualquier problema.
+
+Estamos para ayudarte. 🤝`;
+      requiereAtencion = true;
+      break;
+    default:
+      respuesta = `Gracias por tu respuesta, ${nombre}. Un asesor te contactará pronto.`;
+  }
+
+  await meta.sendWhatsAppMessage(lead.phone, respuesta);
+
+  // Actualizar notas
+  const notasActualizadas = {
+    ...notas,
+    esperando_respuesta_satisfaccion_casa: false,
+    satisfaccion_casa_calificacion: calificacion,
+    satisfaccion_casa_categoria: categoria,
+    satisfaccion_casa_respondido: new Date().toISOString(),
+    satisfaccion_casa_requiere_atencion: requiereAtencion
+  };
+
+  await supabase.client
+    .from('leads')
+    .update({ notes: notasActualizadas })
+    .eq('id', lead.id);
+
+  // Si requiere atención, alertar al vendedor
+  if (requiereAtencion && lead.assigned_to) {
+    const { data: vendedor } = await supabase.client
+      .from('team_members')
+      .select('phone')
+      .eq('id', lead.assigned_to)
+      .single();
+
+    if (vendedor?.phone) {
+      await meta.sendWhatsAppMessage(vendedor.phone,
+        `⚠️ *CLIENTE INSATISFECHO*
+
+Cliente: ${lead.name}
+Calificación: ${calificacion}/4 (${categoria})
+📱 ${lead.phone}
+
+Mensaje: "${mensaje}"
+
+🚨 Requiere seguimiento inmediato.
+📞 bridge ${nombre}`);
+    }
+  }
+
+  console.log(`🏡 Satisfacción casa procesada: ${lead.name} = ${calificacion} (${categoria})`);
+  return true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CHECK-IN DE MANTENIMIENTO
+// Recordatorio anual de mantenimiento preventivo
+// ═══════════════════════════════════════════════════════════════
+export async function checkInMantenimiento(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace11meses = new Date(ahora.getTime() - 330 * 24 * 60 * 60 * 1000);
+    const hace13meses = new Date(ahora.getTime() - 390 * 24 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+    const añoActual = ahora.getFullYear();
+
+    // Buscar clientes que:
+    // 1. Recibieron su casa hace ~1 año (11-13 meses)
+    // 2. No han recibido check-in de mantenimiento este año
+    const { data: clientes } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, property_interest, status_changed_at, assigned_to')
+      .eq('status', 'delivered')
+      .lt('status_changed_at', hace11meses.toISOString())
+      .gt('status_changed_at', hace13meses.toISOString())
+      .not('phone', 'is', null)
+      .limit(10);
+
+    if (!clientes || clientes.length === 0) {
+      console.log('🔧 No hay clientes para check-in de mantenimiento');
+      return;
+    }
+
+    // Filtrar los que no han recibido check-in este año
+    const clientesElegibles = clientes.filter(cliente => {
+      const notas = typeof cliente.notes === 'object' ? cliente.notes : {};
+      const ultimoCheckin = (notas as any)?.ultimo_checkin_mantenimiento;
+      if (ultimoCheckin && ultimoCheckin.startsWith(String(añoActual))) {
+        return false;
+      }
+      return true;
+    });
+
+    if (clientesElegibles.length === 0) {
+      console.log('🔧 Todos los clientes ya tienen check-in de mantenimiento');
+      return;
+    }
+
+    console.log(`🔧 Clientes para check-in de mantenimiento: ${clientesElegibles.length}`);
+
+    let enviados = 0;
+    const maxEnvios = 5;
+
+    for (const cliente of clientesElegibles) {
+      if (enviados >= maxEnvios) break;
+
+      const notas = typeof cliente.notes === 'object' ? cliente.notes : {};
+      const nombre = cliente.name?.split(' ')[0] || 'vecino';
+      const desarrollo = cliente.property_interest || 'tu casa';
+
+      // Calcular años desde entrega
+      const añosDesdeEntrega = Math.floor(
+        (ahora.getTime() - new Date(cliente.status_changed_at).getTime()) / (1000 * 60 * 60 * 24 * 365)
+      );
+
+      const mensaje = `¡Hola ${nombre}! 🏠🔧
+
+Ya cumples *${añosDesdeEntrega} año${añosDesdeEntrega > 1 ? 's' : ''}* en tu casa de ${desarrollo}. ¡Felicidades!
+
+Es buen momento para revisar el mantenimiento preventivo:
+
+✅ *Checklist recomendado:*
+• Impermeabilización del techo
+• Revisión de instalaciones eléctricas
+• Limpieza de cisternas y tinacos
+• Revisión de gas y calentador
+• Pintura exterior (si es necesaria)
+
+¿Todo bien con tu casa o necesitas alguna recomendación de proveedores de confianza?
+
+Responde *SÍ* si todo está bien o *AYUDA* si necesitas contactos de proveedores. 🤝`;
+
+      try {
+        await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+        enviados++;
+        console.log(`🔧 Check-in de mantenimiento enviado a: ${cliente.name} (${añosDesdeEntrega} años)`);
+
+        // Marcar como enviado
+        const notasActualizadas = {
+          ...notas,
+          ultimo_checkin_mantenimiento: hoyStr,
+          años_en_casa: añosDesdeEntrega,
+          esperando_respuesta_mantenimiento: true
+        };
+
+        await supabase.client
+          .from('leads')
+          .update({ notes: notasActualizadas })
+          .eq('id', cliente.id);
+
+        await new Promise(r => setTimeout(r, 2000));
+
+      } catch (err) {
+        console.error(`Error enviando check-in de mantenimiento a ${cliente.name}:`, err);
+      }
+    }
+
+    console.log(`🔧 Check-in de mantenimiento completado: ${enviados} mensajes enviados`);
+
+  } catch (e) {
+    console.error('Error en checkInMantenimiento:', e);
+  }
+}
+
+// Procesar respuesta de check-in de mantenimiento
+export async function procesarRespuestaMantenimiento(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  lead: any,
+  mensaje: string
+): Promise<boolean> {
+  const notas = typeof lead.notes === 'object' ? lead.notes : {};
+
+  // Verificar si estamos esperando respuesta
+  if (!(notas as any)?.esperando_respuesta_mantenimiento) {
+    return false;
+  }
+
+  const nombre = lead.name?.split(' ')[0] || 'vecino';
+  const mensajeLower = mensaje.toLowerCase();
+
+  let respuesta: string;
+  let necesitaProveedores = false;
+
+  if (mensajeLower.includes('ayuda') || mensajeLower.includes('proveedor') || mensajeLower.includes('contacto') || mensajeLower.includes('recomend')) {
+    necesitaProveedores = true;
+    respuesta = `¡Claro ${nombre}! 🤝
+
+Aquí te comparto proveedores de confianza que trabajan con nosotros:
+
+🔨 *Mantenimiento general:*
+Te enviaremos por WhatsApp una lista de proveedores verificados de tu zona.
+
+Un asesor te contactará en breve con las recomendaciones específicas para lo que necesitas.
+
+¿Qué tipo de servicio requieres? (impermeabilización, plomería, electricidad, pintura, etc.)`;
+  } else if (mensajeLower.includes('sí') || mensajeLower.includes('si') || mensajeLower.includes('bien') || mensajeLower.includes('todo ok')) {
+    respuesta = `¡Excelente ${nombre}! 🏠✨
+
+Nos da gusto saber que todo está en orden.
+
+Recuerda que el mantenimiento preventivo alarga la vida de tu inversión.
+
+¡Aquí estamos si necesitas algo! Saludos 👋`;
+  } else {
+    // Respuesta genérica
+    respuesta = `Gracias por tu respuesta, ${nombre}.
+
+¿Necesitas recomendación de algún proveedor para mantenimiento? Solo dinos qué servicio requieres y te ayudamos. 🔧`;
+    necesitaProveedores = true;
+  }
+
+  await meta.sendWhatsAppMessage(lead.phone, respuesta);
+
+  // Actualizar notas
+  const notasActualizadas = {
+    ...notas,
+    esperando_respuesta_mantenimiento: false,
+    respuesta_mantenimiento: mensaje,
+    necesita_proveedores: necesitaProveedores,
+    mantenimiento_respondido: new Date().toISOString()
+  };
+
+  await supabase.client
+    .from('leads')
+    .update({ notes: notasActualizadas })
+    .eq('id', lead.id);
+
+  // Si necesita proveedores, notificar al vendedor
+  if (necesitaProveedores && lead.assigned_to) {
+    const { data: vendedor } = await supabase.client
+      .from('team_members')
+      .select('phone')
+      .eq('id', lead.assigned_to)
+      .single();
+
+    if (vendedor?.phone) {
+      await meta.sendWhatsAppMessage(vendedor.phone,
+        `🔧 *CLIENTE NECESITA PROVEEDORES*
+
+Cliente: ${lead.name}
+📱 ${lead.phone}
+Mensaje: "${mensaje}"
+
+💡 Envíale lista de proveedores recomendados.
+📞 bridge ${nombre}`);
+    }
+  }
+
+  console.log(`🔧 Respuesta mantenimiento procesada: ${lead.name} - ${necesitaProveedores ? 'NECESITA PROVEEDORES' : 'OK'}`);
+  return true;
+}

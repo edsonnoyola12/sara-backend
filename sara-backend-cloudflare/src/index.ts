@@ -142,7 +142,13 @@ import {
   nurturingEducativo,
   solicitarReferidos,
   enviarEncuestaNPS,
-  procesarRespuestaNPS
+  procesarRespuestaNPS,
+  seguimientoPostEntrega,
+  procesarRespuestaEntrega,
+  encuestaSatisfaccionCasa,
+  procesarRespuestaSatisfaccionCasa,
+  checkInMantenimiento,
+  procesarRespuestaMantenimiento
 } from './crons/nurturing';
 
 // Maintenance - Bridge, followups, stagnant leads, anniversaries
@@ -6016,6 +6022,24 @@ Mensaje: ${mensaje}`;
                 if (npsProcessed) {
                   console.log(`📊 Respuesta NPS procesada para ${leadHot.name}`);
                 }
+
+                // Procesar respuesta de seguimiento post-entrega
+                const entregaProcessed = await procesarRespuestaEntrega(supabase, meta, leadHot, text);
+                if (entregaProcessed) {
+                  console.log(`🔑 Respuesta post-entrega procesada para ${leadHot.name}`);
+                }
+
+                // Procesar respuesta de satisfacción con la casa
+                const satisfaccionProcessed = await procesarRespuestaSatisfaccionCasa(supabase, meta, leadHot, text);
+                if (satisfaccionProcessed) {
+                  console.log(`🏡 Respuesta satisfacción casa procesada para ${leadHot.name}`);
+                }
+
+                // Procesar respuesta de mantenimiento
+                const mantenimientoProcessed = await procesarRespuestaMantenimiento(supabase, meta, leadHot, text);
+                if (mantenimientoProcessed) {
+                  console.log(`🔧 Respuesta mantenimiento procesada para ${leadHot.name}`);
+                }
               }
             } catch (hotErr) {
               console.error('Error en detección de leads calientes/objeciones:', hotErr);
@@ -6809,6 +6833,27 @@ Mensaje: ${mensaje}`;
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       await enviarEncuestaNPS(supabase, meta);
       return corsResponse(JSON.stringify({ message: 'Encuestas NPS enviadas.' }));
+    }
+
+    if (url.pathname === '/run-post-entrega') {
+      console.log('🔑 Forzando seguimiento post-entrega...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await seguimientoPostEntrega(supabase, meta);
+      return corsResponse(JSON.stringify({ message: 'Seguimiento post-entrega ejecutado.' }));
+    }
+
+    if (url.pathname === '/run-satisfaccion-casa') {
+      console.log('🏡 Forzando encuesta de satisfacción con la casa...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await encuestaSatisfaccionCasa(supabase, meta);
+      return corsResponse(JSON.stringify({ message: 'Encuestas de satisfacción con la casa enviadas.' }));
+    }
+
+    if (url.pathname === '/run-mantenimiento') {
+      console.log('🔧 Forzando check-in de mantenimiento...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await checkInMantenimiento(supabase, meta);
+      return corsResponse(JSON.stringify({ message: 'Check-in de mantenimiento ejecutado.' }));
     }
 
     if (url.pathname === '/test-objecion') {
@@ -16005,6 +16050,27 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
     if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek === 5) {
       console.log('📊 Enviando encuestas NPS...');
       await enviarEncuestaNPS(supabase, meta);
+    }
+
+    // SEGUIMIENTO POST-ENTREGA: Lunes y Jueves 10am
+    // Verificar que todo esté bien después de recibir las llaves (3-7 días post-entrega)
+    if (mexicoHour === 10 && isFirstRunOfHour && (dayOfWeek === 1 || dayOfWeek === 4)) {
+      console.log('🔑 Enviando seguimiento post-entrega...');
+      await seguimientoPostEntrega(supabase, meta);
+    }
+
+    // ENCUESTA SATISFACCIÓN CASA: Martes 11am
+    // Preguntar cómo les va 3-6 meses después de la entrega
+    if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek === 2) {
+      console.log('🏡 Enviando encuestas de satisfacción con la casa...');
+      await encuestaSatisfaccionCasa(supabase, meta);
+    }
+
+    // CHECK-IN MANTENIMIENTO: Sábado 10am
+    // Recordatorio anual de mantenimiento preventivo (~1 año post-entrega)
+    if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek === 6) {
+      console.log('🔧 Enviando check-in de mantenimiento...');
+      await checkInMantenimiento(supabase, meta);
     }
 
     // ═══════════════════════════════════════════════════════════

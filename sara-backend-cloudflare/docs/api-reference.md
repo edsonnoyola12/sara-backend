@@ -529,6 +529,70 @@ Estado de videos pendientes.
 
 ---
 
+## Flujos Post-Compra
+
+Endpoints para ejecutar manualmente los flujos automáticos de post-compra.
+
+### GET /run-post-entrega
+Ejecutar seguimiento post-entrega (3-7 días después de entrega).
+Verifica: llaves, escrituras, servicios.
+
+```json
+{
+  "message": "Seguimiento post-entrega ejecutado."
+}
+```
+
+### GET /run-satisfaccion-casa
+Ejecutar encuesta de satisfacción con la casa (3-6 meses post-entrega).
+Calificación: 1 (Excelente) - 4 (Mala).
+
+```json
+{
+  "message": "Encuestas de satisfacción con la casa enviadas."
+}
+```
+
+### GET /run-mantenimiento
+Ejecutar check-in de mantenimiento (~1 año post-entrega).
+Incluye checklist de mantenimiento preventivo.
+
+```json
+{
+  "message": "Check-in de mantenimiento ejecutado."
+}
+```
+
+### GET /run-referidos
+Solicitar referidos a clientes satisfechos (30-90 días post-compra).
+
+```json
+{
+  "message": "Solicitud de referidos ejecutada."
+}
+```
+
+### GET /run-nps
+Enviar encuestas NPS (7-30 días post-visita/compra).
+Escala: 0-10 (Detractor/Pasivo/Promotor).
+
+```json
+{
+  "message": "Encuestas NPS enviadas."
+}
+```
+
+### GET /run-nurturing
+Enviar contenido educativo sobre crédito y compra de casa.
+
+```json
+{
+  "message": "Nurturing educativo ejecutado."
+}
+```
+
+---
+
 ## Servicios Internos
 
 ### MetaWhatsAppService

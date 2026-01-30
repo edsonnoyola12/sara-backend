@@ -26,7 +26,7 @@
 # 1. Lee la documentación completa
 cat SARA_COMANDOS.md | head -500
 
-# 2. Verifica tests (OBLIGATORIO - 304 tests)
+# 2. Verifica tests (OBLIGATORIO - 351 tests)
 npm test
 
 # 3. Si falla algún test, NO hagas cambios
@@ -62,7 +62,7 @@ npm test
 | `src/crons/alerts.ts` | ~450 | Alertas de leads, cumpleaños |
 | `src/crons/followups.ts` | ~800 | Follow-ups, nurturing, broadcasts |
 | `src/crons/leadScoring.ts` | ~550 | Scoring, señales calientes, objeciones |
-| `src/crons/nurturing.ts` | ~700 | Recuperación crédito, NPS, referidos |
+| `src/crons/nurturing.ts` | ~1200 | Recuperación crédito, NPS, referidos, post-compra |
 | `src/crons/maintenance.ts` | ~340 | Bridges, leads estancados, aniversarios |
 | `src/crons/videos.ts` | ~710 | Videos Veo 3 personalizados |
 | `src/crons/dashboard.ts` | ~700 | Status, analytics, health, backup |
@@ -182,6 +182,43 @@ Si no hay ventana abierta → el mensaje NO LLEGA.
 - `pending_reporte_semanal` - Reporte lunes
 
 **Aplica a:** Leads, Vendedores, Coordinadores, Asesores, Marketing
+
+### 6. Flujos Post-Compra (Automáticos)
+```
+Cliente compra → sold/closed → delivered
+      ↓
+3-7 días    → 🔑 Seguimiento post-entrega (llaves, escrituras, servicios)
+      ↓
+30-90 días  → 🤝 Solicitud de referidos
+      ↓
+3-6 meses   → 🏡 Encuesta satisfacción casa (1-4)
+      ↓
+7-30 días   → 📊 Encuesta NPS (0-10)
+      ↓
+~1 año      → 🔧 Check-in mantenimiento
+      ↓
+Cada año    → 🎉 Felicitación aniversario
+```
+
+**Funciones en `src/crons/nurturing.ts`:**
+- `seguimientoPostEntrega()` - Verifica llaves, escrituras, servicios
+- `encuestaSatisfaccionCasa()` - Calificación 1-4 de satisfacción
+- `checkInMantenimiento()` - Recordatorio anual de mantenimiento
+- `solicitarReferidos()` - Pide referidos a clientes satisfechos
+- `enviarEncuestaNPS()` - Net Promoter Score 0-10
+
+**Procesamiento de respuestas:**
+- `procesarRespuestaEntrega()` - Detecta problemas post-entrega
+- `procesarRespuestaSatisfaccionCasa()` - Clasifica satisfacción
+- `procesarRespuestaMantenimiento()` - Conecta con proveedores
+- `procesarRespuestaNPS()` - Clasifica promotor/pasivo/detractor
+
+**Endpoints manuales:**
+- `/run-post-entrega` - Ejecutar seguimiento post-entrega
+- `/run-satisfaccion-casa` - Ejecutar encuesta satisfacción
+- `/run-mantenimiento` - Ejecutar check-in mantenimiento
+- `/run-referidos` - Ejecutar solicitud de referidos
+- `/run-nps` - Ejecutar encuestas NPS
 
 ---
 
@@ -902,7 +939,11 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Reporte 7 PM | 7 PM | ✅ |
 | Alertas/Cumpleaños | Diario | ✅ |
 | Scoring leads | Diario | ✅ |
-| NPS/Encuestas | Semanal | ✅ |
+| NPS/Encuestas | Viernes 10am | ✅ |
+| Seguimiento post-entrega | Lun/Jue 10am | ✅ |
+| Satisfacción casa | Martes 11am | ✅ |
+| Check-in mantenimiento | Sábado 10am | ✅ |
+| Referidos | Miércoles 11am | ✅ |
 
 ### 🔒 FLUJOS DE NEGOCIO
 
@@ -915,6 +956,12 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Videos Veo 3 personalizados | ✅ |
 | Ofertas/Cotizaciones ciclo completo | ✅ |
 | Funnel de ventas (new → delivered) | ✅ |
+| **Post-compra: Seguimiento entrega** | ✅ |
+| **Post-compra: Satisfacción casa** | ✅ |
+| **Post-compra: Check-in mantenimiento** | ✅ |
+| **Post-compra: Referidos** | ✅ |
+| **Post-compra: NPS** | ✅ |
+| **Post-compra: Aniversario** | ✅ |
 
 ### 🧪 TESTING
 
@@ -1564,3 +1611,55 @@ const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana',
 **Tests:** 291 → **304** (todos pasan)
 
 **Commit:** `2a36b614`
+
+---
+
+### 2026-01-30 (Sesión 9) - Flujos Post-Compra Completos
+
+**Nuevos flujos implementados en `src/crons/nurturing.ts`:**
+
+| Flujo | Trigger | Función |
+|-------|---------|---------|
+| **Seguimiento post-entrega** | 3-7 días post-delivered | `seguimientoPostEntrega()` |
+| **Encuesta satisfacción casa** | 3-6 meses post-delivered | `encuestaSatisfaccionCasa()` |
+| **Check-in mantenimiento** | ~1 año post-delivered | `checkInMantenimiento()` |
+
+**Procesadores de respuesta:**
+- `procesarRespuestaEntrega()` - Detecta problemas con llaves/escrituras/servicios
+- `procesarRespuestaSatisfaccionCasa()` - Clasifica satisfacción 1-4
+- `procesarRespuestaMantenimiento()` - Conecta con proveedores si necesita
+
+**Calendario de CRONs Post-Compra:**
+
+| Día | Hora | Flujo |
+|-----|------|-------|
+| Lunes | 10am | Seguimiento post-entrega |
+| Martes | 11am | Encuesta satisfacción casa |
+| Miércoles | 11am | Solicitud de referidos |
+| Jueves | 10am | Seguimiento post-entrega |
+| Viernes | 10am | Encuestas NPS |
+| Sábado | 10am | Check-in mantenimiento |
+
+**Endpoints manuales agregados:**
+- `/run-post-entrega` - Seguimiento post-entrega
+- `/run-satisfaccion-casa` - Encuesta satisfacción
+- `/run-mantenimiento` - Check-in mantenimiento
+
+**Flujo completo post-compra:**
+```
+delivered → 3-7 días: 🔑 Seguimiento entrega
+         → 30-90 días: 🤝 Referidos
+         → 3-6 meses: 🏡 Satisfacción casa
+         → 7-30 días: 📊 NPS
+         → ~1 año: 🔧 Mantenimiento
+         → Cada año: 🎉 Aniversario
+```
+
+**Archivos modificados:**
+- `src/crons/nurturing.ts` - 6 nuevas funciones (~500 líneas)
+- `src/index.ts` - Imports, CRONs, endpoints, procesadores de respuesta
+- `CLAUDE.md` - Documentación actualizada
+- `docs/api-reference.md` - Nuevos endpoints documentados
+
+**Tests:** 304/304 pasando ✅
+**Deploy:** Version ID `44701c5a-192b-4281-8881-e9af4764f4e6`
