@@ -537,6 +537,38 @@ curl -X POST "https://...?api_key=XXX" \
 }
 ```
 
+### GET /test-interactive-responses
+Probar extracción de mensajes interactivos (list_reply, button_reply).
+
+```bash
+curl "https://...?api_key=XXX"
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "summary": {
+    "total_tests": 3,
+    "passed": 3,
+    "failed": 0
+  },
+  "extraction_tests": [
+    {
+      "test": "Extracción list_reply",
+      "input": { "type": "interactive", "interactive": { "type": "list_reply", "list_reply": { "id": "2" } } },
+      "extracted": "2",
+      "passed": true
+    }
+  ],
+  "interactive_messages_catalog": [
+    { "nombre": "¿LLEGÓ? (No-show check)", "opciones": ["1 = Sí llegó", "2 = No llegó"] },
+    { "nombre": "Encuesta NPS", "opciones": ["0-10"] },
+    { "nombre": "Satisfacción casa", "opciones": ["1-4"] }
+  ]
+}
+```
+
 ---
 
 ## Endpoints de Debug

@@ -1787,3 +1787,8 @@ Body: { phone, delivery_date?, purchase_date?, status_changed_at? }
 **Conclusión:** Todos los 13 templates tienen handlers o contexto adecuado.
 
 **Tests:** 351/351 pasando ✅
+
+**Nuevo endpoint documentado:**
+- `/test-interactive-responses` - Verifica extracción de mensajes interactivos
+
+**Deploy:** Version ID `e4843ecf-ff9b-47bb-8a66-3ddd267772ca`
