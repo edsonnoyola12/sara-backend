@@ -2364,6 +2364,73 @@ Si quieres, te muestro cómo funciona sin compromiso.`;
         }
       }
 
+      // ═══ CORRECCIÓN: Preguntas sobre LOCAL COMERCIAL ═══
+      const preguntaLocalComercial =
+        msgLowerCallback.includes('local comercial') ||
+        msgLowerCallback.includes('local para negocio') ||
+        msgLowerCallback.includes('locales') ||
+        msgLowerCallback.includes('para negocio');
+
+      if (preguntaLocalComercial && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        // Si Claude dice que sí tenemos locales comerciales (incorrecto)
+        if (respLower.includes('sí tenemos locales') || respLower.includes('tenemos opciones de locales') ||
+            respLower.includes('local comercial desde')) {
+          console.log('⚠️ CORRIGIENDO: Claude dijo que tenemos locales - SOLO CASAS');
+          parsed.response = `En Grupo Santa Rita nos especializamos en casas habitación, no manejamos locales comerciales 🏠
+
+Pero si buscas casa para tu familia, tenemos excelentes opciones desde $1.5M en zonas con muy buena plusvalía.
+
+¿Te interesa que te cuente sobre nuestros desarrollos?`;
+        }
+      }
+
+      // ═══ CORRECCIÓN: Menciona competencia - NO criticar ═══
+      const mencionaCompetencia =
+        msgLowerCallback.includes('frondoso') ||
+        msgLowerCallback.includes('vinte') ||
+        msgLowerCallback.includes('javer') ||
+        msgLowerCallback.includes('ara') ||
+        msgLowerCallback.includes('otra inmobiliaria');
+
+      if (mencionaCompetencia && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        // Si Claude critica la competencia (incorrecto)
+        if (respLower.includes('no son tan buenos') || respLower.includes('mejor que ellos') ||
+            respLower.includes('problemas con') || respLower.includes('mala calidad')) {
+          console.log('⚠️ CORRIGIENDO: Claude criticó competencia - ser profesional');
+          parsed.response = `¡Qué bueno que estés comparando opciones! Es la mejor forma de tomar una decisión informada 👍
+
+En Santa Rita nos enfocamos en la calidad de construcción y en darte un servicio cercano. Más de 50 años en Zacatecas nos respaldan.
+
+¿Te gustaría conocer nuestros desarrollos para que puedas comparar personalmente?`;
+        }
+      }
+
+      // ═══ CORRECCIÓN: Horarios de atención ═══
+      const preguntaHorarios =
+        msgLowerCallback.includes('horario') ||
+        msgLowerCallback.includes('a qué hora abren') ||
+        msgLowerCallback.includes('qué hora cierran') ||
+        msgLowerCallback.includes('estan abiertos');
+
+      if (preguntaHorarios && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        // Si no incluye horarios específicos
+        if (!respLower.includes('9') && !respLower.includes('lunes') && !respLower.includes('horario')) {
+          console.log('⚠️ CORRIGIENDO: Preguntó horarios - agregar info');
+          parsed.response = `¡Claro! Nuestros horarios de atención son:
+
+📅 Lunes a Viernes: 9:00 AM - 7:00 PM
+📅 Sábados: 9:00 AM - 3:00 PM
+📅 Domingos: Citas previa agenda
+
+Por WhatsApp te atiendo 24/7 🙌
+
+¿Te gustaría agendar una visita?`;
+        }
+      }
+
       return {
         intent: parsed.intent || 'otro',
         secondary_intents: secondaryIntents,
