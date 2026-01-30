@@ -1,16 +1,46 @@
 # API Reference - SARA Backend
 
+> **Base URL:** `https://sara-backend.edson-633.workers.dev`
+> **Última actualización:** 2026-01-30
+
+---
+
+## Índice
+
+1. [Autenticación](#autenticación)
+2. [Endpoints Públicos](#endpoints-públicos)
+3. [Leads](#leads)
+4. [Citas (Appointments)](#citas-appointments)
+5. [Propiedades](#propiedades)
+6. [Créditos Hipotecarios](#créditos-hipotecarios)
+7. [Dashboard y Reportes](#dashboard-y-reportes)
+8. [Webhooks](#webhooks)
+9. [Calendario](#calendario)
+10. [Templates WhatsApp](#templates-whatsapp)
+11. [Testing y Debug](#testing-y-debug)
+12. [Sistema](#sistema)
+13. [Servicios Internos](#servicios-internos)
+
+---
+
 ## Autenticación
 
-Todos los endpoints (excepto `/webhook`, `/health`, `/`) requieren autenticación.
+Todos los endpoints `/api/*` y `/test-*` requieren autenticación.
 
 ```bash
-# Header
+# Header (recomendado)
 Authorization: Bearer <API_SECRET>
 
 # O query param
 ?api_key=<API_SECRET>
 ```
+
+### Endpoints que NO requieren auth:
+- `/webhook/*` - Webhooks (usan sus propios tokens)
+- `/health` - Health check
+- `/status` - Dashboard HTML
+- `/analytics` - Analytics HTML
+- `/api/properties` - Catálogo público
 
 ---
 
@@ -125,12 +155,274 @@ Dashboard del equipo (resumen).
 
 ---
 
+## Leads
+
+### POST /api/leads
+Crear nuevo lead.
+
+```json
+{
+  "name": "Juan Pérez",
+  "phone": "5214921234567",
+  "property_interest": "Monte Verde",
+  "source": "facebook"
+}
+```
+
+### GET /api/leads/:id
+Obtener lead por ID.
+
+### PUT /api/leads/:id
+Actualizar lead.
+
+```json
+{
+  "status": "contacted",
+  "notes": "Cliente interesado"
+}
+```
+
+### DELETE /api/leads/:id
+Eliminar lead.
+
+### POST /api/recalculate-scores
+Recalcular scores de todos los leads.
+
+### POST /api/leads/notify-note
+Notificar nota agregada desde CRM.
+
+```json
+{
+  "leadId": "uuid",
+  "note": "Texto de la nota",
+  "author": "Nombre"
+}
+```
+
+### POST /api/leads/notify-reassign
+Notificar reasignación de lead.
+
+```json
+{
+  "leadId": "uuid",
+  "newVendorId": "uuid",
+  "oldVendorId": "uuid"
+}
+```
+
+---
+
+## Citas (Appointments)
+
+### GET /api/appointments
+Listar citas.
+
+**Query params:**
+| Param | Descripción |
+|-------|-------------|
+| `start_date` | Fecha inicio (YYYY-MM-DD) |
+| `end_date` | Fecha fin (YYYY-MM-DD) |
+| `vendor_id` | Filtrar por vendedor |
+
+### POST /api/appointments
+Crear cita.
+
+```json
+{
+  "lead_id": "uuid",
+  "scheduled_date": "2026-02-01",
+  "scheduled_time": "11:00",
+  "appointment_type": "visita",
+  "development": "Monte Verde"
+}
+```
+
+### PUT /api/appointments/:id
+Actualizar cita.
+
+### POST /api/appointments/:id/cancel
+Cancelar cita.
+
+```json
+{
+  "reason": "Cliente no disponible"
+}
+```
+
+### POST /api/appointments/notify-change
+Notificar cambio de cita al lead.
+
+---
+
+## Créditos Hipotecarios
+
+### GET /api/mortgages
+### GET /api/mortgage_applications
+Listar solicitudes de crédito.
+
+### GET /api/mortgages/:id
+Obtener solicitud.
+
+### PUT /api/mortgages/:id
+Actualizar solicitud.
+
+```json
+{
+  "status": "pre_approved",
+  "bank": "BBVA",
+  "approved_amount": 2500000
+}
+```
+
+---
+
+## Dashboard y Reportes
+
+### GET /api/dashboard/kpis
+KPIs del dashboard.
+
+```json
+{
+  "leads_today": 15,
+  "appointments_today": 5,
+  "conversion_rate": 0.23
+}
+```
+
+### GET /api/reportes/diario
+Reporte diario.
+
+### GET /api/reportes/semanal
+Reporte semanal.
+
+### GET /api/reportes/mensual
+Reporte mensual.
+
+### POST /api/reportes/ask
+Consulta con IA.
+
+```json
+{
+  "question": "¿Cuántos leads nuevos esta semana?"
+}
+```
+
+### POST /api/dashboard/ask
+Consulta dashboard con IA.
+
+---
+
+## Webhooks
+
+### GET/POST /webhook/meta
+Webhook de Meta WhatsApp Business.
+- GET: Verificación con `hub.verify_token=sara_verify_token`
+- POST: Recibe mensajes
+
+### GET/POST /webhook/facebook-leads
+Webhook de Facebook Lead Ads.
+- GET: Verificación con `hub.verify_token=sara_fb_leads_token`
+- POST: Recibe leads
+
+### POST /webhook/google-calendar
+Webhook de Google Calendar.
+
+---
+
+## Calendario
+
+### POST /api/events
+Crear evento en Google Calendar.
+
+### GET /api/events
+Listar eventos.
+
+### POST /api/events/invite
+Enviar invitación.
+
+### POST /api/calendar/cleanup
+Limpiar eventos duplicados.
+
+### POST /api/calendar/setup-webhook
+Configurar webhook.
+
+---
+
+## Templates WhatsApp
+
+### GET /api/templates
+Listar templates.
+
+### POST /api/create-all-templates
+Crear todos los templates.
+
+### POST /api/send-template
+Enviar template.
+
+```json
+{
+  "phone": "5214921234567",
+  "template": "bienvenida",
+  "params": ["Juan"]
+}
+```
+
+---
+
+## Sistema
+
+### POST /api/emergency-stop
+Detener broadcasts y CRONs.
+
+### POST /api/broadcasts-enable
+Habilitar broadcasts.
+
+### GET /api/system-status
+Estado del sistema.
+
+### GET /api/diagnostico
+Diagnóstico completo.
+
+---
+
 ## Endpoints de Testing
+
+> ⚠️ **Todos requieren API key**
+
+### GET /test-ai-response
+Probar respuesta de SARA sin enviar WhatsApp.
+
+```bash
+curl "https://...?msg=Hola&api_key=XXX"
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "pregunta": "Hola",
+  "respuesta_sara": "¡Hola! Soy SARA...",
+  "tiempo_ms": 3015
+}
+```
+
+### GET /test-lead
+Simular flujo completo como lead (SÍ envía WhatsApp).
+
+```bash
+curl "https://...?phone=5214921234567&name=Test&msg=Hola&api_key=XXX"
+```
+
+### GET /test-vendedor-msg
+Simular comando de vendedor/CEO.
+
+```bash
+curl "https://...?phone=5214921234567&msg=briefing&api_key=XXX"
+```
 
 ### GET /test-real?test=X
 Ejecutar tests de funcionalidad.
 
-**Tests disponibles:**
 | Test | Descripción |
 |------|-------------|
 | `mensaje` | Envía mensaje de prueba |
@@ -141,12 +433,19 @@ Ejecutar tests de funcionalidad.
 | `video` | Genera video de prueba |
 | `recap` | Envía recap 7pm |
 | `followup` | Simula follow-up pendiente |
-| `setup-dashboard` | Configura datos del dashboard |
 | `all` | Ejecuta todos los tests |
 
-```bash
-curl "https://sara-backend.edson-633.workers.dev/test-real?test=mensaje&api_key=XXX"
-```
+### GET /test-cron
+Ejecutar CRONs manualmente.
+
+### GET /test-briefing
+Probar briefing matutino.
+
+### GET /test-comando-ceo
+Probar comando de CEO.
+
+### GET /test-comando-vendedor
+Probar comando de vendedor.
 
 ---
 
