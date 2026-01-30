@@ -14984,6 +14984,13 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
         { name: 'Videos pendientes', hora: 'c/2min', dias: 'Siempre' },
         { name: 'Remarketing fríos', hora: '8:00', dias: 'Miércoles' },
         { name: 'Seguimiento hipotecas', hora: '8:00', dias: 'Mar/Jue' },
+        // POST-COMPRA
+        { name: '🔑 Seguimiento post-entrega', hora: '10:00', dias: 'Lun/Jue', desc: '3-7 días después de entrega' },
+        { name: '🏡 Satisfacción casa', hora: '11:00', dias: 'Martes', desc: '3-6 meses post-entrega' },
+        { name: '🔧 Check-in mantenimiento', hora: '10:00', dias: 'Sábado', desc: '~1 año post-entrega' },
+        { name: '🤝 Solicitud referidos', hora: '11:00', dias: 'Miércoles', desc: '30-90 días post-venta' },
+        { name: '📊 Encuestas NPS', hora: '10:00', dias: 'Viernes', desc: '7-30 días post-visita/compra' },
+        { name: '🎉 Aniversarios compra', hora: '9:00', dias: 'L-V', desc: 'Cada año' },
       ];
 
       return corsResponse(JSON.stringify({
@@ -15003,6 +15010,11 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
           '/test-video-semanal',
           '/test-remarketing',
           '/test-hipotecas',
+          '/run-post-entrega',
+          '/run-satisfaccion-casa',
+          '/run-mantenimiento',
+          '/run-referidos',
+          '/run-nps',
           '/health',
           '/backup',
           '/ab-results'

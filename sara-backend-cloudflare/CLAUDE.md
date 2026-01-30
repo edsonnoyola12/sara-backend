@@ -184,21 +184,52 @@ Si no hay ventana abierta → el mensaje NO LLEGA.
 **Aplica a:** Leads, Vendedores, Coordinadores, Asesores, Marketing
 
 ### 6. Flujos Post-Compra (Automáticos)
+
+**Timeline del Customer Journey Post-Compra:**
 ```
-Cliente compra → sold/closed → delivered
-      ↓
-3-7 días    → 🔑 Seguimiento post-entrega (llaves, escrituras, servicios)
-      ↓
-30-90 días  → 🤝 Solicitud de referidos
-      ↓
-3-6 meses   → 🏡 Encuesta satisfacción casa (1-4)
-      ↓
-7-30 días   → 📊 Encuesta NPS (0-10)
-      ↓
-~1 año      → 🔧 Check-in mantenimiento
-      ↓
-Cada año    → 🎉 Felicitación aniversario
+ COMPRA                    ENTREGA                         1 AÑO
+   │                          │                              │
+   ▼                          ▼                              ▼
+═══●══════════════════════════●══════════════════════════════●═══
+   │                          │                              │
+   │  ┌─────────────────────┐ │  ┌─────────────────────┐    │
+   │  │ 7-30 días          │ │  │ 3-7 días            │    │
+   │  │ 📊 NPS (0-10)      │ │  │ 🔑 Post-entrega     │    │
+   │  │ Viernes 10am       │ │  │ Lun/Jue 10am        │    │
+   │  └─────────────────────┘ │  └─────────────────────┘    │
+   │                          │                              │
+   │  ┌─────────────────────┐ │  ┌─────────────────────┐    │
+   │  │ 30-90 días         │ │  │ 3-6 meses           │    │
+   │  │ 🤝 Referidos       │ │  │ 🏡 Satisfacción     │    │
+   │  │ Miércoles 11am     │ │  │ Martes 11am         │    │
+   │  └─────────────────────┘ │  └─────────────────────┘    │
+   │                          │                              │
+   │                          │  ┌─────────────────────┐    │
+   │                          │  │ ~1 año              │    │
+   │                          │  │ 🔧 Mantenimiento    │    │
+   │                          │  │ Sábado 10am         │    │
+   │                          │  └─────────────────────┘    │
+   │                          │                              │
+   │                          │  ┌─────────────────────┐    │
+   │                          │  │ Cada año            │    │
+   │                          │  │ 🎉 Aniversario      │    │
+   │                          │  │ 9am L-V             │    │
+   │                          │  └─────────────────────┘    │
+   │                          │                              │
+sold/closed               delivered                      +1 año
 ```
+
+**Calendario de CRONs Post-Compra:**
+
+| Día | Hora | Flujo | Trigger |
+|-----|------|-------|---------|
+| Lunes | 10am | 🔑 Seguimiento post-entrega | 3-7 días post-delivered |
+| Martes | 11am | 🏡 Encuesta satisfacción casa | 3-6 meses post-delivered |
+| Miércoles | 11am | 🤝 Solicitud de referidos | 30-90 días post-sold |
+| Jueves | 10am | 🔑 Seguimiento post-entrega | 3-7 días post-delivered |
+| Viernes | 10am | 📊 Encuestas NPS | 7-30 días post-visita/compra |
+| Sábado | 10am | 🔧 Check-in mantenimiento | ~1 año post-delivered |
+| L-V | 9am | 🎉 Aniversarios | Cada año |
 
 **Funciones en `src/crons/nurturing.ts`:**
 - `seguimientoPostEntrega()` - Verifica llaves, escrituras, servicios
@@ -208,10 +239,10 @@ Cada año    → 🎉 Felicitación aniversario
 - `enviarEncuestaNPS()` - Net Promoter Score 0-10
 
 **Procesamiento de respuestas:**
-- `procesarRespuestaEntrega()` - Detecta problemas post-entrega
-- `procesarRespuestaSatisfaccionCasa()` - Clasifica satisfacción
-- `procesarRespuestaMantenimiento()` - Conecta con proveedores
-- `procesarRespuestaNPS()` - Clasifica promotor/pasivo/detractor
+- `procesarRespuestaEntrega()` - Detecta problemas (llaves, escrituras, servicios)
+- `procesarRespuestaSatisfaccionCasa()` - Clasifica 1=Excelente, 2=Buena, 3=Regular, 4=Mala
+- `procesarRespuestaMantenimiento()` - Conecta con proveedores si necesita
+- `procesarRespuestaNPS()` - Clasifica: 0-6=Detractor, 7-8=Pasivo, 9-10=Promotor
 
 **Endpoints manuales:**
 - `/run-post-entrega` - Ejecutar seguimiento post-entrega
