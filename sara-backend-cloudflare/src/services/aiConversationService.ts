@@ -4126,20 +4126,45 @@ Tú dime, ¿por dónde empezamos?`;
       // Si lead.name tiene un nombre real, reemplazar cualquier nombre
       // incorrecto en la respuesta de Claude
       // ═══════════════════════════════════════════════════════════════
+      const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana', 'Luis', 'Carlos', 'Carmen', 'José', 'Jose', 'Rosa', 'Miguel', 'Laura', 'Antonio', 'Sofía', 'Sofia', 'Diana', 'Jorge', 'Patricia', 'Roberto', 'Andrea', 'Fernando', 'Manuel', 'Isabel', 'Francisco', 'Alejandro', 'Ricardo', 'Gabriela', 'Daniel', 'Eduardo', 'Martha', 'Marta', 'Guadalupe', 'Lupita', 'Javier', 'Sergio', 'Adriana', 'Claudia', 'Monica', 'Mónica', 'Leticia', 'Lety', 'Teresa', 'Tere', 'Elena', 'Silvia'];
+
       if (nombreCliente && nombreCliente !== 'amigo' && nombreCliente.length > 2) {
-        // Lista de nombres comunes que Claude podría alucinar
-        const nombresHallucinated = ['Salma', 'María', 'Juan', 'Pedro', 'Ana', 'Luis', 'Carlos', 'Carmen', 'José', 'Rosa', 'Miguel', 'Laura', 'Antonio', 'Sofía', 'Sofia', 'Diana', 'Jorge', 'Patricia', 'Roberto', 'Andrea'];
+        // Caso 1: Tenemos nombre real - reemplazar nombres falsos por el correcto
         for (const nombreFalso of nombresHallucinated) {
           if (nombreFalso.toLowerCase() !== nombreCliente.toLowerCase() && respuestaLimpia.includes(nombreFalso)) {
             console.error(`⚠️ CORRIGIENDO nombre hallucinated: ${nombreFalso} → ${nombreCliente}`);
-            // Reemplazar en patrones comunes como "¡Listo Salma!" o "Hola Salma,"
             respuestaLimpia = respuestaLimpia
               .replace(new RegExp(`¡Listo ${nombreFalso}!`, 'gi'), `¡Listo ${nombreCliente}!`)
               .replace(new RegExp(`Listo ${nombreFalso}`, 'gi'), `Listo ${nombreCliente}`)
               .replace(new RegExp(`Hola ${nombreFalso}`, 'gi'), `Hola ${nombreCliente}`)
+              .replace(new RegExp(`Hola de nuevo ${nombreFalso}`, 'gi'), `Hola de nuevo ${nombreCliente}`)
+              .replace(new RegExp(`¡Perfecto ${nombreFalso}!`, 'gi'), `¡Perfecto ${nombreCliente}!`)
+              .replace(new RegExp(`Perfecto ${nombreFalso}`, 'gi'), `Perfecto ${nombreCliente}`)
               .replace(new RegExp(`${nombreFalso},`, 'gi'), `${nombreCliente},`)
               .replace(new RegExp(`${nombreFalso}!`, 'gi'), `${nombreCliente}!`)
               .replace(new RegExp(`${nombreFalso} `, 'gi'), `${nombreCliente} `);
+          }
+        }
+      } else {
+        // Caso 2: NO tenemos nombre - ELIMINAR cualquier nombre inventado
+        for (const nombreFalso of nombresHallucinated) {
+          if (respuestaLimpia.includes(nombreFalso)) {
+            console.error(`⚠️ ELIMINANDO nombre hallucinated (sin nombre real): ${nombreFalso}`);
+            respuestaLimpia = respuestaLimpia
+              .replace(new RegExp(`¡Hola de nuevo ${nombreFalso}!`, 'gi'), '¡Hola de nuevo!')
+              .replace(new RegExp(`Hola de nuevo ${nombreFalso}`, 'gi'), 'Hola de nuevo')
+              .replace(new RegExp(`¡Listo ${nombreFalso}!`, 'gi'), '¡Listo!')
+              .replace(new RegExp(`Listo ${nombreFalso}`, 'gi'), 'Listo')
+              .replace(new RegExp(`¡Hola ${nombreFalso}!`, 'gi'), '¡Hola!')
+              .replace(new RegExp(`Hola ${nombreFalso}`, 'gi'), 'Hola')
+              .replace(new RegExp(`¡Perfecto ${nombreFalso}!`, 'gi'), '¡Perfecto!')
+              .replace(new RegExp(`Perfecto ${nombreFalso}`, 'gi'), 'Perfecto')
+              .replace(new RegExp(`¡Excelente ${nombreFalso}!`, 'gi'), '¡Excelente!')
+              .replace(new RegExp(`Excelente ${nombreFalso}`, 'gi'), 'Excelente')
+              .replace(new RegExp(`, ${nombreFalso}!`, 'gi'), '!')
+              .replace(new RegExp(`, ${nombreFalso},`, 'gi'), ',')
+              .replace(new RegExp(` ${nombreFalso}!`, 'gi'), '!')
+              .replace(new RegExp(` ${nombreFalso} `, 'gi'), ' ');
           }
         }
       }
