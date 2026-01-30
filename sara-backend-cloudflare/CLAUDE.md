@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-01-29
+> Última actualización: 2026-01-30
 
 ---
 
@@ -1420,3 +1420,30 @@ const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana',
 
 **Commit:** `2cb10ba5`
 **Deploy:** Version ID `f0ea754f-7c70-460a-9019-46535db0a4eb`
+
+---
+
+### 2026-01-30 (Sesión 8 - Parte 2) - Documentación de APIs
+
+**Archivo actualizado:** `docs/api-reference.md`
+
+**Secciones agregadas:**
+1. Índice con 13 secciones navegables
+2. Autenticación detallada (header vs query param)
+3. Endpoints públicos (no requieren auth)
+4. Leads CRUD con ejemplos de request/response
+5. Citas (Appointments) con filtros
+6. Créditos Hipotecarios
+7. Dashboard y Reportes
+8. Webhooks (Meta, Facebook, Google Calendar)
+9. Calendario/Eventos
+10. Templates WhatsApp
+11. Testing y Debug (26 endpoints documentados)
+12. Sistema (emergency-stop, broadcasts)
+13. Servicios Internos (MetaWhatsApp, Supabase, AI, Bridge)
+
+**Endpoints documentados:** 50+
+
+**Formato:** Markdown con ejemplos de request/response JSON
+
+**Commit:** `3817e382`
