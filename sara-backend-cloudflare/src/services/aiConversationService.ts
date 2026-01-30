@@ -499,21 +499,29 @@ SOBRE GRUPO SANTA RITA (INFORMACIÓN DE LA EMPRESA)
 ⚠️ SOLO Priv. Andes tiene ALBERCA. Los demás NO tienen alberca ni gimnasio.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
-📌 SINÓNIMOS DE DESARROLLOS - IMPORTANTE
+⚠️⚠️⚠️ CITADELLA DEL NOGAL / EL NOGAL - CRÍTICO ⚠️⚠️⚠️
 ━━━━━━━━━━━━━━━━━━━━━━━━
-⚠️ ALGUNOS DESARROLLOS TIENEN NOMBRES ALTERNATIVOS:
 
-**CITADELLA DEL NOGAL = EL NOGAL:**
-- Si preguntan por "Citadella del Nogal" o "El Nogal", SÍ TENEMOS:
-- Villa Campelo (terrenos desde $450,000)
-- Villa Galiano (terrenos en preventa desde $550,000)
-- Citadella del Nogal es el DESARROLLO COMPLETO que incluye varias "villas" o secciones
-- Es como Colinas del Padre: un macro-desarrollo con subdivisiones
-- NUNCA digas "no tenemos El Nogal" - SÍ lo tenemos, son Villa Campelo y Villa Galiano
+🚫 NUNCA DIGAS ESTAS FRASES:
+- "Citadella del Nogal no es uno de nuestros desarrollos" ← FALSO
+- "El Nogal no lo tenemos disponible" ← FALSO
+- "No tenemos El Nogal" ← FALSO
+
+✅ LA VERDAD: SÍ TENEMOS CITADELLA DEL NOGAL
+Citadella del Nogal = El Nogal = Nuestras villas:
+- **Villa Campelo**: Terrenos desde $450,000
+- **Villa Galiano**: Terrenos desde $550,000 (preventa)
+
+📝 RESPUESTA CORRECTA cuando pregunten por "El Nogal" o "Citadella del Nogal":
+"¡Excelente elección! 😊 Citadella del Nogal es nuestro desarrollo de terrenos premium.
+Tenemos dos opciones:
+• Villa Campelo - Terrenos desde $450,000
+• Villa Galiano - Terrenos desde $550,000 (preventa)
+¿Te gustaría visitarlos? ¿Sábado o domingo?"
 
 **COLINAS DEL PADRE:**
-- Es un desarrollo histórico con varias secciones/etapas
-- El Nogal está en la misma zona
+- Es un desarrollo histórico con varias secciones
+- El Nogal/Citadella está en la misma zona
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️⚠️⚠️ MANEJO DE OBJECIONES - VENDEDOR EXPERTO ⚠️⚠️⚠️
@@ -2014,6 +2022,41 @@ RECUERDA:
             // Rescatar con pregunta de venta
             parsed.response = '¡Claro! Solo una pregunta rápida: ¿rentas actualmente o ya tienes casa propia? 🏠';
           }
+        }
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // CORRECCIÓN: Citadella del Nogal / El Nogal (SÍ lo tenemos)
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      if (parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        const preguntaPorNogal = msgLowerCallback.includes('nogal') || msgLowerCallback.includes('citadella');
+
+        // Detectar si Claude dijo incorrectamente que no tenemos El Nogal
+        const dijoNoTenemos =
+          respLower.includes('no tenemos') ||
+          respLower.includes('no lo tenemos') ||
+          respLower.includes('no es uno de nuestros') ||
+          respLower.includes('no está disponible') ||
+          respLower.includes('no manejamos');
+
+        if (preguntaPorNogal && dijoNoTenemos) {
+          console.log('⚠️ CORRIGIENDO: Claude dijo que no tenemos El Nogal - SÍ LO TENEMOS');
+          parsed.response = `¡Excelente elección! 😊 Citadella del Nogal es nuestro desarrollo de terrenos premium en Colinas del Padre.
+
+Tenemos dos opciones:
+• *Villa Campelo* - Terrenos desde $450,000
+• *Villa Galiano* - Terrenos desde $550,000 (preventa)
+
+Ambos con excelente plusvalía y muy tranquilos. *¿Te gustaría visitarlos? ¿Te funciona el sábado o el domingo?*`;
+          parsed.intent = 'solicitar_cita';
+        }
+
+        // También corregir si ofrece agendar cita para "El Nogal" (debe ser Villa Campelo/Galiano)
+        if (parsed.response.includes('visitar *El Nogal*') || parsed.response.includes('visitar *Citadella')) {
+          parsed.response = parsed.response
+            .replace(/visitar \*El Nogal\*/g, 'visitar *Villa Campelo o Villa Galiano* (Citadella del Nogal)')
+            .replace(/visitar \*Citadella del Nogal\*/g, 'visitar *Villa Campelo o Villa Galiano* (Citadella del Nogal)');
         }
       }
 
