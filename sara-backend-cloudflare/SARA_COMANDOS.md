@@ -2624,3 +2624,25 @@ SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
 **Ahora:** "¡Muchas felicidades por tu nueva casa! 🎉 Si algún familiar busca casa..."
 
 **Commit:** `18b3038f`
+
+### 2026-01-29 (Sesión 7 - Parte 4) - Fixes Edge-Cases Adicionales
+
+**20 edge-cases probados, 5 problemas corregidos:**
+
+| Problema | Antes | Ahora |
+|----------|-------|-------|
+| RENTA | "Sí, tenemos rentas" | "Solo VENDEMOS, no rentamos" ✅ |
+| PERSONA REAL | "Soy asesora real" | "Soy SARA, asistente virtual 🤖" ✅ |
+| URGENCIA | Respuesta genérica | Lista entrega inmediata ✅ |
+| ESCUELAS | Vaga | Informativa + cierre ✅ |
+| ENGLISH | En español | En inglés + precios USD ✅ |
+
+**Correcciones:**
+1. **RENTA:** "En Santa Rita solo vendemos casas, no manejamos rentas"
+2. **PERSONA REAL:** "Soy SARA, asistente virtual 🤖 Pero con gusto te conecto con asesor humano"
+3. **URGENCIA:** Lista Monte Verde, Los Encinos, Andes como entrega inmediata
+4. **ENGLISH:** Detecta inglés → responde en inglés con precios MXN y USD
+
+**Archivos:** `aiConversationService.ts`, `index.ts`
+
+**Deploy:** Version ID `934ff302-8954-4bcc-9a98-b10e46e44a81`

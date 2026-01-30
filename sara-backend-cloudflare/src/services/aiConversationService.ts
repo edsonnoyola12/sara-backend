@@ -475,11 +475,16 @@ SOBRE GRUPO SANTA RITA (INFORMACIÓN DE LA EMPRESA)
 - NO ofrecemos transporte a desarrollos
 
 **POLÍTICAS:**
-- SÍ se permite rentar la propiedad
+- SÍ se permite que el comprador rente su propiedad después de comprarla
 - NO se permiten modificaciones exteriores
 - NO hay restricciones de mascotas (excepto Distrito Falco)
 - SÍ se permite uso comercial
 - Edad mínima del comprador: 21 años
+
+⚠️ IMPORTANTE - SOLO VENDEMOS, NO RENTAMOS:
+Santa Rita SOLO VENDE casas y terrenos. NO tenemos propiedades en RENTA.
+Si preguntan "¿tienen casas en renta?" → Responder:
+"En Santa Rita solo vendemos casas, no manejamos rentas. Pero te cuento: con las opciones de crédito actuales, la mensualidad puede ser similar a una renta. ¿Te muestro cómo?"
 
 **PROMOCIÓN VIGENTE:**
 - Nombre: Outlet Santa Rita
@@ -573,6 +578,25 @@ Así los dos ven las casas y deciden juntos. ¿El sábado o domingo les funciona
 "¡Qué bueno que estés comparando! Te cuento: Grupo Santa Rita tiene 50 años construyendo en Zacatecas.
 Nuestras casas no tienen cuotas de mantenimiento y están en zonas de alta plusvalía.
 ¿Has visitado nuestros desarrollos? Vale la pena que compares antes de decidir."
+
+📌 "ME URGE MUDARME" / "NECESITO CASA PRONTO" / "ES URGENTE":
+➜ TÉCNICA: Opciones inmediatas + Cierre rápido
+"¡Perfecto, tengo opciones de ENTREGA INMEDIATA! 🏠
+
+Casas listas para mudarte YA:
+• *Monte Verde* - Desde $1.5M
+• *Los Encinos* - Desde $2.9M
+• *Andes* - Desde $1.5M
+
+Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte hoy mismo."
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 IDIOMA INGLÉS
+━━━━━━━━━━━━━━━━━━━━━━━━
+Si el cliente escribe en INGLÉS (hello, hi, I want, information, house, etc.):
+- Responde en INGLÉS
+- Usa el mismo tono amigable
+- Ejemplo: "Hi! I'm SARA from Grupo Santa Rita 😊 We have beautiful homes in Zacatecas, Mexico. What type of home are you looking for?"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 🏆 ARGUMENTOS DE VENTA - USA ESTOS PARA CERRAR 🏆
@@ -671,14 +695,24 @@ CUANDO QUIERE HABLAR CON VENDEDOR/PERSONA REAL
 - "me pueden llamar?"
 - "quiero que me llamen"
 - "mejor llámame"
+- "eres una persona real?"
+- "eres robot?"
+- "eres IA?"
+
+🚫 NUNCA DIGAS que eres "una persona real" o "asesora real" - ERES UNA IA y debes ser honesta.
+
+✅ RESPUESTA CORRECTA cuando pidan persona real:
+"Soy SARA, asistente virtual de Grupo Santa Rita 🤖 Pero con gusto te conecto con uno de nuestros asesores humanos.
+
+Para que te contacten, ¿me compartes tu nombre?"
 
 DEBES:
-1) Si NO tienes nombre ➜ Pedir nombre: "¡Claro! Para conectarte con un vendedor, ¿me das tu nombre?"
-2) Si NO tienes celular ➜ Pedir celular: "¡Perfecto [nombre]! ¿Me das tu número para que el vendedor te contacte?"
+1) Si NO tienes nombre ➜ Pedir nombre: "¡Claro! Para conectarte con un asesor, ¿me das tu nombre?"
+2) Si NO tienes celular ➜ Pedir celular: "¡Perfecto [nombre]! ¿Me das tu número para que el asesor te contacte?"
 3) Si tienes nombre Y celular ➜ Responder:
    "¡Listo [nombre]! Ya notifiqué a nuestro equipo de ventas para que te contacten pronto.
-   
-   ¿Hay algún desarrollo en particular que te interese para pasarle el dato al vendedor?"
+
+   ¿Hay algún desarrollo en particular que te interese para pasarle el dato al asesor?"
 4) Activar contactar_vendedor: true en el JSON (NO send_contactos)
 
 ⚠️ IMPORTANTE: Después de conectar con vendedor, NO preguntes si quiere asesor VIP ni menciones crédito.
@@ -2106,6 +2140,80 @@ Ambos con excelente plusvalía y muy tranquilos. *¿Te gustaría visitarlos? ¿T
 Si algún familiar o amigo busca casa en el futuro, con gusto lo atiendo. ¡Te deseo mucho éxito en tu nuevo hogar! 🏠`;
           parsed.intent = 'cerrar_conversacion';
           parsed.contactar_vendedor = false;
+        }
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // CORRECCIÓN: Preguntan por RENTA → Solo vendemos
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const preguntaPorRenta =
+        msgLowerCallback.includes('renta') ||
+        msgLowerCallback.includes('rentar') ||
+        msgLowerCallback.includes('alquiler') ||
+        msgLowerCallback.includes('arrendar');
+
+      if (preguntaPorRenta && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        // Si Claude dice que SÍ tienen renta (incorrecto)
+        if (respLower.includes('si, tenemos') || respLower.includes('sí, tenemos') ||
+            respLower.includes('tenemos opciones para rentar') || respLower.includes('casas en renta')) {
+          console.log('⚠️ CORRIGIENDO: Claude dijo que tenemos renta - SOLO VENDEMOS');
+          parsed.response = `En Santa Rita solo vendemos casas, no manejamos rentas 🏠
+
+Pero te cuento algo: con las opciones de crédito actuales, la mensualidad puede ser MUY similar a una renta, ¡y al final la casa es TUYA!
+
+¿Te gustaría que te muestre cómo funciona? Tenemos casas desde $1.5M con mensualidades accesibles.`;
+        }
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // CORRECCIÓN: Pide persona real → Ofrecer humano, NO fingir
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const pidePersonaReal =
+        msgLowerCallback.includes('persona real') ||
+        msgLowerCallback.includes('eres robot') ||
+        msgLowerCallback.includes('eres ia') ||
+        msgLowerCallback.includes('eres humano') ||
+        msgLowerCallback.includes('hablar con alguien');
+
+      if (pidePersonaReal && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        // Si Claude dice que es "asesora real" o "persona real" (incorrecto)
+        if (respLower.includes('asesora real') || respLower.includes('persona real') ||
+            respLower.includes('soy una persona') || respLower.includes('no soy robot')) {
+          console.log('⚠️ CORRIGIENDO: Claude fingió ser humano - somos IA');
+          parsed.response = `Soy SARA, asistente virtual de Grupo Santa Rita 🤖
+
+Pero con gusto te conecto con uno de nuestros asesores humanos. Para que te contacten, ¿me compartes tu nombre?`;
+          parsed.contactar_vendedor = true;
+        }
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // CORRECCIÓN: Urgencia → Listar entrega inmediata
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const tieneUrgencia =
+        msgLowerCallback.includes('urge') ||
+        msgLowerCallback.includes('urgente') ||
+        msgLowerCallback.includes('pronto') ||
+        msgLowerCallback.includes('rapido') ||
+        msgLowerCallback.includes('inmediato') ||
+        msgLowerCallback.includes('este mes');
+
+      if (tieneUrgencia && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        // Si no menciona entrega inmediata
+        if (!respLower.includes('inmediata') && !respLower.includes('listas') && !respLower.includes('disponibles ya')) {
+          console.log('⚠️ CORRIGIENDO: Cliente tiene urgencia - agregar opciones inmediatas');
+          parsed.response = `¡Perfecto, tengo opciones de ENTREGA INMEDIATA! 🏠
+
+Casas listas para mudarte YA:
+• *Monte Verde* - Desde $1.5M
+• *Los Encinos* - Desde $2.9M
+• *Andes* - Desde $1.5M
+
+Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte hoy mismo.`;
+          parsed.intent = 'solicitar_cita';
         }
       }
 

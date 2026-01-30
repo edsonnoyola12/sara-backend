@@ -1606,7 +1606,21 @@ SINÓNIMOS:
 - Felicítalo: "¡Muchas felicidades por tu nueva casa! 🎉"
 - NO indagues qué compró
 - Ofrece referidos: "Si algún familiar busca casa, con gusto lo atiendo"
-- Cierra amablemente
+
+🏠 SOLO VENDEMOS, NO RENTAMOS:
+Si preguntan por renta → "En Santa Rita solo vendemos casas. Pero la mensualidad puede ser similar a una renta y la casa es tuya."
+
+🤖 SI PIDEN "PERSONA REAL":
+- NO digas que eres "asesora real" o "persona real"
+- Responde: "Soy SARA, asistente virtual 🤖 Pero con gusto te conecto con un asesor humano."
+
+⏰ SI TIENE URGENCIA ("me urge", "pronto"):
+- Lista casas de ENTREGA INMEDIATA: Monte Verde, Los Encinos, Andes
+
+🌐 IDIOMA:
+- Si el cliente escribe en INGLÉS → Responde COMPLETAMENTE en inglés
+- Muestra precios en MXN y USD (1 USD ≈ 17 MXN)
+- Mantén el mismo tono cálido y profesional
 
 Nombre del cliente: ${leadName}`;
 
@@ -1639,6 +1653,94 @@ Nombre del cliente: ${leadName}`;
             response = `¡Muchas felicidades por tu nueva casa! 🎉 Comprar una propiedad es una gran decisión y me da gusto que lo hayas logrado.
 
 Si algún familiar o amigo busca casa en el futuro, con gusto lo atiendo. ¡Te deseo mucho éxito en tu nuevo hogar! 🏠`;
+          }
+        }
+
+        // Post-procesamiento: Renta → Solo vendemos
+        const preguntaPorRenta = msgLower.includes('renta') || msgLower.includes('rentar') || msgLower.includes('alquiler');
+        if (preguntaPorRenta) {
+          const respLower = response.toLowerCase();
+          if (respLower.includes('si, tenemos') || respLower.includes('sí, tenemos') ||
+              respLower.includes('opciones para rentar') || respLower.includes('casas en renta')) {
+            response = `En Santa Rita solo vendemos casas, no manejamos rentas 🏠
+
+Pero te cuento: con las opciones de crédito actuales, la mensualidad puede ser MUY similar a una renta, ¡y al final la casa es TUYA!
+
+¿Te gustaría que te muestre cómo funciona? Tenemos casas desde $1.5M con mensualidades accesibles.`;
+          }
+        }
+
+        // Post-procesamiento: Persona real → Ofrecer humano
+        const pidePersonaReal = msgLower.includes('persona real') || msgLower.includes('eres robot') || msgLower.includes('eres ia');
+        if (pidePersonaReal) {
+          const respLower = response.toLowerCase();
+          if (respLower.includes('asesora real') || respLower.includes('persona real') || respLower.includes('soy una persona')) {
+            response = `Soy SARA, asistente virtual de Grupo Santa Rita 🤖
+
+Pero con gusto te conecto con uno de nuestros asesores humanos. Para que te contacten, ¿me compartes tu nombre?`;
+          }
+        }
+
+        // Post-procesamiento: Urgencia → Entrega inmediata
+        const tieneUrgencia = msgLower.includes('urge') || msgLower.includes('urgente') || msgLower.includes('pronto') || msgLower.includes('este mes');
+        if (tieneUrgencia) {
+          const respLower = response.toLowerCase();
+          if (!respLower.includes('inmediata') && !respLower.includes('listas') && !respLower.includes('disponibles ya')) {
+            response = `¡Perfecto, tengo opciones de ENTREGA INMEDIATA! 🏠
+
+Casas listas para mudarte YA:
+• *Monte Verde* - Desde $1.5M
+• *Los Encinos* - Desde $2.9M
+• *Andes* - Desde $1.5M
+
+Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte hoy mismo.`;
+          }
+        }
+
+        // Post-procesamiento: Si mensaje en inglés → respuesta en inglés
+        const esIngles = /^[a-zA-Z\s.,!?'"-]+$/.test(msg.trim()) &&
+          (msgLower.includes('house') || msgLower.includes('home') || msgLower.includes('buy') ||
+           msgLower.includes('want') || msgLower.includes('looking') || msgLower.includes('interested') ||
+           msgLower.includes('hello') || msgLower.includes('hi ') || msgLower.includes('price'));
+        if (esIngles) {
+          const respLower = response.toLowerCase();
+          // Solo reemplazar si respondió claramente en español (no solo una palabra)
+          const spanishWords = ['hola', 'tenemos', 'puedo', 'ayudarte', 'qué', 'cuál', 'cuánto', 'recámaras', 'pregunta'];
+          const spanishCount = spanishWords.filter(w => respLower.includes(w)).length;
+
+          if (spanishCount >= 2) {
+            // Detectar si preguntó por un desarrollo específico
+            const monteVerde = msgLower.includes('monte verde');
+            const losEncinos = msgLower.includes('encinos');
+            const distritoFalco = msgLower.includes('falco');
+            const miravalle = msgLower.includes('miravalle');
+            const andes = msgLower.includes('andes');
+
+            if (monteVerde) {
+              response = `Monte Verde is one of our most popular developments! 🏠
+
+Prices start at $1,500,000 MXN (~$88,000 USD) with 2-3 bedrooms, 2 bathrooms, and 60-75 m².
+
+Would you like to schedule a visit to see it in person? I can set you up for this Saturday or Sunday! 📅`;
+            } else if (losEncinos) {
+              response = `Los Encinos is our premium development! 🌳
+
+Homes range from $2,800,000 to $3,300,000 MXN (~$165,000-$195,000 USD) with 3 bedrooms and premium finishes.
+
+When would you like to visit? I can schedule you for this weekend! 📅`;
+            } else if (distritoFalco) {
+              response = `Distrito Falco features modern urban living! 🏢
+
+Homes start at $2,570,000 MXN (~$151,000 USD) with contemporary design and smart home features.
+
+Would Saturday or Sunday work better for a visit? 📅`;
+            } else {
+              response = `Hi there! 👋 Welcome to Grupo Santa Rita!
+
+We have homes starting at $1.5M MXN (~$88,000 USD) up to $5.1M MXN (~$300,000 USD) in several developments in Zacatecas.
+
+To recommend the perfect option, what's your approximate budget? 💰`;
+            }
           }
         }
 

@@ -1073,3 +1073,65 @@ if (yaComproOtroLado && sigueIndagando) {
 | "ya tengo casa gracias" | Seguía vendiendo | "¡Felicidades! Si algún familiar..." ✅ |
 
 **Commit:** `18b3038f` - fix: felicitar cuando cliente dice 'ya compré en otro lado'
+
+---
+
+### 2026-01-29 (Sesión 7 - Parte 4) - Fixes Edge-Cases Adicionales
+
+**20 edge-cases probados, 5 problemas identificados y corregidos:**
+
+| Problema | Antes | Ahora |
+|----------|-------|-------|
+| **RENTA** | "Sí, tenemos casas en renta" | "Solo VENDEMOS, no rentamos" ✅ |
+| **PERSONA REAL** | "Soy asesora real" | "Soy SARA, asistente virtual 🤖" ✅ |
+| **URGENCIA** | Respuesta genérica | Lista entrega inmediata (Monte Verde, Los Encinos, Andes) ✅ |
+| **ESCUELAS** | Respuesta vaga | Respuesta informativa + cierre a casas ✅ |
+| **ENGLISH** | Respondía en español | Responde en inglés con precios USD ✅ |
+
+**Correcciones aplicadas:**
+
+1. **RENTA (aiConversationService.ts + index.ts):**
+```
+⚠️ SOLO VENDEMOS, NO RENTAMOS:
+Si preguntan "¿tienen casas en renta?" → "En Santa Rita solo vendemos casas..."
+```
+Post-procesamiento: Si Claude dice "sí tenemos rentas" → corregir automáticamente.
+
+2. **PERSONA REAL (aiConversationService.ts + index.ts):**
+```
+🚫 NUNCA digas "soy una persona real" o "asesora real" - ERES UNA IA
+✅ RESPUESTA: "Soy SARA, asistente virtual 🤖 Pero con gusto te conecto con un asesor humano."
+```
+
+3. **URGENCIA (aiConversationService.ts + index.ts):**
+```
+📌 "ME URGE MUDARME" / "NECESITO CASA PRONTO":
+"¡Perfecto, tengo opciones de ENTREGA INMEDIATA! 🏠
+• Monte Verde - Desde $1.5M
+• Los Encinos - Desde $2.9M
+• Andes - Desde $1.5M"
+```
+
+4. **ENGLISH (index.ts):**
+```
+🌐 IDIOMA:
+- Si el cliente escribe en INGLÉS → Responde COMPLETAMENTE en inglés
+- Muestra precios en MXN y USD (1 USD ≈ 17 MXN)
+```
+Post-procesamiento inteligente: Detecta mensaje en inglés, si Claude respondió en español → respuesta en inglés con precios en ambas monedas.
+
+**Archivos modificados:**
+- `src/services/aiConversationService.ts` - Instrucciones de prompt + post-procesamiento
+- `src/index.ts` - Endpoint de prueba con mismas correcciones
+
+**Tests verificados:**
+
+| Mensaje | Respuesta |
+|---------|-----------|
+| "tienen casas en renta" | "solo vendemos casas, no manejamos rentas" ✅ |
+| "quiero hablar con persona real" | "Soy SARA, asistente virtual 🤖" ✅ |
+| "me urge mudarme este mes" | "ENTREGA INMEDIATA: Monte Verde, Los Encinos, Andes" ✅ |
+| "I want to buy a house" | "Hi there! Welcome to Grupo Santa Rita!" ✅ |
+| "What is the price of Monte Verde" | "$1,500,000 MXN (~$88,000 USD)" ✅ |
+
+**Deploy:** Version ID `934ff302-8954-4bcc-9a98-b10e46e44a81`
