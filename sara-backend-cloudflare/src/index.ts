@@ -1803,9 +1803,29 @@ To recommend the perfect option, what's your approximate budget? 💰`;
           const respLower = response.toLowerCase();
           const diceAlbercaFalco = respLower.includes('falco') && respLower.includes('alberca');
           const diceAlbercaMiravalle = respLower.includes('miravalle') && respLower.includes('alberca');
-          const diceNoTienenAlberca = respLower.includes('no incluyen alberca') || respLower.includes('no tienen alberca');
+          // FIX: Detectar cuando dice Andes NO tiene alberca (FALSO - SÍ tiene)
+          const diceAndesNoTieneAlberca = respLower.includes('andes') && (
+            respLower.includes('no cuenta con alberca') ||
+            respLower.includes('no tiene alberca') ||
+            respLower.includes('no incluye alberca') ||
+            respLower.includes('sin alberca') ||
+            respLower.includes('alberca personal') ||
+            respLower.includes('instalar una alberca')
+          );
+          // FIX: Detectar TODAS las formas de decir que no hay alberca
+          const diceNoTienenAlberca =
+            respLower.includes('no incluyen alberca') ||
+            respLower.includes('no tienen alberca') ||
+            respLower.includes('no tenemos casas con alberca') ||
+            respLower.includes('actualmente no tenemos') ||
+            respLower.includes('no manejamos casas con alberca') ||
+            respLower.includes('no contamos con alberca') ||
+            respLower.includes('ninguno tiene alberca') ||
+            respLower.includes('instalar una alberca') ||
+            respLower.includes('patios amplios donde podrías') ||
+            (respLower.includes('alberca') && !respLower.includes('andes') && !respLower.includes('sí tenemos'));
 
-          if (diceAlbercaFalco || diceAlbercaMiravalle || diceNoTienenAlberca) {
+          if (diceAlbercaFalco || diceAlbercaMiravalle || diceNoTienenAlberca || diceAndesNoTieneAlberca) {
             response = `¡Sí tenemos desarrollo con alberca! 🏊
 
 **Priv. Andes** es nuestro único fraccionamiento con ALBERCA:
@@ -1815,6 +1835,64 @@ To recommend the perfect option, what's your approximate budget? 💰`;
 Además tiene vigilancia 24/7, áreas verdes y es pet-friendly 🐕
 
 ¿Te gustaría visitarlo este fin de semana?`;
+          }
+        }
+
+        // FIX: TASAS DE INTERÉS - NO inventar números
+        const preguntaTasaInteres =
+          msgLower.includes('tasa') ||
+          msgLower.includes('interes') ||
+          msgLower.includes('interés') ||
+          msgLower.includes('porcentaje');
+
+        if (preguntaTasaInteres) {
+          const respLower = response.toLowerCase();
+          // Detectar si SARA inventa tasas específicas
+          const inventaTasas = /\d+\.?\d*\s*%/.test(response) ||
+            respLower.includes('entre 8') || respLower.includes('entre 9') ||
+            respLower.includes('entre 10') || respLower.includes('entre 11') ||
+            respLower.includes('actualmente están');
+
+          if (inventaTasas) {
+            response = `¡Buena pregunta! 💰
+
+Las tasas de interés varían según el banco y tu perfil crediticio. Te recomiendo consultar directamente con:
+• INFONAVIT/FOVISSSTE - si tienes subcuenta
+• Banorte, BBVA, Santander, HSBC - créditos tradicionales
+
+Nosotros te ayudamos con el trámite una vez que elijas tu casa. ¿Ya tienes algún desarrollo en mente que te gustaría conocer? 🏠`;
+          }
+        }
+
+        // FIX: BROCHURE/FOLLETO - SÍ tenemos
+        const pideBrochure =
+          msgLower.includes('folleto') ||
+          msgLower.includes('brochure') ||
+          msgLower.includes('catalogo') ||
+          msgLower.includes('catálogo');
+
+        if (pideBrochure) {
+          const respLower = response.toLowerCase();
+          const diceNoTieneFolletos =
+            respLower.includes('no tengo folleto') ||
+            respLower.includes('no tengo brochure') ||
+            respLower.includes('no cuento con') ||
+            respLower.includes('no manejo folletos') ||
+            respLower.includes('platicar sobre todas');
+
+          if (diceNoTieneFolletos) {
+            response = `¡Claro que sí! 📄
+
+Tengo brochures completos con fotos, planos y precios de cada desarrollo.
+
+¿De cuál te gustaría el folleto?
+• Monte Verde (desde $1.5M)
+• Los Encinos (desde $2.8M)
+• Distrito Falco (desde $3.5M)
+• Andes (desde $1.5M, con alberca 🏊)
+• Miravalle (desde $2.9M)
+
+Dime cuál y te lo envío ahora mismo 📲`;
           }
         }
 

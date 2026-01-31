@@ -2055,3 +2055,63 @@ Los mensajes al equipo (briefings, reportes, resúmenes) no llegaban cuando la v
 
 **Commit:** `b4b40c0d`
 **Deploy:** Version ID `8a3ae994-9ab9-41e1-a5c3-d6f4ca7b02d3`
+
+---
+
+### 2026-01-31 (Sesión 12 - Parte 2) - Fix Briefings y Recaps con Ventana 24h
+
+**Problema detectado en auditoría:**
+- `enviarBriefingMatutino()` enviaba mensajes DIRECTO sin verificar ventana 24h
+- `enviarRecapDiario()` enviaba mensajes DIRECTO sin verificar ventana 24h
+- `enviarRecapSemanal()` enviaba mensajes DIRECTO sin verificar ventana 24h
+- Resultado: mensajes no llegaban cuando la ventana estaba cerrada (17/18 team members afectados)
+
+**Causa raíz:**
+El código en `briefings.ts` línea 306 decía "SIEMPRE ENVIAR DIRECTO" ignorando completamente la lógica de ventana 24h que acababa de verificar.
+
+**Correcciones aplicadas:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/crons/briefings.ts` | Import de `enviarMensajeTeamMember` |
+| `src/crons/briefings.ts` | `enviarBriefingMatutino()` ahora usa helper |
+| `src/crons/briefings.ts` | `enviarRecapDiario()` ahora usa helper |
+| `src/crons/briefings.ts` | `enviarRecapSemanal()` ahora usa helper |
+| `src/utils/teamMessaging.ts` | Formato de pending: `{ sent_at, mensaje_completo }` |
+| `src/handlers/whatsapp.ts` | Handler para `pending_resumen_semanal` (CEO y Vendedor) |
+| `src/index.ts` | Agregado `pending_resumen_semanal` a lista de pending keys |
+
+**Flujo corregido:**
+
+```
+8 AM BRIEFING:
+├── Ventana ABIERTA → Mensaje directo ✅
+└── Ventana CERRADA → Template reactivar_equipo + pending_briefing ✅
+
+7 PM RECAP:
+├── Ventana ABIERTA → Mensaje directo ✅
+└── Ventana CERRADA → Template reactivar_equipo + pending_recap ✅
+
+SÁBADO RESUMEN:
+├── Ventana ABIERTA → Mensaje directo ✅
+└── Ventana CERRADA → Template reactivar_equipo + pending_resumen_semanal ✅
+```
+
+**Formato de pending message (compatible con handlers):**
+
+```typescript
+// ANTES (no funcionaba):
+[pendingKey]: mensaje,
+[`${pendingKey}_timestamp`]: timestamp
+
+// AHORA (compatible):
+[pendingKey]: {
+  sent_at: timestamp,
+  mensaje_completo: mensaje
+}
+```
+
+**Tests:** 351/351 pasando ✅
+
+**Commit:** `4b92908d`
+**Deploy:** Version ID `b5a66df9-afc7-4c28-9496-9c75e747041d`
