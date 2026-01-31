@@ -315,20 +315,51 @@ export async function generarVideoSemanalLogros(supabase: SupabaseService, meta:
       `¡Excelente trabajo equipo! 🔥\n` +
       `El video motivacional viene en camino... 🎬`;
 
-    // Enviar a todos los vendedores y admins
+    // Enviar a todos los vendedores y admins (respetando ventana 24h)
     const { data: equipo } = await supabase.client
       .from('team_members')
-      .select('phone, name')
+      .select('phone, name, notes')
       .in('role', ['vendedor', 'admin'])
       .eq('active', true);
+
+    const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
     for (const miembro of equipo || []) {
       if (!miembro.phone) continue;
       try {
-        await meta.sendWhatsAppMessage(miembro.phone, mensajeTexto);
-        console.log(`✅ Resumen enviado a ${miembro.name}`);
+        // Parsear notas para verificar ventana 24h
+        const notasActuales = typeof miembro.notes === 'string'
+          ? JSON.parse(miembro.notes || '{}')
+          : (miembro.notes || {});
+        const lastInteraction = notasActuales.last_sara_interaction;
+        const tieneVentanaAbierta = lastInteraction && lastInteraction > hace24h;
+
+        if (tieneVentanaAbierta) {
+          // Ventana abierta → enviar directo
+          await meta.sendWhatsAppMessage(miembro.phone, mensajeTexto);
+          console.log(`✅ Resumen enviado DIRECTO a ${miembro.name}`);
+        } else {
+          // Ventana cerrada → guardar como pending + enviar template
+          const nombreCorto = miembro.name?.split(' ')[0] || 'Hola';
+          notasActuales.pending_video_semanal = {
+            sent_at: new Date().toISOString(),
+            mensaje_completo: mensajeTexto
+          };
+          await supabase.client
+            .from('team_members')
+            .update({ notes: JSON.stringify(notasActuales) })
+            .eq('phone', miembro.phone);
+
+          // Enviar template para reactivar
+          const templateComponents = [{
+            type: 'body',
+            parameters: [{ type: 'text', text: nombreCorto }]
+          }];
+          await meta.sendTemplate(miembro.phone, 'reactivar_equipo', 'es_MX', templateComponents);
+          console.log(`📤 Template enviado a ${miembro.name} (resumen semanal pendiente)`);
+        }
       } catch (e) {
-        console.error(`⚠️ Error enviando a ${miembro.name}`);
+        console.error(`⚠️ Error enviando a ${miembro.name}:`, e);
       }
     }
 

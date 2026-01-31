@@ -10931,7 +10931,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         }
 
         // Verificar pending messages
-        const pendingKeys = ['pending_briefing', 'pending_recap', 'pending_reporte_diario', 'pending_reporte_semanal', 'pending_mensaje'];
+        const pendingKeys = ['pending_briefing', 'pending_recap', 'pending_reporte_diario', 'pending_reporte_semanal', 'pending_mensaje', 'pending_video_semanal'];
         const pendientes = pendingKeys.filter(key => notas[key]?.mensaje_completo);
 
         return {

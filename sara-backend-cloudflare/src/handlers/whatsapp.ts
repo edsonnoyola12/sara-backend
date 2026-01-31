@@ -1588,6 +1588,22 @@ export class WhatsAppHandler {
       }
     }
 
+    // PENDING VIDEO SEMANAL (resumen semanal de logros)
+    const pendingVideoSemanalCEO = notasCEO?.pending_video_semanal;
+    if (pendingVideoSemanalCEO?.sent_at && pendingVideoSemanalCEO?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingVideoSemanalCEO.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 24) {
+        console.log(`🎬 [PENDING PRIORITY] CEO ${nombreCEO} respondió template - enviando resumen semanal de logros`);
+        await this.meta.sendWhatsAppMessage(cleanPhone, pendingVideoSemanalCEO.mensaje_completo);
+
+        const { pending_video_semanal, ...notasSinPending } = notasCEO;
+        await this.supabase.client.from('team_members').update({
+          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString() }
+        }).eq('id', ceo.id);
+        return;
+      }
+    }
+
     // ╔════════════════════════════════════════════════════════════════════════╗
     // ║  CRÍTICO - NO MODIFICAR SIN CORRER TESTS: npm test                      ║
     // ║  Test file: src/tests/conversationLogic.test.ts                         ║
@@ -4022,6 +4038,25 @@ export class WhatsAppHandler {
             ...notasSinPendingSemanal,
             last_sara_interaction: new Date().toISOString(),
             last_reporte_semanal_context: { sent_at: new Date().toISOString(), delivered: true }
+          }
+        }).eq('id', vendedor.id);
+        return;
+      }
+    }
+
+    // PENDING VIDEO SEMANAL (resumen semanal de logros - viernes)
+    const pendingVideoSemanalInicio = notasVendedor?.pending_video_semanal;
+    if (pendingVideoSemanalInicio?.sent_at && pendingVideoSemanalInicio?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingVideoSemanalInicio.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 24) {
+        console.log(`🎬 [PENDING PRIORITY] ${nombreVendedor} respondió template - enviando resumen semanal de logros`);
+        await this.meta.sendWhatsAppMessage(from, pendingVideoSemanalInicio.mensaje_completo);
+
+        const { pending_video_semanal, ...notasSinPendingVideo } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPendingVideo,
+            last_sara_interaction: new Date().toISOString()
           }
         }).eq('id', vendedor.id);
         return;
