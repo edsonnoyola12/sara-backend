@@ -1018,11 +1018,24 @@ GET /test-video-personalizado/{phone}?nombre={nombre}&desarrollo={desarrollo}
 | `/test-ai-response?msg=X&api_key=Y` | Prueba respuestas de SARA (solo texto, no envía WhatsApp) |
 | `/test-lead?phone=X&name=Y&msg=Z&api_key=W` | Flujo completo como lead real (SÍ envía WhatsApp) |
 | `/test-vendedor-msg?phone=X&msg=Y&api_key=Z` | Simula mensaje de vendedor/CEO |
+| `/test-interactive-responses?api_key=X` | Verifica extracción de list_reply/button_reply (QA) |
+| `/test-update-dates?api_key=X` | Actualiza fechas de lead para probar CRONs post-compra |
 | `/debug-lead?phone=X` | Debug de un lead específico |
+| `/debug-citas?phone=X` | Ver citas de un lead |
+| `/debug-vendedor?phone=X` | Debug de un vendedor |
 | `/test-ventana-24h` | Ver estado ventana 24h de cada team member (PÚBLICO) |
 | `/test-envio-7pm` | Dry-run del reporte 7 PM (PÚBLICO) |
 | `/test-envio-7pm?enviar=true` | Envío REAL del reporte 7 PM |
 | `/test-envio-7pm?enviar=true&phone=XXXX` | Envío REAL a vendedor específico |
+
+### Endpoints Post-Compra (Manuales)
+| Endpoint | Uso |
+|----------|-----|
+| `/run-post-entrega` | Ejecuta seguimiento post-entrega (3-7 días) |
+| `/run-satisfaccion-casa` | Ejecuta encuesta satisfacción (3-6 meses) |
+| `/run-mantenimiento` | Ejecuta check-in mantenimiento (~1 año) |
+| `/run-referidos` | Ejecuta solicitud de referidos (30-90 días) |
+| `/run-nps` | Ejecuta encuestas NPS (7-30 días) |
 
 ### 🔐 Autenticación de API
 
@@ -1120,6 +1133,38 @@ GET /api/templates/stats
 
 # Buscar por tag
 GET /api/templates/tag/followup
+```
+
+### Manejo de Respuestas a Templates
+
+Cuando SARA envía un template, guarda contexto para manejar respuestas:
+
+| Template | Dónde guarda contexto | Handler |
+|----------|----------------------|---------|
+| `appointment_confirmation` | `leads.notes.template_sent` | Detecta "sí/confirmo" vs "no/cambiar" |
+| `info_credito` | `leads.notes.template_sent` | Agenda llamada con asesor si muestra interés |
+| `reagendar_noshow` | `leads.notes.pending_noshow_response` | Notifica vendedor, responde al lead |
+| `promo_desarrollo` | `leads.notes.last_broadcast` | Pasa `broadcastContext` a SARA |
+| `recordatorio_cita_*` | Consulta BD | SARA ve citas pendientes automáticamente |
+| `feliz_cumple` | `leads.notes.pending_birthday_response` | Captura fecha de cumpleaños |
+| `referidos_postventa` | Detección regex | Crea lead referido si detecta "referido [nombre] [tel]" |
+| `encuesta_*` | `surveys` table | Sistema de encuestas procesa calificaciones |
+
+**Flujo de broadcast/promoción:**
+```
+1. promo_desarrollo enviado → se guarda last_broadcast en notes
+2. Lead responde → checkBroadcastResponse() detecta
+3. broadcastContext se pasa a SARA con mensaje original
+4. SARA responde CON CONTEXTO de la promoción
+```
+
+**Flujo de no-show:**
+```
+1. Vendedor responde "2" a ¿LLEGÓ? → handler detecta pending_show_confirmation
+2. Cita marcada como no_show
+3. Lead recibe mensaje de reagendar
+4. pending_noshow_response guardado en lead
+5. Cuando lead responde → vendedor notificado
 ```
 
 ### Dashboard de Equipo
@@ -2930,5 +2975,47 @@ Guadalupe, Lupita, Javier, Sergio, Adriana, Claudia, Monica, etc.
 | `69b68744` | docs: update with quality metrics |
 
 **Tests:** 291 → **304** (todos pasan)
+
+---
+
+## 📊 RESUMEN SESIÓN 11 (2026-01-30)
+
+### Fix Crítico: Mensajes Interactivos
+
+**Problema:** Vendedor respondía "2" a lista "¿LLEGÓ?" pero SARA enviaba saludo genérico.
+
+**Causa:** Webhook solo leía `message.text.body`, ignorando `message.interactive.list_reply`.
+
+**Fix (`index.ts`):**
+```typescript
+if (messageType === 'interactive') {
+  if (interactiveType === 'list_reply') {
+    text = message.interactive.list_reply?.id;
+  } else if (interactiveType === 'button_reply') {
+    text = message.interactive.button_reply?.id;
+  }
+}
+```
+
+### Nuevo Endpoint QA
+
+`/test-interactive-responses` - Verifica extracción de mensajes interactivos (3 tests, catálogo de 9 tipos)
+
+### Auditoría de Templates
+
+13 templates verificados - todos tienen handler o contexto adecuado.
+
+### Commits Sesión 11
+
+| Commit | Descripción |
+|--------|-------------|
+| `0a11d385` | fix: handle interactive message responses |
+| `fd3dc0d9` | feat: add /test-interactive-responses endpoint |
+| `568d2dc4` | docs: document template response handling |
+| `0ae39700` | docs: add endpoint documentation |
+
+**Tests:** 351/351 pasando ✅
+
+**Deploy:** `e4843ecf-ff9b-47bb-8a66-3ddd267772ca`
 
 **Sistema 100% operativo - Última verificación: 2026-01-30**
