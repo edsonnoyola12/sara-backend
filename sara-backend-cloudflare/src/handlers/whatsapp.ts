@@ -1588,6 +1588,22 @@ export class WhatsAppHandler {
       }
     }
 
+    // PENDING RESUMEN SEMANAL (recap semanal - sábado)
+    const pendingResumenSemanalCEO = notasCEO?.pending_resumen_semanal;
+    if (pendingResumenSemanalCEO?.sent_at && pendingResumenSemanalCEO?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingResumenSemanalCEO.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 24) {
+        console.log(`📋 [PENDING PRIORITY] CEO ${nombreCEO} respondió template - enviando resumen semanal`);
+        await this.meta.sendWhatsAppMessage(cleanPhone, pendingResumenSemanalCEO.mensaje_completo);
+
+        const { pending_resumen_semanal, ...notasSinPending } = notasCEO;
+        await this.supabase.client.from('team_members').update({
+          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString(), last_resumen_semanal_context: { sent_at: new Date().toISOString(), delivered: true } }
+        }).eq('id', ceo.id);
+        return;
+      }
+    }
+
     // PENDING VIDEO SEMANAL (resumen semanal de logros)
     const pendingVideoSemanalCEO = notasCEO?.pending_video_semanal;
     if (pendingVideoSemanalCEO?.sent_at && pendingVideoSemanalCEO?.mensaje_completo) {
@@ -4038,6 +4054,26 @@ export class WhatsAppHandler {
             ...notasSinPendingSemanal,
             last_sara_interaction: new Date().toISOString(),
             last_reporte_semanal_context: { sent_at: new Date().toISOString(), delivered: true }
+          }
+        }).eq('id', vendedor.id);
+        return;
+      }
+    }
+
+    // PENDING RESUMEN SEMANAL (recap semanal - sábado)
+    const pendingResumenSemanalInicio = notasVendedor?.pending_resumen_semanal;
+    if (pendingResumenSemanalInicio?.sent_at && pendingResumenSemanalInicio?.mensaje_completo) {
+      const horasDesde = (Date.now() - new Date(pendingResumenSemanalInicio.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesde <= 24) {
+        console.log(`📋 [PENDING PRIORITY] ${nombreVendedor} respondió template - enviando resumen semanal`);
+        await this.meta.sendWhatsAppMessage(from, pendingResumenSemanalInicio.mensaje_completo);
+
+        const { pending_resumen_semanal, ...notasSinPendingResumen } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPendingResumen,
+            last_sara_interaction: new Date().toISOString(),
+            last_resumen_semanal_context: { sent_at: new Date().toISOString(), delivered: true }
           }
         }).eq('id', vendedor.id);
         return;

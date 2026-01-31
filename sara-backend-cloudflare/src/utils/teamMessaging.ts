@@ -85,11 +85,14 @@ export async function enviarMensajeTeamMember(
         console.log(`   📨 Template ${REACTIVATION_TEMPLATE} enviado a ${teamMember.name}`);
 
         // Guardar mensaje como pending si está habilitado
+        // Formato: { sent_at, mensaje_completo } - compatible con handlers de whatsapp.ts
         if (guardarPending) {
           const nuevasNotas = {
             ...notasActuales,
-            [pendingKey]: mensaje,
-            [`${pendingKey}_timestamp`]: new Date().toISOString()
+            [pendingKey]: {
+              sent_at: new Date().toISOString(),
+              mensaje_completo: mensaje
+            }
           };
 
           await supabase.client

@@ -14,6 +14,7 @@
 
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 
 // ═══════════════════════════════════════════════════════════
 // FELICITACIONES DE CUMPLEAÑOS - TEAM MEMBERS
@@ -302,30 +303,36 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
     console.log(`   🕐 Última interacción con SARA: ${lastInteraction || 'NUNCA'}`);
     console.log(`   🕐 Hace 24h sería: ${hace24h}`);
     console.log(`   🔓 ¿Ventana 24h abierta?: ${tieneVentanaAbierta ? 'SÍ ✅' : 'NO ❌'}`);
-
-    // ═══ SIEMPRE ENVIAR DIRECTO (sin template) ═══
-    console.log(`\n   🟢 MÉTODO: ENVÍO DIRECTO`);
-    console.log(`   📱 Enviando a: ${vendedor.phone}`);
     console.log(`   📝 Mensaje tiene ${mensaje.length} caracteres`);
 
-    const sendResult = await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
-    console.log(`   ✅ Resultado envío:`, sendResult ? 'OK' : 'Sin respuesta');
+    // ═══ USAR HELPER QUE RESPETA VENTANA 24H ═══
+    const resultado = await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
+      tipoMensaje: 'briefing',
+      guardarPending: true,
+      pendingKey: 'pending_briefing'
+    });
 
-    // Actualizar notas
-    notasActuales.last_briefing_context = {
-      sent_at: new Date().toISOString(),
-      citas: citasHoy?.length || 0,
-      delivered: true,
-      method: 'direct'
-    };
-    delete notasActuales.pending_briefing; // Limpiar si había pendiente
+    if (resultado.success) {
+      // Actualizar notas con contexto del briefing
+      notasActuales.last_briefing_context = {
+        sent_at: new Date().toISOString(),
+        citas: citasHoy?.length || 0,
+        delivered: resultado.method === 'direct',
+        method: resultado.method
+      };
+      if (resultado.method === 'direct') {
+        delete notasActuales.pending_briefing; // Limpiar si se envió directo
+      }
 
-    await supabase.client.from('team_members').update({
-      last_briefing_sent: hoyStr,
-      notes: JSON.stringify(notasActuales)
-    }).eq('id', vendedor.id);
+      await supabase.client.from('team_members').update({
+        last_briefing_sent: hoyStr,
+        notes: JSON.stringify(notasActuales)
+      }).eq('id', vendedor.id);
 
-    console.log(`   ✅ Briefing enviado DIRECTO a ${vendedor.name}`);
+      console.log(`   ✅ Briefing ${resultado.method === 'direct' ? 'enviado DIRECTO' : 'template+pending'} a ${vendedor.name}`);
+    } else {
+      console.log(`   ❌ Error enviando briefing a ${vendedor.name}`);
+    }
   } catch (error) {
     console.error(`\n   ❌ ERROR EN BRIEFING para ${vendedor.name}:`, error);
     console.error(`   ❌ Stack:`, error instanceof Error ? error.stack : 'No stack');
@@ -374,15 +381,18 @@ export async function enviarRecapDiario(supabase: SupabaseService, meta: MetaWha
     `📋 O solo cuéntame y lo registro por ti.\n\n` +
     `_Ej: "Hablé con Juan, quiere visita el lunes"_`;
 
-  // ═══════════════════════════════════════════════════════════
-  // ENVIAR MENSAJE DIRECTO (sin template)
-  // ═══════════════════════════════════════════════════════════
-  try {
-    await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+  // ═══ USAR HELPER QUE RESPETA VENTANA 24H ═══
+  const resultado = await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
+    tipoMensaje: 'reporte', // Usa pending_reporte
+    guardarPending: true,
+    pendingKey: 'pending_recap'
+  });
+
+  if (resultado.success) {
     await supabase.client.from('team_members').update({ last_recap_sent: hoy }).eq('id', vendedor.id);
-    console.log(`📋 Recap enviado DIRECTO a ${vendedor.name}`);
-  } catch (error) {
-    console.error(`❌ Error enviando recap a ${vendedor.name}:`, error);
+    console.log(`📋 Recap ${resultado.method === 'direct' ? 'enviado DIRECTO' : 'template+pending'} a ${vendedor.name}`);
+  } else {
+    console.error(`❌ Error enviando recap a ${vendedor.name}`);
   }
 }
 
@@ -398,20 +408,22 @@ export async function enviarRecapSemanal(supabase: SupabaseService, meta: MetaWh
     return;
   }
 
-  const nombreCorto = vendedor.name?.split(' ')[0] || 'Hola';
   const mensaje = `*Resumen semanal, ${vendedor.name}*\n\n` +
     `Esta semana trabajaste duro. Revisa tus metricas en el CRM.\n\n` +
     `Disfruta tu fin de semana!`;
 
-  // ═══════════════════════════════════════════════════════════
-  // ENVIAR MENSAJE DIRECTO (sin template)
-  // ═══════════════════════════════════════════════════════════
-  try {
-    await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+  // ═══ USAR HELPER QUE RESPETA VENTANA 24H ═══
+  const resultado = await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
+    tipoMensaje: 'resumen_semanal',
+    guardarPending: true,
+    pendingKey: 'pending_resumen_semanal'
+  });
+
+  if (resultado.success) {
     await supabase.client.from('team_members').update({ last_recap_semanal_sent: hoy }).eq('id', vendedor.id);
-    console.log(`📋 Recap semanal enviado DIRECTO a ${vendedor.name}`);
-  } catch (error) {
-    console.error(`❌ Error enviando recap semanal a ${vendedor.name}:`, error);
+    console.log(`📋 Recap semanal ${resultado.method === 'direct' ? 'enviado DIRECTO' : 'template+pending'} a ${vendedor.name}`);
+  } else {
+    console.error(`❌ Error enviando recap semanal a ${vendedor.name}`);
   }
 }
 
