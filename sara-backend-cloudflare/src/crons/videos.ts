@@ -140,13 +140,19 @@ export async function verificarVideosPendientes(supabase: SupabaseService, meta:
             // 3. Enviar por WhatsApp
             let enviadoExitoso = false;
             if (video.lead_phone === 'TEAM_WEEKLY') {
-              console.log('📤 Enviando video semanal a todo el equipo...');
-
               const { data: equipo } = await supabase.client
                 .from('team_members')
-                .select('phone, name')
+                .select('phone, name, role')
                 .in('role', ['vendedor', 'admin', 'coordinador'])
                 .eq('active', true);
+
+              const miembrosConPhone = (equipo || []).filter((m: any) => m.phone);
+              console.log('═══════════════════════════════════════════════════════════');
+              console.log('📤 VIDEO SEMANAL - ENVIANDO A TODO EL EQUIPO');
+              console.log(`📊 Total destinatarios: ${miembrosConPhone.length}`);
+              console.log('───────────────────────────────────────────────────────────');
+              miembrosConPhone.forEach((m: any) => console.log(`   → ${m.name} (${m.role}) - ${m.phone}`));
+              console.log('───────────────────────────────────────────────────────────');
 
               // Parsear stats del campo desarrollo (JSON)
               let caption = '🎬 *¡Resumen de la semana!*\n\n¡Excelente trabajo equipo! 🔥';
@@ -165,16 +171,23 @@ export async function verificarVideosPendientes(supabase: SupabaseService, meta:
               }
 
               // Enviar video a equipo EN PARALELO
-              const miembrosConPhone = (equipo || []).filter((m: any) => m.phone);
               const resultados = await Promise.allSettled(miembrosConPhone.map(async (miembro: any) => {
                 await meta.sendWhatsAppVideoById(miembro.phone, mediaId, caption);
-                console.log(`✅ Video semanal enviado a ${miembro.name}`);
-                return true;
+                console.log(`   ✅ ENVIADO: ${miembro.name} (${miembro.phone})`);
+                return miembro.name;
               }));
-              enviadoExitoso = resultados.some(r => r.status === 'fulfilled');
+
+              const exitosos = resultados.filter(r => r.status === 'fulfilled').length;
+              const fallidos = resultados.filter(r => r.status === 'rejected').length;
+
+              console.log('───────────────────────────────────────────────────────────');
+              console.log(`📊 RESUMEN: ${exitosos} enviados, ${fallidos} fallidos`);
+              console.log('═══════════════════════════════════════════════════════════');
+
+              enviadoExitoso = exitosos > 0;
               resultados.forEach((r, i) => {
                 if (r.status === 'rejected') {
-                  console.error(`⚠️ Error enviando video a ${miembrosConPhone[i]?.name}: ${(r as PromiseRejectedResult).reason?.message || (r as PromiseRejectedResult).reason}`);
+                  console.error(`   ❌ FALLÓ: ${miembrosConPhone[i]?.name}: ${(r as PromiseRejectedResult).reason?.message || (r as PromiseRejectedResult).reason}`);
                 }
               });
             } else {
@@ -304,82 +317,11 @@ export async function generarVideoSemanalLogros(supabase: SupabaseService, meta:
 
     console.log(`📊 Métricas semana: ${numLeads} leads, ${numCitas} citas, ${numCierres} cierres`);
 
-    // Primero enviar mensaje de texto con métricas
-    const mensajeTexto = `🏠 *¡RESUMEN SEMANAL EQUIPO SANTA RITA!*\n` +
-      `━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `📊 *Esta semana logramos:*\n\n` +
-      `👥 *${numLeads}* leads nuevos\n` +
-      `📅 *${numCitas}* citas agendadas\n` +
-      `✅ *${numCierres}* cierres\n\n` +
-      `🥇 *Top performer:* ${topPerformer.name}${topPerformer.cierres > 0 ? ` (${topPerformer.cierres} cierres)` : ''}\n\n` +
-      `¡Excelente trabajo equipo! 🔥\n` +
-      `El video motivacional viene en camino... 🎬`;
-
-    // Enviar a todos los vendedores y admins (respetando ventana 24h)
-    const { data: equipo } = await supabase.client
-      .from('team_members')
-      .select('phone, name, notes')
-      .in('role', ['vendedor', 'admin'])
-      .eq('active', true);
-
-    const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-
-    for (const miembro of equipo || []) {
-      if (!miembro.phone) continue;
-      try {
-        // Parsear notas para verificar ventana 24h
-        const notasActuales = typeof miembro.notes === 'string'
-          ? JSON.parse(miembro.notes || '{}')
-          : (miembro.notes || {});
-        const lastInteraction = notasActuales.last_sara_interaction;
-        const tieneVentanaAbierta = lastInteraction && lastInteraction > hace24h;
-
-        if (tieneVentanaAbierta) {
-          // Ventana abierta → enviar directo
-          await meta.sendWhatsAppMessage(miembro.phone, mensajeTexto);
-          console.log(`✅ Resumen enviado DIRECTO a ${miembro.name}`);
-        } else {
-          // Ventana cerrada → guardar como pending + enviar template
-          const nombreCorto = miembro.name?.split(' ')[0] || 'Hola';
-          notasActuales.pending_video_semanal = {
-            sent_at: new Date().toISOString(),
-            mensaje_completo: mensajeTexto
-          };
-          await supabase.client
-            .from('team_members')
-            .update({ notes: JSON.stringify(notasActuales) })
-            .eq('phone', miembro.phone);
-
-          // Enviar template para reactivar
-          const templateComponents = [{
-            type: 'body',
-            parameters: [{ type: 'text', text: nombreCorto }]
-          }];
-          await meta.sendTemplate(miembro.phone, 'reactivar_equipo', 'es_MX', templateComponents);
-          console.log(`📤 Template enviado a ${miembro.name} (resumen semanal pendiente)`);
-        }
-      } catch (e) {
-        console.error(`⚠️ Error enviando a ${miembro.name}:`, e);
-      }
-    }
-
-    // Generar video con Veo 3 - Mensaje adaptado a resultados
-    let mensajeVoz = '';
-    if (numCierres > 0) {
-      mensajeVoz = `¡Equipo Santa Rita! ${numCierres} ${numCierres === 1 ? 'cierre' : 'cierres'} esta semana. ¡Felicidades ${topPerformer.name}!`;
-    } else if (numCitas > 0) {
-      mensajeVoz = `¡Equipo Santa Rita! ${numCitas} ${numCitas === 1 ? 'cita' : 'citas'} esta semana. ¡Esas ventas vienen pronto!`;
-    } else if (numLeads > 0) {
-      mensajeVoz = `¡Equipo Santa Rita! ${numLeads} leads nuevos. ¡A convertirlos en citas!`;
-    } else {
-      mensajeVoz = `¡Equipo Santa Rita! Nueva semana, nuevas oportunidades. ¡Vamos con todo!`;
-    }
-
-    const promptVideo = `A professional Mexican business coach speaking directly to camera.
-Modern bright office with glass windows, natural lighting.
-He speaks enthusiastically in Spanish: "${mensajeVoz}"
-Confident smile, professional attire, warm lighting.
-Vertical 9:16 format, 8 seconds.`;
+    // Generar video con Veo 3 - Personalizado para Grupo Santa Rita
+    const promptVideo = `A Mexican real estate agent standing in front of modern Santa Rita homes says: "Felicidades equipo Santa Rita, excelente semana!"
+Bright sunny day, beautiful residential houses in Zacatecas Mexico as background.
+Professional attire, warm smile, speaking directly to camera.
+Vertical 9:16, 8 seconds.`;
 
     console.log('🎬 Generando video semanal con Veo 3...');
 

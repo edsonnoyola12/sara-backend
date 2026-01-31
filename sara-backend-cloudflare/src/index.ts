@@ -9569,10 +9569,67 @@ Keep the camera focused on this specific house facade. Golden hour lighting, 4k.
     // TEST: Generar video semanal manualmente
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/test-video-semanal') {
+      const testPhone = url.searchParams.get('phone');
       console.log('🧪 TEST: Generando video semanal de logros...');
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      if (testPhone) {
+        const phoneFormatted = testPhone.startsWith('52') ? testPhone : '52' + testPhone;
+        const hoy = new Date();
+        const inicioSemana = new Date(hoy);
+        inicioSemana.setDate(hoy.getDate() - hoy.getDay() + 1);
+        inicioSemana.setHours(0, 0, 0, 0);
+        const finSemana = new Date(hoy);
+        finSemana.setHours(23, 59, 59, 999);
+
+        const { data: leadsNuevos } = await supabase.client.from('leads').select('id').gte('created_at', inicioSemana.toISOString()).lte('created_at', finSemana.toISOString());
+        const { data: citasAgendadas } = await supabase.client.from('appointments').select('id').gte('created_at', inicioSemana.toISOString()).lte('created_at', finSemana.toISOString());
+        const { data: cierres } = await supabase.client.from('leads').select('id, assigned_to').eq('status', 'closed').gte('status_changed_at', inicioSemana.toISOString()).lte('status_changed_at', finSemana.toISOString());
+        const { data: vendedores } = await supabase.client.from('team_members').select('id, name').eq('role', 'vendedor').eq('active', true);
+
+        let topPerformer = { name: 'El equipo', cierres: 0 };
+        if (vendedores && cierres) {
+          const cierresPorVendedor: Record<string, number> = {};
+          for (const c of cierres) {
+            if (c.assigned_to) cierresPorVendedor[c.assigned_to] = (cierresPorVendedor[c.assigned_to] || 0) + 1;
+          }
+          for (const [vendedorId, count] of Object.entries(cierresPorVendedor)) {
+            if (count > topPerformer.cierres) {
+              const vendedor = vendedores.find((v: any) => v.id === vendedorId);
+              if (vendedor) topPerformer = { name: vendedor.name.split(' ')[0], cierres: count };
+            }
+          }
+        }
+
+        const numLeads = leadsNuevos?.length || 0;
+        const numCitas = citasAgendadas?.length || 0;
+        const numCierres = cierres?.length || 0;
+
+        let mensajeVoz = '';
+        if (numCierres > 0) {
+          mensajeVoz = `¡${numCierres} ${numCierres === 1 ? 'venta' : 'ventas'}! ¡Bravo ${topPerformer.name}!`;
+        } else if (numCitas > 0) {
+          mensajeVoz = `¡${numCitas} citas! ¡Vamos equipo!`;
+        } else if (numLeads > 0) {
+          mensajeVoz = `¡${numLeads} leads nuevos! ¡A vender!`;
+        } else {
+          mensajeVoz = `¡Nueva semana! ¡Vamos con todo!`;
+        }
+
+        const mensajeTexto = `🏠 *¡RESUMEN SEMANAL EQUIPO SANTA RITA!*\n━━━━━━━━━━━━━━━━━━━━━\n\n📊 *Esta semana logramos:*\n\n👥 *${numLeads}* leads nuevos\n📅 *${numCitas}* citas agendadas\n✅ *${numCierres}* cierres\n\n🥇 *Top performer:* ${topPerformer.name}${topPerformer.cierres > 0 ? ` (${topPerformer.cierres} cierres)` : ''}\n\n¡Excelente trabajo equipo! 🔥`;
+
+        await meta.sendWhatsAppMessage(phoneFormatted, mensajeTexto);
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          phone: phoneFormatted,
+          metricas: { leads: numLeads, citas: numCitas, cierres: numCierres, topPerformer: topPerformer.name },
+          mensajeVoz: mensajeVoz
+        }));
+      }
+
       await generarVideoSemanalLogros(supabase, meta, env);
-      return corsResponse(JSON.stringify({ ok: true, message: 'Video semanal iniciado. El CRON lo enviará cuando esté listo.' }));
+      return corsResponse(JSON.stringify({ ok: true, message: 'Video semanal iniciado a todos.' }));
     }
 
 
