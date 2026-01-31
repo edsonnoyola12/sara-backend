@@ -3098,4 +3098,73 @@ Agregadas detecciones: `no manejamos`, `instalar alberca`, `futura alberca`, etc
 
 **Deploy:** `50fbcd32-802f-48e4-8c58-ea9c9165c502`
 
+---
+
+**Sesión 11 Parte 4 (Optimización Agresiva + Tests en Vivo)**
+
+### Secciones Optimizadas
+
+| Sección | Antes | Después | Reducción |
+|---------|-------|---------|-----------|
+| RESPUESTAS CORTAS | 40 líneas | 4 líneas | 90% |
+| POST-VENTA/OTRO LADO | 35 líneas | 5 líneas | 86% |
+| SEGURIDAD/SERVICIOS/DISTANCIAS | 46 líneas | 5 líneas | 89% |
+| QUEJAS/PERSONALIDAD | 65 líneas | 12 líneas | 82% |
+| FINANCIAMIENTO/PLÁTICA | 65 líneas | 8 líneas | 88% |
+| RECORDATORIO FINAL | 25 líneas | 2 líneas | 92% |
+| SEND_CONTACTOS | 15 líneas | 1 línea | 93% |
+| QUIERE VER = CITA | 25 líneas | 2 líneas | 92% |
+| **Total** | **316 líneas** | **39 líneas** | **88%** |
+
+### Métricas
+
+| Métrica | Valor |
+|---------|-------|
+| Archivo | 7,699 → 7,355 líneas |
+| Reducción | -344 líneas |
+
+### Tests en Vivo (20/20 ✅)
+
+| Test | Resultado |
+|------|-----------|
+| Citadella del Nogal | ✅ Villa Campelo + Galiano |
+| No me contactes | ✅ Respeta decisión |
+| INFONAVIT | ✅ Confirma que aplica |
+| English | ✅ Responde en inglés + USD |
+| Persona real | ✅ "Soy asistente virtual" |
+| Me urge | ✅ Entrega inmediata |
+| Hamburguesas | ✅ "Somos inmobiliaria" |
+| Mascotas | ✅ Pet-friendly |
+| Número equivocado | ✅ Maneja amablemente |
+| Competencia | ✅ No critica, destaca valor |
+| Solo emoji 👍 | ✅ Responde y pregunta |
+| Lo voy a pensar | ✅ Intenta rescatar |
+| Terreno | ✅ Villa Campelo/Galiano |
+| Tasa interés | ✅ Rango general, no inventa |
+| 3 rec económica | ✅ Lista por precio |
+| Monte Verde | ✅ 5 modelos con precios |
+| Queja | ✅ Pregunta problema |
+| Ubicación | ✅ Lista desarrollos |
+| Typo "informasion" | ✅ Entiende correctamente |
+| "Sí quiero" | ✅ Continúa flujo |
+
+### Ahorro Acumulado Total (Sesiones 8+11)
+
+| Sesión | Reducción | Descripción |
+|--------|-----------|-------------|
+| Sesión 8 | ~8% | Líneas decorativas, emojis |
+| Sesión 11 Parte 2 | ~12% | MENTALIDAD, FLUJO DE VENTA |
+| Sesión 11 Parte 3 | ~5% | FORMATO, DATOS, CITAS |
+| Sesión 11 Parte 4 | ~5% | RESPUESTAS, SEGURIDAD, PERSONALIDAD |
+| **Total** | **~30%** | **~$540/año ahorro** |
+
+### Commits Sesión 11 Parte 4
+
+| Commit | Descripción |
+|--------|-------------|
+| `e2981ded` | perf: optimizar prompt de IA - Sesión 11 Parte 4 |
+| `cecce0f9` | docs: agregar Sesión 11 Parte 4 a documentación |
+
+**Deploy:** `c6df2364-5f23-4947-9476-7c562a83e9f1`
+
 **Sistema 100% operativo - Última verificación: 2026-01-31**
