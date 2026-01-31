@@ -363,12 +363,23 @@ export async function generarVideoSemanalLogros(supabase: SupabaseService, meta:
       }
     }
 
-    // Generar video con Veo 3 (SIN texto - AI no genera texto legible)
-    const promptVideo = `Celebratory office scene with happy Mexican real estate team.
-Professional team of 5-6 people in business casual attire clapping and celebrating.
+    // Generar video con Veo 3 - Mensaje adaptado a resultados
+    let mensajeVoz = '';
+    if (numCierres > 0) {
+      mensajeVoz = `¡Equipo Santa Rita! ${numCierres} ${numCierres === 1 ? 'cierre' : 'cierres'} esta semana. ¡Felicidades ${topPerformer.name}!`;
+    } else if (numCitas > 0) {
+      mensajeVoz = `¡Equipo Santa Rita! ${numCitas} ${numCitas === 1 ? 'cita' : 'citas'} esta semana. ¡Esas ventas vienen pronto!`;
+    } else if (numLeads > 0) {
+      mensajeVoz = `¡Equipo Santa Rita! ${numLeads} leads nuevos. ¡A convertirlos en citas!`;
+    } else {
+      mensajeVoz = `¡Equipo Santa Rita! Nueva semana, nuevas oportunidades. ¡Vamos con todo!`;
+    }
+
+    const promptVideo = `A professional Mexican business coach speaking directly to camera.
 Modern bright office with glass windows, natural lighting.
-Slow motion confetti falling. High fives and genuine smiles.
-Cinematic, warm color grading. 8 seconds. No text, no overlays, no captions - clean video only.`;
+He speaks enthusiastically in Spanish: "${mensajeVoz}"
+Confident smile, professional attire, warm lighting.
+Vertical 9:16 format, 8 seconds.`;
 
     console.log('🎬 Generando video semanal con Veo 3...');
 

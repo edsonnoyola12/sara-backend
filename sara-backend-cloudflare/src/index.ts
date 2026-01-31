@@ -15977,8 +15977,8 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
       await enviarReporteDiarioMarketing(supabase, meta);
     }
 
-    // Viernes 6pm: Video semanal de logros con Veo 3 (solo primer ejecucion)
-    if (mexicoHour === 18 && isFirstRunOfHour && dayOfWeek === 5) {
+    // Sábado 2pm: Video semanal de logros con Veo 3 (solo primer ejecucion)
+    if (mexicoHour === 14 && isFirstRunOfHour && dayOfWeek === 6) {
       console.log('🎬 Generando video semanal de logros...');
       await generarVideoSemanalLogros(supabase, meta, env);
     }
