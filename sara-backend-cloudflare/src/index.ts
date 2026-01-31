@@ -5919,6 +5919,45 @@ Mensaje: ${mensaje}`;
         const changes = entry?.changes?.[0];
         const value = changes?.value;
         const messages = value?.messages;
+        const statuses = value?.statuses;
+
+        // ═══════════════════════════════════════════════════════════
+        // TRACKING DE ESTADOS DE ENTREGA (sent, delivered, read, failed)
+        // ═══════════════════════════════════════════════════════════
+        if (statuses && statuses.length > 0) {
+          for (const status of statuses) {
+            const messageId = status.id;
+            const statusType = status.status; // sent, delivered, read, failed
+            const recipientId = status.recipient_id;
+            const timestamp = status.timestamp;
+            const errorCode = status.errors?.[0]?.code;
+            const errorTitle = status.errors?.[0]?.title;
+
+            console.log(`📬 STATUS UPDATE: ${statusType} | To: ${recipientId} | MsgID: ${messageId?.substring(0, 30)}...`);
+
+            // Guardar en tabla message_delivery_status
+            try {
+              await supabase.client.from('message_delivery_status').upsert({
+                message_id: messageId,
+                recipient_phone: recipientId,
+                status: statusType,
+                timestamp: new Date(parseInt(timestamp) * 1000).toISOString(),
+                error_code: errorCode,
+                error_message: errorTitle,
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'message_id' });
+
+              // Log especial para errores
+              if (statusType === 'failed') {
+                console.error(`❌ MENSAJE FALLIDO: ${recipientId} - Error ${errorCode}: ${errorTitle}`);
+              }
+            } catch (dbError) {
+              // Si la tabla no existe, solo loguear
+              console.log(`📬 ${statusType.toUpperCase()}: ${recipientId} (tabla no existe, solo log)`);
+            }
+          }
+          return new Response('OK', { status: 200 });
+        }
 
         console.log('📥 Messages encontrados:', messages?.length || 0);
 
@@ -9398,10 +9437,164 @@ _Solo responde con el número_ 🙏`;
       }
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // ENVIAR VIDEO A TELÉFONOS ESPECÍFICOS
+    // /send-video-to-phones?video_id=XXX&phones=521...,521...,521...
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/send-video-to-phones') {
+      const videoId = url.searchParams.get('video_id');
+      const phonesParam = url.searchParams.get('phones');
+
+      if (!videoId || !phonesParam) {
+        return corsResponse(JSON.stringify({ error: 'Faltan video_id o phones' }), 400);
+      }
+
+      const phones = phonesParam.split(',').map(p => p.trim());
+      console.log(`📤 Enviando video ${videoId} a ${phones.length} teléfonos`);
+
+      const { data: video } = await supabase.client
+        .from('pending_videos')
+        .select('*')
+        .eq('id', videoId)
+        .single();
+
+      if (!video || !video.video_url) {
+        return corsResponse(JSON.stringify({ error: 'Video no encontrado o sin URL' }), 404);
+      }
+
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      try {
+        // Descargar video
+        console.log('📥 Descargando video...');
+        const videoResponse = await fetch(video.video_url, {
+          headers: { 'x-goog-api-key': env.GEMINI_API_KEY }
+        });
+
+        if (!videoResponse.ok) {
+          return corsResponse(JSON.stringify({ error: `Error descargando: ${videoResponse.status}` }), 500);
+        }
+
+        const videoBuffer = await videoResponse.arrayBuffer();
+        console.log(`✅ Descargado: ${videoBuffer.byteLength} bytes`);
+
+        // Subir a Meta
+        console.log('📤 Subiendo a Meta...');
+        const mediaId = await meta.uploadVideoFromBuffer(videoBuffer);
+        console.log(`✅ Media ID: ${mediaId}`);
+
+        // Parsear stats para caption
+        let caption = '🎬 *¡RESUMEN SEMANAL!*\n\n¡Excelente trabajo equipo! 🔥';
+        try {
+          const stats = JSON.parse(video.desarrollo);
+          caption = `🎬 *¡RESUMEN SEMANAL!*\n\n` +
+            `📊 *Resultados del equipo:*\n` +
+            `   📥 ${stats.leads} leads nuevos\n` +
+            `   📅 ${stats.citas} citas agendadas\n` +
+            `   🏆 ${stats.cierres} cierres\n\n` +
+            `¡Vamos por más! 💪🔥`;
+        } catch (e) {
+          console.log('⚠️ No se pudo parsear stats, usando caption default');
+        }
+
+        // Enviar a cada teléfono
+        const enviados: string[] = [];
+        const errores: string[] = [];
+
+        for (const phone of phones) {
+          try {
+            const phoneFormatted = phone.startsWith('52') ? phone : '52' + phone;
+            await meta.sendWhatsAppVideoById(phoneFormatted, mediaId, caption);
+            console.log(`✅ Video enviado a ${phoneFormatted}`);
+            enviados.push(phoneFormatted);
+          } catch (e: any) {
+            console.error(`❌ Error enviando a ${phone}: ${e.message}`);
+            errores.push(`${phone}: ${e.message}`);
+          }
+        }
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          message: `Video enviado a ${enviados.length}/${phones.length} teléfonos`,
+          enviados,
+          errores
+        }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
 
     // ═══════════════════════════════════════════════════════════
     // TEST: Generar video Veo 3 personalizado
     // ═══════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════
+    // CONSULTAR ESTADOS DE ENTREGA DE MENSAJES
+    // /message-status?phone=521... o /message-status?hours=24
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/message-status') {
+      const phone = url.searchParams.get('phone');
+      const hours = parseInt(url.searchParams.get('hours') || '24');
+
+      try {
+        let query = supabase.client
+          .from('message_delivery_status')
+          .select('*')
+          .order('updated_at', { ascending: false })
+          .limit(100);
+
+        if (phone) {
+          const phoneClean = phone.replace(/\D/g, '');
+          query = query.like('recipient_phone', `%${phoneClean.slice(-10)}`);
+        } else {
+          const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+          query = query.gte('updated_at', since);
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+          // Si la tabla no existe, mostrar mensaje amigable
+          if (error.message.includes('does not exist')) {
+            return corsResponse(JSON.stringify({
+              error: 'Tabla message_delivery_status no existe',
+              hint: 'Ejecuta el SQL para crearla o espera a que lleguen los primeros webhooks de estado',
+              sql: `CREATE TABLE message_delivery_status (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  message_id TEXT UNIQUE NOT NULL,
+  recipient_phone TEXT NOT NULL,
+  status TEXT NOT NULL,
+  timestamp TIMESTAMPTZ,
+  error_code TEXT,
+  error_message TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_mds_phone ON message_delivery_status(recipient_phone);
+CREATE INDEX idx_mds_status ON message_delivery_status(status);
+CREATE INDEX idx_mds_updated ON message_delivery_status(updated_at);`
+            }));
+          }
+          throw error;
+        }
+
+        // Agrupar por estado
+        const resumen = {
+          sent: data?.filter(d => d.status === 'sent').length || 0,
+          delivered: data?.filter(d => d.status === 'delivered').length || 0,
+          read: data?.filter(d => d.status === 'read').length || 0,
+          failed: data?.filter(d => d.status === 'failed').length || 0
+        };
+
+        return corsResponse(JSON.stringify({
+          query: phone ? `phone: ${phone}` : `últimas ${hours} horas`,
+          resumen,
+          total: data?.length || 0,
+          mensajes: data?.slice(0, 50) // Limitar a 50 para no sobrecargar
+        }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
     if (url.pathname === '/test-veo3') {
       console.log('TEST: Probando generacion de video Veo 3...');
       const testPhone = url.searchParams.get('phone') || '5212224558475';
