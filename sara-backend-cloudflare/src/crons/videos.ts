@@ -317,13 +317,17 @@ export async function generarVideoSemanalLogros(supabase: SupabaseService, meta:
 
     console.log(`📊 Métricas semana: ${numLeads} leads, ${numCitas} citas, ${numCierres} cierres`);
 
-    // Generar video con Veo 3 - Personalizado para Grupo Santa Rita
-    const promptVideo = `A Mexican real estate agent standing in front of modern Santa Rita homes says: "Felicidades equipo Santa Rita, excelente semana!"
-Bright sunny day, beautiful residential houses in Zacatecas Mexico as background.
+    // Generar video con Veo 3 - Usando foto real de casas de Santa Rita
+    const fotoSantaRita = 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg';
+    const promptVideo = `Real estate agent in front of these houses says: "Felicidades equipo Santa Rita, excelente semana!"
 Professional attire, warm smile, speaking directly to camera.
 Vertical 9:16, 8 seconds.`;
 
-    console.log('🎬 Generando video semanal con Veo 3...');
+    console.log('🎬 Generando video semanal con Veo 3 (con imagen de referencia)...');
+
+    // Descargar imagen de referencia
+    const imgBase64 = await descargarImagenBase64(fotoSantaRita);
+    console.log('🎬 Imagen de Santa Rita descargada');
 
     const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning', {
       method: 'POST',
@@ -333,7 +337,8 @@ Vertical 9:16, 8 seconds.`;
       },
       body: JSON.stringify({
         instances: [{
-          prompt: promptVideo
+          prompt: promptVideo,
+          image: { bytesBase64Encoded: imgBase64, mimeType: 'image/jpeg' }
         }],
         parameters: {
           aspectRatio: "9:16",
