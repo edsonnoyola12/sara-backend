@@ -3156,7 +3156,8 @@ Agregadas detecciones: `no manejamos`, `instalar alberca`, `futura alberca`, etc
 | Sesión 11 Parte 2 | ~12% | MENTALIDAD, FLUJO DE VENTA |
 | Sesión 11 Parte 3 | ~5% | FORMATO, DATOS, CITAS |
 | Sesión 11 Parte 4 | ~5% | RESPUESTAS, SEGURIDAD, PERSONALIDAD |
-| **Total** | **~30%** | **~$540/año ahorro** |
+| Sesión 11 Parte 5 | ~1% | REGLAS CITA, INTENTS, FLAGS |
+| **Total** | **~31%** | **~$560/año ahorro** |
 
 ### Commits Sesión 11 Parte 4
 
@@ -3166,5 +3167,33 @@ Agregadas detecciones: `no manejamos`, `instalar alberca`, `futura alberca`, etc
 | `cecce0f9` | docs: agregar Sesión 11 Parte 4 a documentación |
 
 **Deploy:** `c6df2364-5f23-4947-9476-7c562a83e9f1`
+
+---
+
+**Sesión 11 Parte 5 (Optimización Final)**
+
+### Secciones Compactadas
+
+| Sección | Antes | Después | Reducción |
+|---------|-------|---------|-----------|
+| REGLAS DE CITA | 42 líneas | 5 líneas | 88% |
+| INTENTS | 24 líneas | 3 líneas | 88% |
+| FLAGS | 14 líneas | 6 líneas | 57% |
+| **Total** | **80 líneas** | **14 líneas** | **82%** |
+
+### Métricas
+
+| Métrica | Valor |
+|---------|-------|
+| Archivo | 7,355 → 7,286 líneas |
+| Reducción | -69 líneas |
+
+### Commits Sesión 11 Parte 5
+
+| Commit | Descripción |
+|--------|-------------|
+| `c85a3c83` | perf: optimizar prompt - Sesión 11 Parte 5 |
+
+**Deploy:** `5950330e-72a6-4b0c-9971-72eb72653ea7`
 
 **Sistema 100% operativo - Última verificación: 2026-01-31**
