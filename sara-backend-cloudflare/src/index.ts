@@ -15967,47 +15967,9 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // 9am L-V: REACTIVAR EQUIPO - Enviar template a quienes no han interactuado en 24h
+    // 9am L-V: REACTIVAR EQUIPO - DESACTIVADO
+    // Ahora el briefing de 8am se envía DIRECTO sin template
     // ═══════════════════════════════════════════════════════════════
-    if (mexicoHour === 9 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5 && vendedores) {
-      console.log('🔄 Verificando equipo para reactivación...');
-      const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      let reactivados = 0;
-
-      for (const v of vendedores) {
-        if (!v.phone || !v.active) continue;
-
-        // Verificar si no ha interactuado en 24h
-        const ultimaInteraccion = v.last_sara_interaction;
-        const necesitaReactivar = !ultimaInteraccion || ultimaInteraccion < hace24h;
-
-        if (necesitaReactivar) {
-          console.log(`   📤 Reactivando a ${v.name} (última: ${ultimaInteraccion || 'nunca'})`);
-          try {
-            // Enviar template de reactivación
-            await meta.sendTemplate(v.phone, 'reactivar_equipo', 'es_MX', [
-              {
-                type: 'body',
-                parameters: [
-                  { type: 'text', text: v.name?.split(' ')[0] || 'Equipo' }
-                ]
-              }
-            ]);
-            reactivados++;
-
-            // Marcar que se envió template (para no repetir)
-            await supabase.client
-              .from('team_members')
-              .update({ last_sara_interaction: new Date().toISOString() })
-              .eq('id', v.id);
-
-          } catch (err) {
-            console.log(`   ⚠️ Error reactivando ${v.name}:`, err);
-          }
-        }
-      }
-      console.log(`🔄 REACTIVACIÓN: ${reactivados} miembros reactivados`);
-    }
 
     // 7pm L-V: Reporte diario consolidado a vendedores (incluye recap + métricas)
     // CONSOLIDADO: Antes se enviaban 2 mensajes separados (recap + reporte), ahora es 1 solo

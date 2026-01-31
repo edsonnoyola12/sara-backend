@@ -49,46 +49,17 @@ export async function enviarMensajeTeamMember(
 
     const nombreCorto = teamMember.name?.split(' ')[0] || 'Hola';
 
-    console.log(`📤 [${tipoMensaje}] ${teamMember.name}: Ventana 24h ${ventanaAbierta ? '✅ ABIERTA' : '❌ CERRADA'}`);
+    console.log(`📤 [${tipoMensaje}] ${teamMember.name}: Enviando mensaje DIRECTO (sin template)`);
 
-    if (ventanaAbierta) {
-      // ═══ VENTANA ABIERTA: Enviar mensaje directo ═══
+    // ═══ SIEMPRE ENVIAR MENSAJE DIRECTO ═══
+    // Ya no usamos templates de reactivación - enviamos directo al equipo
+    try {
       await meta.sendWhatsAppMessage(teamMember.phone, mensaje);
       console.log(`   ✅ Mensaje enviado DIRECTO a ${teamMember.name}`);
-      return { success: true, method: 'direct', ventanaAbierta: true };
-    } else {
-      // ═══ VENTANA CERRADA: Enviar template + guardar pending ═══
-
-      // 1. Guardar mensaje en pending si está habilitado
-      if (guardarPending) {
-        notasActuales[pendingKey] = {
-          sent_at: new Date().toISOString(),
-          tipo: tipoMensaje,
-          mensaje_completo: mensaje
-        };
-        await supabase.client
-          .from('team_members')
-          .update({ notes: JSON.stringify(notasActuales) })
-          .eq('id', teamMember.id);
-        console.log(`   💾 Mensaje guardado en ${pendingKey}`);
-      }
-
-      // 2. Enviar template reactivar_equipo
-      const templateComponents = [
-        {
-          type: 'body',
-          parameters: [{ type: 'text', text: nombreCorto }]
-        }
-      ];
-
-      try {
-        await meta.sendTemplate(teamMember.phone, 'reactivar_equipo', 'es_MX', templateComponents);
-        console.log(`   📤 Template enviado a ${teamMember.name} (mensaje guardado como pending)`);
-        return { success: true, method: 'template', ventanaAbierta: false };
-      } catch (templateError) {
-        console.error(`   ❌ Error enviando template a ${teamMember.name}:`, templateError);
-        return { success: false, method: 'failed', ventanaAbierta: false };
-      }
+      return { success: true, method: 'direct', ventanaAbierta };
+    } catch (sendError) {
+      console.error(`   ❌ Error enviando mensaje a ${teamMember.name}:`, sendError);
+      return { success: false, method: 'failed', ventanaAbierta: false };
     }
   } catch (error) {
     console.error(`❌ Error en enviarMensajeTeamMember para ${teamMember.name}:`, error);

@@ -303,67 +303,29 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
     console.log(`   🕐 Hace 24h sería: ${hace24h}`);
     console.log(`   🔓 ¿Ventana 24h abierta?: ${tieneVentanaAbierta ? 'SÍ ✅' : 'NO ❌'}`);
 
-    if (tieneVentanaAbierta) {
-      // ═══ VENTANA ABIERTA: Enviar briefing directo ═══
-      console.log(`\n   🟢 MÉTODO: ENVÍO DIRECTO (ventana abierta)`);
-      console.log(`   📱 Enviando a: ${vendedor.phone}`);
-      console.log(`   📝 Mensaje tiene ${mensaje.length} caracteres`);
+    // ═══ SIEMPRE ENVIAR DIRECTO (sin template) ═══
+    console.log(`\n   🟢 MÉTODO: ENVÍO DIRECTO`);
+    console.log(`   📱 Enviando a: ${vendedor.phone}`);
+    console.log(`   📝 Mensaje tiene ${mensaje.length} caracteres`);
 
-      const sendResult = await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
-      console.log(`   ✅ Resultado envío directo:`, sendResult ? 'OK' : 'Sin respuesta');
+    const sendResult = await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+    console.log(`   ✅ Resultado envío:`, sendResult ? 'OK' : 'Sin respuesta');
 
-      // Actualizar notas
-      notasActuales.last_briefing_context = {
-        sent_at: new Date().toISOString(),
-        citas: citasHoy?.length || 0,
-        delivered: true,
-        method: 'direct'
-      };
-      delete notasActuales.pending_briefing; // Limpiar si había pendiente
+    // Actualizar notas
+    notasActuales.last_briefing_context = {
+      sent_at: new Date().toISOString(),
+      citas: citasHoy?.length || 0,
+      delivered: true,
+      method: 'direct'
+    };
+    delete notasActuales.pending_briefing; // Limpiar si había pendiente
 
-      await supabase.client.from('team_members').update({
-        last_briefing_sent: hoyStr,
-        notes: JSON.stringify(notasActuales)
-      }).eq('id', vendedor.id);
+    await supabase.client.from('team_members').update({
+      last_briefing_sent: hoyStr,
+      notes: JSON.stringify(notasActuales)
+    }).eq('id', vendedor.id);
 
-      console.log(`   ✅ Briefing enviado DIRECTO exitosamente a ${vendedor.name}`);
-    } else {
-      // ═══ VENTANA CERRADA: Enviar template + guardar pending ═══
-      console.log(`\n   🟡 MÉTODO: TEMPLATE + PENDING (ventana cerrada)`);
-      console.log(`   📱 Enviando template a: ${vendedor.phone}`);
-
-      // 1. Guardar briefing completo en notes
-      notasActuales.pending_briefing = {
-        sent_at: new Date().toISOString(),
-        fecha: fechaFormato,
-        citas: citasHoy?.length || 0,
-        acciones_pendientes: totalAcciones,
-        mensaje_completo: mensaje
-      };
-      console.log(`   💾 Guardando pending_briefing en notes...`);
-      const updateResult = await supabase.client
-        .from('team_members')
-        .update({
-          last_briefing_sent: hoyStr,
-          notes: JSON.stringify(notasActuales)
-        })
-        .eq('id', vendedor.id);
-      console.log(`   💾 Update notes result:`, updateResult.error ? `ERROR: ${updateResult.error.message}` : 'OK');
-
-      // 2. Enviar template reactivar_equipo (más apropiado para equipo interno)
-      const templateComponents = [
-        {
-          type: 'body',
-          parameters: [
-            { type: 'text', text: nombreCorto }
-          ]
-        }
-      ];
-      console.log(`   📤 Enviando template 'reactivar_equipo' con parámetro: ${nombreCorto}`);
-      const templateResult = await meta.sendTemplate(vendedor.phone, 'reactivar_equipo', 'es_MX', templateComponents);
-      console.log(`   📤 Template result:`, templateResult ? 'OK' : 'Sin respuesta');
-      console.log(`   ✅ Template enviado, briefing guardado como pending`);
-    }
+    console.log(`   ✅ Briefing enviado DIRECTO a ${vendedor.name}`);
   } catch (error) {
     console.error(`\n   ❌ ERROR EN BRIEFING para ${vendedor.name}:`, error);
     console.error(`   ❌ Stack:`, error instanceof Error ? error.stack : 'No stack');
@@ -413,48 +375,15 @@ export async function enviarRecapDiario(supabase: SupabaseService, meta: MetaWha
     `_Ej: "Hablé con Juan, quiere visita el lunes"_`;
 
   // ═══════════════════════════════════════════════════════════
-  // ENVIAR VÍA TEMPLATE (para que llegue aunque no hayan escrito en 24h)
-  // Estrategia: Template llega, vendedor responde, ENTONCES enviamos recap
+  // ENVIAR MENSAJE DIRECTO (sin template)
   // ═══════════════════════════════════════════════════════════
   try {
-    // 1. Guardar recap en notes ANTES de enviar template
-    const notasActuales = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
-    notasActuales.pending_recap = {
-      sent_at: new Date().toISOString(),
-      tipo: 'diario',
-      mensaje_completo: mensaje
-    };
-    await supabase.client
-      .from('team_members')
-      .update({
-        last_recap_sent: hoy,
-        notes: JSON.stringify(notasActuales)
-      })
-      .eq('id', vendedor.id);
-
-    // 2. Enviar template reactivar_equipo (para equipo interno)
-    const templateComponents = [
-      {
-        type: 'body',
-        parameters: [
-          { type: 'text', text: nombreCorto }
-        ]
-      }
-    ];
-    await meta.sendTemplate(vendedor.phone, 'reactivar_equipo', 'es_MX', templateComponents);
-    console.log(`📤 Template recap enviado a ${vendedor.name} (recap completo pendiente hasta que responda)`);
+    await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+    await supabase.client.from('team_members').update({ last_recap_sent: hoy }).eq('id', vendedor.id);
+    console.log(`📋 Recap enviado DIRECTO a ${vendedor.name}`);
   } catch (error) {
     console.error(`❌ Error enviando recap a ${vendedor.name}:`, error);
-    // Fallback: enviar directo si la ventana está abierta
-    try {
-      await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
-      await supabase.client.from('team_members').update({ last_recap_sent: hoy }).eq('id', vendedor.id);
-      console.log(`📋 Recap enviado directo a ${vendedor.name} (fallback)`);
-    } catch (e2) {
-      console.error(`❌ Fallback recap también falló para ${vendedor.name}`);
-    }
   }
-  console.log(`✅ Recap diario enviado a ${vendedor.name}`);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -475,49 +404,15 @@ export async function enviarRecapSemanal(supabase: SupabaseService, meta: MetaWh
     `Disfruta tu fin de semana!`;
 
   // ═══════════════════════════════════════════════════════════
-  // ENVIAR VÍA TEMPLATE (para que llegue aunque no hayan escrito en 24h)
-  // Estrategia: Template llega, vendedor responde, ENTONCES enviamos recap
+  // ENVIAR MENSAJE DIRECTO (sin template)
   // ═══════════════════════════════════════════════════════════
   try {
-    // 1. Guardar recap en notes ANTES de enviar template
-    const notasActuales = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
-    notasActuales.pending_recap = {
-      sent_at: new Date().toISOString(),
-      tipo: 'semanal',
-      mensaje_completo: mensaje
-    };
-    await supabase.client
-      .from('team_members')
-      .update({
-        last_recap_semanal_sent: hoy,
-        notes: JSON.stringify(notasActuales)
-      })
-      .eq('id', vendedor.id);
-
-    // 2. Enviar template (recap se envía cuando respondan)
-    const templateComponents = [
-      {
-        type: 'body',
-        parameters: [
-          { type: 'text', text: nombreCorto },
-          { type: 'text', text: 'tu resumen semanal' }
-        ]
-      }
-    ];
-    await meta.sendTemplate(vendedor.phone, 'seguimiento_lead', 'es_MX', templateComponents);
-    console.log(`📤 Template recap semanal enviado a ${vendedor.name} (recap completo pendiente hasta que responda)`);
+    await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+    await supabase.client.from('team_members').update({ last_recap_semanal_sent: hoy }).eq('id', vendedor.id);
+    console.log(`📋 Recap semanal enviado DIRECTO a ${vendedor.name}`);
   } catch (error) {
     console.error(`❌ Error enviando recap semanal a ${vendedor.name}:`, error);
-    // Fallback
-    try {
-      await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
-      await supabase.client.from('team_members').update({ last_recap_semanal_sent: hoy }).eq('id', vendedor.id);
-      console.log(`📋 Recap semanal enviado directo a ${vendedor.name} (fallback)`);
-    } catch (e2) {
-      console.error(`❌ Fallback recap semanal también falló para ${vendedor.name}`);
-    }
   }
-  console.log(`✅ Recap semanal enviado a ${vendedor.name}`);
 }
 
 // ═══════════════════════════════════════════════════════════
