@@ -1872,3 +1872,69 @@ PASO 1: SALUDO ➜ Impactante, directo...
 
 **Commit:** `6750602d`
 **Deploy:** Version ID `52eaf0dd-9594-409a-b14d-f7f6273fc50a`
+
+---
+
+### 2026-01-31 (Sesión 11 - Parte 3) - Análisis de Conversaciones + Optimización
+
+**1. Análisis de Respuestas de SARA**
+
+| Test | Resultado | Notas |
+|------|-----------|-------|
+| Saludo | ✅ | Pregunta recámaras |
+| Monte Verde | ✅ | Lista modelos con precios |
+| Muy caro | ✅ | Ofrece alternativas económicas |
+| El Nogal | ✅ | Responde Villa Campelo/Galiano |
+| **Alberca** | ❌→✅ | **FIX:** Detectaba mal "no manejamos" |
+| Renta | ✅ | "Solo vendemos, no rentamos" |
+| Ya compré | ✅ | Felicita + ofrece referidos |
+
+**2. Fix de Detección de Alberca**
+
+SARA decía incorrectamente "no manejamos casas con alberca" cuando **Priv. Andes SÍ tiene**.
+
+```typescript
+// ANTES: Solo detectaba estas frases
+respLower.includes('no incluyen alberca') || respLower.includes('no tienen alberca')
+
+// AHORA: Detecta todas las variantes
+'no manejamos' || 'no contamos con alberca' || 'ninguno tiene alberca' ||
+'no hay alberca' || 'instalar una alberca' || 'futura alberca' ||
+(includes('alberca') && !includes('andes'))
+```
+
+**3. Optimización Adicional del Prompt**
+
+| Sección Compactada | Antes | Después |
+|--------------------|-------|---------|
+| Formato visual + ejemplos | 26 líneas | 2 líneas |
+| Datos/Nombres/Inventar | 31 líneas | 5 líneas |
+| Citas/Tasas de interés | 54 líneas | 4 líneas |
+| Recursos/Créditos | 38 líneas | 2 líneas |
+| **Total** | **149 líneas** | **13 líneas** |
+
+**4. Métricas de Ahorro**
+
+| Métrica | Valor |
+|---------|-------|
+| Líneas eliminadas | 164 |
+| Líneas agregadas | 25 |
+| Reducción neta | 139 líneas |
+| Archivo ahora | 7,699 líneas |
+
+**5. Ahorro Acumulado Total (Sesiones 8+11)**
+
+| Sesión | Reducción | Descripción |
+|--------|-----------|-------------|
+| Sesión 8 | ~8% | Líneas decorativas, emojis |
+| Sesión 11 Parte 2 | ~12% | MENTALIDAD, FLUJO DE VENTA |
+| Sesión 11 Parte 3 | ~5% | FORMATO, DATOS, CITAS, TASAS |
+| **Total** | **~25%** | **~$450/año ahorro** |
+
+**Verificación:**
+- ✅ 351 tests pasando
+- ✅ Alberca → Priv. Andes (corregido)
+- ✅ Saludo, desarrollos, objeciones funcionan
+
+**Commits:** `e3df4f2e`
+**Deploy:** Version ID `50fbcd32-802f-48e4-8c58-ea9c9165c502`

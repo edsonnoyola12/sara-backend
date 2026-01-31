@@ -3058,4 +3058,44 @@ Optimización agresiva del prompt de IA para reducir costos.
 
 **Deploy:** `52eaf0dd-9594-409a-b14d-f7f6273fc50a`
 
+---
+
+**Sesión 11 Parte 3 (Análisis + Fix Alberca + Optimización)**
+
+### Análisis de Respuestas
+
+| Test | Resultado |
+|------|-----------|
+| Saludo, Monte Verde, Muy caro | ✅ |
+| El Nogal, Renta, Ya compré | ✅ |
+| **Alberca** | ❌→✅ Fix aplicado |
+
+### Fix: Detección de Alberca
+
+SARA decía "no manejamos casas con alberca" pero **Priv. Andes SÍ tiene**.
+
+Agregadas detecciones: `no manejamos`, `instalar alberca`, `futura alberca`, etc.
+
+### Optimización Adicional
+
+| Sección | Reducción |
+|---------|-----------|
+| Formato visual | 26→2 líneas |
+| Datos/Nombres | 31→5 líneas |
+| Citas/Tasas | 54→4 líneas |
+| Recursos/Créditos | 38→2 líneas |
+| **Total** | **139 líneas menos** |
+
+### Ahorro Acumulado (Sesiones 8+11)
+
+| Total | ~25% tokens | ~$450/año |
+
+### Commits Sesión 11 Parte 3
+
+| Commit | Descripción |
+|--------|-------------|
+| `e3df4f2e` | perf: optimizar prompt + fix alberca detection |
+
+**Deploy:** `50fbcd32-802f-48e4-8c58-ea9c9165c502`
+
 **Sistema 100% operativo - Última verificación: 2026-01-31**
