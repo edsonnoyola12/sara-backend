@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-01-30
+> Última actualización: 2026-01-31
 
 ---
 
@@ -1792,3 +1792,83 @@ Body: { phone, delivery_date?, purchase_date?, status_changed_at? }
 - `/test-interactive-responses` - Verifica extracción de mensajes interactivos
 
 **Deploy:** Version ID `e4843ecf-ff9b-47bb-8a66-3ddd267772ca`
+
+---
+
+### 2026-01-30 (Sesión 11 - Parte 2) - Optimización Agresiva del Prompt
+
+**Objetivo:** Reducir costos de API de Claude optimizando el prompt de IA.
+
+**Secciones optimizadas:**
+
+| Sección | Antes | Después | Reducción |
+|---------|-------|---------|-----------|
+| MENTALIDAD DE VENDEDOR EXPERTO | ~30 líneas | 5 líneas | 83% |
+| FLUJO DE VENTA EXPERTO | ~95 líneas | 15 líneas | 84% |
+| **Total** | ~125 líneas | 20 líneas | **84%** |
+
+**Cambios en `aiConversationService.ts`:**
+
+```typescript
+// ANTES: 30 líneas verbosas sobre mentalidad
+🏆 MENTALIDAD DE VENDEDOR EXPERTO 🏆
+Tu único objetivo: **AGENDAR UNA CITA DE VISITA**
+... (30 líneas de explicaciones)
+
+// DESPUÉS: 5 líneas compactas
+🏆 VENDEDORA EXPERTA - OBJETIVO: AGENDAR CITA 🏆
+- Cada mensaje debe acercar al cliente a la cita
+- NUNCA termines sin pregunta que avance la venta
+- Usa URGENCIA, ESCASEZ, PRUEBA SOCIAL
+- Cierres: "¿Sábado o domingo?" / "Te agendo sábado 11, ¿va?"
+```
+
+```typescript
+// ANTES: 95 líneas de flujo de venta paso a paso
+🏆 FLUJO DE VENTA EXPERTO - OBJETIVO: CITA EN 3-5 MENSAJES 🏆
+PASO 1: SALUDO ➜ Impactante, directo...
+... (95 líneas con ejemplos extensos)
+
+// DESPUÉS: 15 líneas compactas
+🏆 FLUJO DE VENTA - CITA EN 3-5 MENSAJES 🏆
+1. SALUDO: "¡Hola! Soy SARA de Grupo Santa Rita. Casas desde $1.5M. ¿2 o 3 recámaras?"
+2. CALIFICA: UNA pregunta (recámaras + presupuesto)
+3. RECOMIENDA: "[Desarrollo] desde $X, muy seguro. ¿Lo visitamos este finde?"
+4. AGENDAR: pide nombre → pide día/hora → confirma
+```
+
+**Métricas de ahorro:**
+
+| Métrica | Valor |
+|---------|-------|
+| Líneas eliminadas | 129 |
+| Líneas agregadas | 18 |
+| Reducción neta | 111 líneas |
+| Tokens ahorrados | ~2,100 por mensaje |
+
+**Ahorro acumulado (Sesión 8 + 11):**
+
+| Sesión | Ahorro |
+|--------|--------|
+| Sesión 8 | ~8% (líneas decorativas, emojis) |
+| Sesión 11 | ~12% (secciones verbosas) |
+| **Total** | **~20%** |
+
+**Impacto en costos:**
+
+| Métrica | Antes | Después |
+|---------|-------|---------|
+| Tokens/mensaje | ~17,000 | ~13,600 |
+| Costo/mensaje | $0.051 | $0.041 |
+| Costo mensual (100 msgs/día) | ~$155 | ~$125 |
+| **Ahorro mensual** | - | **~$30** |
+| **Ahorro anual** | - | **~$360** |
+
+**Verificación:**
+- ✅ 351 tests pasando
+- ✅ SARA responde correctamente (probado con "hola busco casa")
+- ✅ Mantiene toda la funcionalidad crítica
+- ✅ Respuestas en ~3.5 segundos
+
+**Commit:** `6750602d`
+**Deploy:** Version ID `52eaf0dd-9594-409a-b14d-f7f6273fc50a`
