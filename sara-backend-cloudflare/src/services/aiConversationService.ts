@@ -1635,7 +1635,7 @@ Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte
           respLower.includes('no tiene alberca') ||
           respLower.includes('no incluye alberca') ||
           respLower.includes('sin alberca') ||
-          respLower.includes('alberca personal') ||  // sugiere instalar una personal = dice que no hay
+          respLower.includes('alberca personal') ||
           respLower.includes('instalar una alberca')
         );
         // Detectar TODAS las formas de decir que no hay alberca
@@ -1652,7 +1652,13 @@ Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte
           respLower.includes('actualmente no tenemos') ||
           (respLower.includes('alberca') && !respLower.includes('andes') && !respLower.includes('sí tenemos'));
 
-        if (diceAlbercaFalco || diceAlbercaMiravalle || diceNoTienenAlberca || diceAndesNoTieneAlberca) {
+        // NUEVO: Si pregunta por alberca pero la respuesta NO menciona alberca/piscina/Andes
+        const noRespondeSobreAlberca =
+          !respLower.includes('alberca') &&
+          !respLower.includes('piscina') &&
+          !respLower.includes('andes');
+
+        if (diceAlbercaFalco || diceAlbercaMiravalle || diceNoTienenAlberca || diceAndesNoTieneAlberca || noRespondeSobreAlberca) {
           console.log('⚠️ CORRIGIENDO: Info incorrecta de alberca - SOLO Andes tiene');
           parsed.response = `¡Sí tenemos desarrollo con alberca! 🏊
 
@@ -1760,8 +1766,17 @@ Nosotros te ayudamos con el trámite una vez que elijas tu casa. ¿Ya tienes alg
           respLower.includes('no manejo folletos') ||
           respLower.includes('no tenemos folleto');
 
-        if (diceNoTieneFolletos) {
-          console.log('⚠️ CORRIGIENDO: SARA dijo que no tiene folletos - SÍ tenemos');
+        // NUEVO: Si pregunta por brochure pero la respuesta no menciona folleto/brochure/pdf
+        const noRespondeSobreBrochure =
+          !respLower.includes('folleto') &&
+          !respLower.includes('brochure') &&
+          !respLower.includes('pdf') &&
+          !respLower.includes('catálogo') &&
+          !respLower.includes('catalogo') &&
+          !respLower.includes('te envío');
+
+        if (diceNoTieneFolletos || noRespondeSobreBrochure) {
+          console.log('⚠️ CORRIGIENDO: SARA no respondió sobre folletos - SÍ tenemos');
           parsed.response = `¡Claro que sí! 📄
 
 Tengo brochures completos con fotos, planos y precios de cada desarrollo.

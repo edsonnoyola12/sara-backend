@@ -1565,7 +1565,7 @@ export default {
     // ═══════════════════════════════════════════════════════════════════════
     // 🧪 TEST-AI-RESPONSE - Prueba respuestas de SARA sin enviar WhatsApp
     // USO: /test-ai-response?msg=tienen%20casas%20en%20polanco&api_key=XXX
-    // Devuelve la respuesta de la IA directamente para QA
+    // IMPORTANTE: Usa el MISMO servicio que los leads reales (AIConversationService)
     // ═══════════════════════════════════════════════════════════════════════
     if (url.pathname === "/test-ai-response" && request.method === "GET") {
       const authError = checkApiAuth(request, env);
@@ -1575,377 +1575,50 @@ export default {
       const leadName = url.searchParams.get('name') || 'Lead Prueba';
 
       try {
-        // Obtener catálogo de propiedades (no hay columna 'active', usar todas)
+        // Obtener propiedades para contexto
         const { data: properties } = await supabase.client
           .from('properties')
-          .select('id, name, development, price, description, gps_link, bedrooms, bathrooms, area_m2');
+          .select('*');
 
-        // Crear prompt de SARA
-        const catalogoTexto = (properties || []).map(p =>
-          `- ${p.name} (${p.development}): $${p.price?.toLocaleString() || '?'} MXN, ${p.bedrooms || '?'} rec, ${p.bathrooms || '?'} baños, ${p.area_m2 || '?'}m². ${p.description?.substring(0, 80) || ''}`
-        ).join('\n');
+        // Crear lead simulado con historial vacío
+        const leadSimulado = {
+          id: 'test-lead-id',
+          phone: '5210000000000',
+          name: leadName,
+          status: 'new',
+          property_interest: null,
+          conversation_history: [],
+          notes: {},
+          resources_sent_for: null
+        };
 
-        const systemPrompt = `Eres SARA, VENDEDORA EXPERTA de Grupo Santa Rita, inmobiliaria en ZACATECAS, México.
-
-🎯 TU ÚNICO OBJETIVO: AGENDAR UNA VISITA
-- NUNCA te rindas en el primer "no"
-- Siempre termina con pregunta de cierre
-- Si dicen "quiero ver" o "me interesa" → CIERRA: "¡Perfecto! ¿Te funciona el sábado o el domingo?"
-
-CATÁLOGO DE DESARROLLOS EN ZACATECAS:
-${catalogoTexto}
-
-SINÓNIMOS:
-- "Citadella del Nogal" o "El Nogal" = Villa Campelo y Villa Galiano
-
-🚫 FRASES PROHIBIDAS:
-- "Sin problema" / "Entendido" / "Ok"
-- "Le aviso al vendedor para que te contacte"
-- Respuestas largas sin pregunta de cierre
-
-✅ SIEMPRE:
-- Respuestas cortas (máx 2-3 líneas)
-- Terminar con pregunta de cierre
-- Si muestra interés → "¿Sábado o domingo?"
-
-🏡 SI DICE "YA COMPRÉ EN OTRO LADO":
-- Felicítalo: "¡Muchas felicidades por tu nueva casa! 🎉"
-- NO indagues qué compró
-- Ofrece referidos: "Si algún familiar busca casa, con gusto lo atiendo"
-
-🏠 SOLO VENDEMOS, NO RENTAMOS:
-Si preguntan por renta → "En Santa Rita solo vendemos casas. Pero la mensualidad puede ser similar a una renta y la casa es tuya."
-
-🤖 SI PIDEN "PERSONA REAL":
-- NO digas que eres "asesora real" o "persona real"
-- Responde: "Soy SARA, asistente virtual 🤖 Pero con gusto te conecto con un asesor humano."
-
-⏰ SI TIENE URGENCIA ("me urge", "pronto"):
-- Lista casas de ENTREGA INMEDIATA: Monte Verde, Los Encinos, Andes
-
-🌐 IDIOMA:
-- Si el cliente escribe en INGLÉS → Responde COMPLETAMENTE en inglés
-- Muestra precios en MXN y USD (1 USD ≈ 17 MXN)
-- Mantén el mismo tono cálido y profesional
-
-Nombre del cliente: ${leadName}`;
-
+        // Crear todas las instancias de servicios necesarios
         const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
+        const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+        const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+        const twilio = null as any; // No necesitamos Twilio para pruebas
+
+        // Usar el MISMO servicio que los leads reales
+        const aiService = new AIConversationService(supabase, twilio, meta, calendar, claude, env);
         const startTime = Date.now();
 
-        let response = await claude.chat([
-          { role: 'user', content: msg }
-        ], systemPrompt);
+        // analyzeWithAI es el método real que procesa mensajes de leads
+        const analysis = await aiService.analyzeWithAI(msg, leadSimulado, properties || []);
 
         const responseTime = Date.now() - startTime;
 
-        // Post-procesamiento: "ya compré en otro lado" → felicitar y cerrar
-        const msgLower = msg.toLowerCase();
-        const yaComproOtroLado =
-          (msgLower.includes('ya compr') && (msgLower.includes('otro lado') || msgLower.includes('otra'))) ||
-          msgLower.includes('ya tengo casa') ||
-          msgLower.includes('ya adquir');
-
-        if (yaComproOtroLado) {
-          const respLower = response.toLowerCase();
-          const sigueIndagando =
-            respLower.includes('qué tipo') ||
-            respLower.includes('qué compraste') ||
-            respLower.includes('curiosidad') ||
-            respLower.includes('por qué no') ||
-            respLower.includes('si cambias');
-
-          if (sigueIndagando || (!respLower.includes('felicidades') && !respLower.includes('felicitar'))) {
-            response = `¡Muchas felicidades por tu nueva casa! 🎉 Comprar una propiedad es una gran decisión y me da gusto que lo hayas logrado.
-
-Si algún familiar o amigo busca casa en el futuro, con gusto lo atiendo. ¡Te deseo mucho éxito en tu nuevo hogar! 🏠`;
-          }
-        }
-
-        // Post-procesamiento: Renta → Solo vendemos
-        const preguntaPorRenta = msgLower.includes('renta') || msgLower.includes('rentar') || msgLower.includes('alquiler');
-        if (preguntaPorRenta) {
-          const respLower = response.toLowerCase();
-          if (respLower.includes('si, tenemos') || respLower.includes('sí, tenemos') ||
-              respLower.includes('opciones para rentar') || respLower.includes('casas en renta')) {
-            response = `En Santa Rita solo vendemos casas, no manejamos rentas 🏠
-
-Pero te cuento: con las opciones de crédito actuales, la mensualidad puede ser MUY similar a una renta, ¡y al final la casa es TUYA!
-
-¿Te gustaría que te muestre cómo funciona? Tenemos casas desde $1.5M con mensualidades accesibles.`;
-          }
-        }
-
-        // Post-procesamiento: Persona real → Ofrecer humano
-        const pidePersonaReal = msgLower.includes('persona real') || msgLower.includes('eres robot') || msgLower.includes('eres ia');
-        if (pidePersonaReal) {
-          const respLower = response.toLowerCase();
-          if (respLower.includes('asesora real') || respLower.includes('persona real') || respLower.includes('soy una persona')) {
-            response = `Soy SARA, asistente virtual de Grupo Santa Rita 🤖
-
-Pero con gusto te conecto con uno de nuestros asesores humanos. Para que te contacten, ¿me compartes tu nombre?`;
-          }
-        }
-
-        // Post-procesamiento: Urgencia → Entrega inmediata
-        const tieneUrgencia = msgLower.includes('urge') || msgLower.includes('urgente') || msgLower.includes('pronto') || msgLower.includes('este mes');
-        if (tieneUrgencia) {
-          const respLower = response.toLowerCase();
-          if (!respLower.includes('inmediata') && !respLower.includes('listas') && !respLower.includes('disponibles ya')) {
-            response = `¡Perfecto, tengo opciones de ENTREGA INMEDIATA! 🏠
-
-Casas listas para mudarte YA:
-• *Monte Verde* - Desde $1.5M
-• *Los Encinos* - Desde $2.9M
-• *Andes* - Desde $1.5M
-
-Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte hoy mismo.`;
-          }
-        }
-
-        // Post-procesamiento: Si mensaje en inglés → respuesta en inglés
-        const esIngles = /^[a-zA-Z\s.,!?'"-]+$/.test(msg.trim()) &&
-          (msgLower.includes('house') || msgLower.includes('home') || msgLower.includes('buy') ||
-           msgLower.includes('want') || msgLower.includes('looking') || msgLower.includes('interested') ||
-           msgLower.includes('hello') || msgLower.includes('hi ') || msgLower.includes('price'));
-        if (esIngles) {
-          const respLower = response.toLowerCase();
-          // Solo reemplazar si respondió claramente en español (no solo una palabra)
-          const spanishWords = ['hola', 'tenemos', 'puedo', 'ayudarte', 'qué', 'cuál', 'cuánto', 'recámaras', 'pregunta'];
-          const spanishCount = spanishWords.filter(w => respLower.includes(w)).length;
-
-          if (spanishCount >= 2) {
-            // Detectar si preguntó por un desarrollo específico
-            const monteVerde = msgLower.includes('monte verde');
-            const losEncinos = msgLower.includes('encinos');
-            const distritoFalco = msgLower.includes('falco');
-            const miravalle = msgLower.includes('miravalle');
-            const andes = msgLower.includes('andes');
-
-            if (monteVerde) {
-              response = `Monte Verde is one of our most popular developments! 🏠
-
-Prices start at $1,500,000 MXN (~$88,000 USD) with 2-3 bedrooms, 2 bathrooms, and 60-75 m².
-
-Would you like to schedule a visit to see it in person? I can set you up for this Saturday or Sunday! 📅`;
-            } else if (losEncinos) {
-              response = `Los Encinos is our premium development! 🌳
-
-Homes range from $2,800,000 to $3,300,000 MXN (~$165,000-$195,000 USD) with 3 bedrooms and premium finishes.
-
-When would you like to visit? I can schedule you for this weekend! 📅`;
-            } else if (distritoFalco) {
-              response = `Distrito Falco features modern urban living! 🏢
-
-Homes start at $2,570,000 MXN (~$151,000 USD) with contemporary design and smart home features.
-
-Would Saturday or Sunday work better for a visit? 📅`;
-            } else {
-              response = `Hi there! 👋 Welcome to Grupo Santa Rita!
-
-We have homes starting at $1.5M MXN (~$88,000 USD) up to $5.1M MXN (~$300,000 USD) in several developments in Zacatecas.
-
-To recommend the perfect option, what's your approximate budget? 💰`;
-            }
-          }
-        }
-
-        // Post-procesamiento: Petición de NO CONTACTO
-        const pideNoContacto =
-          msgLower.includes('no me escribas') ||
-          msgLower.includes('dejame en paz') ||
-          msgLower.includes('déjame en paz') ||
-          msgLower.includes('no me contactes') ||
-          msgLower.includes('borra mi numero') ||
-          msgLower.includes('no quiero que me escriban') ||
-          msgLower.includes('stop') ||
-          (msgLower.includes('ya no') && msgLower.includes('escrib'));
-
-        if (pideNoContacto) {
-          const respLower = response.toLowerCase();
-          const sigueVendiendo =
-            respLower.includes('te gustaría') ||
-            respLower.includes('qué tipo') ||
-            respLower.includes('te muestro') ||
-            respLower.includes('recámaras') ||
-            respLower.includes('presupuesto') ||
-            respLower.includes('tienes casa');
-
-          if (sigueVendiendo || !respLower.includes('respeto')) {
-            response = `Entendido, respeto tu decisión. Si en el futuro te interesa buscar casa, aquí estaré para ayudarte. ¡Que tengas excelente día! 👋`;
-          }
-        }
-
-        // Post-procesamiento: Número equivocado
-        const numeroEquivocado =
-          msgLower.includes('numero equivocado') ||
-          msgLower.includes('número equivocado') ||
-          msgLower.includes('me equivoqué de numero') ||
-          msgLower.includes('wrong number');
-
-        if (numeroEquivocado) {
-          const respLower = response.toLowerCase();
-          // Si intenta vender de cualquier forma
-          if (respLower.includes('tienes casa') || respLower.includes('buscas casa') ||
-              respLower.includes('coinc') || respLower.includes('te interesaría') ||
-              respLower.includes('casas que tenemos') || respLower.includes('qué tipo')) {
-            response = `¡Disculpa la confusión! Este es el WhatsApp de Grupo Santa Rita, inmobiliaria en Zacatecas. Si conoces a alguien que busque casa, con gusto lo atiendo. ¡Que tengas buen día! 👋`;
-          }
-        }
-
-        // Post-procesamiento: Alberca - SOLO Andes tiene
-        const preguntaPorAlberca =
-          msgLower.includes('alberca') ||
-          msgLower.includes('piscina') ||
-          msgLower.includes('pool');
-
-        if (preguntaPorAlberca) {
-          const respLower = response.toLowerCase();
-          const diceAlbercaFalco = respLower.includes('falco') && respLower.includes('alberca');
-          const diceAlbercaMiravalle = respLower.includes('miravalle') && respLower.includes('alberca');
-          // FIX: Detectar cuando dice Andes NO tiene alberca (FALSO - SÍ tiene)
-          const diceAndesNoTieneAlberca = respLower.includes('andes') && (
-            respLower.includes('no cuenta con alberca') ||
-            respLower.includes('no tiene alberca') ||
-            respLower.includes('no incluye alberca') ||
-            respLower.includes('sin alberca') ||
-            respLower.includes('alberca personal') ||
-            respLower.includes('instalar una alberca')
-          );
-          // FIX: Detectar TODAS las formas de decir que no hay alberca
-          const diceNoTienenAlberca =
-            respLower.includes('no incluyen alberca') ||
-            respLower.includes('no tienen alberca') ||
-            respLower.includes('no tenemos casas con alberca') ||
-            respLower.includes('actualmente no tenemos') ||
-            respLower.includes('no manejamos casas con alberca') ||
-            respLower.includes('no contamos con alberca') ||
-            respLower.includes('ninguno tiene alberca') ||
-            respLower.includes('instalar una alberca') ||
-            respLower.includes('patios amplios donde podrías') ||
-            (respLower.includes('alberca') && !respLower.includes('andes') && !respLower.includes('sí tenemos'));
-
-          if (diceAlbercaFalco || diceAlbercaMiravalle || diceNoTienenAlberca || diceAndesNoTieneAlberca) {
-            response = `¡Sí tenemos desarrollo con alberca! 🏊
-
-**Priv. Andes** es nuestro único fraccionamiento con ALBERCA:
-• Laurel - $1,514,957 (2 rec)
-• Lavanda - $2,699,071 (3 rec, vestidor)
-
-Además tiene vigilancia 24/7, áreas verdes y es pet-friendly 🐕
-
-¿Te gustaría visitarlo este fin de semana?`;
-          }
-        }
-
-        // FIX: TASAS DE INTERÉS - NO inventar números
-        const preguntaTasaInteres =
-          msgLower.includes('tasa') ||
-          msgLower.includes('interes') ||
-          msgLower.includes('interés') ||
-          msgLower.includes('porcentaje');
-
-        if (preguntaTasaInteres) {
-          const respLower = response.toLowerCase();
-          // Detectar si SARA inventa tasas específicas
-          const inventaTasas = /\d+\.?\d*\s*%/.test(response) ||
-            respLower.includes('entre 8') || respLower.includes('entre 9') ||
-            respLower.includes('entre 10') || respLower.includes('entre 11') ||
-            respLower.includes('actualmente están');
-
-          if (inventaTasas) {
-            response = `¡Buena pregunta! 💰
-
-Las tasas de interés varían según el banco y tu perfil crediticio. Te recomiendo consultar directamente con:
-• INFONAVIT/FOVISSSTE - si tienes subcuenta
-• Banorte, BBVA, Santander, HSBC - créditos tradicionales
-
-Nosotros te ayudamos con el trámite una vez que elijas tu casa. ¿Ya tienes algún desarrollo en mente que te gustaría conocer? 🏠`;
-          }
-        }
-
-        // FIX: BROCHURE/FOLLETO - SÍ tenemos
-        const pideBrochure =
-          msgLower.includes('folleto') ||
-          msgLower.includes('brochure') ||
-          msgLower.includes('catalogo') ||
-          msgLower.includes('catálogo');
-
-        if (pideBrochure) {
-          const respLower = response.toLowerCase();
-          const diceNoTieneFolletos =
-            respLower.includes('no tengo folleto') ||
-            respLower.includes('no tengo brochure') ||
-            respLower.includes('no cuento con') ||
-            respLower.includes('no manejo folletos') ||
-            respLower.includes('platicar sobre todas');
-
-          if (diceNoTieneFolletos) {
-            response = `¡Claro que sí! 📄
-
-Tengo brochures completos con fotos, planos y precios de cada desarrollo.
-
-¿De cuál te gustaría el folleto?
-• Monte Verde (desde $1.5M)
-• Los Encinos (desde $2.8M)
-• Distrito Falco (desde $3.5M)
-• Andes (desde $1.5M, con alberca 🏊)
-• Miravalle (desde $2.9M)
-
-Dime cuál y te lo envío ahora mismo 📲`;
-          }
-        }
-
-        // Post-procesamiento: Mascotas - responder directamente
-        const preguntaPorMascotas =
-          msgLower.includes('mascota') ||
-          msgLower.includes('perro') ||
-          msgLower.includes('gato') ||
-          msgLower.includes('pet');
-
-        if (preguntaPorMascotas) {
-          const respLower = response.toLowerCase();
-          if (!respLower.includes('mascota') && !respLower.includes('pet') && !respLower.includes('perro')) {
-            response = `¡Sí, aceptamos mascotas! 🐕
-
-Casi todos nuestros desarrollos son pet-friendly:
-• Monte Verde ✅
-• Los Encinos ✅
-• Miravalle ✅
-• Andes ✅ (además tiene alberca 🏊)
-
-⚠️ Solo Distrito Falco NO permite mascotas.
-
-¿Qué tipo de mascota tienes? ¿Te gustaría conocer alguno de estos desarrollos?`;
-          }
-        }
-
-        // Post-procesamiento: "No me interesa" - NO ofrecer cita
-        const diceNoInteresa =
-          msgLower.includes('no me interesa') ||
-          msgLower.includes('no gracias') ||
-          msgLower.includes('no thank');
-
-        if (diceNoInteresa) {
-          const respLower = response.toLowerCase();
-          if (respLower.includes('sábado o domingo') || respLower.includes('sabado o domingo') ||
-              respLower.includes('agendar') || respLower.includes('visita')) {
-            response = `¡Entendido! Solo una pregunta rápida: ¿ya tienes casa propia o rentas actualmente?
-
-Es que muchos clientes que rentaban se dieron cuenta que con lo de la renta pueden pagar su propia casa 🏠
-
-Si quieres, te muestro cómo funciona sin compromiso.`;
-          }
-        }
-
+        // La respuesta ya viene procesada por AIConversationService
+        // que incluye TODAS las correcciones (alberca, tasas, brochure, etc.)
         return corsResponse(JSON.stringify({
           ok: true,
           pregunta: msg,
-          respuesta_sara: response,
+          respuesta_sara: analysis.response,
           tiempo_ms: responseTime,
           lead_simulado: leadName,
           desarrollos_disponibles: properties?.length || 0,
-          nota: 'Prueba directa de IA - no envía WhatsApp'
+          intent: analysis.intent,
+          desarrollo_detectado: analysis.desarrollo_cita || analysis.extracted_data?.desarrollo,
+          nota: 'Usa el MISMO servicio que los leads reales (AIConversationService)'
         }));
 
       } catch (e: any) {
