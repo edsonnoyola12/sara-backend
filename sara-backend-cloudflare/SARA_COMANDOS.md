@@ -1027,6 +1027,7 @@ GET /test-video-personalizado/{phone}?nombre={nombre}&desarrollo={desarrollo}
 | `/test-envio-7pm` | Dry-run del reporte 7 PM (PÚBLICO) |
 | `/test-envio-7pm?enviar=true` | Envío REAL del reporte 7 PM |
 | `/test-envio-7pm?enviar=true&phone=XXXX` | Envío REAL a vendedor específico |
+| `/test-pending-flow?phone=X&nombre=Y` | Prueba flujo completo de pending messages (template + pending) |
 
 ### Endpoints Post-Compra (Manuales)
 | Endpoint | Uso |
@@ -3195,5 +3196,48 @@ Agregadas detecciones: `no manejamos`, `instalar alberca`, `futura alberca`, etc
 | `c85a3c83` | perf: optimizar prompt - Sesión 11 Parte 5 |
 
 **Deploy:** `5950330e-72a6-4b0c-9971-72eb72653ea7`
+
+---
+
+## 2026-01-31 (Sesión 12) - Sistema de Templates para Mensajes al Equipo
+
+### Problema Resuelto
+Mensajes al equipo (briefings, reportes, resúmenes) no llegaban cuando la ventana de 24h estaba cerrada.
+
+### Solución Implementada
+
+| Situación | Acción |
+|-----------|--------|
+| Ventana 24h abierta | Mensaje directo |
+| Ventana 24h cerrada | Template `reactivar_equipo` + pending |
+| Team member responde | Se entrega mensaje pendiente |
+
+### Archivos Modificados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/utils/teamMessaging.ts` | Lógica de ventana 24h con templates |
+| `src/index.ts` | Nuevo endpoint `/test-pending-flow` |
+
+### Pending Keys por Tipo
+
+| tipoMensaje | Pending Key |
+|-------------|-------------|
+| `briefing` | `pending_briefing` |
+| `reporte_diario` | `pending_reporte_diario` |
+| `resumen_semanal` | `pending_resumen_semanal` |
+| `reporte` | `pending_reporte` |
+| `notificacion` | `pending_mensaje` |
+
+### Nuevo Endpoint
+`/test-pending-flow?phone=X&nombre=Y&api_key=Z` - Prueba flujo completo de pending messages
+
+### Commits Sesión 12
+
+| Commit | Descripción |
+|--------|-------------|
+| `b4b40c0d` | feat: sistema de templates para mensajes al equipo con ventana 24h |
+
+**Deploy:** `8a3ae994-9ab9-41e1-a5c3-d6f4ca7b02d3`
 
 **Sistema 100% operativo - Última verificación: 2026-01-31**

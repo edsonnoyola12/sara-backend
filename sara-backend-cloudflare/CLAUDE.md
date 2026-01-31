@@ -162,11 +162,12 @@ Si no hay ventana abierta → el mensaje NO LLEGA.
 ```
 
 **Solución implementada:**
-- Función `enviarMensajeTeamMember()` en index.ts
+- Función `enviarMensajeTeamMember()` en `src/utils/teamMessaging.ts`
 - Verifica `last_sara_interaction` del team member
 - Si ventana abierta → envía mensaje directo
 - Si ventana cerrada → envía template `reactivar_equipo` + guarda en `pending_*`
 - Cuando responden → se entrega el mensaje pendiente
+- Fallback: si template falla, intenta enviar directo
 
 **Pending messages se verifican PRIMERO:**
 - En `handleVendedorMessage` (whatsapp.ts ~línea 3810)
@@ -179,7 +180,7 @@ Si no hay ventana abierta → el mensaje NO LLEGA.
 - `pending_briefing` - Briefing de mañana (8 AM)
 - `pending_recap` - Recap nocturno (7 PM, solo si no usó SARA)
 - `pending_reporte_diario` - Reporte 7 PM
-- `pending_reporte_semanal` - Reporte lunes
+- `pending_resumen_semanal` - Resumen semanal (sábado)
 
 **Aplica a:** Leads, Vendedores, Coordinadores, Asesores, Marketing
 
@@ -2006,3 +2007,51 @@ respLower.includes('no incluyen alberca') || respLower.includes('no tienen alber
 
 **Commit:** `c85a3c83`
 **Deploy:** Version ID `5950330e-72a6-4b0c-9971-72eb72653ea7`
+
+---
+
+### 2026-01-31 (Sesión 12) - Sistema de Templates para Mensajes al Equipo
+
+**Problema resuelto:**
+Los mensajes al equipo (briefings, reportes, resúmenes) no llegaban cuando la ventana de 24h estaba cerrada.
+
+**Solución implementada:**
+
+| Situación | Acción |
+|-----------|--------|
+| Ventana 24h **abierta** | Mensaje directo |
+| Ventana 24h **cerrada** | Template `reactivar_equipo` + mensaje guardado como pending |
+| Team member **responde** | Se entrega el mensaje pendiente |
+
+**Archivos modificados:**
+- `src/utils/teamMessaging.ts` - Lógica de ventana 24h con templates
+- `src/index.ts` - Nuevo endpoint `/test-pending-flow`
+
+**Templates intentados (RECHAZADOS por Meta):**
+- `briefing_equipo` ❌
+- `reporte_diario_equipo` ❌
+- `resumen_semanal_equipo` ❌
+
+**Template usado (APROBADO):**
+- `reactivar_equipo` ✅ - Template genérico que funciona para todos los casos
+
+**Pending keys por tipo de mensaje:**
+
+| tipoMensaje | Pending Key |
+|-------------|-------------|
+| `briefing` | `pending_briefing` |
+| `reporte_diario` | `pending_reporte_diario` |
+| `resumen_semanal` | `pending_resumen_semanal` |
+| `reporte` | `pending_reporte` |
+| `notificacion` | `pending_mensaje` |
+
+**Nuevo endpoint de prueba:**
+- `/test-pending-flow?phone=X&nombre=Y` - Prueba flujo completo de pending
+
+**Flujo verificado en producción:**
+1. ✅ Template enviado correctamente
+2. ✅ Mensaje guardado como pending
+3. ✅ Mensaje entregado al responder
+
+**Commit:** `b4b40c0d`
+**Deploy:** Version ID `8a3ae994-9ab9-41e1-a5c3-d6f4ca7b02d3`
