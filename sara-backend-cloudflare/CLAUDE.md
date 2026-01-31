@@ -50,7 +50,7 @@ npm test
 |---------|--------|---------|--------|
 | `src/index.ts` | ~14,300 | Router principal + CRONs | ALTO |
 | `src/handlers/whatsapp.ts` | ~11,000 | Handler de mensajes | ALTO |
-| `src/services/aiConversationService.ts` | ~7,300 | IA + prompts | ALTO |
+| `src/services/aiConversationService.ts` | ~7,355 | IA + prompts | ALTO |
 | `src/services/creditFlowService.ts` | ~1,400 | Flujo hipotecario | MEDIO |
 
 ### Módulos CRON Extraídos (2026-01-29)
@@ -1929,7 +1929,8 @@ respLower.includes('no incluyen alberca') || respLower.includes('no tienen alber
 | Sesión 8 | ~8% | Líneas decorativas, emojis |
 | Sesión 11 Parte 2 | ~12% | MENTALIDAD, FLUJO DE VENTA |
 | Sesión 11 Parte 3 | ~5% | FORMATO, DATOS, CITAS, TASAS |
-| **Total** | **~25%** | **~$450/año ahorro** |
+| Sesión 11 Parte 4 | ~5% | RESPUESTAS, SEGURIDAD, PERSONALIDAD |
+| **Total** | **~30%** | **~$540/año ahorro** |
 
 **Verificación:**
 - ✅ 351 tests pasando
@@ -1938,3 +1939,40 @@ respLower.includes('no incluyen alberca') || respLower.includes('no tienen alber
 
 **Commits:** `e3df4f2e`
 **Deploy:** Version ID `50fbcd32-802f-48e4-8c58-ea9c9165c502`
+
+---
+
+### 2026-01-31 (Sesión 11 - Parte 4) - Optimización Agresiva del Prompt
+
+**Continuación de optimización del prompt de IA:**
+
+| Sección Compactada | Antes | Después | Reducción |
+|--------------------|-------|---------|-----------|
+| RESPUESTAS CORTAS | 40 líneas | 4 líneas | 90% |
+| POST-VENTA/OTRO LADO | 35 líneas | 5 líneas | 86% |
+| SEGURIDAD/SERVICIOS/DISTANCIAS | 46 líneas | 5 líneas | 89% |
+| QUEJAS/PERSONALIDAD | 65 líneas | 12 líneas | 82% |
+| FINANCIAMIENTO/PLÁTICA | 65 líneas | 8 líneas | 88% |
+| RECORDATORIO FINAL | 25 líneas | 2 líneas | 92% |
+| SEND_CONTACTOS | 15 líneas | 1 línea | 93% |
+| QUIERE VER = CITA | 25 líneas | 2 líneas | 92% |
+| **Total** | **316 líneas** | **39 líneas** | **88%** |
+
+**Métricas:**
+- Archivo: 7,699 → 7,355 líneas (-344 líneas)
+- Ahorro acumulado: ~30% de tokens
+- Ahorro anual estimado: ~$540
+
+**Tests en Vivo Verificados:**
+
+| Test | Resultado |
+|------|-----------|
+| Saludo | ✅ Pregunta recámaras |
+| "Quiero ver las casas" | ✅ Cierra con "¿sábado o domingo?" |
+| Alberca | ✅ Solo Priv. Andes |
+| Muy caro | ✅ Ofrece desde $1.5M |
+| Ya compré otro lado | ✅ Felicita + ofrece referidos |
+| Casas en renta | ✅ "Solo vendemos, no rentamos" |
+
+**Commit:** `e2981ded`
+**Deploy:** Version ID `c6df2364-5f23-4947-9476-7c562a83e9f1`
