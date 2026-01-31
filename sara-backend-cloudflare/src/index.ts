@@ -9730,6 +9730,104 @@ Keep the camera focused on this specific house facade. Golden hour lighting, 4k.
       }
     }
 
+    // TEST: Probar flujo completo de pending message
+    if (url.pathname === '/test-pending-flow') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const phone = url.searchParams.get('phone');
+      const nombre = url.searchParams.get('nombre') || 'Test';
+      const mensaje = url.searchParams.get('mensaje') || '🧪 Este es un mensaje de PRUEBA del sistema de pending messages.\n\nSi recibes esto, el flujo funcionó correctamente.\n\n- Template enviado ✅\n- Mensaje guardado como pending ✅\n- Entregado al responder ✅';
+
+      if (!phone) {
+        return corsResponse(JSON.stringify({ error: 'Falta phone' }), 400);
+      }
+
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      try {
+        // 1. Buscar o crear team member temporal
+        let teamMember = await supabase.client
+          .from('team_members')
+          .select('*')
+          .like('phone', `%${phone.slice(-10)}`)
+          .single();
+
+        if (!teamMember.data) {
+          // Crear team member temporal para la prueba
+          const { data: newMember, error: insertError } = await supabase.client
+            .from('team_members')
+            .insert({
+              name: nombre,
+              phone: `521${phone.slice(-10)}`,
+              role: 'vendedor',
+              active: true,
+              notes: JSON.stringify({ test_member: true, last_sara_interaction: '2020-01-01T00:00:00Z' })
+            })
+            .select()
+            .single();
+
+          if (insertError) {
+            return corsResponse(JSON.stringify({ error: 'Error creando team member', details: insertError }), 500);
+          }
+          teamMember = { data: newMember };
+        } else {
+          // Forzar ventana cerrada para la prueba
+          const notasActuales = typeof teamMember.data.notes === 'string'
+            ? JSON.parse(teamMember.data.notes || '{}')
+            : (teamMember.data.notes || {});
+
+          await supabase.client
+            .from('team_members')
+            .update({ notes: JSON.stringify({ ...notasActuales, last_sara_interaction: '2020-01-01T00:00:00Z' }) })
+            .eq('id', teamMember.data.id);
+
+          // Refrescar datos
+          const { data: refreshed } = await supabase.client
+            .from('team_members')
+            .select('*')
+            .eq('id', teamMember.data.id)
+            .single();
+          teamMember.data = refreshed;
+        }
+
+        // 2. Usar enviarMensajeTeamMember para probar el flujo completo
+        const result = await enviarMensajeTeamMember(
+          supabase,
+          meta,
+          teamMember.data,
+          mensaje,
+          { tipoMensaje: 'briefing', guardarPending: true }
+        );
+
+        // 3. Verificar que se guardó el pending
+        const { data: verificacion } = await supabase.client
+          .from('team_members')
+          .select('notes')
+          .eq('id', teamMember.data.id)
+          .single();
+
+        const notasFinales = typeof verificacion?.notes === 'string'
+          ? JSON.parse(verificacion.notes)
+          : verificacion?.notes;
+
+        return corsResponse(JSON.stringify({
+          success: true,
+          paso1: 'Team member encontrado/creado',
+          paso2: `Resultado envío: ${result.method}`,
+          paso3: result.method === 'template' ? 'Mensaje guardado como pending_briefing' : 'Mensaje enviado directo (ventana abierta)',
+          result,
+          pending_guardado: notasFinales?.pending_briefing ? 'Sí' : 'No',
+          instrucciones: result.method === 'template'
+            ? '👉 Ahora responde al template de WhatsApp. Deberías recibir el mensaje pendiente.'
+            : '👉 El mensaje se envió directo porque la ventana estaba abierta.'
+        }, null, 2));
+
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
     // Enviar mensaje directo a un teléfono (con debug)
     if (url.pathname === '/send-message') {
       const phone = url.searchParams.get('phone');

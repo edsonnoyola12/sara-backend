@@ -11,6 +11,18 @@ export interface EnviarMensajeTeamResult {
   ventanaAbierta: boolean;
 }
 
+// Mapeo de tipo de mensaje a pending key (todos usan reactivar_equipo que está aprobado)
+const PENDING_KEY_CONFIG: Record<string, string> = {
+  'briefing': 'pending_briefing',
+  'reporte_diario': 'pending_reporte_diario',
+  'resumen_semanal': 'pending_resumen_semanal',
+  'reporte': 'pending_reporte',
+  'notificacion': 'pending_mensaje',
+};
+
+// Template único aprobado para reactivar ventana 24h
+const REACTIVATION_TEMPLATE = 'reactivar_equipo';
+
 /**
  * Envía mensaje a un team member respetando la ventana de 24h de WhatsApp
  *
@@ -29,12 +41,13 @@ export async function enviarMensajeTeamMember(
   teamMember: any,
   mensaje: string,
   opciones?: {
-    tipoMensaje?: string;  // 'reporte', 'alerta', 'notificacion', etc.
+    tipoMensaje?: string;  // 'briefing', 'reporte_diario', 'resumen_semanal', 'reporte', 'notificacion'
     guardarPending?: boolean;  // Guardar mensaje en pending si no hay ventana
     pendingKey?: string;  // Key para guardar en notes (ej: 'pending_reporte')
   }
 ): Promise<EnviarMensajeTeamResult> {
-  const { tipoMensaje = 'notificacion', guardarPending = true, pendingKey = 'pending_mensaje' } = opciones || {};
+  const { tipoMensaje = 'notificacion', guardarPending = true } = opciones || {};
+  const pendingKey = opciones?.pendingKey || PENDING_KEY_CONFIG[tipoMensaje] || 'pending_mensaje';
 
   try {
     // Obtener notas actuales
@@ -49,17 +62,59 @@ export async function enviarMensajeTeamMember(
 
     const nombreCorto = teamMember.name?.split(' ')[0] || 'Hola';
 
-    console.log(`📤 [${tipoMensaje}] ${teamMember.name}: Enviando mensaje DIRECTO (sin template)`);
+    if (ventanaAbierta) {
+      // ═══ VENTANA ABIERTA: ENVIAR DIRECTO ═══
+      console.log(`📤 [${tipoMensaje}] ${teamMember.name}: Ventana ABIERTA - enviando DIRECTO`);
+      try {
+        await meta.sendWhatsAppMessage(teamMember.phone, mensaje);
+        console.log(`   ✅ Mensaje enviado DIRECTO a ${teamMember.name}`);
+        return { success: true, method: 'direct', ventanaAbierta: true };
+      } catch (sendError) {
+        console.error(`   ❌ Error enviando mensaje directo a ${teamMember.name}:`, sendError);
+        return { success: false, method: 'failed', ventanaAbierta: true };
+      }
+    } else {
+      // ═══ VENTANA CERRADA: ENVIAR TEMPLATE + GUARDAR PENDING ═══
+      console.log(`📤 [${tipoMensaje}] ${teamMember.name}: Ventana CERRADA - enviando template ${REACTIVATION_TEMPLATE}`);
 
-    // ═══ SIEMPRE ENVIAR MENSAJE DIRECTO ═══
-    // Ya no usamos templates de reactivación - enviamos directo al equipo
-    try {
-      await meta.sendWhatsAppMessage(teamMember.phone, mensaje);
-      console.log(`   ✅ Mensaje enviado DIRECTO a ${teamMember.name}`);
-      return { success: true, method: 'direct', ventanaAbierta };
-    } catch (sendError) {
-      console.error(`   ❌ Error enviando mensaje a ${teamMember.name}:`, sendError);
-      return { success: false, method: 'failed', ventanaAbierta: false };
+      try {
+        // Enviar template reactivar_equipo (formato: phone, templateName, languageCode, components)
+        await meta.sendTemplate(teamMember.phone, REACTIVATION_TEMPLATE, 'es_MX', [
+          { type: 'body', parameters: [{ type: 'text', text: nombreCorto }] }
+        ]);
+        console.log(`   📨 Template ${REACTIVATION_TEMPLATE} enviado a ${teamMember.name}`);
+
+        // Guardar mensaje como pending si está habilitado
+        if (guardarPending) {
+          const nuevasNotas = {
+            ...notasActuales,
+            [pendingKey]: mensaje,
+            [`${pendingKey}_timestamp`]: new Date().toISOString()
+          };
+
+          await supabase.client
+            .from('team_members')
+            .update({ notes: nuevasNotas })
+            .eq('id', teamMember.id);
+
+          console.log(`   💾 Mensaje guardado como ${pendingKey} para ${teamMember.name}`);
+        }
+
+        return { success: true, method: 'template', ventanaAbierta: false };
+      } catch (templateError) {
+        console.error(`   ❌ Error enviando template a ${teamMember.name}:`, templateError);
+
+        // Fallback: intentar enviar directo de todos modos
+        try {
+          console.log(`   🔄 Intentando fallback directo...`);
+          await meta.sendWhatsAppMessage(teamMember.phone, mensaje);
+          console.log(`   ✅ Fallback directo exitoso a ${teamMember.name}`);
+          return { success: true, method: 'direct', ventanaAbierta: false };
+        } catch (fallbackError) {
+          console.error(`   ❌ Fallback también falló para ${teamMember.name}:`, fallbackError);
+          return { success: false, method: 'failed', ventanaAbierta: false };
+        }
+      }
     }
   } catch (error) {
     console.error(`❌ Error en enviarMensajeTeamMember para ${teamMember.name}:`, error);
