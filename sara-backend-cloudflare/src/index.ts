@@ -57,6 +57,7 @@ import {
   enviarReporteMensualMarketing,
   enviarEncuestasPostCita,
   enviarEncuestasNPS,
+  iniciarFlujosPostVisita,
   procesarRespuestaEncuesta,
   aplicarPreciosProgramados
 } from './crons/reports';
@@ -4228,6 +4229,49 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
         .select()
         .single();
       return corsResponse(JSON.stringify(data || {}));
+    }
+
+    // Endpoint para aplicar incremento mensual de precios (0.5%)
+    if (url.pathname === '/api/properties/apply-monthly-increase' && request.method === 'POST') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const { data: properties } = await supabase.client
+        .from('properties')
+        .select('id, name, price, development');
+
+      if (!properties || properties.length === 0) {
+        return corsResponse(JSON.stringify({ error: 'No properties found' }), 404);
+      }
+
+      const updates = [];
+      const INCREASE_RATE = 1.005; // 0.5% mensual
+
+      for (const prop of properties) {
+        const oldPrice = prop.price;
+        const newPrice = Math.round(oldPrice * INCREASE_RATE);
+
+        await supabase.client
+          .from('properties')
+          .update({ price: newPrice })
+          .eq('id', prop.id);
+
+        updates.push({
+          id: prop.id,
+          name: prop.name,
+          development: prop.development,
+          oldPrice,
+          newPrice,
+          increase: newPrice - oldPrice
+        });
+      }
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        message: `Precios actualizados: ${updates.length} propiedades (+0.5%)`,
+        timestamp: new Date().toISOString(),
+        updates
+      }));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -8866,6 +8910,14 @@ _Solo responde con el número_ 🙏`;
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       await enviarEncuestasPostCita(supabase, meta);
       return corsResponse(JSON.stringify({ ok: true, message: 'Encuestas post-cita procesadas' }));
+    }
+
+    // Forzar flujo post-visita (pregunta al vendedor)
+    if (url.pathname === '/test-flujo-postvisita' || url.pathname === '/run-flujo-postvisita') {
+      console.log('🧪 TEST: Forzando flujo post-visita...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await iniciarFlujosPostVisita(supabase, meta);
+      return corsResponse(JSON.stringify({ ok: true, message: 'Flujo post-visita ejecutado' }));
     }
 
     // Forzar procesamiento de encuestas NPS
@@ -16210,6 +16262,10 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
         }
       });
     }
+
+    // FLUJO POST-VISITA - pregunta al vendedor "¿Llegó el lead?" (30-90min después de cita)
+    console.log('📋 Verificando citas pasadas para flujo post-visita...');
+    await iniciarFlujosPostVisita(supabase, meta);
 
     // ENCUESTAS AUTOMÁTICAS - cada hora verifica citas completadas hace 2h
     console.log('📋 Verificando encuestas post-cita pendientes...');

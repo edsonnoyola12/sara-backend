@@ -997,6 +997,113 @@ _¡Éxito esta semana!_ 🚀`;
 }
 
 // ═══════════════════════════════════════════════════════════════
+// FLUJO POST-VISITA AUTOMÁTICO
+// Pregunta al VENDEDOR: "¿Llegó el lead?" → luego encuesta al lead
+// ═══════════════════════════════════════════════════════════════
+
+export async function iniciarFlujosPostVisita(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+
+    // Timezone México
+    const mexicoFormatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Mexico_City',
+      year: 'numeric', month: '2-digit', day: '2-digit'
+    });
+    const hoyMexico = mexicoFormatter.format(ahora);
+
+    const horaFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Mexico_City',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    });
+    const horaMexico = horaFormatter.format(ahora);
+    const [horaActual, minActual] = horaMexico.split(':').map(Number);
+    const minutosActuales = horaActual * 60 + minActual;
+
+    console.log(`📋 POST-VISITA: Verificando citas ${hoyMexico} ${horaMexico}`);
+
+    // Buscar citas de hoy que aún no están completed/no_show/cancelled
+    const { data: citas, error } = await supabase.client
+      .from('appointments')
+      .select('*, leads!inner(id, name, phone, property_interest, notes), team_members:vendedor_id(id, name, phone, notes)')
+      .eq('scheduled_date', hoyMexico)
+      .in('status', ['scheduled', 'confirmed']);
+
+    if (error || !citas || citas.length === 0) {
+      console.log(`📋 POST-VISITA: No hay citas pendientes hoy`);
+      return;
+    }
+
+    // Filtrar citas cuya hora ya pasó (hace 30-90 min)
+    const citasPasadas = citas.filter(cita => {
+      const horaCita = cita.scheduled_time || '12:00';
+      const [h, m] = horaCita.split(':').map(Number);
+      const minutosCita = (h || 12) * 60 + (m || 0);
+
+      // Asumiendo cita de 1h, debió terminar hace 30-90 min
+      const minutosDesdeFinCita = minutosActuales - (minutosCita + 60);
+      return minutosDesdeFinCita >= 30 && minutosDesdeFinCita <= 90;
+    });
+
+    if (citasPasadas.length === 0) {
+      console.log(`📋 POST-VISITA: No hay citas en ventana de 30-90min`);
+      return;
+    }
+
+    console.log(`📋 POST-VISITA: ${citasPasadas.length} citas para iniciar flujo`);
+
+    const { PostVisitService } = await import('../services/postVisitService');
+    const postVisitService = new PostVisitService(supabase);
+
+    for (const cita of citasPasadas) {
+      const lead = cita.leads as any;
+      const vendedor = cita.team_members as any;
+
+      if (!vendedor?.phone) {
+        console.log(`📋 POST-VISITA: Vendedor sin teléfono para cita ${cita.id}`);
+        continue;
+      }
+
+      // Verificar si ya se inició flujo para esta cita
+      const vendedorNotas = typeof vendedor.notes === 'object' ? vendedor.notes : {};
+      const contextoExistente = vendedorNotas?.post_visit_context;
+      if (contextoExistente && contextoExistente.appointment_id === cita.id) {
+        console.log(`📋 POST-VISITA: Flujo ya iniciado para ${lead.name}`);
+        continue;
+      }
+
+      // Verificar si cita ya fue procesada (en notas de la cita)
+      if (cita.post_visit_initiated) {
+        console.log(`📋 POST-VISITA: Cita ${cita.id} ya procesada`);
+        continue;
+      }
+
+      try {
+        // Iniciar flujo post-visita
+        const { mensaje, context } = await postVisitService.iniciarFlujoPostVisita(cita, lead, vendedor);
+
+        // Enviar pregunta al vendedor
+        await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+
+        // Marcar cita como iniciada
+        await supabase.client
+          .from('appointments')
+          .update({ post_visit_initiated: true })
+          .eq('id', cita.id);
+
+        console.log(`📋 POST-VISITA: Pregunta enviada a ${vendedor.name} sobre ${lead.name}`);
+
+        await new Promise(r => setTimeout(r, 1000));
+      } catch (err) {
+        console.error(`📋 POST-VISITA: Error con ${lead.name}:`, err);
+      }
+    }
+  } catch (e) {
+    console.error('Error en iniciarFlujosPostVisita:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ENCUESTAS AUTOMÁTICAS
 // ═══════════════════════════════════════════════════════════════
 
