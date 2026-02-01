@@ -2115,3 +2115,67 @@ SÁBADO RESUMEN:
 
 **Commit:** `4b92908d`
 **Deploy:** Version ID `b5a66df9-afc7-4c28-9496-9c75e747041d`
+
+---
+
+### 2026-01-31 (Sesión 12 - Parte 3) - Unificación de test-ai-response
+
+**Problema detectado:**
+El endpoint `/test-ai-response` tenía ~320 líneas de código DUPLICADO con su propio prompt y post-procesamiento. Cada fix en `AIConversationService` requería un fix separado en `index.ts`.
+
+Usuario: "por que t iues equivndo y equivoacando esto lo ehemos corrigdio varias veces"
+
+**Causa raíz:**
+- Código duplicado entre `/test-ai-response` y `AIConversationService`
+- Fixes se aplicaban solo a uno de los dos lugares
+- Bugs recurrían porque el otro código no se actualizaba
+
+**Solución implementada:**
+
+Refactorizar `/test-ai-response` para usar `AIConversationService` directamente:
+
+```typescript
+// ANTES (código duplicado):
+const aiService = new AIConversationService(supabase, meta, env.ANTHROPIC_API_KEY);
+// + 320 líneas de prompt y post-procesamiento duplicado
+
+// AHORA (código unificado):
+const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
+const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+const aiService = new AIConversationService(supabase, null, meta, calendar, claude, env);
+const analysis = await aiService.analyzeWithAI(msg, leadSimulado, properties);
+```
+
+**Mejoras adicionales en post-procesamiento:**
+
+| Corrección | Antes | Ahora |
+|------------|-------|-------|
+| **Alberca** | Solo corregía si decía "no tenemos alberca" | También corrige si ignora la pregunta |
+| **Brochure** | Solo corregía si decía "no tengo folletos" | También corrige si ignora la pregunta |
+
+**Tests verificados:**
+
+| Pregunta | Respuesta Correcta |
+|----------|-------------------|
+| "tienen casas con alberca" | ✅ "Priv. Andes es nuestro único desarrollo con ALBERCA" |
+| "tienen brochure de las casas" | ✅ Lista desarrollos con opción de enviar |
+| "cual es la tasa de interes" | ✅ "Varían según banco, consulta INFONAVIT/bancos" |
+| "quiero ver Citadella del Nogal" | ✅ "¿Te funciona sábado o domingo?" |
+| "tienen casas en renta" | ✅ "Solo vendemos, no rentamos" |
+| "ya compre en otro lado" | ✅ "¡Felicidades! Si algún familiar..." |
+| "ya no me escribas" | ✅ "Respeto tu decisión..." |
+
+**Beneficios:**
+- Eliminado código duplicado (~300 líneas)
+- Un solo lugar para correcciones de IA
+- Tests y producción usan el mismo código
+- Bugs no pueden recurrir por código desincronizado
+
+**Tests:** 351/351 pasando ✅
+
+**Commits:**
+- `69b14eed` - fix: corregir respuestas de alberca, tasas de interés y brochure
+- `e5d1d7f6` - refactor: unificar test-ai-response con AIConversationService
+
+**Deploy:** Version ID `59d788b3-a081-4fb0-8b22-5f069483ebbd`

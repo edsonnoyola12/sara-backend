@@ -1638,9 +1638,10 @@ POST /api/visits/:id/status    - Actualizar estado
   - Fallback 3: Comandos de Marketing (campañas, metricas, segmentos, broadcast)
   - Archivos modificados: `src/handlers/whatsapp.ts` (handleCEOMessage)
 
-- ✅ **Nuevo endpoint `/test-ai-response`:**
+- ✅ **Endpoint `/test-ai-response` (UNIFICADO 2026-01-31):**
   - Prueba respuestas de SARA sin enviar WhatsApp
-  - Útil para QA de respuestas de IA
+  - **IMPORTANTE**: Usa el MISMO `AIConversationService` que los leads reales
+  - Todas las correcciones de IA se aplican automáticamente
   - Uso: `/test-ai-response?msg=X&api_key=Y`
 
 - ✅ **Fix: Query de properties sin filtro `active`:**
@@ -3237,7 +3238,43 @@ Mensajes al equipo (briefings, reportes, resúmenes) no llegaban cuando la venta
 | Commit | Descripción |
 |--------|-------------|
 | `b4b40c0d` | feat: sistema de templates para mensajes al equipo con ventana 24h |
+| `4b92908d` | fix: briefings y recaps ahora respetan ventana 24h |
+| `69b14eed` | fix: corregir respuestas de alberca, tasas y brochure |
+| `e5d1d7f6` | refactor: unificar test-ai-response con AIConversationService |
 
-**Deploy:** `8a3ae994-9ab9-41e1-a5c3-d6f4ca7b02d3`
+---
+
+## 2026-01-31 (Sesión 12 - Parte 3) - Unificación de test-ai-response
+
+### Problema
+El endpoint `/test-ai-response` tenía ~320 líneas de código DUPLICADO. Cada fix en `AIConversationService` requería un fix separado, causando bugs recurrentes.
+
+### Solución
+Refactorizar para usar `AIConversationService` directamente, eliminando código duplicado.
+
+### Correcciones Mejoradas
+
+| Caso | Antes | Ahora |
+|------|-------|-------|
+| **Alberca** | Solo corregía si decía "no tenemos" | También corrige si ignora la pregunta |
+| **Brochure** | Solo corregía si decía "no tengo" | También corrige si ignora la pregunta |
+| **Tasas** | Solo corregía si inventaba % | Siempre redirige a bancos |
+
+### Tests Verificados
+
+| Pregunta | Respuesta |
+|----------|-----------|
+| "tienen casas con alberca" | ✅ "Priv. Andes es el único con ALBERCA" |
+| "tienen brochure" | ✅ Lista desarrollos con precios |
+| "cual es la tasa de interes" | ✅ "Consulta INFONAVIT/bancos" |
+| "Citadella del Nogal" | ✅ "¿Sábado o domingo?" |
+
+### Beneficios
+- Eliminado ~300 líneas de código duplicado
+- Un solo lugar para correcciones de IA
+- Tests y producción usan el mismo código
+- Bugs no pueden recurrir
+
+**Deploy:** `59d788b3-a081-4fb0-8b22-5f069483ebbd`
 
 **Sistema 100% operativo - Última verificación: 2026-01-31**
