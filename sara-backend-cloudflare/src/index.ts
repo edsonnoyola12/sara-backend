@@ -6081,25 +6081,29 @@ Mensaje: ${mensaje}`;
                 // Procesar respuesta NPS si aplica
                 const npsProcessed = await procesarRespuestaNPS(supabase, meta, leadHot, text);
                 if (npsProcessed) {
-                  console.log(`📊 Respuesta NPS procesada para ${leadHot.name}`);
+                  console.log(`📊 Respuesta NPS procesada para ${leadHot.name} - NO enviar respuesta genérica`);
+                  return new Response('OK', { status: 200 }); // IMPORTANTE: No seguir a la IA genérica
                 }
 
                 // Procesar respuesta de seguimiento post-entrega
                 const entregaProcessed = await procesarRespuestaEntrega(supabase, meta, leadHot, text);
                 if (entregaProcessed) {
-                  console.log(`🔑 Respuesta post-entrega procesada para ${leadHot.name}`);
+                  console.log(`🔑 Respuesta post-entrega procesada para ${leadHot.name} - NO enviar respuesta genérica`);
+                  return new Response('OK', { status: 200 }); // IMPORTANTE: No seguir a la IA genérica
                 }
 
                 // Procesar respuesta de satisfacción con la casa
                 const satisfaccionProcessed = await procesarRespuestaSatisfaccionCasa(supabase, meta, leadHot, text);
                 if (satisfaccionProcessed) {
-                  console.log(`🏡 Respuesta satisfacción casa procesada para ${leadHot.name}`);
+                  console.log(`🏡 Respuesta satisfacción casa procesada para ${leadHot.name} - NO enviar respuesta genérica`);
+                  return new Response('OK', { status: 200 }); // IMPORTANTE: No seguir a la IA genérica
                 }
 
                 // Procesar respuesta de mantenimiento
                 const mantenimientoProcessed = await procesarRespuestaMantenimiento(supabase, meta, leadHot, text);
                 if (mantenimientoProcessed) {
-                  console.log(`🔧 Respuesta mantenimiento procesada para ${leadHot.name}`);
+                  console.log(`🔧 Respuesta mantenimiento procesada para ${leadHot.name} - NO enviar respuesta genérica`);
+                  return new Response('OK', { status: 200 }); // IMPORTANTE: No seguir a la IA genérica
                 }
               }
             } catch (hotErr) {
@@ -6892,8 +6896,13 @@ Mensaje: ${mensaje}`;
     if (url.pathname === '/run-nps') {
       console.log('📊 Forzando envío de encuestas NPS...');
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-      await enviarEncuestaNPS(supabase, meta);
-      return corsResponse(JSON.stringify({ message: 'Encuestas NPS enviadas.' }));
+      const resultado = await enviarEncuestaNPS(supabase, meta);
+      return corsResponse(JSON.stringify({
+        message: 'Encuestas NPS',
+        elegibles: resultado.elegibles,
+        enviados: resultado.enviados,
+        detalles: resultado.detalles
+      }));
     }
 
     if (url.pathname === '/run-post-entrega') {

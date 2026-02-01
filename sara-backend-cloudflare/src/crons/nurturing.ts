@@ -743,7 +743,8 @@ Hace: ${diasDesdeCompra} días
 // ENCUESTAS NPS (Net Promoter Score)
 // Mide satisfacción en puntos clave del journey
 // ═══════════════════════════════════════════════════════════
-export async function enviarEncuestaNPS(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+export async function enviarEncuestaNPS(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<{ elegibles: number, enviados: number, detalles: string[] }> {
+  const resultado = { elegibles: 0, enviados: 0, detalles: [] as string[] };
   try {
     const ahora = new Date();
     const hace7dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -765,7 +766,8 @@ export async function enviarEncuestaNPS(supabase: SupabaseService, meta: MetaWha
 
     if (!clientes || clientes.length === 0) {
       console.log('📊 No hay clientes para encuesta NPS');
-      return;
+      resultado.detalles.push('No hay clientes con status visited/sold/closed/delivered en ventana 7-30 días');
+      return resultado;
     }
 
     // Filtrar los que no han recibido encuesta
@@ -776,9 +778,11 @@ export async function enviarEncuestaNPS(supabase: SupabaseService, meta: MetaWha
 
     if (clientesElegibles.length === 0) {
       console.log('📊 Todos los clientes ya tienen encuesta NPS');
-      return;
+      resultado.detalles.push(`${clientes.length} clientes encontrados pero todos ya tienen encuesta NPS`);
+      return resultado;
     }
 
+    resultado.elegibles = clientesElegibles.length;
     console.log(`📊 Clientes para encuesta NPS: ${clientesElegibles.length}`);
 
     let enviados = 0;
@@ -820,6 +824,8 @@ Tu respuesta nos ayuda a mejorar 🙏`;
       try {
         await meta.sendWhatsAppMessage(cliente.phone, mensaje);
         enviados++;
+        resultado.enviados = enviados;
+        resultado.detalles.push(`✅ Enviado a ${cliente.name} (${cliente.phone}) - ${cliente.status}`);
         console.log(`📊 Encuesta NPS enviada a: ${cliente.name} (${cliente.status})`);
 
         // Marcar como enviada
@@ -839,13 +845,17 @@ Tu respuesta nos ayuda a mejorar 🙏`;
 
       } catch (err) {
         console.error(`Error enviando encuesta NPS a ${cliente.name}:`, err);
+        resultado.detalles.push(`❌ Error enviando a ${cliente.name} (${cliente.phone}): ${err}`);
       }
     }
 
     console.log(`📊 Encuestas NPS enviadas: ${enviados}`);
+    return resultado;
 
   } catch (e) {
     console.error('Error en enviarEncuestaNPS:', e);
+    resultado.detalles.push(`❌ Error general: ${e}`);
+    return resultado;
   }
 }
 
