@@ -2381,6 +2381,38 @@ npm test
 
 ---
 
+### 2026-02-01 (Sesión 14 - Parte 2) - Fix Citas Pasadas en Prompts
+
+**Bug reportado por usuario:**
+SARA decía "tu visita del 30 de enero" cuando estamos a 1 de febrero - mostraba citas pasadas.
+
+**Causa:**
+El query para verificar citas existentes no filtraba por fecha:
+```typescript
+// ANTES (bug):
+.in('status', ['scheduled', 'confirmed'])
+.order('created_at', { ascending: false })
+```
+
+**Fix aplicado en `aiConversationService.ts:148-159`:**
+```typescript
+// AHORA (corregido):
+const hoy = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+// ...
+.in('status', ['scheduled', 'confirmed'])
+.gte('scheduled_date', hoy) // Solo citas de hoy en adelante
+.order('scheduled_date', { ascending: true }) // La más próxima primero
+```
+
+**Cambios:**
+1. Agregar `.gte('scheduled_date', hoy)` para filtrar solo citas futuras
+2. Cambiar orden de `created_at desc` a `scheduled_date asc` (la más próxima primero)
+
+**Commit:** `15ee1e01`
+**Deploy:** Version ID `fa71efe6-59c9-4c2e-ae91-76e40ea6d246`
+
+---
+
 ## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-01)
 
 ### Flujos de IA Verificados
