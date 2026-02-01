@@ -2303,18 +2303,68 @@ npm test
    Duration  4.24s
 ```
 
-#### Pruebas en Producción (via /test-vendedor-msg)
+#### Pruebas en Producción - 42 Tests Ejecutados
 
-| Comando | Endpoint | Resultado |
-|---------|----------|-----------|
-| mis leads | ✅ Procesado | Oscar Castelo (admin) |
-| segmentos | ✅ Procesado | Marketing command |
-| broadcast | ✅ Procesado | Marketing command |
-| metricas | ✅ Procesado | Marketing command |
-| bridge Roberto | ✅ Procesado | Bridge activado |
-| ofertas | ✅ Procesado | Ver ofertas activas |
-| cotizar Roberto 2500000 | ✅ Procesado | Crear oferta |
-| docs Roberto | ✅ Procesado | Asesor command |
+**IA Conversacional (13 tests via /test-ai-response):**
+
+| Test | Resultado | Respuesta |
+|------|-----------|-----------|
+| Saludo | ✅ | Pregunta 2 o 3 recámaras |
+| Alberca | ✅ | Solo Priv. Andes |
+| Renta | ✅ | "Solo vendemos, no rentamos" |
+| El Nogal | ✅ | Cierra con cita |
+| Ya compré | ✅ | Felicita + referidos |
+| No contacto | ✅ | Respeta decisión |
+| INFONAVIT | ✅ | Acepta + pregunta recámaras |
+| English | ✅ | Responde en inglés con USD |
+| Quiero ver | ✅ | "¿Sábado o domingo?" |
+| Muy caro | ✅ | Ofrece desde $1.5M |
+| Lo voy a pensar | ✅ | Urgencia + escasez |
+| Terrenos | ✅ | Villa Campelo/Galiano |
+| Urgencia | ✅ | Entrega inmediata |
+
+**Comandos CEO (18 tests via /test-vendedor-msg):**
+
+| Comando | Resultado |
+|---------|-----------|
+| bridge Roberto | ✅ |
+| cotizar Roberto 2500000 | ✅ |
+| ofertas | ✅ |
+| pipeline | ✅ |
+| alertas | ✅ |
+| equipo | ✅ |
+| calcular 2500000 | ✅ |
+| bancos | ✅ |
+| docs Roberto | ✅ |
+| preaprobado Roberto | ✅ |
+| mercado | ✅ |
+| visitas | ✅ |
+| clv | ✅ |
+| reporte semanal | ✅ |
+| enviar oferta Roberto | ✅ |
+| historial Roberto | ✅ |
+| nota Roberto... | ✅ |
+| agendar cita Roberto | ✅ |
+
+**CRONs Post-Compra (6 tests via /run-*):**
+
+| CRON | Resultado |
+|------|-----------|
+| Post-Entrega | ✅ Ejecutado |
+| NPS | ✅ Ejecutado |
+| Referidos | ✅ Ejecutado |
+| Satisfacción Casa | ✅ Ejecutado |
+| Mantenimiento | ✅ Ejecutado |
+| Flujo Post-Visita | ✅ Ejecutado |
+
+**APIs y Sistema (5 tests):**
+
+| Endpoint | Resultado |
+|----------|-----------|
+| /test-ventana-24h | ✅ 2 abiertas, 16 cerradas |
+| /api/leads | ✅ 32 leads |
+| /api/properties | ✅ 36 propiedades |
+| /health | ✅ healthy |
 
 #### Estado de Producción
 
@@ -2323,9 +2373,11 @@ npm test
 | Health | ✅ healthy |
 | Supabase | ✅ ok (32 leads) |
 | Team Members | ✅ 20 registrados |
-| Producción URL | `https://sara-backend.edson-633.workers.dev` |
+| Propiedades | ✅ 36 activas |
+| Deploy | ✅ Version `5bbf4489-d8f3-4a57-ac19-24ace8dd2332` |
+| URL | `https://sara-backend.edson-633.workers.dev` |
 
-**Conclusión:** 100% del código está cubierto por tests unitarios. Todos los comandos de Asesor, CEO, Vendedor, Marketing, y los flujos de Bridge, Post-Compra, e IA están verificados. **Producción 100% operativa.**
+**Conclusión:** 42/42 tests de producción pasados. 351/351 tests unitarios pasados. **Sistema 100% operativo.**
 
 ---
 
