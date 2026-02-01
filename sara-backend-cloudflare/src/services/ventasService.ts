@@ -190,7 +190,7 @@ export class VentasService {
       const { error: updateError } = await this.supabase.client
         .from('leads')
         .update({
-          status: 'closed_won',
+          status: 'sold',
           status_changed_at: new Date().toISOString(),
           notes: {
             ...((typeof lead.notes === 'object' && lead.notes) || {}),
