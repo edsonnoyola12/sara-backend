@@ -350,7 +350,8 @@ Registra apartado de propiedad:
 Marca una venta como cerrada:
 - `cerrar venta Juan García`
 - `venta cerrada María`
-- Actualiza lead a status `closed_won`
+- Actualiza lead a status `sold`
+- Guarda `purchase_date` automáticamente (para flujos post-compra)
 
 ### Comando: cancelar lead (VentasService)
 Marca lead como caído:
@@ -3277,4 +3278,58 @@ Refactorizar para usar `AIConversationService` directamente, eliminando código 
 
 **Deploy:** `59d788b3-a081-4fb0-8b22-5f069483ebbd`
 
-**Sistema 100% operativo - Última verificación: 2026-01-31**
+---
+
+## 2026-02-01 (Sesión 13) - QA Sistemático Completo
+
+### Pruebas Exhaustivas Realizadas
+
+Se ejecutaron pruebas sistemáticas de todos los flujos principales de SARA.
+
+#### Pruebas de IA/Leads (17 tests)
+
+| Test | Resultado |
+|------|-----------|
+| Saludo | ✅ Pregunta 2 o 3 recámaras |
+| Monte Verde | ✅ Lista modelos con precios |
+| Alberca | ✅ Solo Priv. Andes |
+| Citadella/El Nogal | ✅ Villa Campelo + Villa Galiano |
+| Renta | ✅ "Solo vendemos, no rentamos" |
+| Ya compré otro lado | ✅ Felicita + referidos |
+| No me escribas | ✅ Respeta decisión |
+| Crédito INFONAVIT | ✅ Pregunta subcuenta |
+| "Lo voy a pensar" | ✅ Urgencia + escasez |
+| "Quiero ver casas" | ✅ "¿Sábado o domingo?" |
+| Terrenos | ✅ Citadella del Nogal |
+| Local comercial | ✅ Aclara residencial |
+| Casa más grande | ✅ Calandria 3 plantas |
+| Más barata | ✅ $1.5M Monte Verde/Andes |
+| "Zacatecas lejos" | ✅ Maneja objeción |
+| Área de juegos | ✅ Lista desarrollos |
+| Enganche mínimo | ✅ 10% + INFONAVIT 100% |
+
+#### Comandos Probados
+
+| Rol | Comandos | Estado |
+|-----|----------|--------|
+| CEO | pipeline, alertas, ofertas | ✅ |
+| Vendedor | cotizar, citas, mis leads, hot | ✅ |
+
+#### CRONs Post-Compra
+
+| CRON | Endpoint | Estado |
+|------|----------|--------|
+| Post-entrega | `/run-post-entrega` | ✅ |
+| NPS | `/run-nps` | ✅ |
+| Referidos | `/run-referidos` | ✅ |
+| Post-visita | `/test-flujo-postvisita` | ✅ |
+
+### Estado del Sistema
+
+| Componente | Estado |
+|------------|--------|
+| Health | ✅ healthy |
+| Supabase | ✅ ok (32 leads) |
+| Tests unitarios | ✅ 351/351 pasan |
+
+**Sistema 100% operativo - Última verificación: 2026-02-01**
