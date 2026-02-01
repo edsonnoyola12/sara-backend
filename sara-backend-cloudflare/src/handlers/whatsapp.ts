@@ -573,17 +573,19 @@ export class WhatsAppHandler {
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // VERIFICAR SI ES RESPUESTA A ENCUESTA
+      // VERIFICAR SI ES RESPUESTA A ENCUESTA (CRÍTICO - ANTES DE IA)
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      console.log(`📋 ENCUESTA CHECK: phone=${cleanPhone}, msg="${trimmedBody}"`);
       try {
         const respuestaEncuesta = await this.procesarRespuestaEncuesta(cleanPhone, trimmedBody);
+        console.log(`📋 ENCUESTA CHECK: resultado=${respuestaEncuesta ? 'PROCESADA' : 'NO HAY ENCUESTA'}`);
         if (respuestaEncuesta) {
           console.log(`📋 Respuesta de encuesta procesada para ${cleanPhone}`);
           await this.meta.sendWhatsAppMessage(cleanPhone, respuestaEncuesta);
           return; // No procesar más, ya respondimos a la encuesta
         }
-      } catch (e) {
-        console.error('⚠️ Error procesando respuesta de encuesta:', e);
+      } catch (e: any) {
+        console.error('⚠️ Error procesando respuesta de encuesta:', e.message || e);
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

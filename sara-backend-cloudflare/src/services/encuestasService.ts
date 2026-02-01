@@ -6,25 +6,38 @@ export class EncuestasService {
   async buscarLeadConEncuestaPostVisita(phone: string): Promise<any | null> {
     try {
       const phoneSuffix = phone.replace(/\D/g, '').slice(-10);
+      console.log(`📋 ENCUESTA: Buscando lead con phone suffix: ${phoneSuffix} (original: ${phone})`);
 
       // Buscar lead con encuesta pendiente en notas
-      const { data: leads } = await this.supabase.client
+      const { data: leads, error } = await this.supabase.client
         .from('leads')
         .select('*')
         .ilike('phone', `%${phoneSuffix}`);
 
-      if (!leads) return null;
+      if (error) {
+        console.error(`📋 ENCUESTA: Error buscando leads:`, error.message);
+        return null;
+      }
+
+      console.log(`📋 ENCUESTA: Encontrados ${leads?.length || 0} leads con ese teléfono`);
+
+      if (!leads || leads.length === 0) return null;
 
       // Buscar uno que tenga pending_client_survey en notas
       for (const lead of leads) {
         const notas = typeof lead.notes === 'object' ? lead.notes : {};
-        if (notas.pending_client_survey) {
+        const tienePendiente = !!notas.pending_client_survey;
+        console.log(`📋 ENCUESTA: Lead ${lead.name} (${lead.id}) - pending_client_survey: ${tienePendiente}`);
+        if (tienePendiente) {
+          console.log(`📋 ENCUESTA: ¡ENCONTRADO! Lead ${lead.name} tiene encuesta pendiente`);
           return lead;
         }
       }
 
+      console.log(`📋 ENCUESTA: Ningún lead tiene pending_client_survey`);
       return null;
-    } catch (e) {
+    } catch (e: any) {
+      console.error(`📋 ENCUESTA: Error inesperado:`, e.message || e);
       return null;
     }
   }
