@@ -187,15 +187,17 @@ export class VentasService {
 
       const lead = leads[0];
 
+      const fechaVenta = new Date().toISOString();
       const { error: updateError } = await this.supabase.client
         .from('leads')
         .update({
           status: 'sold',
-          status_changed_at: new Date().toISOString(),
+          status_changed_at: fechaVenta,
+          purchase_date: fechaVenta.split('T')[0], // Solo fecha YYYY-MM-DD
           notes: {
             ...((typeof lead.notes === 'object' && lead.notes) || {}),
             venta_cerrada: {
-              fecha: new Date().toISOString(),
+              fecha: fechaVenta,
               cerrada_por: vendedor.name
             }
           }
