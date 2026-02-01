@@ -145,15 +145,17 @@ export class AIConversationService {
 
     console.log('🔍 ¿Conversación nueva?', esConversacionNueva, '| Nombre real:', tieneNombreReal, '| Nombre confirmado:', nombreConfirmado, '| lead.name:', lead.name);
 
-    // Verificar si ya existe cita confirmada para este lead
+    // Verificar si ya existe cita confirmada para este lead (SOLO FUTURAS)
     let citaExistenteInfo = '';
+    const hoy = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
     try {
       const { data: citaExistente } = await this.supabase.client
         .from('appointments')
         .select('scheduled_date, scheduled_time, property_name')
         .eq('lead_id', lead.id)
         .in('status', ['scheduled', 'confirmed'])
-        .order('created_at', { ascending: false })
+        .gte('scheduled_date', hoy) // Solo citas de hoy en adelante
+        .order('scheduled_date', { ascending: true }) // La más próxima primero
         .limit(1);
       
       if (citaExistente && citaExistente.length > 0) {
