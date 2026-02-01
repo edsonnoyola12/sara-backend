@@ -2413,6 +2413,67 @@ const hoy = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
 
 ---
 
+### 2026-02-01 (Sesión 15) - Fix Respuestas NPS Cortas
+
+**Bug reportado por usuario:**
+Cuando un lead respondía "1" o "10" a una encuesta NPS, SARA enviaba respuesta genérica "¡Hola! Soy SARA..." en lugar de procesar la respuesta NPS.
+
+**Causa raíz (2 problemas):**
+
+1. **Handler de emojis capturaba números:** La regex `\p{Emoji}` en Unicode incluye dígitos 0-9 (por secuencias como 0️⃣, 1️⃣), entonces "10" era tratado como emoji.
+
+2. **Procesamiento de encuestas dentro de `text.length > 3`:** El código de NPS estaba dentro de un bloque que excluía mensajes cortos.
+
+**Fix aplicado en `src/index.ts`:**
+
+```typescript
+// 1. Excluir números puros del handler de emojis
+const esPuroNumero = /^\d+$/.test(textoLimpio);
+const esEmojiSolo = textoLimpio.length <= 4 &&
+  /^[\p{Emoji}\s]+$/u.test(textoLimpio) &&
+  !esPuroNumero;  // ← NUEVO
+
+// 2. Procesar encuestas PRIMERO sin restricción de longitud
+if (text) {  // ← Antes era: if (text && text.length > 3)
+  // Procesar NPS, post-entrega, satisfacción, mantenimiento PRIMERO
+  const npsProcessed = await procesarRespuestaNPS(...);
+  if (npsProcessed) return new Response('OK');
+  // ... otras encuestas ...
+
+  // DESPUÉS: señales calientes y objeciones (solo para mensajes largos)
+  if (text.length > 3) {
+    // detectarSeñalesCalientes, detectarObjeciones
+  }
+}
+```
+
+**Flujo corregido:**
+
+```
+Mensaje "10" recibido
+├── ANTES: Handler emoji → "¡Hola! Soy SARA..." ❌
+└── AHORA: procesarRespuestaNPS() → "¡Gracias! (promotor)" ✅
+```
+
+**Tests en producción verificados:**
+
+| Test | Resultado | Respuesta |
+|------|-----------|-----------|
+| NPS "10" | ✅ | "¡Muchas gracias! 🎉 (promotor)" |
+| NPS "1" | ✅ | Procesado como encuesta |
+| Emoji 👍 | ✅ | Sigue funcionando normal |
+| Monte Verde | ✅ | Lista modelos con precios |
+| Alberca | ✅ | "Solo Priv. Andes" |
+| Renta | ✅ | "Solo vendemos, no rentamos" |
+| El Nogal | ✅ | Cierra con cita |
+| Ya compré | ✅ | "¡Felicidades!" |
+| No contacto | ✅ | "Respeto tu decisión" |
+
+**Commit:** `94a9cdd9`
+**Deploy:** Version ID `2413db6a-eec5-4c3e-a933-3155d046fc37`
+
+---
+
 ## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-01)
 
 ### Flujos de IA Verificados
@@ -2431,6 +2492,7 @@ const hoy = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
 | Solicitud de cita | ✅ | 2026-02-01 |
 | Terrenos | ✅ | 2026-02-01 |
 | Especificaciones (grande, barata, amenidades) | ✅ | 2026-02-01 |
+| **Respuestas NPS cortas (1-10)** | ✅ | 2026-02-01 |
 
 ### Comandos Verificados
 
