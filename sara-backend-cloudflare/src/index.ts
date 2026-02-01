@@ -6018,7 +6018,9 @@ Mensaje: ${mensaje}`;
 
           // ═══ MANEJO DE EMOJIS SOLOS ═══
           const textoLimpio = text.trim();
-          const esEmojiSolo = textoLimpio.length <= 4 && /^[\p{Emoji}\s]+$/u.test(textoLimpio);
+          // NOTA: Excluir strings puramente numéricos (0-10) para no interferir con respuestas NPS
+          const esPuroNumero = /^\d+$/.test(textoLimpio);
+          const esEmojiSolo = textoLimpio.length <= 4 && /^[\p{Emoji}\s]+$/u.test(textoLimpio) && !esPuroNumero;
 
           if (esEmojiSolo && textoLimpio.length > 0) {
             console.log(`😊 Emoji solo recibido: "${textoLimpio}"`);
@@ -6052,9 +6054,10 @@ Mensaje: ${mensaje}`;
           }
           // ═══ FIN MANEJO DE EMOJIS SOLOS ═══
 
-          // ═══ DETECCIÓN DE LEADS CALIENTES Y OBJECIONES ═══
-          // Detectar señales de compra y objeciones ANTES de procesar el mensaje
-          if (text && text.length > 3) {
+          // ═══ DETECCIÓN DE LEADS CALIENTES, OBJECIONES Y RESPUESTAS A ENCUESTAS ═══
+          // Detectar señales de compra, objeciones y respuestas NPS ANTES de procesar el mensaje
+          // NOTA: No filtrar por longitud para capturar respuestas NPS cortas como "1", "10"
+          if (text) {
             try {
               const cleanPhoneHot = from.replace(/\D/g, '');
               const { data: leadHot } = await supabase.client
@@ -6064,9 +6067,37 @@ Mensaje: ${mensaje}`;
                 .single();
 
               if (leadHot && leadHot.assigned_to) {
-                // Detectar señales calientes
-                const señalesCalientes = detectarSeñalesCalientes(text);
-                if (señalesCalientes.length > 0) {
+                // PRIMERO: Procesar respuestas a encuestas (NPS, post-entrega, etc.)
+                // Estos pueden ser mensajes cortos como "1", "10", "si", "no"
+                const npsProcessed = await procesarRespuestaNPS(supabase, meta, leadHot, text);
+                if (npsProcessed) {
+                  console.log(`📊 Respuesta NPS procesada para ${leadHot.name} - NO enviar respuesta genérica`);
+                  return new Response('OK', { status: 200 });
+                }
+
+                const entregaProcessed = await procesarRespuestaEntrega(supabase, meta, leadHot, text);
+                if (entregaProcessed) {
+                  console.log(`🔑 Respuesta post-entrega procesada para ${leadHot.name} - NO enviar respuesta genérica`);
+                  return new Response('OK', { status: 200 });
+                }
+
+                const satisfaccionProcessed = await procesarRespuestaSatisfaccionCasa(supabase, meta, leadHot, text);
+                if (satisfaccionProcessed) {
+                  console.log(`🏡 Respuesta satisfacción casa procesada para ${leadHot.name} - NO enviar respuesta genérica`);
+                  return new Response('OK', { status: 200 });
+                }
+
+                const mantenimientoProcessed = await procesarRespuestaMantenimiento(supabase, meta, leadHot, text);
+                if (mantenimientoProcessed) {
+                  console.log(`🔧 Respuesta mantenimiento procesada para ${leadHot.name} - NO enviar respuesta genérica`);
+                  return new Response('OK', { status: 200 });
+                }
+
+                // DESPUÉS: Detectar señales calientes y objeciones (solo para mensajes más largos)
+                if (text.length > 3) {
+                  // Detectar señales calientes
+                  const señalesCalientes = detectarSeñalesCalientes(text);
+                  if (señalesCalientes.length > 0) {
                   console.log(`🔥 Señales calientes detectadas para ${leadHot.name}: ${señalesCalientes.map(s => s.tipo).join(', ')}`);
                   await alertarLeadCaliente(supabase, meta, leadHot, text, señalesCalientes);
                 }
@@ -6077,33 +6108,6 @@ Mensaje: ${mensaje}`;
                   console.error(`⚠️ Objeciones detectadas para ${leadHot.name}: ${objeciones.map(o => o.tipo).join(', ')}`);
                   await alertarObjecion(supabase, meta, leadHot, text, objeciones);
                 }
-
-                // Procesar respuesta NPS si aplica
-                const npsProcessed = await procesarRespuestaNPS(supabase, meta, leadHot, text);
-                if (npsProcessed) {
-                  console.log(`📊 Respuesta NPS procesada para ${leadHot.name} - NO enviar respuesta genérica`);
-                  return new Response('OK', { status: 200 }); // IMPORTANTE: No seguir a la IA genérica
-                }
-
-                // Procesar respuesta de seguimiento post-entrega
-                const entregaProcessed = await procesarRespuestaEntrega(supabase, meta, leadHot, text);
-                if (entregaProcessed) {
-                  console.log(`🔑 Respuesta post-entrega procesada para ${leadHot.name} - NO enviar respuesta genérica`);
-                  return new Response('OK', { status: 200 }); // IMPORTANTE: No seguir a la IA genérica
-                }
-
-                // Procesar respuesta de satisfacción con la casa
-                const satisfaccionProcessed = await procesarRespuestaSatisfaccionCasa(supabase, meta, leadHot, text);
-                if (satisfaccionProcessed) {
-                  console.log(`🏡 Respuesta satisfacción casa procesada para ${leadHot.name} - NO enviar respuesta genérica`);
-                  return new Response('OK', { status: 200 }); // IMPORTANTE: No seguir a la IA genérica
-                }
-
-                // Procesar respuesta de mantenimiento
-                const mantenimientoProcessed = await procesarRespuestaMantenimiento(supabase, meta, leadHot, text);
-                if (mantenimientoProcessed) {
-                  console.log(`🔧 Respuesta mantenimiento procesada para ${leadHot.name} - NO enviar respuesta genérica`);
-                  return new Response('OK', { status: 200 }); // IMPORTANTE: No seguir a la IA genérica
                 }
               }
             } catch (hotErr) {
