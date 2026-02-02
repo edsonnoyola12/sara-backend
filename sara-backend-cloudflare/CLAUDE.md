@@ -2728,4 +2728,24 @@ if (leadsPendientes && leadsPendientes.length > 1) {
 | Check-in mantenimiento | Sábado 10am | ✅ |
 | Flujo post-visita | Automático | ✅ |
 
+### Estado del Sistema (2026-02-02 19:04 UTC)
+
+| Componente | Estado |
+|------------|--------|
+| General | ✅ healthy |
+| Database (Supabase) | ✅ ok |
+| Cache (KV) | ✅ ok |
+| Meta WhatsApp | ✅ configured |
+| Anthropic (Claude) | ✅ configured |
+| Google Calendar | ✅ configured |
+
+| Métrica | Valor |
+|---------|-------|
+| Leads hoy | 29 |
+| Total leads | 88 |
+| Citas hoy | 0 |
+| Team members | 18 |
+| Ventanas 24h abiertas | 4 |
+| Ventanas 24h cerradas | 14 |
+
 **Sistema 100% operativo - Última verificación: 2026-02-02**
