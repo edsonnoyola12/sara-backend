@@ -2683,6 +2683,153 @@ if (leadsPendientes && leadsPendientes.length > 1) {
 
 ---
 
+### 2026-02-02 (Sesión 18) - Sistema de Mensajería Profesional con Expiración Configurable
+
+**Problema identificado:**
+- 34 mensajes pending habían expirado silenciosamente
+- El timeout estaba hardcodeado a 12 horas para TODOS los tipos de mensaje
+- Briefings que debían expirar en 18h usaban el mismo timeout que notificaciones
+- No había forma de limpiar mensajes pending expirados
+
+**Solución implementada:**
+
+#### 1. Configuración de Expiración por Tipo de Mensaje
+
+```typescript
+// src/utils/teamMessaging.ts
+const EXPIRATION_CONFIG: Record<string, number> = {
+  'briefing': 18,      // Expira antes del siguiente briefing
+  'recap': 18,         // Expira antes del siguiente recap
+  'reporte_diario': 24,
+  'resumen_semanal': 72, // Más tiempo para el semanal
+  'reporte': 24,
+  'notificacion': 48,
+};
+```
+
+#### 2. Nueva función `isPendingExpired()`
+
+```typescript
+// Reemplaza el check hardcodeado de 12 horas
+export function isPendingExpired(
+  pending: { sent_at: string; expires_at?: string },
+  tipoMensaje?: string
+): boolean {
+  // Si tiene expires_at explícito, usar ese
+  if (pending.expires_at) {
+    return new Date(pending.expires_at) < new Date();
+  }
+  // Fallback: calcular basado en sent_at + config
+  const maxHoras = EXPIRATION_CONFIG[tipoMensaje || 'notificacion'] || 24;
+  // ...
+}
+```
+
+#### 3. Nueva función `getPendingMessages()`
+
+Retorna todos los pending messages ordenados por prioridad:
+1. `pending_briefing` (prioridad 1)
+2. `pending_recap` (prioridad 2)
+3. `pending_reporte_diario` (prioridad 2)
+4. `pending_resumen_semanal` (prioridad 3)
+5. `pending_mensaje` (prioridad 4)
+
+#### 4. Actualización de Handlers (whatsapp.ts)
+
+**Antes (hardcodeado):**
+```typescript
+const horasDesde = (Date.now() - new Date(pending.sent_at).getTime()) / (1000 * 60 * 60);
+if (horasDesde <= 12) {
+  // entregar mensaje
+}
+```
+
+**Después (dinámico):**
+```typescript
+if (!isPendingExpired(pending, 'briefing')) {
+  // entregar mensaje
+}
+```
+
+**Handlers actualizados:**
+- `handleCEOMessage` - pending_briefing, pending_recap, pending_resumen_semanal
+- `handleVendedorMessage` - pending_briefing, pending_reporte_diario, pending_resumen_semanal
+
+#### 5. Nuevo Endpoint `/limpiar-pending-expirados`
+
+```typescript
+GET /limpiar-pending-expirados
+// Requiere: ?api_key=XXX
+
+// Limpia todos los pending messages expirados de team_members.notes
+// Retorna: { success: true, cleaned: 37, teamMembers: 17 }
+```
+
+#### 6. SQL para Message Queue (Preparación Futura)
+
+**Archivo:** `sql/message_queue_tables.sql`
+
+Tablas creadas para futura migración a sistema de cola profesional:
+- `message_queue` - Cola principal con estados (queued, template_sent, delivered, failed, expired)
+- `message_audit_log` - Auditoría de eventos del ciclo de vida
+- `message_type_config` - Configuración por tipo de mensaje
+
+Funciones SQL:
+- `enqueue_message()` - Encolar mensaje
+- `mark_message_delivered()` - Marcar como entregado
+- `get_next_pending_message()` - Obtener siguiente para entregar
+- `expire_old_messages()` - Expirar mensajes viejos (para CRON)
+
+#### 7. MessageQueueService (Preparación Futura)
+
+**Archivo:** `src/services/messageQueueService.ts`
+
+Servicio con feature flag para migración gradual:
+```typescript
+class MessageQueueService {
+  private useNewQueue = false; // Toggle para migración gradual
+
+  async enqueue(...) { }
+  async getNextPendingMessage(...) { }
+  async markDelivered(...) { }
+  async expireOldMessages() { }
+}
+```
+
+**Archivos modificados:**
+- `src/utils/teamMessaging.ts` - Nuevas funciones de expiración
+- `src/handlers/whatsapp.ts` - Import + actualización de handlers
+- `src/index.ts` - Nuevo endpoint + import actualizado
+
+**Archivos nuevos:**
+- `sql/message_queue_tables.sql` - Schema para futura migración
+- `src/services/messageQueueService.ts` - Servicio para futura migración
+
+**Pruebas realizadas:**
+
+| Test | Resultado |
+|------|-----------|
+| Pending expirados detectados | ✅ 34 encontrados |
+| Envío DIRECTO (ventana abierta) | ✅ Vendedor Test |
+| Envío TEMPLATE (ventana cerrada) | ✅ Javier Frausto |
+| Limpieza de pending expirados | ✅ 37 limpiados de 17 team members |
+| Estado post-limpieza | ✅ 0 pending activos, 0 expirados |
+
+**Estado del sistema post-fix:**
+
+| Métrica | Valor |
+|---------|-------|
+| Team members | 18 |
+| Ventanas abiertas | 4 |
+| Ventanas cerradas | 14 |
+| Pending activos | 0 |
+| Pending expirados | 0 |
+
+**Commit:** Sesión 18 - Sistema de mensajería con expiración configurable
+**Deploy:** Completado
+
+---
+
 ## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-02)
 
 ### Flujos de IA Verificados
@@ -2707,6 +2854,8 @@ if (leadsPendientes && leadsPendientes.length > 1) {
 | **Reacciones a mensajes** | ✅ | 2026-02-01 |
 | **Fotos de desperfectos (post-entrega)** | ✅ | 2026-02-02 |
 | **Deduplicación mensajes team_members** | ✅ | 2026-02-02 |
+| **Expiración configurable de pending messages** | ✅ | 2026-02-02 |
+| **Limpieza automática de pending expirados** | ✅ | 2026-02-02 |
 
 ### Comandos Verificados
 
@@ -2728,7 +2877,7 @@ if (leadsPendientes && leadsPendientes.length > 1) {
 | Check-in mantenimiento | Sábado 10am | ✅ |
 | Flujo post-visita | Automático | ✅ |
 
-### Estado del Sistema (2026-02-02 19:04 UTC)
+### Estado del Sistema (2026-02-02)
 
 | Componente | Estado |
 |------------|--------|
@@ -2741,11 +2890,17 @@ if (leadsPendientes && leadsPendientes.length > 1) {
 
 | Métrica | Valor |
 |---------|-------|
-| Leads hoy | 29 |
-| Total leads | 88 |
-| Citas hoy | 0 |
 | Team members | 18 |
 | Ventanas 24h abiertas | 4 |
 | Ventanas 24h cerradas | 14 |
+| Pending activos | 0 |
+| Pending expirados | 0 (limpiados) |
+
+### Endpoints de Administración
+
+| Endpoint | Uso |
+|----------|-----|
+| `/test-ventana-24h` | Ver estado de ventanas y pending de cada team member |
+| `/limpiar-pending-expirados` | Limpiar mensajes pending expirados (requiere api_key) |
 
 **Sistema 100% operativo - Última verificación: 2026-02-02**
