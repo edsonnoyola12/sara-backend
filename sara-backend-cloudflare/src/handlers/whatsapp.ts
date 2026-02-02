@@ -2,6 +2,7 @@ import { SupabaseService } from '../services/supabase';
 import { ClaudeService } from '../services/claude';
 import { TwilioService } from '../services/twilio';
 import { parseReagendarParams as parseReagendarParamsUtil } from '../utils/vendedorParsers';
+import { isPendingExpired } from '../utils/teamMessaging';
 import { FollowupService } from '../services/followupService';
 import { FollowupApprovalService } from '../services/followupApprovalService';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
@@ -1526,12 +1527,11 @@ export class WhatsAppHandler {
     // Actualizar last_sara_interaction (ventana 24h ahora está abierta)
     notasCEO.last_sara_interaction = new Date().toISOString();
 
-    // PENDING BRIEFING
+    // PENDING BRIEFING - Usa expiración configurable (18h)
     const pendingBriefingCEO = notasCEO?.pending_briefing;
     if (pendingBriefingCEO?.sent_at && pendingBriefingCEO?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingBriefingCEO.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 12) {
-        console.log(`📋 [PENDING PRIORITY] CEO ${nombreCEO} respondió template - enviando briefing`);
+      if (!isPendingExpired(pendingBriefingCEO, 'briefing')) {
+        console.log(`📋 [PENDING] CEO ${nombreCEO} respondió template - enviando briefing`);
         await this.meta.sendWhatsAppMessage(cleanPhone, pendingBriefingCEO.mensaje_completo);
 
         const { pending_briefing, ...notasSinPending } = notasCEO;
@@ -1542,12 +1542,11 @@ export class WhatsAppHandler {
       }
     }
 
-    // PENDING RECAP
+    // PENDING RECAP - Usa expiración configurable (18h)
     const pendingRecapCEO = notasCEO?.pending_recap;
     if (pendingRecapCEO?.sent_at && pendingRecapCEO?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingRecapCEO.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 12) {
-        console.log(`📋 [PENDING PRIORITY] CEO ${nombreCEO} respondió template - enviando recap`);
+      if (!isPendingExpired(pendingRecapCEO, 'recap')) {
+        console.log(`📋 [PENDING] CEO ${nombreCEO} respondió template - enviando recap`);
         await this.meta.sendWhatsAppMessage(cleanPhone, pendingRecapCEO.mensaje_completo);
 
         const { pending_recap, ...notasSinPending } = notasCEO;
@@ -1558,12 +1557,11 @@ export class WhatsAppHandler {
       }
     }
 
-    // PENDING REPORTE DIARIO
+    // PENDING REPORTE DIARIO - Usa expiración configurable (24h)
     const pendingReporteDiarioCEO = notasCEO?.pending_reporte_diario;
     if (pendingReporteDiarioCEO?.sent_at && pendingReporteDiarioCEO?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingReporteDiarioCEO.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 12) {
-        console.log(`📊 [PENDING PRIORITY] CEO ${nombreCEO} respondió template - enviando reporte diario`);
+      if (!isPendingExpired(pendingReporteDiarioCEO, 'reporte_diario')) {
+        console.log(`📊 [PENDING] CEO ${nombreCEO} respondió template - enviando reporte diario`);
         await this.meta.sendWhatsAppMessage(cleanPhone, pendingReporteDiarioCEO.mensaje_completo);
 
         const { pending_reporte_diario, ...notasSinPending } = notasCEO;
@@ -1574,12 +1572,11 @@ export class WhatsAppHandler {
       }
     }
 
-    // PENDING REPORTE SEMANAL
+    // PENDING REPORTE SEMANAL - Usa expiración configurable (72h)
     const pendingReporteSemanalCEO = notasCEO?.pending_reporte_semanal;
     if (pendingReporteSemanalCEO?.sent_at && pendingReporteSemanalCEO?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingReporteSemanalCEO.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 12) {
-        console.log(`📊 [PENDING PRIORITY] CEO ${nombreCEO} respondió template - enviando reporte semanal`);
+      if (!isPendingExpired(pendingReporteSemanalCEO, 'resumen_semanal')) {
+        console.log(`📊 [PENDING] CEO ${nombreCEO} respondió template - enviando reporte semanal`);
         await this.meta.sendWhatsAppMessage(cleanPhone, pendingReporteSemanalCEO.mensaje_completo);
 
         const { pending_reporte_semanal, ...notasSinPending } = notasCEO;
@@ -1590,12 +1587,11 @@ export class WhatsAppHandler {
       }
     }
 
-    // PENDING RESUMEN SEMANAL (recap semanal - sábado)
+    // PENDING RESUMEN SEMANAL (recap semanal - sábado) - Usa expiración configurable (72h)
     const pendingResumenSemanalCEO = notasCEO?.pending_resumen_semanal;
     if (pendingResumenSemanalCEO?.sent_at && pendingResumenSemanalCEO?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingResumenSemanalCEO.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 24) {
-        console.log(`📋 [PENDING PRIORITY] CEO ${nombreCEO} respondió template - enviando resumen semanal`);
+      if (!isPendingExpired(pendingResumenSemanalCEO, 'resumen_semanal')) {
+        console.log(`📋 [PENDING] CEO ${nombreCEO} respondió template - enviando resumen semanal`);
         await this.meta.sendWhatsAppMessage(cleanPhone, pendingResumenSemanalCEO.mensaje_completo);
 
         const { pending_resumen_semanal, ...notasSinPending } = notasCEO;
@@ -3982,12 +3978,11 @@ export class WhatsAppHandler {
       notasVendedor.last_sara_interaction = new Date().toISOString();
     }
 
-    // PENDING BRIEFING (mañana)
+    // PENDING BRIEFING (mañana) - Usa expiración configurable (18h para briefing)
     const pendingBriefingInicio = notasVendedor?.pending_briefing;
     if (pendingBriefingInicio?.sent_at && pendingBriefingInicio?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingBriefingInicio.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 12) {
-        console.log(`📋 [PENDING PRIORITY] ${nombreVendedor} respondió template - enviando briefing`);
+      if (!isPendingExpired(pendingBriefingInicio, 'briefing')) {
+        console.log(`📋 [PENDING] ${nombreVendedor} respondió template - enviando briefing`);
         await this.meta.sendWhatsAppMessage(from, pendingBriefingInicio.mensaje_completo);
 
         const { pending_briefing, ...notasSinPendingBriefing } = notasVendedor;
@@ -4002,12 +3997,11 @@ export class WhatsAppHandler {
       }
     }
 
-    // PENDING RECAP (noche - no usó SARA)
+    // PENDING RECAP (noche - no usó SARA) - Usa expiración configurable (18h para recap)
     const pendingRecapInicio = notasVendedor?.pending_recap;
     if (pendingRecapInicio?.sent_at && pendingRecapInicio?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingRecapInicio.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 12) {
-        console.log(`📋 [PENDING PRIORITY] ${nombreVendedor} respondió template - enviando recap`);
+      if (!isPendingExpired(pendingRecapInicio, 'recap')) {
+        console.log(`📋 [PENDING] ${nombreVendedor} respondió template - enviando recap`);
         await this.meta.sendWhatsAppMessage(from, pendingRecapInicio.mensaje_completo);
 
         const { pending_recap, ...notasSinPendingRecap } = notasVendedor;
@@ -4022,12 +4016,11 @@ export class WhatsAppHandler {
       }
     }
 
-    // PENDING REPORTE DIARIO (7 PM)
+    // PENDING REPORTE DIARIO (7 PM) - Usa expiración configurable (24h para reporte_diario)
     const pendingReporteDiarioInicio = notasVendedor?.pending_reporte_diario;
     if (pendingReporteDiarioInicio?.sent_at && pendingReporteDiarioInicio?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingReporteDiarioInicio.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 12) {
-        console.log(`📊 [PENDING PRIORITY] ${nombreVendedor} respondió template - enviando reporte diario`);
+      if (!isPendingExpired(pendingReporteDiarioInicio, 'reporte_diario')) {
+        console.log(`📊 [PENDING] ${nombreVendedor} respondió template - enviando reporte diario`);
         await this.meta.sendWhatsAppMessage(from, pendingReporteDiarioInicio.mensaje_completo);
 
         const { pending_reporte_diario, ...notasSinPendingReporte } = notasVendedor;
@@ -4042,12 +4035,11 @@ export class WhatsAppHandler {
       }
     }
 
-    // PENDING REPORTE SEMANAL (lunes)
+    // PENDING REPORTE SEMANAL (lunes) - Usa expiración configurable (72h para resumen_semanal)
     const pendingReporteSemanalInicio = notasVendedor?.pending_reporte_semanal;
     if (pendingReporteSemanalInicio?.sent_at && pendingReporteSemanalInicio?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingReporteSemanalInicio.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 12) {
-        console.log(`📊 [PENDING PRIORITY] ${nombreVendedor} respondió template - enviando reporte semanal`);
+      if (!isPendingExpired(pendingReporteSemanalInicio, 'resumen_semanal')) {
+        console.log(`📊 [PENDING] ${nombreVendedor} respondió template - enviando reporte semanal`);
         await this.meta.sendWhatsAppMessage(from, pendingReporteSemanalInicio.mensaje_completo);
 
         const { pending_reporte_semanal, ...notasSinPendingSemanal } = notasVendedor;
@@ -4062,12 +4054,11 @@ export class WhatsAppHandler {
       }
     }
 
-    // PENDING RESUMEN SEMANAL (recap semanal - sábado)
+    // PENDING RESUMEN SEMANAL (recap semanal - sábado) - Usa expiración configurable (72h)
     const pendingResumenSemanalInicio = notasVendedor?.pending_resumen_semanal;
     if (pendingResumenSemanalInicio?.sent_at && pendingResumenSemanalInicio?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingResumenSemanalInicio.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 24) {
-        console.log(`📋 [PENDING PRIORITY] ${nombreVendedor} respondió template - enviando resumen semanal`);
+      if (!isPendingExpired(pendingResumenSemanalInicio, 'resumen_semanal')) {
+        console.log(`📋 [PENDING] ${nombreVendedor} respondió template - enviando resumen semanal`);
         await this.meta.sendWhatsAppMessage(from, pendingResumenSemanalInicio.mensaje_completo);
 
         const { pending_resumen_semanal, ...notasSinPendingResumen } = notasVendedor;

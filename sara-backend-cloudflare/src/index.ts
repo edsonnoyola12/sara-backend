@@ -63,7 +63,7 @@ import {
 } from './crons/reports';
 
 // Utils
-import { enviarMensajeTeamMember, EnviarMensajeTeamResult } from './utils/teamMessaging';
+import { enviarMensajeTeamMember, EnviarMensajeTeamResult, isPendingExpired, getPendingMessages } from './utils/teamMessaging';
 
 // Briefings y Recaps
 import {
@@ -1631,6 +1631,81 @@ export default {
 
       } catch (e: any) {
         console.error('❌ Error en limpiar-alertas:', e);
+        return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🧹 LIMPIAR-PENDING-EXPIRADOS - Limpia pending messages expirados de team_members
+    // USO: /limpiar-pending-expirados?api_key=XXX
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/limpiar-pending-expirados" && request.method === "GET") {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      try {
+        const { data: teamMembers } = await supabase.client
+          .from('team_members')
+          .select('id, name, notes')
+          .eq('active', true);
+
+        const pendingKeys = [
+          { key: 'pending_briefing', type: 'briefing' },
+          { key: 'pending_recap', type: 'recap' },
+          { key: 'pending_reporte_diario', type: 'reporte_diario' },
+          { key: 'pending_reporte_semanal', type: 'resumen_semanal' },
+          { key: 'pending_resumen_semanal', type: 'resumen_semanal' },
+          { key: 'pending_mensaje', type: 'notificacion' },
+          { key: 'pending_test_7pm', type: 'notificacion' },
+          { key: 'pending_video_semanal', type: 'resumen_semanal' },
+        ];
+
+        let totalLimpiados = 0;
+        const detalles: any[] = [];
+
+        for (const tm of teamMembers || []) {
+          const notas = typeof tm.notes === 'string'
+            ? JSON.parse(tm.notes || '{}')
+            : (tm.notes || {});
+
+          let modificado = false;
+          const limpiados: string[] = [];
+
+          for (const { key, type } of pendingKeys) {
+            const pending = notas[key];
+            if (pending?.mensaje_completo || pending?.sent_at) {
+              // Verificar si expiró usando la función isPendingExpired
+              if (isPendingExpired(pending, type)) {
+                delete notas[key];
+                modificado = true;
+                limpiados.push(key);
+                totalLimpiados++;
+              }
+            }
+          }
+
+          if (modificado) {
+            await supabase.client
+              .from('team_members')
+              .update({ notes: notas })
+              .eq('id', tm.id);
+
+            detalles.push({
+              nombre: tm.name,
+              limpiados
+            });
+          }
+        }
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          total_limpiados: totalLimpiados,
+          team_members_afectados: detalles.length,
+          detalles
+        }, null, 2));
+
+      } catch (e: any) {
+        console.error('❌ Error en limpiar-pending-expirados:', e);
         return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
       }
     }
@@ -11284,6 +11359,9 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const ahora = new Date().toISOString();
 
+      let totalPendingActivos = 0;
+      let totalPendingExpirados = 0;
+
       const resultado = teamMembers?.map(tm => {
         const notas = typeof tm.notes === 'string' ? JSON.parse(tm.notes || '{}') : (tm.notes || {});
         const lastInteraction = notas.last_sara_interaction;
@@ -11298,9 +11376,32 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
           tiempoDesde = horas > 0 ? `${horas}h ${minutos}m` : `${minutos}m`;
         }
 
-        // Verificar pending messages
-        const pendingKeys = ['pending_briefing', 'pending_recap', 'pending_reporte_diario', 'pending_reporte_semanal', 'pending_resumen_semanal', 'pending_mensaje', 'pending_video_semanal'];
-        const pendientes = pendingKeys.filter(key => notas[key]?.mensaje_completo);
+        // Usar nueva función para obtener pending messages con info de expiración
+        const pendingMessages = getPendingMessages(notas);
+        totalPendingActivos += pendingMessages.length;
+
+        // Contar expirados
+        const pendingKeys = ['pending_briefing', 'pending_recap', 'pending_reporte_diario', 'pending_reporte_semanal', 'pending_resumen_semanal', 'pending_mensaje'];
+        for (const key of pendingKeys) {
+          const pending = notas[key];
+          if (pending?.mensaje_completo && isPendingExpired(pending, key.replace('pending_', ''))) {
+            totalPendingExpirados++;
+          }
+        }
+
+        // Formatear pending messages con estado
+        const pendingInfo = pendingMessages.map(p => {
+          const sentAt = new Date(p.pending.sent_at);
+          const horasDesdeSent = Math.round((Date.now() - sentAt.getTime()) / (1000 * 60 * 60) * 10) / 10;
+          return {
+            tipo: p.type,
+            prioridad: p.priority,
+            enviado_hace: `${horasDesdeSent}h`,
+            expira_en: p.pending.expires_at
+              ? `${Math.round((new Date(p.pending.expires_at).getTime() - Date.now()) / (1000 * 60 * 60) * 10) / 10}h`
+              : 'N/A'
+          };
+        });
 
         return {
           nombre: tm.name,
@@ -11309,22 +11410,35 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
           ventana_24h: ventanaAbierta ? '✅ ABIERTA' : '❌ CERRADA',
           ultima_interaccion: lastInteraction || 'Nunca',
           hace: tiempoDesde,
-          pending_messages: pendientes.length > 0 ? pendientes : 'Ninguno'
+          pending_count: pendingMessages.length,
+          pending_messages: pendingInfo.length > 0 ? pendingInfo : 'Ninguno'
         };
       });
 
       const resumen = {
-        total: resultado?.length || 0,
+        total_team_members: resultado?.length || 0,
         ventana_abierta: resultado?.filter(r => r.ventana_24h.includes('ABIERTA')).length || 0,
         ventana_cerrada: resultado?.filter(r => r.ventana_24h.includes('CERRADA')).length || 0,
-        con_pending: resultado?.filter(r => Array.isArray(r.pending_messages)).length || 0
+        con_pending_activos: resultado?.filter(r => r.pending_count > 0).length || 0,
+        total_pending_activos: totalPendingActivos,
+        total_pending_expirados: totalPendingExpirados,
+        tasa_entrega: resultado?.length
+          ? Math.round((resultado.filter(r => r.ventana_24h.includes('ABIERTA')).length / resultado.length) * 100)
+          : 0
       };
 
       return corsResponse(JSON.stringify({
         timestamp: ahora,
         hace24h_limite: hace24h,
         resumen,
-        team_members: resultado
+        team_members: resultado,
+        recomendaciones: resumen.tasa_entrega < 50
+          ? [
+              '⚠️ Menos del 50% del equipo tiene ventana abierta',
+              '💡 Considerar: templates más atractivos, horarios de envío diferentes',
+              '📊 Usar /test-envio-7pm?enviar=true para enviar templates de reactivación'
+            ]
+          : ['✅ Buena tasa de entrega']
       }, null, 2));
     }
 
