@@ -2517,7 +2517,42 @@ Mensaje "10" recibido
 
 ---
 
-## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-01)
+### 2026-02-02 (Sesión 16) - Detección de Fotos de Desperfectos
+
+**Nueva funcionalidad para clientes post-entrega:**
+
+Cuando un cliente con status `delivered`, `sold` o `closed` envía una foto:
+
+| Situación | Acción de SARA |
+|-----------|----------------|
+| Foto con caption de desperfecto | ✅ Notifica vendedor + CEO + confirma al cliente |
+| Foto sin caption (cliente post-entrega) | ✅ Notifica equipo + pide descripción |
+| Foto con problema (lead normal) | ✅ Ofrece casas nuevas como alternativa |
+| Foto sin caption (lead normal) | ✅ Respuesta genérica mejorada |
+
+**Palabras clave detectadas:**
+```
+humedad, goteras, grieta, fisura, rotura, daño, desperfecto,
+mancha, moho, filtración, pintura, descascarado,
+puerta, ventana, no cierra, piso, azulejo, tubería,
+drenaje, atascado, luz, eléctrico, techo, plafón
+```
+
+**Flujo de reporte:**
+```
+Cliente post-entrega envía foto de humedad
+  ├── 📤 Notifica vendedor: "🚨 REPORTE DE CLIENTE - [nombre] envió foto 'humedad en pared'"
+  ├── 📤 Notifica CEO: "🚨 REPORTE POST-ENTREGA"
+  ├── 💬 Responde al cliente: "Tu reporte ha sido registrado..."
+  └── 📝 Guarda nota en el lead
+```
+
+**Commit:** `5d5bae57`
+**Deploy:** Version ID `73d443fb-7367-4400-9280-c9c462b23a55`
+
+---
+
+## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-02)
 
 ### Flujos de IA Verificados
 
@@ -2539,6 +2574,7 @@ Mensaje "10" recibido
 | **Mensajes multimedia (audio, imagen, video, sticker)** | ✅ | 2026-02-01 |
 | **Mensajes interactivos (botones, listas)** | ✅ | 2026-02-01 |
 | **Reacciones a mensajes** | ✅ | 2026-02-01 |
+| **Fotos de desperfectos (post-entrega)** | ✅ | 2026-02-02 |
 
 ### Comandos Verificados
 
