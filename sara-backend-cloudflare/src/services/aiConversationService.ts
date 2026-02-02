@@ -653,6 +653,12 @@ CUANDO PIDE INFORMACIÓN GENERAL (sin mencionar desarrollo específico)
 DEBES responder con la lista de TODOS los desarrollos disponibles.
 ⚠️ USA LOS PRECIOS DEL CATÁLOGO QUE ESTÁ ABAJO, NO INVENTES PRECIOS.
 
+💰 REGLA DE PRECIOS - MUY IMPORTANTE:
+- SIEMPRE muestra precios de casas EQUIPADAS (es lo que está en el catálogo)
+- SOLO si el cliente pregunta específicamente "¿cuánto cuesta SIN equipo?" das ese precio
+- Las casas EQUIPADAS incluyen: closets y cocina integral
+- Si preguntan "¿qué incluye equipada?" → "Incluye closets y cocina integral"
+
 Formato de respuesta (ajusta los precios según el catálogo):
 
 "¡Hola! 😊 Soy SARA de Grupo Santa Rita, 50 años construyendo los mejores hogares de Zacatecas.
@@ -1451,13 +1457,13 @@ RECUERDA:
 
         if (preguntaPorNogal && dijoNoTenemos) {
           console.log('⚠️ CORRIGIENDO: Claude dijo que no tenemos El Nogal - SÍ LO TENEMOS');
-          parsed.response = `¡Excelente elección! 😊 Citadella del Nogal es nuestro desarrollo de terrenos premium en Colinas del Padre.
+          parsed.response = `¡Excelente elección! 😊 Citadella del Nogal es nuestro desarrollo de terrenos premium.
 
-Tenemos dos opciones:
+Tiene dos secciones:
 • *Villa Campelo* - Terrenos desde $450,000
 • *Villa Galiano* - Terrenos desde $550,000 (preventa)
 
-Ambos con excelente plusvalía y muy tranquilos. *¿Te gustaría visitarlos? ¿Te funciona el sábado o el domingo?*`;
+Excelente plusvalía y muy tranquilo. *¿Te gustaría visitarlo? ¿Te funciona el sábado o el domingo?*`;
           parsed.intent = 'solicitar_cita';
         }
 
@@ -2317,12 +2323,13 @@ Tú dime, ¿por dónde empezamos?`;
     // Normalizar el interés para comparación
     const interesNormalizado = propertyInterest?.toLowerCase().trim();
 
-    // SIEMPRE: Resumen de desarrollos con precios (compacto)
-    catalogo += '\n═══ DESARROLLOS DISPONIBLES ═══\n';
+    // SIEMPRE: Resumen de desarrollos con precios EQUIPADOS (por defecto)
+    catalogo += '\n═══ DESARROLLOS DISPONIBLES (PRECIOS EQUIPADAS) ═══\n';
     porDesarrollo.forEach((props, dev) => {
+      // Usar price_equipped si existe, sino price como fallback
       const precios = props
-        .filter((p: any) => p.price && Number(p.price) > 0)
-        .map((p: any) => Number(p.price));
+        .filter((p: any) => (p.price_equipped || p.price) && Number(p.price_equipped || p.price) > 0)
+        .map((p: any) => Number(p.price_equipped || p.price));
 
       if (precios.length > 0) {
         const minPrecio = Math.min(...precios);
@@ -2334,18 +2341,18 @@ Tú dime, ¿por dónde empezamos?`;
       }
     });
 
-    // SIEMPRE: Tabla compacta de TODOS los modelos con precios (para consulta rápida)
-    catalogo += '\n═══ PRECIOS POR MODELO (REFERENCIA RÁPIDA) ═══\n';
+    // SIEMPRE: Tabla compacta de TODOS los modelos con precios EQUIPADOS (para consulta rápida)
+    catalogo += '\n═══ PRECIOS EQUIPADAS POR MODELO ═══\n';
     porDesarrollo.forEach((props, dev) => {
       const modelosConPrecio = props
-        .filter((p: any) => p.price && Number(p.price) > 0 && p.name)
-        .map((p: any) => `${p.name}:$${(Number(p.price)/1000000).toFixed(2)}M`)
+        .filter((p: any) => (p.price_equipped || p.price) && Number(p.price_equipped || p.price) > 0 && p.name)
+        .map((p: any) => `${p.name}:$${(Number(p.price_equipped || p.price)/1000000).toFixed(2)}M`)
         .join(' | ');
       if (modelosConPrecio) {
         catalogo += `${dev}: ${modelosConPrecio}\n`;
       }
     });
-    catalogo += '(USA ESTOS PRECIOS EXACTOS, NO INVENTES)\n';
+    catalogo += '(PRECIOS DE CASAS EQUIPADAS - USA ESTOS, NO INVENTES)\n';
 
     // SOLO si hay interés específico: Mostrar detalle de ESE desarrollo
     if (interesNormalizado) {
@@ -2359,17 +2366,22 @@ Tú dime, ¿por dónde empezamos?`;
           catalogo += `\n═══ DETALLE: ${dev.toUpperCase()} (interés del cliente) ═══\n`;
 
           props.forEach(p => {
-            const precio = p.price ? `$${(Number(p.price)/1000000).toFixed(1)}M` : '';
+            // Usar precio equipado por defecto
+            const precioEquipada = p.price_equipped || p.price;
+            const precio = precioEquipada ? `$${(Number(precioEquipada)/1000000).toFixed(1)}M equipada` : '';
             const plantas = p.floors === 1 ? '1 planta' : `${p.floors} plantas`;
             const extras = [];
             if (p.has_study) extras.push('estudio');
             if (p.has_terrace) extras.push('terraza');
             if (p.has_roof_garden) extras.push('roof garden');
             if (p.has_garden) extras.push('jardín');
-            if (p.is_equipped) extras.push('equipada');
 
             catalogo += `• ${p.name}: ${precio} | ${p.bedrooms} rec, ${p.bathrooms || '?'} baños | ${p.area_m2}m²`;
             if (extras.length > 0) catalogo += ` | ${extras.join(', ')}`;
+            // Agregar precio sin equipo entre paréntesis si es diferente
+            if (p.price && p.price_equipped && Number(p.price) !== Number(p.price_equipped)) {
+              catalogo += ` (sin equipo: $${(Number(p.price)/1000000).toFixed(1)}M)`;
+            }
             catalogo += '\n';
 
             // Solo incluir descripción si es corta
