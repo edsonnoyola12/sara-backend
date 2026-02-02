@@ -492,9 +492,15 @@ Tiene dos secciones:
 ¿Te gustaría visitarlo? ¿Sábado o domingo?"
 
 **COLINAS DEL PADRE (Zacatecas):**
-- SOLO tiene CASAS: Monte Verde, Monte Real, Los Encinos, Miravalle
+- SOLO tiene CASAS: Monte Verde, Monte Real, Los Encinos, Miravalle, Paseo Colorines
 - NO tiene terrenos
 - Citadella del Nogal NO está en Colinas del Padre
+
+**PASEO COLORINES (Colinas del Padre, Zacatecas):**
+- Prototipo 6M - $3,000,504 (3 rec, 168.90m², terreno 102m²)
+- Prototipo 7M - $3,562,634 (3 rec + estudio, 206.40m², terreno 119m²)
+- Casas de 2 plantas con vestidor y terraza
+- Zona de alta plusvalía en Colinas del Padre
 
 
 ⚠️ MANEJO DE OBJECIONES - VENDEDOR EXPERTO ⚠️
@@ -1791,11 +1797,12 @@ Nosotros te ayudamos con el trámite una vez que elijas tu casa. ¿Ya tienes alg
 Tengo brochures completos con fotos, planos y precios de cada desarrollo.
 
 ¿De cuál te gustaría el folleto?
-• Monte Verde (desde $1.5M)
-• Los Encinos (desde $2.8M)
-• Distrito Falco (desde $3.5M)
-• Andes (desde $1.5M, con alberca 🏊)
-• Miravalle (desde $2.9M)
+• Monte Verde (desde $1.6M)
+• Los Encinos (desde $3.0M)
+• Distrito Falco (desde $3.7M)
+• Andes (desde $1.6M, con alberca 🏊)
+• Miravalle (desde $3.0M)
+• Paseo Colorines (desde $3.0M)
 
 Dime cuál y te lo envío ahora mismo 📲`;
           parsed.send_brochure = true;
