@@ -5898,10 +5898,106 @@ Mensaje: ${mensaje}`;
               }
             }
 
-            // Si no está en flujo de crédito, ignorar imagen o responder genérico
-            if (!text && !message.image?.caption) {
+            // ═══ DETECCIÓN DE FOTOS DE DESPERFECTOS (CLIENTES POST-ENTREGA) ═══
+            // caption ya definido arriba en línea 5839
+            const captionLower = caption.toLowerCase();
+
+            // Palabras clave que indican desperfectos/problemas
+            const palabrasDesperfecto = [
+              'humedad', 'húmedo', 'mojado', 'goteras', 'gotera', 'fuga', 'fugas',
+              'grieta', 'grietas', 'fisura', 'fisuras', 'cuarteado', 'cuarteadura',
+              'rotura', 'roto', 'rota', 'dañado', 'dañada', 'daño', 'desperfecto',
+              'mancha', 'manchas', 'moho', 'hongos', 'filtración', 'filtra',
+              'problema', 'defecto', 'mal estado', 'deterioro', 'deteriorado',
+              'pintura', 'descascarado', 'ampolla', 'burbuja',
+              'puerta', 'ventana', 'no cierra', 'no abre', 'atorado', 'atorada',
+              'piso', 'azulejo', 'loseta', 'levantado', 'quebrado',
+              'tubería', 'drenaje', 'atascado', 'tapado', 'no sirve',
+              'luz', 'eléctrico', 'apagón', 'corto', 'chispa',
+              'techo', 'plafón', 'caído', 'cayendo'
+            ];
+
+            const esReporteDesperfecto = palabrasDesperfecto.some(p => captionLower.includes(p));
+
+            // Buscar lead para verificar si es cliente post-entrega
+            const { data: leadImg } = await supabase.client
+              .from('leads')
+              .select('*, team_members!leads_assigned_to_fkey(phone, name)')
+              .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`)
+              .single();
+
+            const esClientePostEntrega = leadImg && ['delivered', 'sold', 'closed'].includes(leadImg.status);
+
+            // Si es cliente post-entrega y manda foto (con o sin caption de desperfecto)
+            if (esClientePostEntrega && (esReporteDesperfecto || !caption)) {
+              console.log(`🏠 Foto de posible desperfecto de cliente post-entrega: ${leadImg.name}`);
+
+              // Notificar al vendedor asignado
+              const vendedor = leadImg.team_members;
+              if (vendedor?.phone) {
+                const tipoProblema = esReporteDesperfecto ? `"${caption}"` : '(sin descripción)';
+                await meta.sendWhatsAppMessage(vendedor.phone,
+                  `🚨 *REPORTE DE CLIENTE*\n\n` +
+                  `👤 ${leadImg.name}\n` +
+                  `📱 ${leadImg.phone}\n` +
+                  `🏠 Cliente entregado\n` +
+                  `📸 Envió foto ${tipoProblema}\n\n` +
+                  `Por favor contacta al cliente para dar seguimiento.`
+                );
+                console.log(`📤 Vendedor ${vendedor.name} notificado del reporte`);
+              }
+
+              // También notificar al CEO
+              const CEO_PHONE = '5214922019052';
+              await meta.sendWhatsAppMessage(CEO_PHONE,
+                `🚨 *REPORTE POST-ENTREGA*\n\n` +
+                `👤 ${leadImg.name}\n` +
+                `📱 ${leadImg.phone}\n` +
+                `📸 Envió foto: ${caption || '(sin descripción)'}\n` +
+                `👷 Vendedor: ${vendedor?.name || 'Sin asignar'}`
+              );
+
+              // Responder al cliente
               await meta.sendWhatsAppMessage(from,
-                '📷 Recibí tu imagen. Si necesitas ayuda con un crédito hipotecario, escríbeme "quiero crédito" y te guío paso a paso.');
+                `📸 Recibí tu foto${caption ? ` sobre: "${caption}"` : ''}.\n\n` +
+                `Tu reporte ha sido registrado y ${vendedor?.name || 'nuestro equipo'} te contactará pronto para dar seguimiento.\n\n` +
+                `Si es algo urgente, puedes llamarnos directamente. ¡Gracias por reportarlo! 🏠`
+              );
+
+              // Guardar nota en el lead
+              const notaActual = leadImg.notes || [];
+              const nuevaNota = {
+                text: `📸 REPORTE CON FOTO: ${caption || 'Imagen sin descripción'}`,
+                author: 'SARA',
+                timestamp: new Date().toISOString(),
+                type: 'system'
+              };
+              await supabase.client
+                .from('leads')
+                .update({ notes: [...notaActual, nuevaNota] })
+                .eq('id', leadImg.id);
+
+              return new Response('OK', { status: 200 });
+            }
+
+            // Si hay caption con palabras de desperfecto pero NO es cliente post-entrega
+            // (podría ser lead mostrando su casa actual)
+            if (esReporteDesperfecto && leadImg && !esClientePostEntrega) {
+              console.log(`📸 Lead ${leadImg.name} envió foto con descripción de problema (no es post-entrega)`);
+              await meta.sendWhatsAppMessage(from,
+                `📸 Veo que me compartes una foto. ¿Es de tu casa actual?\n\n` +
+                `Si estás buscando mudarte por esos problemas, ¡tengo casas nuevas desde $1.5M! 🏠\n\n` +
+                `¿Te gustaría conocer nuestros desarrollos?`
+              );
+              return new Response('OK', { status: 200 });
+            }
+
+            // Respuesta genérica para otras imágenes
+            if (!text && !caption) {
+              await meta.sendWhatsAppMessage(from,
+                '📷 Recibí tu imagen. ¿En qué te puedo ayudar?\n\n' +
+                '🏠 Si buscas casa, tenemos opciones desde $1.5M\n' +
+                '💳 Si necesitas crédito, escríbeme "quiero crédito"');
               return new Response('OK', { status: 200 });
             }
           }
