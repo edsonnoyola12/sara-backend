@@ -3049,4 +3049,60 @@ class MessageQueueService {
 
 **Total: 38 propiedades en catálogo**
 
+---
+
+### 2026-02-02 (Sesión 19 - Parte 2) - Fix Edición de Propiedades en CRM
+
+**Problema:** No se podía editar propiedades en el CRM.
+
+**Causa:** El permiso `puedeEditarPropiedades()` solo permitía rol `admin`.
+
+**Correcciones en `sara-crm-new/src/App.tsx`:**
+
+| Cambio | Antes | Después |
+|--------|-------|---------|
+| Permisos | Solo `admin` | `admin` y `coordinador` |
+| Interface Property | Sin `price_equipped`, `land_size` | Con campos agregados |
+| Modal PropertyModal | Sin campos de precio equipada/terreno | Con nuevos campos |
+
+**Nuevos campos en modal de propiedades:**
+- Precio Equipada (`price_equipped`)
+- Terreno m² (`land_size`)
+- Pisos (`floors`)
+
+**Código cambiado:**
+```typescript
+// ANTES:
+puedeEditarPropiedades: () => currentUser?.role === 'admin',
+
+// DESPUÉS:
+puedeEditarPropiedades: () => ['admin', 'coordinador'].includes(currentUser?.role || ''),
+```
+
+**Commit CRM:** `498ff05 feat: permitir edición de propiedades a coordinadores + nuevos campos`
+**Deploy CRM:** https://sara-crm-new.vercel.app
+
+---
+
+## RESUMEN SESIÓN 19 COMPLETA (2026-02-02)
+
+| Tarea | Estado | Commit |
+|-------|--------|--------|
+| Corregir info geográfica (Colinas del Padre vs Citadella) | ✅ | `9a823a39` |
+| Actualizar precios Feb 2026 | ✅ | `de7fcfad` |
+| Agregar Paseo Colorines | ✅ | `de7fcfad` |
+| SQL ejecutado en Supabase | ✅ | - |
+| Fix edición propiedades CRM | ✅ | `498ff05` |
+| Documentación actualizada | ✅ | - |
+
+**Archivos modificados Backend:**
+- `src/services/aiConversationService.ts` - Info geográfica + precios equipados
+- `src/services/propertyComparatorService.ts` - Lista desarrollos
+- `src/services/ceoCommandsService.ts` - Lista desarrollos
+- `sql/EJECUTAR_EN_SUPABASE.sql` - Precios + Paseo Colorines
+- `CLAUDE.md` - Documentación
+
+**Archivos modificados CRM:**
+- `src/App.tsx` - Permisos + campos propiedades
+
 **Sistema 100% operativo - Última verificación: 2026-02-02**
