@@ -62,62 +62,53 @@ export async function enviarMensajeTeamMember(
 
     const nombreCorto = teamMember.name?.split(' ')[0] || 'Hola';
 
-    if (ventanaAbierta) {
-      // ═══ VENTANA ABIERTA: ENVIAR DIRECTO ═══
-      console.log(`📤 [${tipoMensaje}] ${teamMember.name}: Ventana ABIERTA - enviando DIRECTO`);
-      try {
-        await meta.sendWhatsAppMessage(teamMember.phone, mensaje);
-        console.log(`   ✅ Mensaje enviado DIRECTO a ${teamMember.name}`);
-        return { success: true, method: 'direct', ventanaAbierta: true };
-      } catch (sendError) {
-        console.error(`   ❌ Error enviando mensaje directo a ${teamMember.name}:`, sendError);
-        return { success: false, method: 'failed', ventanaAbierta: true };
-      }
-    } else {
-      // ═══ VENTANA CERRADA: ENVIAR TEMPLATE + GUARDAR PENDING ═══
-      console.log(`📤 [${tipoMensaje}] ${teamMember.name}: Ventana CERRADA - enviando template ${REACTIVATION_TEMPLATE}`);
+    // ═══ SIEMPRE ENVIAR DIRECTO (ignorar ventana 24h) ═══
+    // Meta puede rechazar si ventana cerrada, pero a veces llega
+    // Es mejor intentar que depender de templates que nadie responde
+    console.log(`📤 [${tipoMensaje}] ${teamMember.name}: Enviando DIRECTO (ventana: ${ventanaAbierta ? 'abierta' : 'cerrada'})`);
 
-      try {
-        // Enviar template reactivar_equipo (formato: phone, templateName, languageCode, components)
-        await meta.sendTemplate(teamMember.phone, REACTIVATION_TEMPLATE, 'es_MX', [
-          { type: 'body', parameters: [{ type: 'text', text: nombreCorto }] }
-        ]);
-        console.log(`   📨 Template ${REACTIVATION_TEMPLATE} enviado a ${teamMember.name}`);
+    try {
+      await meta.sendWhatsAppMessage(teamMember.phone, mensaje);
+      console.log(`   ✅ Mensaje enviado DIRECTO a ${teamMember.name}`);
+      return { success: true, method: 'direct', ventanaAbierta };
+    } catch (sendError: any) {
+      console.error(`   ❌ Error enviando directo a ${teamMember.name}:`, sendError?.message || sendError);
 
-        // Guardar mensaje como pending si está habilitado
-        // Formato: { sent_at, mensaje_completo } - compatible con handlers de whatsapp.ts
-        if (guardarPending) {
-          const nuevasNotas = {
-            ...notasActuales,
-            [pendingKey]: {
-              sent_at: new Date().toISOString(),
-              mensaje_completo: mensaje
-            }
-          };
-
-          await supabase.client
-            .from('team_members')
-            .update({ notes: nuevasNotas })
-            .eq('id', teamMember.id);
-
-          console.log(`   💾 Mensaje guardado como ${pendingKey} para ${teamMember.name}`);
-        }
-
-        return { success: true, method: 'template', ventanaAbierta: false };
-      } catch (templateError) {
-        console.error(`   ❌ Error enviando template a ${teamMember.name}:`, templateError);
-
-        // Fallback: intentar enviar directo de todos modos
+      // Si falló el envío directo, intentar con template como fallback
+      if (!ventanaAbierta) {
+        console.log(`   🔄 Intentando fallback con template ${REACTIVATION_TEMPLATE}...`);
         try {
-          console.log(`   🔄 Intentando fallback directo...`);
-          await meta.sendWhatsAppMessage(teamMember.phone, mensaje);
-          console.log(`   ✅ Fallback directo exitoso a ${teamMember.name}`);
-          return { success: true, method: 'direct', ventanaAbierta: false };
-        } catch (fallbackError) {
-          console.error(`   ❌ Fallback también falló para ${teamMember.name}:`, fallbackError);
+          await meta.sendTemplate(teamMember.phone, REACTIVATION_TEMPLATE, 'es_MX', [
+            { type: 'body', parameters: [{ type: 'text', text: nombreCorto }] }
+          ]);
+          console.log(`   📨 Template enviado a ${teamMember.name}`);
+
+          // Guardar mensaje como pending
+          if (guardarPending) {
+            const nuevasNotas = {
+              ...notasActuales,
+              [pendingKey]: {
+                sent_at: new Date().toISOString(),
+                mensaje_completo: mensaje
+              }
+            };
+
+            await supabase.client
+              .from('team_members')
+              .update({ notes: nuevasNotas })
+              .eq('id', teamMember.id);
+
+            console.log(`   💾 Mensaje guardado como ${pendingKey}`);
+          }
+
+          return { success: true, method: 'template', ventanaAbierta: false };
+        } catch (templateError) {
+          console.error(`   ❌ Template también falló para ${teamMember.name}:`, templateError);
           return { success: false, method: 'failed', ventanaAbierta: false };
         }
       }
+
+      return { success: false, method: 'failed', ventanaAbierta };
     }
   } catch (error) {
     console.error(`❌ Error en enviarMensajeTeamMember para ${teamMember.name}:`, error);
