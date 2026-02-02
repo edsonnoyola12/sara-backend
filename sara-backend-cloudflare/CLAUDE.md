@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-01
+> Última actualización: 2026-02-02
 
 ---
 
@@ -2605,6 +2605,84 @@ Cliente post-entrega envía foto de humedad
 
 ---
 
+### 2026-02-02 (Sesión 17) - Fix Mensajes Duplicados a Múltiples Leads
+
+**Bug reportado:**
+Cuando Vendedor Test enviaba "hola", SARA respondía con múltiples mensajes:
+- "Tu mensaje fue enviado a Carlos Garcia"
+- "Tu mensaje fue enviado a lead"
+- "Tu mensaje fue enviado a Maria Lopez"
+
+**Causa raíz:**
+1. El CRON de alertas marcaba múltiples leads con `alerta_vendedor_id` del mismo vendedor
+2. No había deduplicación para mensajes de team_members (solo para leads)
+3. Meta enviaba el webhook múltiples veces (duplicados comunes)
+4. Cada ejecución del webhook enviaba a un lead diferente
+
+**Fixes aplicados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/index.ts` | Deduplicación para team_members usando `last_processed_msg_id` en notes |
+| `src/index.ts` | Nuevo endpoint `/limpiar-alertas?phone=X&api_key=Y` |
+| `src/handlers/whatsapp.ts` | Cambiar query de `.single()` a `.limit(10)` para manejar múltiples leads |
+| `src/handlers/whatsapp.ts` | Limpiar TODOS los leads con `alerta_vendedor_id` del vendedor después de enviar |
+
+**Deduplicación para Team Members:**
+```typescript
+// Ahora se verifica si es team_member PRIMERO
+const { data: teamMember } = await supabase.client
+  .from('team_members')
+  .select('id, notes')
+  .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`)
+  .maybeSingle();
+
+if (teamMember) {
+  const tmLastMsgId = tmNotes.last_processed_msg_id;
+  if (tmLastMsgId === messageId) {
+    console.log('⏭️ [TEAM] Mensaje ya procesado (mismo ID), saltando');
+    return new Response('OK', { status: 200 });
+  }
+  // Marcar como procesado...
+}
+```
+
+**Limpieza de alertas múltiples:**
+```typescript
+// Después de enviar a UN lead, limpiar TODOS los demás
+if (leadsPendientes && leadsPendientes.length > 1) {
+  for (const otroLead of leadsPendientes.slice(1)) {
+    delete otrasNotas.sugerencia_pendiente;
+    delete otrasNotas.alerta_vendedor_id;
+    await supabase.client.from('leads').update({ notes: otrasNotas }).eq('id', otroLead.id);
+  }
+  console.log(`🧹 Limpiados ${leadsPendientes.length - 1} leads adicionales`);
+}
+```
+
+**Nuevo endpoint `/limpiar-alertas`:**
+- Limpia manualmente alertas pendientes de un vendedor
+- Útil cuando hay múltiples leads con `alerta_vendedor_id` del mismo vendedor
+- Uso: `/limpiar-alertas?phone=5212224558475&api_key=XXX`
+
+**Leads afectados en el bug:**
+
+| Lead | Teléfono | Status |
+|------|----------|--------|
+| Carlos Garcia | 5219990007777 | sold |
+| Maria Lopez | 5219990008888 | new |
+| maria lopez | 5215559998877 | fallen |
+
+**Verificación:**
+- ✅ Vendedor Test envía "hola" → recibe UNA respuesta de SARA
+- ✅ No se envía a múltiples leads
+- ✅ 351 tests pasando
+
+**Commit:** `7a7daaf3`
+**Deploy:** Version ID `e61cc703-9b68-45c9-a6ca-7166d1a3889e`
+
+---
+
 ## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-02)
 
 ### Flujos de IA Verificados
@@ -2628,6 +2706,7 @@ Cliente post-entrega envía foto de humedad
 | **Mensajes interactivos (botones, listas)** | ✅ | 2026-02-01 |
 | **Reacciones a mensajes** | ✅ | 2026-02-01 |
 | **Fotos de desperfectos (post-entrega)** | ✅ | 2026-02-02 |
+| **Deduplicación mensajes team_members** | ✅ | 2026-02-02 |
 
 ### Comandos Verificados
 
@@ -2649,4 +2728,4 @@ Cliente post-entrega envía foto de humedad
 | Check-in mantenimiento | Sábado 10am | ✅ |
 | Flujo post-visita | Automático | ✅ |
 
-**Sistema 100% operativo - Última verificación: 2026-02-01**
+**Sistema 100% operativo - Última verificación: 2026-02-02**
