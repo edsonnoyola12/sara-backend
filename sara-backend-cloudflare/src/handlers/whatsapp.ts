@@ -5655,18 +5655,20 @@ export class WhatsAppHandler {
   ): Promise<boolean> {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // 🆕 APROBAR SUGERENCIA: Si vendedor responde "ok" a una alerta
+    // NOTA: Usamos maybeSingle() en vez de single() porque puede haber 0 o múltiples leads
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     const mensajeLimpio = body.trim().toLowerCase();
     if (['ok', 'si', 'sí', 'enviar', 'dale', 'va'].includes(mensajeLimpio)) {
       // Buscar si hay un lead con sugerencia pendiente para este vendedor
-      const { data: leadConSugerencia } = await this.supabase.client
+      const { data: leadsConSugerencia } = await this.supabase.client
         .from('leads')
         .select('id, name, phone, notes')
         .eq('notes->>alerta_vendedor_id', vendedor.id)
         .not('notes->>sugerencia_pendiente', 'is', null)
         .order('updated_at', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(10); // Traer todos para limpiarlos después
+
+      const leadConSugerencia = leadsConSugerencia?.[0]; // Solo procesar el primero
 
       if (leadConSugerencia?.notes?.sugerencia_pendiente) {
         const sugerencia = leadConSugerencia.notes.sugerencia_pendiente;
@@ -5675,12 +5677,28 @@ export class WhatsAppHandler {
         // Enviar el mensaje sugerido al lead
         await this.meta.sendWhatsAppMessage(leadConSugerencia.phone, sugerencia);
 
-        // Limpiar la sugerencia pendiente
+        // Limpiar la sugerencia pendiente de ESTE lead
         delete notasActuales.sugerencia_pendiente;
         delete notasActuales.alerta_vendedor_id;
         await this.supabase.client.from('leads')
           .update({ notes: notasActuales })
           .eq('id', leadConSugerencia.id);
+
+        // ═══ CRÍTICO: Limpiar TODOS los demás leads con alerta del mismo vendedor ═══
+        // Esto evita que si Meta envía duplicados, se envíe a múltiples leads
+        if (leadsConSugerencia && leadsConSugerencia.length > 1) {
+          for (const otroLead of leadsConSugerencia.slice(1)) {
+            if (otroLead.notes) {
+              const otrasNotas = { ...otroLead.notes };
+              delete otrasNotas.sugerencia_pendiente;
+              delete otrasNotas.alerta_vendedor_id;
+              await this.supabase.client.from('leads')
+                .update({ notes: otrasNotas })
+                .eq('id', otroLead.id);
+            }
+          }
+          console.log(`🧹 Limpiados ${leadsConSugerencia.length - 1} leads adicionales con alerta pendiente`);
+        }
 
         // Registrar actividad del vendedor
         await this.supabase.client.from('lead_activities').insert({
@@ -5706,14 +5724,16 @@ export class WhatsAppHandler {
 
     // Si el vendedor escribe un mensaje personalizado (no es comando conocido),
     // verificar si hay sugerencia pendiente y usarlo como mensaje
-    const { data: leadPendiente } = await this.supabase.client
+    // NOTA: Usamos limit(10) para traer todos y limpiarlos, evitando envíos duplicados
+    const { data: leadsPendientes } = await this.supabase.client
       .from('leads')
       .select('id, name, phone, notes')
       .eq('notes->>alerta_vendedor_id', vendedor.id)
       .not('notes->>sugerencia_pendiente', 'is', null)
       .order('updated_at', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(10);
+
+    const leadPendiente = leadsPendientes?.[0]; // Solo procesar el primero
 
     const vendorService = new VendorCommandsService(this.supabase);
     const result = vendorService.detectRouteCommand(body, mensaje);
@@ -5726,12 +5746,28 @@ export class WhatsAppHandler {
       // Enviar el mensaje personalizado del vendedor al lead
       await this.meta.sendWhatsAppMessage(leadPendiente.phone, body);
 
-      // Limpiar la sugerencia pendiente
+      // Limpiar la sugerencia pendiente de ESTE lead
       delete notasActuales.sugerencia_pendiente;
       delete notasActuales.alerta_vendedor_id;
       await this.supabase.client.from('leads')
         .update({ notes: notasActuales })
         .eq('id', leadPendiente.id);
+
+      // ═══ CRÍTICO: Limpiar TODOS los demás leads con alerta del mismo vendedor ═══
+      // Esto evita que si Meta envía duplicados, se envíe a múltiples leads
+      if (leadsPendientes && leadsPendientes.length > 1) {
+        for (const otroLead of leadsPendientes.slice(1)) {
+          if (otroLead.notes) {
+            const otrasNotas = { ...otroLead.notes };
+            delete otrasNotas.sugerencia_pendiente;
+            delete otrasNotas.alerta_vendedor_id;
+            await this.supabase.client.from('leads')
+              .update({ notes: otrasNotas })
+              .eq('id', otroLead.id);
+          }
+        }
+        console.log(`🧹 Limpiados ${leadsPendientes.length - 1} leads adicionales con alerta pendiente`);
+      }
 
       // Registrar actividad del vendedor
       await this.supabase.client.from('lead_activities').insert({

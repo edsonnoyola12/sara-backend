@@ -1564,6 +1564,78 @@ export default {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // 🧹 LIMPIAR-ALERTAS - Limpia alertas pendientes de leads para un vendedor
+    // USO: /limpiar-alertas?phone=5212224558475&api_key=XXX
+    // Esto es útil cuando hay múltiples leads con alerta_vendedor_id del mismo vendedor
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/limpiar-alertas" && request.method === "GET") {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const phone = url.searchParams.get('phone') || '5212224558475';
+      const phoneLimpio = phone.replace(/\D/g, '');
+
+      try {
+        // Buscar vendedor
+        const { data: vendedor } = await supabase.client
+          .from('team_members')
+          .select('id, name')
+          .or(`phone.eq.${phoneLimpio},phone.like.%${phoneLimpio.slice(-10)}`)
+          .maybeSingle();
+
+        if (!vendedor) {
+          return corsResponse(JSON.stringify({
+            error: 'Vendedor no encontrado',
+            phone: phoneLimpio
+          }), 404);
+        }
+
+        // Buscar leads con alertas pendientes de este vendedor
+        const { data: leadsConAlerta } = await supabase.client
+          .from('leads')
+          .select('id, name, phone, notes')
+          .eq('notes->>alerta_vendedor_id', vendedor.id)
+          .not('notes->>sugerencia_pendiente', 'is', null);
+
+        if (!leadsConAlerta || leadsConAlerta.length === 0) {
+          return corsResponse(JSON.stringify({
+            ok: true,
+            message: 'No hay alertas pendientes para limpiar',
+            vendedor: vendedor.name,
+            leadsLimpiados: 0
+          }));
+        }
+
+        // Limpiar alertas de todos los leads
+        let limpiados = 0;
+        for (const lead of leadsConAlerta) {
+          const notas = lead.notes || {};
+          delete notas.sugerencia_pendiente;
+          delete notas.alerta_vendedor_id;
+
+          await supabase.client.from('leads')
+            .update({ notes: notas })
+            .eq('id', lead.id);
+
+          limpiados++;
+        }
+
+        console.log(`🧹 Limpiadas ${limpiados} alertas pendientes del vendedor ${vendedor.name}`);
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          vendedor: vendedor.name,
+          leadsLimpiados: limpiados,
+          leads: leadsConAlerta.map(l => ({ id: l.id, name: l.name || 'Sin nombre', phone: l.phone }))
+        }));
+
+      } catch (e: any) {
+        console.error('❌ Error en limpiar-alertas:', e);
+        return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // 🧪 TEST-AI-RESPONSE - Prueba respuestas de SARA sin enviar WhatsApp
     // USO: /test-ai-response?msg=tienen%20casas%20en%20polanco&api_key=XXX
     // IMPORTANTE: Usa el MISMO servicio que los leads reales (AIConversationService)
@@ -5788,40 +5860,76 @@ Mensaje: ${mensaje}`;
 
           // ═══ DEDUPLICACIÓN: Evitar procesar mensajes rápidos duplicados ═══
           const cleanPhone = from.replace(/\D/g, '');
-          const { data: recentMsg } = await supabase.client
-            .from('leads')
-            .select('notes')
-            .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`)
-            .single();
-
-          const lastMsgId = recentMsg?.notes?.last_processed_msg_id;
-          const lastMsgTime = recentMsg?.notes?.last_processed_msg_time;
           const now = Date.now();
 
-          // Si el mismo mensaje ID ya fue procesado, saltar
-          if (lastMsgId === messageId) {
-            console.log('⏭️ Mensaje ya procesado (mismo ID), saltando');
-            return new Response('OK', { status: 200 });
-          }
+          // Primero verificar si es un team_member (vendedor, CEO, asesor, etc.)
+          const { data: teamMember } = await supabase.client
+            .from('team_members')
+            .select('id, notes')
+            .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`)
+            .maybeSingle();
 
-          // Si hubo un mensaje procesado hace menos de 3 segundos, esperar y combinar
-          if (lastMsgTime && (now - lastMsgTime) < 3000) {
-            console.log('⏳ Mensaje muy rápido, esperando 2s para combinar...');
-            await new Promise(r => setTimeout(r, 2000));
-          }
+          if (teamMember) {
+            // ═══ DEDUPLICACIÓN TEAM MEMBERS ═══
+            const tmNotes = typeof teamMember.notes === 'string'
+              ? JSON.parse(teamMember.notes || '{}')
+              : (teamMember.notes || {});
+            const tmLastMsgId = tmNotes.last_processed_msg_id;
 
-          // Marcar este mensaje como en proceso
-          if (recentMsg) {
+            // Si el mismo mensaje ID ya fue procesado, saltar
+            if (tmLastMsgId === messageId) {
+              console.log('⏭️ [TEAM] Mensaje ya procesado (mismo ID), saltando');
+              return new Response('OK', { status: 200 });
+            }
+
+            // Marcar este mensaje como en proceso
             await supabase.client
-              .from('leads')
+              .from('team_members')
               .update({
                 notes: {
-                  ...(recentMsg.notes || {}),
+                  ...tmNotes,
                   last_processed_msg_id: messageId,
                   last_processed_msg_time: now
                 }
               })
-              .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`);
+              .eq('id', teamMember.id);
+            console.log(`👤 [TEAM] Deduplicación OK para team_member ${teamMember.id}`);
+          } else {
+            // ═══ DEDUPLICACIÓN LEADS ═══
+            const { data: recentMsg } = await supabase.client
+              .from('leads')
+              .select('notes')
+              .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`)
+              .maybeSingle();
+
+            const lastMsgId = recentMsg?.notes?.last_processed_msg_id;
+            const lastMsgTime = recentMsg?.notes?.last_processed_msg_time;
+
+            // Si el mismo mensaje ID ya fue procesado, saltar
+            if (lastMsgId === messageId) {
+              console.log('⏭️ [LEAD] Mensaje ya procesado (mismo ID), saltando');
+              return new Response('OK', { status: 200 });
+            }
+
+            // Si hubo un mensaje procesado hace menos de 3 segundos, esperar y combinar
+            if (lastMsgTime && (now - lastMsgTime) < 3000) {
+              console.log('⏳ Mensaje muy rápido, esperando 2s para combinar...');
+              await new Promise(r => setTimeout(r, 2000));
+            }
+
+            // Marcar este mensaje como en proceso
+            if (recentMsg) {
+              await supabase.client
+                .from('leads')
+                .update({
+                  notes: {
+                    ...(recentMsg.notes || {}),
+                    last_processed_msg_id: messageId,
+                    last_processed_msg_time: now
+                  }
+                })
+                .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`);
+            }
           }
           // ═══ FIN DEDUPLICACIÓN ═══
 
