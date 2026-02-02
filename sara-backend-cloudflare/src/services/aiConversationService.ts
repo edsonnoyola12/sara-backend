@@ -473,27 +473,28 @@ Casas desde $1,514,957 (Laurel) hasta $2,699,071 (Lavanda).
 
 ⚠️ CITADELLA DEL NOGAL / EL NOGAL - CRÍTICO ⚠️
 
-
-🚫 NUNCA DIGAS ESTAS FRASES:
+🚫 NUNCA DIGAS:
 - "Citadella del Nogal no es uno de nuestros desarrollos" ← FALSO
 - "El Nogal no lo tenemos disponible" ← FALSO
-- "No tenemos El Nogal" ← FALSO
+- "Citadella está en Colinas del Padre" ← FALSO (está en Guadalupe)
 
 ✅ LA VERDAD: SÍ TENEMOS CITADELLA DEL NOGAL
-Citadella del Nogal = El Nogal = Nuestras villas:
-- **Villa Campelo**: Terrenos desde $450,000
-- **Villa Galiano**: Terrenos desde $550,000 (preventa)
+Citadella del Nogal es nuestro desarrollo de TERRENOS en GUADALUPE.
+Tiene dos secciones:
+- **Villa Campelo**: Terrenos desde $454,511
+- **Villa Galiano**: Terrenos desde $555,514
 
-📝 RESPUESTA CORRECTA cuando pregunten por "El Nogal" o "Citadella del Nogal":
-"¡Excelente elección! 😊 Citadella del Nogal es nuestro desarrollo de terrenos premium.
-Tenemos dos opciones:
-• Villa Campelo - Terrenos desde $450,000
-• Villa Galiano - Terrenos desde $550,000 (preventa)
-¿Te gustaría visitarlos? ¿Sábado o domingo?"
+📝 RESPUESTA CORRECTA para "El Nogal" o "Citadella del Nogal":
+"¡Excelente elección! 😊 Citadella del Nogal es nuestro desarrollo de terrenos en Guadalupe.
+Tiene dos secciones:
+• Villa Campelo - Terrenos desde $454,511
+• Villa Galiano - Terrenos desde $555,514
+¿Te gustaría visitarlo? ¿Sábado o domingo?"
 
-**COLINAS DEL PADRE:**
-- Es un desarrollo histórico con varias secciones
-- El Nogal/Citadella está en la misma zona
+**COLINAS DEL PADRE (Zacatecas):**
+- SOLO tiene CASAS: Monte Verde, Monte Real, Los Encinos, Miravalle
+- NO tiene terrenos
+- Citadella del Nogal NO está en Colinas del Padre
 
 
 ⚠️ MANEJO DE OBJECIONES - VENDEDOR EXPERTO ⚠️
@@ -1457,11 +1458,11 @@ RECUERDA:
 
         if (preguntaPorNogal && dijoNoTenemos) {
           console.log('⚠️ CORRIGIENDO: Claude dijo que no tenemos El Nogal - SÍ LO TENEMOS');
-          parsed.response = `¡Excelente elección! 😊 Citadella del Nogal es nuestro desarrollo de terrenos premium.
+          parsed.response = `¡Excelente elección! 😊 Citadella del Nogal es nuestro desarrollo de terrenos en Guadalupe.
 
 Tiene dos secciones:
-• *Villa Campelo* - Terrenos desde $450,000
-• *Villa Galiano* - Terrenos desde $550,000 (preventa)
+• *Villa Campelo* - Terrenos desde $454,511
+• *Villa Galiano* - Terrenos desde $555,514
 
 Excelente plusvalía y muy tranquilo. *¿Te gustaría visitarlo? ¿Te funciona el sábado o el domingo?*`;
           parsed.intent = 'solicitar_cita';

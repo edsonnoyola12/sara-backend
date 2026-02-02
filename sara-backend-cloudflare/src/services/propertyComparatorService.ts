@@ -278,8 +278,8 @@ export class PropertyComparatorService {
       return `Para comparar propiedades, menciona al menos 2 desarrollos.\n\n` +
         `Ejemplo: "Compara Monte Verde vs Distrito Falco"\n\n` +
         `Desarrollos disponibles:\n` +
-        `• Monte Verde\n• Distrito Falco\n• Los Encinos\n• Miravalle\n` +
-        `• Villa Campelo\n• Villa Galiano\n• Colinas del Padre`;
+        `CASAS: Monte Verde, Monte Real, Los Encinos, Miravalle, Distrito Falco, Andes, Alpes\n` +
+        `TERRENOS: Villa Campelo, Villa Galiano (Citadella del Nogal)`;
     }
 
     const comparison = await this.compareByDevelopments(foundDevelopments);

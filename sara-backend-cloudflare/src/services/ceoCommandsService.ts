@@ -859,9 +859,8 @@ export class CEOCommandsService {
               `• _comparar Monte Verde vs Distrito Falco_\n` +
               `• _vs Miravalle Los Encinos_\n\n` +
               `*Desarrollos disponibles:*\n` +
-              `• Monte Verde\n• Distrito Falco\n• Los Encinos\n` +
-              `• Miravalle\n• Villa Campelo\n• Villa Galiano\n` +
-              `• Colinas del Padre\n\n` +
+              `CASAS: Monte Verde, Monte Real, Los Encinos, Miravalle, Distrito Falco, Andes, Alpes\n` +
+              `TERRENOS: Villa Campelo, Villa Galiano (Citadella del Nogal)\n\n` +
               `_Escribe los desarrollos que quieres comparar_`;
             return { message: msg };
           }
