@@ -3333,3 +3333,175 @@ Se ejecutaron pruebas sistemáticas de todos los flujos principales de SARA.
 | Tests unitarios | ✅ 351/351 pasan |
 
 **Sistema 100% operativo - Última verificación: 2026-02-01**
+
+---
+
+## 2026-02-01 (Sesión 14) - Verificación Completa de Cobertura de Tests
+
+### Auditoría Exhaustiva de Tests Unitarios (351 tests)
+
+| Archivo | Tests | Cobertura |
+|---------|-------|-----------|
+| `asesorCommands.test.ts` | 32 | mis leads, docs, preaprobado, rechazado |
+| `ceoCommands.test.ts` | 27 | leads, equipo, ventas, bridge, broadcast |
+| `vendorCommands.test.ts` | 30 | citas, agendar, reagendar, brochure |
+| `conversationLogic.test.ts` | 35 | Bridge logic, GPS, recursos |
+| `postCompra.test.ts` | 47 | Post-entrega, satisfacción, NPS |
+| `aiResponses.test.ts` | 44 | Alberca, Nogal, rentas, objeciones |
+| `integration.test.ts` | 38 | Webhooks, auth, CORS, flujos |
+| `newFeatures.test.ts` | 43 | Notas, historial, recap |
+
+### Pruebas en Producción (42 tests)
+
+| Categoría | Tests | Estado |
+|-----------|-------|--------|
+| IA Conversacional | 13 | ✅ |
+| Comandos CEO | 18 | ✅ |
+| CRONs Post-Compra | 6 | ✅ |
+| APIs y Sistema | 5 | ✅ |
+
+### Fix Citas Pasadas en Prompts
+
+**Problema:** SARA mencionaba citas del pasado (ej: "visita del 30 de enero" cuando estamos a 1 de febrero).
+
+**Fix:** Agregar `.gte('scheduled_date', hoy)` al query de citas + cambiar orden a `scheduled_date asc`.
+
+**Commit:** `15ee1e01`
+
+---
+
+## 2026-02-01 (Sesión 15) - Fix Respuestas NPS Cortas
+
+### Problema Detectado
+
+Cuando un lead respondía "1" o "10" a una encuesta NPS, SARA enviaba respuesta genérica en lugar de procesar la respuesta NPS.
+
+### Causa Raíz
+
+1. Handler de emojis capturaba números (regex `\p{Emoji}` incluye dígitos)
+2. Procesamiento de encuestas estaba dentro de bloque `text.length > 3`
+
+### Fix Aplicado
+
+```typescript
+// 1. Excluir números puros del handler de emojis
+const esPuroNumero = /^\d+$/.test(textoLimpio);
+const esEmojiSolo = textoLimpio.length <= 4 && !esPuroNumero;
+
+// 2. Procesar encuestas PRIMERO sin restricción de longitud
+if (text) {  // Antes: if (text && text.length > 3)
+  const npsProcessed = await procesarRespuestaNPS(...);
+  if (npsProcessed) return new Response('OK');
+}
+```
+
+### QA Mensajes Multimedia (15 tests)
+
+| Tipo | Test | Estado |
+|------|------|--------|
+| Audio/Voz 🎤 | ✅ | OK |
+| Emoji solo 😊 | ✅ | OK |
+| Sticker 😄 | ✅ | OK |
+| Ubicación 📍 | ✅ | OK |
+| Documento 📄 | ✅ | OK |
+| Imagen 🖼️ | ✅ | OK |
+| Video 🎬 | ✅ | OK |
+| Contacto 👤 | ✅ | OK |
+| Reacción 👍/👎 | ✅ | OK |
+| Button reply | ✅ | OK |
+| List reply | ✅ | OK |
+
+**Commit:** `94a9cdd9`
+**Deploy:** Version ID `2413db6a-eec5-4c3e-a933-3155d046fc37`
+
+---
+
+## 2026-02-01 (Sesión 16) - Detección de Fotos de Desperfectos
+
+### Nueva Funcionalidad para Clientes Post-Entrega
+
+Cuando un cliente con status `delivered`, `sold` o `closed` envía una foto de desperfecto:
+
+| Situación | Acción de SARA |
+|-----------|----------------|
+| Foto con caption de desperfecto | ✅ Notifica vendedor + CEO + confirma al cliente |
+| Foto sin caption (cliente post-entrega) | ✅ Notifica equipo + pide descripción |
+| Foto con problema (lead normal) | ✅ Ofrece casas nuevas como alternativa |
+| Foto sin caption (lead normal) | ✅ Respuesta genérica mejorada |
+
+### Palabras Clave Detectadas
+
+```
+humedad, goteras, grieta, fisura, rotura, daño, desperfecto,
+mancha, moho, filtración, pintura, descascarado,
+puerta, ventana, no cierra, piso, azulejo, tubería,
+drenaje, atascado, luz, eléctrico, techo, plafón
+```
+
+### Flujo de Reporte
+
+```
+Cliente post-entrega envía foto de humedad
+  ├── 📤 Notifica vendedor: "🚨 REPORTE DE CLIENTE - [nombre] envió foto"
+  ├── 📤 Notifica CEO: "🚨 REPORTE POST-ENTREGA"
+  ├── 💬 Responde al cliente: "Tu reporte ha sido registrado..."
+  └── 📝 Guarda nota en el lead
+```
+
+### Archivo Modificado
+
+`src/index.ts` (líneas 5901-5980)
+
+**Commit:** `5d5bae57`
+**Deploy:** Version ID `73d443fb-7367-4400-9280-c9c462b23a55`
+
+---
+
+## 2026-02-01 (Sesión 16 - Parte 2) - QA Exhaustivo 50+ Tests
+
+### Pruebas Ejecutadas
+
+| Categoría | Tests | Estado |
+|-----------|-------|--------|
+| Fotos de desperfectos | 4 | ✅ |
+| Preguntas de información | 14 | ✅ |
+| Perfiles de cliente | 6 | ✅ |
+| Mensajes especiales | 7 | ✅ |
+| Escenarios diversos | 19+ | ✅ |
+
+### Preguntas de Información Probadas
+
+- Amenidades (gym, áreas verdes)
+- Tiempo de entrega
+- Plusvalía/inversión
+- Documentos necesarios
+- Proceso de compra
+- Horarios de atención
+- Apartado inicial
+- Promociones/descuentos
+- Mensualidades
+- Casa amueblada/una planta
+- Ampliación posterior
+- Negocio en casa
+
+### Perfiles de Cliente Probados
+
+- Pareja joven recién casados
+- Persona en buró de crédito
+- Mudanza de otra ciudad
+- Freelancer sin nómina
+- Expatriado en USA
+- Copropiedad (hermanos)
+
+### Mensajes Especiales Probados
+
+- Múltiples emojis (🏠❤️👍)
+- "ok" simple
+- Expresión de frustración
+- Portugués
+- Mensaje informal/voz
+- Solicitud de humano
+
+**Deploy:** Version ID `f71281b4-2578-4ac1-a49a-86500dc5143d`
+
+**Sistema 100% operativo - Última verificación: 2026-02-01**
