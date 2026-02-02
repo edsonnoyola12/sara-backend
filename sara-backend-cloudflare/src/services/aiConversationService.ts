@@ -972,7 +972,7 @@ INTENTS: saludo | interes_desarrollo | solicitar_cita | confirmar_cita | cancela
 FLAGS:
 - send_video_desarrollo: true si menciona CUALQUIER desarrollo (SIEMPRE enviar, nunca preguntar)
 - send_gps: true si pide ubicación/mapa/dirección
-- send_brochure: true si pide brochure/PDF/catálogo
+- send_brochure: true si pide brochure/PDF/catálogo/planos/folleto
 - send_video: true si pide "el video" explícitamente
 - send_matterport: true si pide tour 3D/recorrido virtual (NO "quiero ver casas" = cita física)
 - send_contactos: true SOLO si pide crédito/asesor explícitamente
@@ -1763,12 +1763,14 @@ Nosotros te ayudamos con el trámite una vez que elijas tu casa. ¿Ya tienes alg
         }
       }
 
-      // ═══ CORRECCIÓN: BROCHURE/FOLLETO - SÍ tenemos ═══
+      // ═══ CORRECCIÓN: BROCHURE/FOLLETO/PLANOS - SÍ tenemos ═══
       const pideBrochure =
         msgLowerCallback.includes('folleto') ||
         msgLowerCallback.includes('brochure') ||
         msgLowerCallback.includes('catalogo') ||
         msgLowerCallback.includes('catálogo') ||
+        msgLowerCallback.includes('planos') ||
+        msgLowerCallback.includes('plano') ||
         msgLowerCallback.includes('pdf');
 
       if (pideBrochure && parsed.response) {

@@ -1766,6 +1766,11 @@ export default {
           desarrollos_disponibles: properties?.length || 0,
           intent: analysis.intent,
           desarrollo_detectado: analysis.desarrollo_cita || analysis.extracted_data?.desarrollo,
+          // Flags de recursos (estos activan envío automático en producción)
+          send_gps: analysis.send_gps || false,
+          send_video: analysis.send_video || false,
+          send_brochure: analysis.send_brochure || false,
+          send_video_desarrollo: analysis.send_video_desarrollo || false,
           nota: 'Usa el MISMO servicio que los leads reales (AIConversationService)'
         }));
 
