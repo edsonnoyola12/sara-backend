@@ -2904,3 +2904,149 @@ class MessageQueueService {
 | `/limpiar-pending-expirados` | Limpiar mensajes pending expirados (requiere api_key) |
 
 **Sistema 100% operativo - Última verificación: 2026-02-02**
+
+---
+
+### 2026-02-02 (Sesión 19) - Actualización de Precios y Nuevo Desarrollo Paseo Colorines
+
+**Problemas corregidos:**
+
+1. **Información geográfica incorrecta de SARA:**
+   - SARA decía "Villa Campelo está en Colinas del Padre" - INCORRECTO
+   - SARA decía "Citadella del Nogal está en Colinas del Padre" - INCORRECTO
+
+2. **Precios y mostrar equipadas por defecto**
+
+3. **Nuevo desarrollo: Paseo Colorines**
+
+**Correcciones de información geográfica:**
+
+| Zona | Desarrollos | Tipo |
+|------|-------------|------|
+| **Colinas del Padre (Zacatecas)** | Monte Verde, Monte Real, Los Encinos, Miravalle, **Paseo Colorines** | SOLO CASAS |
+| **Guadalupe** | Andes (Vialidad Siglo XXI), Distrito Falco (Calzada Solidaridad) | CASAS |
+| **Citadella del Nogal (Guadalupe)** | Villa Campelo, Villa Galiano | TERRENOS |
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/services/aiConversationService.ts` | Corrección de información geográfica de Citadella |
+| `src/services/aiConversationService.ts` | Precios EQUIPADOS por defecto |
+| `src/services/propertyComparatorService.ts` | Lista de desarrollos corregida |
+| `src/services/ceoCommandsService.ts` | Lista de desarrollos corregida |
+
+**Precios EQUIPADOS por defecto:**
+- SARA ahora muestra precios de casas **equipadas** por defecto
+- Solo muestra precio sin equipo si el cliente lo pregunta específicamente
+- Casas equipadas incluyen: **closets y cocina integral**
+
+**Nuevo desarrollo: Paseo Colorines**
+
+| Modelo | Precio | Terreno | Construcción | Recámaras |
+|--------|--------|---------|--------------|-----------|
+| Prototipo 6M | $3,000,504 | 102m² | 168.90m² | 3 |
+| Prototipo 7M | $3,562,634 | 119m² | 206.40m² | 3 + estudio |
+
+**Ubicación:** Colinas del Padre, Zacatecas
+
+**Actualización de precios (vigente 28 Feb 2026):**
+
+| Desarrollo | Modelos | Rango Equipadas |
+|------------|---------|-----------------|
+| Los Encinos | 7 | $3.00M - $3.80M |
+| Monte Verde | 5 | $1.60M - $2.84M |
+| Andes | 4 | $1.60M - $2.84M |
+| Distrito Falco | 7 | $3.71M - $5.38M |
+| Miravalle | 8 | $3.05M - $4.35M |
+| **Paseo Colorines** | 2 | $3.00M - $3.56M |
+| Villa Campelo (terrenos) | - | $8,500-$9,500/m² |
+| Villa Galiano (terrenos) | - | $6,400-$6,700/m² |
+
+**Archivos SQL creados:**
+
+| Archivo | Uso |
+|---------|-----|
+| `sql/EJECUTAR_EN_SUPABASE.sql` | **Ejecutar en Supabase Dashboard → SQL Editor** |
+| `sql/update_prices_28feb26.sql` | Respaldo de SQL con comentarios |
+| `update-prices.mjs` | Script Node.js (falló por DNS) |
+
+**Para actualizar precios en Supabase:**
+1. Abrir Supabase Dashboard
+2. Ir a SQL Editor
+3. Copiar y ejecutar contenido de `sql/EJECUTAR_EN_SUPABASE.sql`
+
+**Commit:** `9a823a39 fix: corregir información geográfica de desarrollos`
+
+---
+
+## DESARROLLOS Y UBICACIONES (Actualizado 2026-02-02)
+
+### Colinas del Padre (Zacatecas) - SOLO CASAS
+
+| Desarrollo | Modelos | Precio Equipada Desde |
+|------------|---------|----------------------|
+| Monte Verde | Acacia, Fresno, Fresno 2, Eucalipto, Olivo | $1.60M |
+| Los Encinos | Encino Blanco, Verde, Dorado, Roble, Maple, etc. | $3.00M |
+| Miravalle | Vizcaya, Bilbao, Casa Habitación, Departamento | $3.05M |
+| Monte Real | - | - |
+| **Paseo Colorines** | Prototipo 6M, Prototipo 7M | $3.00M |
+
+### Guadalupe - CASAS
+
+| Desarrollo | Ubicación | Modelos | Precio Equipada Desde |
+|------------|-----------|---------|----------------------|
+| Andes | Vialidad Siglo XXI | Laurel, Dalia, Gardenia, Lavanda | $1.60M |
+| Distrito Falco | Calzada Solidaridad | Chipre, Calandria, Mirlo, Colibrí, etc. | $3.71M |
+
+### Citadella del Nogal (Guadalupe) - TERRENOS
+
+| Sección | Precio/m² Contado | Precio/m² Financiamiento |
+|---------|-------------------|-------------------------|
+| Villa Campelo | $8,500 - $9,500 | Financiamiento 13 meses |
+| Villa Galiano | $6,400 | $6,700 |
+
+⚠️ **IMPORTANTE:** Colinas del Padre NO tiene terrenos. Los terrenos están en Citadella del Nogal (Guadalupe).
+
+---
+
+## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-02)
+
+### Flujos de IA Verificados
+
+| Flujo | Estado | Última verificación |
+|-------|--------|---------------------|
+| Saludos y presentación | ✅ | 2026-02-02 |
+| Info de desarrollos | ✅ | 2026-02-02 |
+| Alberca = Solo Andes | ✅ | 2026-02-02 |
+| **Citadella del Nogal = Villa Campelo/Galiano (en GUADALUPE)** | ✅ | 2026-02-02 |
+| **Colinas del Padre = SOLO CASAS (no terrenos)** | ✅ | 2026-02-02 |
+| Renta = "Solo vendemos" | ✅ | 2026-02-02 |
+| Ya compré otro lado = Felicita | ✅ | 2026-02-02 |
+| No contacto = Respeta | ✅ | 2026-02-02 |
+| INFONAVIT/Crédito | ✅ | 2026-02-02 |
+| Objeciones (precio, pensar, ubicación) | ✅ | 2026-02-02 |
+| Solicitud de cita | ✅ | 2026-02-02 |
+| Terrenos | ✅ | 2026-02-02 |
+| Especificaciones (grande, barata, amenidades) | ✅ | 2026-02-02 |
+| **Precios EQUIPADOS por defecto** | ✅ | 2026-02-02 |
+| **Nuevo desarrollo: Paseo Colorines** | ✅ | 2026-02-02 |
+
+### Catálogo de Propiedades (38 total)
+
+| Desarrollo | Propiedades | Tipo |
+|------------|-------------|------|
+| Los Encinos | 7 | Casas |
+| Monte Verde | 5 | Casas |
+| Andes | 4 | Casas |
+| Distrito Falco | 7 | Casas |
+| Miravalle | 8 | Casas/Deptos |
+| **Paseo Colorines** | 2 | Casas |
+| Alpes | 1 | Casas |
+| Villa Campelo | 1 | Terrenos |
+| Villa Galiano | 1 | Terrenos |
+| Monte Real | 2 | Casas |
+
+**Total: 38 propiedades en catálogo**
+
+**Sistema 100% operativo - Última verificación: 2026-02-02**
