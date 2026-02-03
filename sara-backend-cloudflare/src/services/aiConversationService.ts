@@ -1735,11 +1735,12 @@ Si quieres, te muestro cómo funciona sin compromiso.`;
 
       // ═══ CORRECCIÓN: TASAS DE INTERÉS - NO inventar números ═══
       const preguntaTasaInteres =
-        msgLowerCallback.includes('tasa') ||
+        msgLowerCallback.includes('tasa de') ||
+        msgLowerCallback.includes('tasa ') ||
         msgLowerCallback.includes('interes') ||
         msgLowerCallback.includes('interés') ||
         msgLowerCallback.includes('porcentaje') ||
-        msgLowerCallback.includes('cat');
+        (msgLowerCallback.includes(' cat ') || msgLowerCallback.includes(' cat') || msgLowerCallback.startsWith('cat '));
 
       if (preguntaTasaInteres && parsed.response) {
         const respLower = parsed.response.toLowerCase();
