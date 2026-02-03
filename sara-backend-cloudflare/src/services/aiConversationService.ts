@@ -2529,7 +2529,7 @@ Tú dime, ¿por dónde empezamos?`;
           respuestaConfirm = `¡Perfecto ${nombreCliente}! Mantenemos tu cita en *${citaExistente.property_name || 'el desarrollo'}*. ¡Te esperamos! 😊`;
         }
 
-        await this.twilio.sendWhatsAppMessage(from, respuestaConfirm);
+        await this.meta.sendWhatsAppMessage(from, respuestaConfirm);
 
         // Guardar en historial
         const historialAct = lead.conversation_history || [];
@@ -3295,7 +3295,7 @@ Tú dime, ¿por dónde empezamos?`;
         }
 
         // Enviar respuesta
-        await this.twilio.sendWhatsAppMessage(from, contextoDecision.respuesta);
+        await this.meta.sendWhatsAppMessage(from, contextoDecision.respuesta);
 
         // ═══ Si quiere_asesor = true, NOTIFICAR AL ASESOR (solo si no fue notificado antes) ═══
         if ((contextoDecision.datos as any)?.quiere_asesor === true && !lead.asesor_notificado) {
@@ -3323,12 +3323,12 @@ Tú dime, ¿por dónde empezamos?`;
 
 ¡Contáctalo pronto!`;
 
-              await this.twilio.sendWhatsAppMessage(asesor.phone, msgAsesor);
+              await this.meta.sendWhatsAppMessage(asesor.phone, msgAsesor);
               console.log('✅ Asesor notificado:', asesor.name);
 
               // Enviar info del asesor al cliente (delay reducido)
               await new Promise(r => setTimeout(r, 400));
-              await this.twilio.sendWhatsAppMessage(from,
+              await this.meta.sendWhatsAppMessage(from,
                 `👨‍💼 *Tu asesor de crédito:*\n*${asesor.name}*\n📱 ${asesor.phone}\n\n¡Te contactará pronto! 😊`
               );
 
@@ -3341,7 +3341,7 @@ Tú dime, ¿por dónde empezamos?`;
           } catch (e) {
             console.error('⚠️ Error notificando asesor:', e);
             // Fallback: informar al cliente que hubo un problema
-            await this.twilio.sendWhatsAppMessage(from,
+            await this.meta.sendWhatsAppMessage(from,
               'Hubo un pequeño problema contactando al asesor. Te escribiremos muy pronto. 😊'
             );
           }
@@ -3462,7 +3462,7 @@ Tú dime, ¿por dónde empezamos?`;
             // Notificar asesor (solo si está activo)
             if (asesorData?.[0]?.phone && asesorData?.[0]?.is_active !== false) {
               const asesorPhone = asesorData[0].phone.replace(/\D/g, '').slice(-10);
-              await this.twilio.sendWhatsAppMessage(
+              await this.meta.sendWhatsAppMessage(
                 `whatsapp:+52${asesorPhone}`,
                 `🔔 *NUEVO LEAD INTERESADO EN CRÉDITO*\n\n👤 ${nombreParaMortgage}\n📱 ${lead.phone}\n\n⏰ Contactar pronto`
               );
@@ -3540,7 +3540,7 @@ Tú dime, ¿por dónde empezamos?`;
       if (!tieneNombreReal && !yaPreguntoNombre && !seEnviaranRecursos && (analysis.intent === 'confirmar_cita' || claudeResponse.toLowerCase().includes('te agendo') || claudeResponse.toLowerCase().includes('agendarte'))) {
         console.log('🛑 INTERCEPTANDO: Claude quiere agendar pero no hay nombre (sin recursos)');
         const respuestaForzada = `¡Qué bien que te interesa *${desarrolloInteres || 'visitarnos'}*! 😊 Para agendarte, ¿me compartes tu nombre?`;
-        await this.twilio.sendWhatsAppMessage(from, respuestaForzada);
+        await this.meta.sendWhatsAppMessage(from, respuestaForzada);
         console.log('✅ Pregunta de nombre FORZADA enviada');
 
         // Guardar en historial
@@ -3732,7 +3732,7 @@ Tú dime, ¿por dónde empezamos?`;
       if (yaRespondioRecientemente) {
         console.log('⏭️ RATE LIMIT: Ya se envió respuesta hace <5s, saltando envío (contexto guardado)');
       } else if (!interceptoCita) {
-        await this.twilio.sendWhatsAppMessage(from, respuestaLimpia);
+        await this.meta.sendWhatsAppMessage(from, respuestaLimpia);
         console.log('✅ Respuesta de Claude enviada (sin pregunta de crédito)');
 
         // ═══ GUARDAR HISTORIAL CON RESPUESTA CORRECTA (después de validar horario) ═══
@@ -3829,7 +3829,7 @@ Tú dime, ¿por dónde empezamos?`;
 
             // SOLO notificar si NO existe solicitud previa Y está activo
             if (!yaNotificado && asesor.phone && asesor.is_active !== false) {
-              await this.twilio.sendWhatsAppMessage(
+              await this.meta.sendWhatsAppMessage(
                 'whatsapp:+52' + asesor.phone.replace(/\D/g, '').slice(-10),
                 notifAsesor
               );
@@ -3900,7 +3900,7 @@ Tú dime, ¿por dónde empezamos?`;
 📱 Tel: ${asesor.phone}
 
 ¡Te contactará pronto para orientarte! 😊`;
-              await this.twilio.sendWhatsAppMessage(from, msgAsesor);
+              await this.meta.sendWhatsAppMessage(from, msgAsesor);
               console.log('✅ Datos del asesor enviados al cliente');
 
               // Marcar como notificado para evitar duplicados
@@ -3965,7 +3965,7 @@ Tú dime, ¿por dónde empezamos?`;
               if (esUrgente) notifVend += `\n\n🚨 *URGENTE - ${analysis.intent.toUpperCase()}*`;
               else notifVend += `\n\n⏰ Contactar pronto`;
 
-              await this.twilio.sendWhatsAppMessage(
+              await this.meta.sendWhatsAppMessage(
                 'whatsapp:+52' + vendedor.phone.replace(/\D/g, '').slice(-10),
                 notifVend
               );
@@ -4091,7 +4091,7 @@ Tú dime, ¿por dónde empezamos?`;
             // GPS de oficinas centrales Grupo Santa Rita
             const gpsOficinas = 'https://maps.app.goo.gl/hUk6aH8chKef6NRY7';
             await new Promise(r => setTimeout(r, 400));
-            await this.twilio.sendWhatsAppMessage(from,
+            await this.meta.sendWhatsAppMessage(from,
               `📍 *Ubicación de Oficinas Grupo Santa Rita:*\n${gpsOficinas}\n\n_Ahí te lleva directo en Google Maps_`
             );
             console.log(`✅ GPS enviado (oficinas): ${gpsOficinas}`);
@@ -4119,7 +4119,7 @@ Tú dime, ¿por dónde empezamos?`;
 
               if (tieneCitaGPS) {
                 const cita = citaParaGPS[0];
-                await this.twilio.sendWhatsAppMessage(from,
+                await this.meta.sendWhatsAppMessage(from,
                   `📍 *Ubicación de ${devParaGPSSolo}:*\n${propGPSSolo.gps_link}\n\n` +
                   `${primerNombreGPS ? primerNombreGPS + ', recuerda' : 'Recuerda'} que tu cita es el *${cita.date}* a las *${cita.time}* 📅\n¡Ahí te esperamos! 🏠`
                 );
@@ -4127,7 +4127,7 @@ Tú dime, ¿por dónde empezamos?`;
                 // Guardar acción en historial para contexto
                 await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', `${devParaGPSSolo} - con recordatorio de cita ${cita.date} ${cita.time}`);
               } else {
-                await this.twilio.sendWhatsAppMessage(from,
+                await this.meta.sendWhatsAppMessage(from,
                   `📍 *Ubicación de ${devParaGPSSolo}:*\n${propGPSSolo.gps_link}\n\n` +
                   `${primerNombreGPS ? primerNombreGPS + ', ¿te' : '¿Te'} gustaría agendar una visita? 🏠`
                 );
@@ -4208,7 +4208,7 @@ Tú dime, ¿por dónde empezamos?`;
                   const intro = tieneNombre
                     ? `*${primerNombre}*, aquí te comparto *${dev}*:`
                     : `Aquí te comparto *${dev}*:`;
-                  await this.twilio.sendWhatsAppMessage(from, `${intro}\n\n${recursos.join('\n\n')}`);
+                  await this.meta.sendWhatsAppMessage(from, `${intro}\n\n${recursos.join('\n\n')}`);
                   console.log(`✅ Recursos enviados para: ${dev}`);
                   // Guardar acción en historial para contexto
                   const recursosDesc = [];
@@ -4220,7 +4220,7 @@ Tú dime, ¿por dónde empezamos?`;
                 // GPS del desarrollo - ENVIAR SI EL LEAD LO PIDIÓ EXPLÍCITAMENTE
                 if (analysis.send_gps === true && propiedadMatch.gps_link) {
                   await new Promise(r => setTimeout(r, 400));
-                  await this.twilio.sendWhatsAppMessage(from, `📍 *Ubicación de ${dev}:*\n${propiedadMatch.gps_link}\n\n_Ahí te lleva directo en Google Maps_`);
+                  await this.meta.sendWhatsAppMessage(from, `📍 *Ubicación de ${dev}:*\n${propiedadMatch.gps_link}\n\n_Ahí te lleva directo en Google Maps_`);
                   console.log(`✅ GPS enviado para: ${dev}`);
                   // Guardar acción en historial
                   await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', dev);
@@ -4271,7 +4271,7 @@ Tú dime, ¿por dónde empezamos?`;
                   } catch (docError) {
                     // Fallback: si falla envío de documento, enviar como link
                     console.error(`⚠️ Error enviando brochure como documento, enviando como link:`, docError);
-                    await this.twilio.sendWhatsAppMessage(from,
+                    await this.meta.sendWhatsAppMessage(from,
                       `📋 *Brochure ${dev}:*\n${brochureUrl}\n\n_Modelos, precios y características_`
                     );
                   }
@@ -4296,7 +4296,7 @@ Tú dime, ¿por dónde empezamos?`;
                   ? `${primerNombre}, ¿te gustaría agendar una cita para visitar *${desarrollosMencionados}*? 🏠`
                   : `¿Te gustaría agendar una cita para visitar *${desarrollosMencionados}*? 🏠\n\nPara agendarte, ¿me compartes tu nombre? 😊`;
 
-                await this.twilio.sendWhatsAppMessage(from, msgPush);
+                await this.meta.sendWhatsAppMessage(from, msgPush);
                 console.log('✅ Push a cita enviado después de recursos');
 
                 // Guardar en historial para que Claude sepa que preguntamos por visita
@@ -4354,7 +4354,7 @@ Tú dime, ¿por dónde empezamos?`;
                     const cita = citaExistenteGPS[0];
                     const msgGPS = `📍 *Ubicación de ${devParaGPS}:*\n${propGPS.gps_link}\n\n` +
                       `${primerNombreGPS ? primerNombreGPS + ', recuerda' : 'Recuerda'} que tu cita es el *${cita.date}* a las *${cita.time}* 📅\n¡Ahí te esperamos! 🏠`;
-                    await this.twilio.sendWhatsAppMessage(from, msgGPS);
+                    await this.meta.sendWhatsAppMessage(from, msgGPS);
                     console.log(`✅ GPS enviado con recordatorio de cita: ${devParaGPS}`);
                     // Guardar acción en historial
                     await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', `${devParaGPS} - recordatorio cita ${cita.date} ${cita.time}`);
@@ -4362,7 +4362,7 @@ Tú dime, ¿por dónde empezamos?`;
                     // No tiene cita → GPS + ofrecer agendar
                     const msgGPS = `📍 *Ubicación de ${devParaGPS}:*\n${propGPS.gps_link}\n\n` +
                       `${primerNombreGPS ? primerNombreGPS + ', ¿te' : '¿Te'} gustaría agendar una visita para conocerlo? 🏠`;
-                    await this.twilio.sendWhatsAppMessage(from, msgGPS);
+                    await this.meta.sendWhatsAppMessage(from, msgGPS);
                     console.log(`✅ GPS enviado con oferta de cita: ${devParaGPS}`);
                     // Guardar acción en historial
                     await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', `${devParaGPS} - pregunté si quiere visitar`);
@@ -4394,7 +4394,7 @@ Tú dime, ¿por dónde empezamos?`;
                     console.log(`✅ Brochure PDF enviado (solicitado): ${devParaBrochure} - ${brochureUrl}`);
                   } catch (docError) {
                     console.error(`⚠️ Error enviando brochure como documento:`, docError);
-                    await this.twilio.sendWhatsAppMessage(from, `📋 *Brochure ${devParaBrochure}:*\n${brochureUrl}\n\n_Modelos, precios y características_`);
+                    await this.meta.sendWhatsAppMessage(from, `📋 *Brochure ${devParaBrochure}:*\n${brochureUrl}\n\n_Modelos, precios y características_`);
                   }
                   await this.guardarAccionEnHistorial(lead.id, 'Envié brochure PDF solicitado', devParaBrochure);
                 } else {
@@ -4414,7 +4414,7 @@ Tú dime, ¿por dónde empezamos?`;
                 });
                 if (propVideo?.youtube_link) {
                   await new Promise(r => setTimeout(r, 400));
-                  await this.twilio.sendWhatsAppMessage(from, `🎬 *Video de ${devParaVideo}:*\n${propVideo.youtube_link}\n\n_Conoce el desarrollo en detalle_`);
+                  await this.meta.sendWhatsAppMessage(from, `🎬 *Video de ${devParaVideo}:*\n${propVideo.youtube_link}\n\n_Conoce el desarrollo en detalle_`);
                   console.log(`✅ Video enviado (solicitado): ${devParaVideo}`);
                   await this.guardarAccionEnHistorial(lead.id, 'Envié video solicitado', devParaVideo);
                 } else {
@@ -4434,7 +4434,7 @@ Tú dime, ¿por dónde empezamos?`;
                 });
                 if (propMatterport?.matterport_link) {
                   await new Promise(r => setTimeout(r, 400));
-                  await this.twilio.sendWhatsAppMessage(from, `🏠 *Recorrido virtual de ${devParaMatterport}:*\n${propMatterport.matterport_link}\n\n_Tour 3D interactivo - recorre la casa como si estuvieras ahí_`);
+                  await this.meta.sendWhatsAppMessage(from, `🏠 *Recorrido virtual de ${devParaMatterport}:*\n${propMatterport.matterport_link}\n\n_Tour 3D interactivo - recorre la casa como si estuvieras ahí_`);
                   console.log(`✅ Matterport enviado (solicitado): ${devParaMatterport}`);
                   await this.guardarAccionEnHistorial(lead.id, 'Envié recorrido virtual solicitado', devParaMatterport);
                 } else {
@@ -5030,7 +5030,7 @@ Tú dime, ¿por dónde empezamos?`;
           const asesorPhone = asesor.phone.replace(/\D/g, '');
           const modalidadTexto = modalidadElegida === 'llamada' ? '📞 LLAMADA' :
                                   modalidadElegida === 'videollamada' ? '💻 VIDEOLLAMADA' : '🏢 PRESENCIAL';
-          await this.twilio.sendWhatsAppMessage(
+          await this.meta.sendWhatsAppMessage(
             asesorPhone.length === 10 ? `whatsapp:+52${asesorPhone}` : `whatsapp:+${asesorPhone}`,
             `🔥 *LEAD QUIERE CRÉDITO*\n\n👤 ${lead.name || nombreCliente}\n📱 ${lead.phone}\n🏠 ${lead.property_interest || 'Por definir'}\n\n${modalidadTexto}\n⏰ Hora: ${horaPreferida}\n\n📞 Contactar ASAP`
           );
@@ -5051,7 +5051,7 @@ Tú dime, ¿por dónde empezamos?`;
           const asesorPhoneClean = asesor.phone?.replace(/\D/g, '') || '';
           // Fix: usar await en lugar de setTimeout suelto para evitar race conditions
           await new Promise(r => setTimeout(r, 400));
-          await this.twilio.sendWhatsAppMessage(from,
+          await this.meta.sendWhatsAppMessage(from,
             `👨‍💼 *${asesor.name}*\n📱 ${asesorPhoneClean.length === 10 ? '+52' + asesorPhoneClean : '+' + asesorPhoneClean}\n\nTe contactará pronto.`
           );
         } else {
@@ -5799,7 +5799,7 @@ ${modalidad === 'presencial' ? '→ Quiere CITA EN OFICINA' : ''}
 
           // Enviar notificación al asesor (solo si está activo)
           if (asesor.phone && asesor.is_active !== false) {
-            await this.twilio.sendWhatsAppMessage(
+            await this.meta.sendWhatsAppMessage(
               'whatsapp:+52' + asesor.phone.replace(/\D/g, '').slice(-10),
               notificacion
             );
@@ -6177,7 +6177,7 @@ Mientras tanto, si tienes dudas estoy aquí para ayudarte 📌`;
 ━━━━━━━━━━━━━━━━━━━━
 ⚠¡ *¡CONTACTAR A LA BREVEDAD!* ⚠¡`;
 
-        await this.twilio.sendWhatsAppMessage(
+        await this.meta.sendWhatsAppMessage(
           asesorBanco.phone,
           msgAsesorBanco
         );
@@ -6298,7 +6298,7 @@ Mientras tanto, si tienes dudas estoy aquí para ayudarte 📌`;
 
 ✅ El asesor ya fue notificado y contactará al cliente.`;
 
-            await this.twilio.sendWhatsAppMessage(
+            await this.meta.sendWhatsAppMessage(
               vendedorAsignado.phone,
               msgVendedor
             );
@@ -6421,7 +6421,7 @@ Un asesor te contactará muy pronto. ¿Hay algo más en lo que pueda ayudarte?`;
     // Solo enviar respuestaPrincipal si NO se envió ya en el flujo anterior
     // (evitar doble mensaje cuando hora fuera de horario)
     if (!yaEnvioMensajeHorarioInvalido) {
-      await this.twilio.sendWhatsAppMessage(from, respuestaPrincipal);
+      await this.meta.sendWhatsAppMessage(from, respuestaPrincipal);
       console.log('✅ Respuesta enviada');
     } else {
       console.log('⏭️ Respuesta ya enviada anteriormente (horario inválido)');
@@ -6446,7 +6446,7 @@ Un asesor te contactará muy pronto. ¿Hay algo más en lo que pueda ayudarte?`;
 📱 Tel: ${asesorInfo.phone}
 
 ¡Te contactará pronto! 😊`;
-          await this.twilio.sendWhatsAppMessage(from, msgAsesor);
+          await this.meta.sendWhatsAppMessage(from, msgAsesor);
           console.log('✅ Datos del asesor enviados al cliente');
 
           // Marcar como notificado
@@ -6503,7 +6503,7 @@ Un asesor te contactará muy pronto. ¿Hay algo más en lo que pueda ayudarte?`;
 El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
         
         try {
-          await this.twilio.sendWhatsAppMessage(vendedor.phone, msgVendedor);
+          await this.meta.sendWhatsAppMessage(vendedor.phone, msgVendedor);
           console.log('✅ Vendedor notificado:', vendedor.name);
         } catch (e) {
           console.error('⚠️ Error enviando WhatsApp a vendedor');
@@ -6674,7 +6674,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       else if (!desarrolloFinal || desarrolloFinal === 'Por definir') {
         console.log('🚫 NO HAY DESARROLLO VÁLIDO - No se creará cita');
         // No crear cita sin desarrollo, redirigir a asesor
-        await this.twilio.sendWhatsAppMessage(from, '¡Perfecto! 😊 Para recomendarte el mejor desarrollo según tu presupuesto, ¿te gustaría que un asesor te contacte directamente?');
+        await this.meta.sendWhatsAppMessage(from, '¡Perfecto! 😊 Para recomendarte el mejor desarrollo según tu presupuesto, ¿te gustaría que un asesor te contacte directamente?');
       }
       // Verificación de seguridad: NO crear cita sin nombre
       else if (!tieneNombre) {
@@ -6684,7 +6684,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
           .filter((m: any) => m.role === 'assistant')
           .slice(-1)[0]?.content?.toLowerCase() || '';
         if (!ultMsgSara.includes('me compartes tu nombre')) {
-          await this.twilio.sendWhatsAppMessage(from, '¡Me encanta que quieras visitarnos! 😊 Solo para darte mejor atención, ¿me compartes tu nombre?');
+          await this.meta.sendWhatsAppMessage(from, '¡Me encanta que quieras visitarnos! 😊 Solo para darte mejor atención, ¿me compartes tu nombre?');
         } else {
           console.log('ℹ️ Ya preguntamos nombre, esperando respuesta');
         }
@@ -6814,7 +6814,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
           if (prop.youtube_link && !videosEnviados.has(prop.youtube_link) && recursosEnviados < MAX_RECURSOS) {
             const saludo = clientName !== 'Cliente' ? `*${clientName}*, mira` : 'Mira';
             const msgVideo = `🎬 ${saludo} cómo es *${nombreModelo}* en ${nombreDesarrollo} por dentro:\n${prop.youtube_link}`;
-            await this.twilio.sendWhatsAppMessage(from, msgVideo);
+            await this.meta.sendWhatsAppMessage(from, msgVideo);
             videosEnviados.add(prop.youtube_link);
             recursosEnviados++;
             console.log(`✅ Video YouTube enviado: ${nombreModelo} (${recursosEnviados}/${MAX_RECURSOS})`);
@@ -6824,7 +6824,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
           if (prop.matterport_link && !matterportsEnviados.has(prop.matterport_link) && recursosEnviados < MAX_RECURSOS) {
             const saludo = clientName !== 'Cliente' ? `*${clientName}*, recorre` : 'Recorre';
             const msgMatterport = `🏠 ${saludo} *${nombreModelo}* en 3D como si estuvieras ahí:\n${prop.matterport_link}`;
-            await this.twilio.sendWhatsAppMessage(from, msgMatterport);
+            await this.meta.sendWhatsAppMessage(from, msgMatterport);
             matterportsEnviados.add(prop.matterport_link);
             recursosEnviados++;
             console.log(`✅ Matterport enviado: ${nombreModelo} (${recursosEnviados}/${MAX_RECURSOS})`);
@@ -6850,7 +6850,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
             if (prop.youtube_link && !videosEnviados.has(prop.youtube_link) && recursosEnviados < MAX_RECURSOS) {
               const saludo = clientName !== 'Cliente' ? `*${clientName}*, mira` : 'Mira';
               const msgVideo = `🎬 ${saludo} cómo es *${dev}* por dentro:\n${prop.youtube_link}`;
-              await this.twilio.sendWhatsAppMessage(from, msgVideo);
+              await this.meta.sendWhatsAppMessage(from, msgVideo);
               videosEnviados.add(prop.youtube_link);
               recursosEnviados++;
               console.log(`✅ Video YouTube enviado: ${dev} (${recursosEnviados}/${MAX_RECURSOS})`);
@@ -6863,7 +6863,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
               const nombreModelo = prop.model || prop.name || 'la casa modelo';
               const saludo = clientName !== 'Cliente' ? `*${clientName}*, recorre` : 'Recorre';
               const msgMatterport = `🏠 ${saludo} *${nombreModelo}* de ${dev} en 3D:\n${prop.matterport_link}`;
-              await this.twilio.sendWhatsAppMessage(from, msgMatterport);
+              await this.meta.sendWhatsAppMessage(from, msgMatterport);
               matterportsEnviados.add(prop.matterport_link);
               recursosEnviados++;
               console.log(`✅ Matterport enviado: ${dev} (${recursosEnviados}/${MAX_RECURSOS})`);
@@ -6889,7 +6889,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
           if (propConVideo.youtube_link) {
             const saludo = clientName !== 'Cliente' ? `*${clientName}*, mira` : 'Mira';
             const msgVideo = `🎬 ${saludo} este video de *${nombreDesarrollo}*:\n${propConVideo.youtube_link}`;
-            await this.twilio.sendWhatsAppMessage(from, msgVideo);
+            await this.meta.sendWhatsAppMessage(from, msgVideo);
             videosEnviados.add(propConVideo.youtube_link);
             recursosEnviados++;
             console.log(`✅ Video FALLBACK enviado: ${nombreDesarrollo}`);
@@ -6912,7 +6912,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
           if (propConVideo.matterport_link && recursosEnviados < MAX_RECURSOS) {
             const saludo = clientName !== 'Cliente' ? `*${clientName}*, recorre` : 'Recorre';
             const msgMatterport = `🏠 ${saludo} este desarrollo en 3D:\n${propConVideo.matterport_link}`;
-            await this.twilio.sendWhatsAppMessage(from, msgMatterport);
+            await this.meta.sendWhatsAppMessage(from, msgMatterport);
             matterportsEnviados.add(propConVideo.matterport_link);
             recursosEnviados++;
             console.log(`✅ Matterport FALLBACK enviado: ${nombreDesarrollo}`);
@@ -6972,7 +6972,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
               // Fallback: si falla envío de documento, enviar como link
               console.error(`⚠️ Error enviando brochure como documento, enviando como link:`, docError);
               const msgBrochure = `📄 *Brochure completo de ${desarrolloParaBrochure}:*\n${brochureUrl}\n\nAhí encuentras fotos, videos, tour 3D, ubicación y precios.`;
-              await this.twilio.sendWhatsAppMessage(from, msgBrochure);
+              await this.meta.sendWhatsAppMessage(from, msgBrochure);
             }
             // Guardar acción en historial
             await this.guardarAccionEnHistorial(lead.id, 'Envié brochure PDF completo', desarrolloParaBrochure);
@@ -6994,7 +6994,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
             if (gpsUrl) {
               await new Promise(resolve => setTimeout(resolve, 400));
               const msgGPS = `📍 *Ubicación de ${desarrolloParaGPS}:*\n${gpsUrl}\n\n_Ahí te lleva directo en Google Maps_`;
-              await this.twilio.sendWhatsAppMessage(from, msgGPS);
+              await this.meta.sendWhatsAppMessage(from, msgGPS);
               console.log(`✅ GPS enviado: ${desarrolloParaGPS} - ${gpsUrl}`);
               // Guardar acción en historial
               await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', desarrolloParaGPS);
@@ -7031,7 +7031,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
         const gpsOficinas = 'https://maps.app.goo.gl/hUk6aH8chKef6NRY7';
         await new Promise(resolve => setTimeout(resolve, 400));
         const msgGPS = `📍 *Ubicación de Oficinas Grupo Santa Rita:*\n${gpsOficinas}\n\n_Ahí te lleva directo en Google Maps_`;
-        await this.twilio.sendWhatsAppMessage(from, msgGPS);
+        await this.meta.sendWhatsAppMessage(from, msgGPS);
         console.log(`✅ GPS enviado (oficinas): ${gpsOficinas}`);
         await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', 'Oficinas Grupo Santa Rita');
       } else {
@@ -7047,14 +7047,14 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
           if (gpsUrl) {
             await new Promise(resolve => setTimeout(resolve, 400));
             const msgGPS = `📍 *Ubicación de ${desarrolloParaGPS}:*\n${gpsUrl}\n\n_Ahí te lleva directo en Google Maps_`;
-            await this.twilio.sendWhatsAppMessage(from, msgGPS);
+            await this.meta.sendWhatsAppMessage(from, msgGPS);
             console.log(`✅ GPS enviado (solo): ${desarrolloParaGPS} - ${gpsUrl}`);
             // Guardar acción en historial
             await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', desarrolloParaGPS);
           } else {
             console.error(`⚠️ ${desarrolloParaGPS} NO tiene gps_link en DB`);
             // Enviar mensaje indicando que no tenemos GPS
-            await this.twilio.sendWhatsAppMessage(from, `📍 La ubicación exacta de ${desarrolloParaGPS} te la puedo dar cuando agendemos tu visita. ¿Te gustaría agendar una cita? 🏠`);
+            await this.meta.sendWhatsAppMessage(from, `📍 La ubicación exacta de ${desarrolloParaGPS} te la puedo dar cuando agendemos tu visita. ¿Te gustaría agendar una cita? 🏠`);
           }
         }
       }
@@ -7301,7 +7301,7 @@ ${gpsAsesor ? `🗺️ ${gpsAsesor}` : ''}
 
         console.log('📨 MENSAJE A ASESOR:', msgAsesor);
         
-        await this.twilio.sendWhatsAppMessage(
+        await this.meta.sendWhatsAppMessage(
           asesorHipotecario.phone,
           msgAsesor
         );
@@ -7330,7 +7330,7 @@ ${gpsAsesor ? `🗺️ ${gpsAsesor}` : ''}
 
 ${msgContacto}`;
 
-        await this.twilio.sendWhatsAppMessage(from, msgConfirmacionCliente);
+        await this.meta.sendWhatsAppMessage(from, msgConfirmacionCliente);
         console.log('📤 Confirmación de asesor enviada al cliente');
         
         // Agregar confirmación al historial para evitar duplicados
