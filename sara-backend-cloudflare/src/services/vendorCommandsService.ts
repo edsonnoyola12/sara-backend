@@ -418,6 +418,17 @@ export class VendorCommandsService {
       };
     }
 
+    // ═══ LLAMAR IA (Retell.ai) ═══
+    // Formato: "llamar ia Juan" - Inicia llamada telefónica automatizada con IA
+    const llamarIAMatch = msg.match(/^llamar\s+ia\s+([a-záéíóúñü\s]+)$/i);
+    if (llamarIAMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorLlamarIA',
+        handlerParams: { nombre: llamarIAMatch[1].trim() }
+      };
+    }
+
     // ═══ LLAMAR (info de contacto) ═══
     // Formato: "llamar Juan" (sin fecha = solo mostrar info)
     const llamarInfoMatch = msg.match(/^llamar\s+([a-záéíóúñü]+)$/i);

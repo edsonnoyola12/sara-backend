@@ -1,0 +1,281 @@
+# GRUPO SANTA RITA - BASE DE CONOCIMIENTOS PARA SARA
+# Asistente Virtual de Ventas Inmobiliarias
+# Zacatecas, México
+
+================================================================================
+INFORMACIÓN DE LA EMPRESA
+================================================================================
+
+Nombre: Grupo Santa Rita
+Giro: Desarrollador inmobiliario
+Ubicación: Zacatecas, México
+Años de experiencia: Más de 20 años construyendo hogares
+Especialidad: Casas residenciales y terrenos
+Valores: Calidad, confianza, familias felices
+
+================================================================================
+ZONAS DONDE CONSTRUIMOS
+================================================================================
+
+ZONA 1: COLINAS DEL PADRE (Zacatecas)
+- Tipo: SOLO CASAS (no hay terrenos aquí)
+- Desarrollos: Monte Verde, Los Encinos, Miravalle, Monte Real, Paseo Colorines
+- Características: Zona residencial consolidada, cerca de escuelas y comercios
+
+ZONA 2: GUADALUPE (Zacatecas)
+- Tipo: CASAS
+- Desarrollos: Priv. Andes (Vialidad Siglo XXI), Distrito Falco (Calzada Solidaridad)
+- Características: Excelente conectividad, zonas comerciales cercanas
+
+ZONA 3: CITADELLA DEL NOGAL (Guadalupe)
+- Tipo: SOLO TERRENOS
+- Secciones: Villa Campelo, Villa Galiano
+- Características: Terrenos para construir tu casa a tu gusto
+
+================================================================================
+DESARROLLOS Y PRECIOS (Actualizado Febrero 2026)
+================================================================================
+
+------- MONTE VERDE (Colinas del Padre) -------
+Rango de precios: $1,600,000 - $2,840,000 MXN (equipadas)
+Enganche mínimo: 10%
+Financiamiento: Bancario, INFONAVIT, FOVISSSTE
+
+Modelos disponibles:
+- Acacia: $1,604,400 | 60m² construcción | 2 recámaras | 1 piso
+- Fresno: $1,900,000 | 75m² construcción | 2 recámaras | 2 pisos
+- Fresno 2: $2,050,000 | 82m² construcción | 3 recámaras | 2 pisos
+- Eucalipto: $2,400,000 | 95m² construcción | 3 recámaras | 2 pisos
+- Olivo: $2,840,000 | 110m² construcción | 3 recámaras | 2 pisos
+
+Amenidades Monte Verde:
+- Áreas verdes
+- Parque infantil
+- Caseta de vigilancia 24/7
+- Calles pavimentadas
+
+------- LOS ENCINOS (Colinas del Padre) -------
+Rango de precios: $3,000,000 - $3,800,000 MXN (equipadas)
+Segmento: Residencial Plus
+
+Modelos disponibles:
+- Encino Blanco: $3,000,000 | 120m² construcción | 3 recámaras
+- Encino Verde: $3,200,000 | 130m² construcción | 3 recámaras
+- Encino Dorado: $3,400,000 | 140m² construcción | 3 recámaras + estudio
+- Roble: $3,600,000 | 150m² construcción | 4 recámaras
+- Maple: $3,800,000 | 160m² construcción | 4 recámaras + family room
+
+Amenidades Los Encinos:
+- Casa club
+- Áreas verdes amplias
+- Vigilancia 24/7
+- Acceso controlado
+
+------- PRIV. ANDES (Guadalupe - Vialidad Siglo XXI) -------
+*** ÚNICO DESARROLLO CON ALBERCA ***
+Rango de precios: $1,600,000 - $2,840,000 MXN (equipadas)
+
+Modelos disponibles:
+- Laurel: $1,514,957 | 60m² construcción | 2 recámaras
+- Dalia: $1,800,000 | 72m² construcción | 2 recámaras
+- Gardenia: $2,200,000 | 90m² construcción | 3 recámaras
+- Lavanda: $2,699,071 | 105m² construcción | 3 recámaras + vestidor
+
+Amenidades Priv. Andes:
+- ALBERCA (único desarrollo con alberca)
+- Gimnasio
+- Área de asadores
+- Salón de eventos
+- Vigilancia 24/7
+- Parque infantil
+
+------- DISTRITO FALCO (Guadalupe - Calzada Solidaridad) -------
+Rango de precios: $3,710,000 - $5,380,000 MXN (equipadas)
+Segmento: Residencial Premium
+
+Modelos disponibles:
+- Chipre: $3,710,000 | 140m² construcción | 3 recámaras
+- Calandria: $4,200,000 | 160m² construcción | 3 recámaras + estudio
+- Mirlo: $4,500,000 | 175m² construcción | 4 recámaras
+- Colibrí: $4,800,000 | 190m² construcción | 4 recámaras
+- Cenzontle: $5,140,000 | 200m² construcción | 4 recámaras + roof garden
+- Quetzal: $5,380,000 | 215m² construcción | 4 recámaras + 3 plantas
+
+Amenidades Distrito Falco:
+- Diseño arquitectónico premium
+- Acabados de lujo
+- Domótica incluida
+- Paneles solares opcionales
+- Vigilancia 24/7
+
+------- MIRAVALLE (Colinas del Padre) -------
+Rango de precios: $3,050,000 - $4,350,000 MXN (equipadas)
+
+Modelos disponibles:
+- Vizcaya: $3,050,000 | 125m² construcción | 3 recámaras
+- Bilbao: $3,400,000 | 140m² construcción | 3 recámaras
+- Sevilla: $3,700,000 | 155m² construcción | 3 recámaras + estudio
+- Madrid: $4,000,000 | 170m² construcción | 4 recámaras
+- Barcelona: $4,350,000 | 185m² construcción | 4 recámaras + terraza
+
+Amenidades Miravalle:
+- Parque central
+- Áreas deportivas
+- Vigilancia 24/7
+- Ciclovía
+
+------- PASEO COLORINES (Colinas del Padre) -------
+Rango de precios: $3,000,000 - $3,562,634 MXN (equipadas)
+*** NUEVO DESARROLLO ***
+
+Modelos disponibles:
+- Prototipo 6M: $3,000,504 | 102m² terreno | 168.90m² construcción | 3 recámaras
+- Prototipo 7M: $3,562,634 | 119m² terreno | 206.40m² construcción | 3 rec + estudio
+
+------- TERRENOS - VILLA CAMPELO (Citadella del Nogal) -------
+Precio por m²: $8,500 - $9,500 MXN (contado)
+Tamaños disponibles: 150m² a 300m²
+Financiamiento: Hasta 13 meses
+
+------- TERRENOS - VILLA GALIANO (Citadella del Nogal) -------
+Precio por m²: $6,400 MXN (contado) | $6,700 MXN (financiamiento)
+Tamaños disponibles: 120m² a 250m²
+
+================================================================================
+OPCIONES DE FINANCIAMIENTO
+================================================================================
+
+CRÉDITO BANCARIO:
+- Bancos: BBVA, Banorte, Santander, HSBC, Scotiabank
+- Enganche mínimo: 10-20%
+- Plazo: 10-20 años
+- Tasa: Variable según banco y perfil (consultar directamente con bancos)
+
+INFONAVIT:
+- Crédito tradicional
+- Cofinavit (INFONAVIT + banco)
+- Requisitos: Puntos INFONAVIT suficientes, relación laboral activa
+- Podemos precalificar sin compromiso
+
+FOVISSSTE:
+- Para trabajadores del gobierno
+- Similar a INFONAVIT
+- Requisitos: Estar activo en FOVISSSTE
+
+CRÉDITO DIRECTO CON GRUPO SANTA RITA:
+- Solo para terrenos en Citadella del Nogal
+- Hasta 13 meses
+- Sin buró de crédito
+
+================================================================================
+PROCESO DE COMPRA
+================================================================================
+
+PASO 1: VISITA
+- Agendar cita para conocer el desarrollo
+- Recorrido por casas muestra
+- Sin compromiso
+
+PASO 2: SELECCIÓN
+- Elegir modelo y lote
+- Revisar planos y acabados
+- Cotización personalizada
+
+PASO 3: APARTADO
+- Apartado desde $10,000 MXN
+- Reserva el lote por 30 días
+- 100% aplicable al enganche
+
+PASO 4: ENGANCHE
+- 10-20% del valor de la casa
+- Puede incluir subcuenta INFONAVIT
+- Plazos flexibles
+
+PASO 5: ESCRITURACIÓN
+- Trámite de crédito (si aplica)
+- Firma ante notario
+- Entrega de llaves
+
+TIEMPO DE ENTREGA:
+- Casas en inventario: 30-60 días
+- Casas en construcción: 3-6 meses
+- Casas por iniciar: 6-12 meses
+
+================================================================================
+PREGUNTAS FRECUENTES
+================================================================================
+
+P: ¿Tienen casas en renta?
+R: No, solo VENDEMOS casas. No manejamos rentas.
+
+P: ¿Cuál desarrollo tiene alberca?
+R: Solo Priv. Andes tiene alberca. Es nuestro único desarrollo con esta amenidad.
+
+P: ¿Aceptan INFONAVIT?
+R: Sí, aceptamos INFONAVIT, FOVISSSTE y crédito bancario en todos nuestros desarrollos.
+
+P: ¿Cuál es la casa más económica?
+R: Monte Verde y Priv. Andes tienen casas desde $1.5 millones.
+
+P: ¿Cuál es la casa más grande?
+R: En Distrito Falco tenemos casas de hasta 215m² de construcción.
+
+P: ¿Tienen terrenos?
+R: Sí, en Citadella del Nogal (Villa Campelo y Villa Galiano) tenemos terrenos desde $6,400/m².
+
+P: ¿Dónde están ubicados?
+R: Tenemos desarrollos en Colinas del Padre (Zacatecas) y Guadalupe.
+
+P: ¿Puedo visitar sin cita?
+R: Recomendamos agendar cita para darte atención personalizada, pero también puedes llegar directamente.
+
+P: ¿Las casas vienen equipadas?
+R: Sí, incluyen closets y cocina integral. Los precios mostrados son de casas equipadas.
+
+P: ¿Aceptan mascotas?
+R: Sí, en todos nuestros desarrollos se permiten mascotas.
+
+P: ¿Tienen casas de una sola planta?
+R: Sí, en Monte Verde el modelo Acacia es de una planta. En otros desarrollos hay opciones de 1-2-3 plantas.
+
+P: ¿Cuánto es el enganche mínimo?
+R: 10% del valor de la casa. Si usas INFONAVIT, tu subcuenta puede cubrir parte del enganche.
+
+================================================================================
+HORARIOS Y CONTACTO
+================================================================================
+
+Horarios de atención:
+- Lunes a Viernes: 9:00 AM - 7:00 PM
+- Sábados: 9:00 AM - 3:00 PM
+- Domingos: 10:00 AM - 2:00 PM (solo con cita)
+
+Oficinas de ventas:
+- En cada desarrollo hay casa muestra
+- Oficina central en Zacatecas
+
+================================================================================
+COMPETENCIA (NO CRITICAR, SOLO DIFERENCIARNOS)
+================================================================================
+
+Si mencionan competencia:
+- NO criticar otras empresas
+- Enfocarse en nuestras fortalezas:
+  * Más de 20 años de experiencia
+  * Calidad de construcción comprobada
+  * Financiamiento flexible
+  * Atención personalizada
+  * Desarrollos en las mejores zonas
+
+================================================================================
+SINÓNIMOS Y NOMBRES ALTERNATIVOS
+================================================================================
+
+- "El Nogal" = Citadella del Nogal = Villa Campelo + Villa Galiano
+- "Colinas" = Colinas del Padre
+- "Andes" = Priv. Andes = Privada Andes
+- "Falco" = Distrito Falco
+
+================================================================================
+FIN DEL DOCUMENTO
+================================================================================

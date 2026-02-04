@@ -17,9 +17,14 @@ export interface FeatureFlags {
   sentry_enabled: boolean;              // Error tracking
 
   // Features de WhatsApp
-  audio_transcription_enabled: boolean; // Transcripción de audios
+  audio_transcription_enabled: boolean; // Transcripción de audios (Whisper)
   auto_followups_enabled: boolean;      // Follow-ups automáticos
   broadcast_enabled: boolean;           // Mensajes masivos
+
+  // Features de Voz
+  tts_enabled: boolean;                 // Text-to-Speech (SARA responde con audio)
+  voice_messages_enabled: boolean;      // Enviar mensajes de voz
+  retell_enabled: boolean;              // Llamadas telefónicas con IA (Retell.ai)
 
   // Operaciones
   outside_hours_responses: boolean;     // Respuestas fuera de horario
@@ -45,9 +50,14 @@ const DEFAULT_FLAGS: FeatureFlags = {
   email_reports_enabled: false,
   sentry_enabled: true,
 
-  audio_transcription_enabled: false,
+  audio_transcription_enabled: true,  // ✅ Activado - Transcribe notas de voz con Whisper
   auto_followups_enabled: true,
   broadcast_enabled: true,
+
+  // Features de Voz
+  tts_enabled: true,                  // ✅ Activado - SARA puede responder con audio
+  voice_messages_enabled: true,       // ✅ Activado - Enviar mensajes de voz
+  retell_enabled: false,              // ❌ Desactivado - Requiere API key de Retell.ai
 
   outside_hours_responses: true,
   smart_caching_enabled: true,
