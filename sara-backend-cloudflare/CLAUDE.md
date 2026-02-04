@@ -101,7 +101,9 @@ Busca estos comentarios antes de modificar:
 
 | Rol | Teléfono | Nombre | Acceso |
 |-----|----------|--------|--------|
-| **CEO/Admin** | 5214922019052 | Oscar Castelo | TODOS los comandos |
+| **Dueño/Dev** | **5610016226** | Edson | Teléfono principal para pruebas |
+| **Dueño/Dev** | **2224558475** | Edson | Teléfono secundario |
+| CEO/Admin | 5214922019052 | Oscar Castelo | TODOS los comandos |
 | Vendedor Test | 5212224558475 | Vendedor Test | Solo vendedor |
 | Asesor | 5214929272839 | Leticia Lara | Solo asesor (inactiva) |
 | Asesor Test | 5210000000001 | Asesor Crédito Test | Solo asesor (inactivo) |

@@ -659,6 +659,54 @@ export default {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // TEST TTS - Probar Text-to-Speech y envío de audio
+    // USO: /test-tts?phone=5610016226&texto=Hola%20esto%20es%20una%20prueba&api_key=XXX
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/test-tts" && request.method === "GET") {
+      try {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+
+        const phone = url.searchParams.get('phone') || '5610016226';
+        const texto = url.searchParams.get('texto') || 'Hola, soy SARA. Esta es una prueba del sistema de voz.';
+
+        if (!env.OPENAI_API_KEY) {
+          return corsResponse(JSON.stringify({ ok: false, error: 'OPENAI_API_KEY no configurado' }));
+        }
+
+        console.log(`🔊 TEST TTS: Iniciando para phone=${phone}, texto="${texto.substring(0, 30)}..."`);
+
+        const { createTTSService } = await import('./services/ttsService');
+        const tts = createTTSService(env.OPENAI_API_KEY);
+
+        const result = await tts.generateAudio(texto);
+        console.log(`🔊 TEST TTS: Resultado generateAudio:`, result.success, result.error || 'OK');
+
+        if (!result.success || !result.audioBuffer) {
+          return corsResponse(JSON.stringify({ ok: false, error: result.error || 'No se generó audio' }));
+        }
+
+        console.log(`✅ TEST TTS: Audio generado (${result.audioBuffer.byteLength} bytes)`);
+
+        const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+        const sendResult = await meta.sendVoiceMessage(phone, result.audioBuffer, result.mimeType || 'audio/ogg');
+        console.log(`✅ TEST TTS: Enviado a WhatsApp:`, JSON.stringify(sendResult).substring(0, 100));
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          phone,
+          texto_original: texto,
+          audio_bytes: result.audioBuffer.byteLength,
+          duracion_estimada: result.duration,
+          mensaje: 'Audio enviado por WhatsApp'
+        }));
+      } catch (e: any) {
+        console.error('❌ TEST TTS error:', e.message, e.stack);
+        return corsResponse(JSON.stringify({ ok: false, error: e.message, stack: e.stack?.substring(0, 500) }));
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // TEST COMANDO CEO - Probar comandos sin enviar WhatsApp
     // USO: /test-comando-ceo?cmd=ventas
     // ═══════════════════════════════════════════════════════════════════════
