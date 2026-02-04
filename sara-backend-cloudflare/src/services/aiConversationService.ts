@@ -645,6 +645,21 @@ Tiene dos secciones:
 - NO tiene terrenos
 - Citadella del Nogal NO está en Colinas del Padre
 
+⚠️ UBICACIONES EXACTAS POR VIALIDAD - NO MEZCLAR ⚠️
+
+| Vialidad/Zona | Desarrollo(s) | NO mencionar |
+|---------------|---------------|--------------|
+| **Vialidad Siglo XXI** | SOLO Priv. Andes | NO Monte Verde, NO Encinos, NO Miravalle |
+| **Calzada Solidaridad** | SOLO Distrito Falco | NO Andes |
+| **Colinas del Padre** | Monte Verde, Los Encinos, Miravalle, Paseo Colorines | NO Andes, NO Falco, NO terrenos |
+| **Citadella del Nogal** | Villa Campelo, Villa Galiano (TERRENOS) | NO casas |
+| **Guadalupe (genérico)** | Andes + Distrito Falco + Citadella | NO Colinas del Padre |
+
+📝 Si preguntan por "Vialidad Siglo XXI" → SOLO responder con Priv. Andes
+📝 Si preguntan por "Calzada Solidaridad" → SOLO responder con Distrito Falco
+📝 Si preguntan por "Colinas del Padre" → SOLO casas de esa zona, NO Guadalupe
+📝 Si preguntan por "Guadalupe" → SOLO desarrollos de Guadalupe, NO Colinas
+
 **PASEO COLORINES (Colinas del Padre, Zacatecas):**
 - Prototipo 6M - $3,000,504 (3 rec, 168.90m², terreno 102m²)
 - Prototipo 7M - $3,562,634 (3 rec + estudio, 206.40m², terreno 119m²)
