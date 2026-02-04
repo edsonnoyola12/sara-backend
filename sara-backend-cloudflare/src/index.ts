@@ -707,6 +707,90 @@ export default {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // TEST RETELL - Probar llamadas telefónicas con IA
+    // USO: /test-retell?phone=5610016226&nombre=Test&api_key=XXX
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/test-retell" && request.method === "GET") {
+      try {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+
+        // Verificar configuración
+        if (!env.RETELL_API_KEY || !env.RETELL_AGENT_ID || !env.RETELL_PHONE_NUMBER) {
+          return corsResponse(JSON.stringify({
+            ok: false,
+            error: 'Retell no configurado',
+            missing: {
+              RETELL_API_KEY: !env.RETELL_API_KEY,
+              RETELL_AGENT_ID: !env.RETELL_AGENT_ID,
+              RETELL_PHONE_NUMBER: !env.RETELL_PHONE_NUMBER
+            }
+          }));
+        }
+
+        const phone = url.searchParams.get('phone');
+        const nombre = url.searchParams.get('nombre') || 'Cliente Test';
+        const desarrollo = url.searchParams.get('desarrollo') || 'Monte Verde';
+
+        if (!phone) {
+          return corsResponse(JSON.stringify({
+            ok: false,
+            error: 'Falta parámetro phone',
+            uso: '/test-retell?phone=5215551234567&nombre=Juan&desarrollo=Monte Verde&api_key=XXX',
+            config: {
+              RETELL_API_KEY: '✅ Configurado',
+              RETELL_AGENT_ID: '✅ Configurado',
+              RETELL_PHONE_NUMBER: env.RETELL_PHONE_NUMBER
+            }
+          }));
+        }
+
+        console.log(`📞 TEST RETELL: Iniciando llamada a ${phone} (${nombre})`);
+
+        const { createRetellService } = await import('./services/retellService');
+        const retell = createRetellService(
+          env.RETELL_API_KEY,
+          env.RETELL_AGENT_ID,
+          env.RETELL_PHONE_NUMBER
+        );
+
+        // Verificar disponibilidad
+        if (!retell.isAvailable()) {
+          return corsResponse(JSON.stringify({
+            ok: false,
+            error: 'Servicio Retell no disponible'
+          }));
+        }
+
+        // Iniciar llamada
+        const result = await retell.initiateCall({
+          leadId: 'test-' + Date.now(),
+          leadName: nombre,
+          leadPhone: phone,
+          desarrolloInteres: desarrollo,
+          precioDesde: '$1.5 millones',
+          motivo: 'seguimiento'
+        });
+
+        console.log(`📞 TEST RETELL: Resultado:`, JSON.stringify(result));
+
+        return corsResponse(JSON.stringify({
+          ok: result.success,
+          phone,
+          nombre,
+          desarrollo,
+          callId: result.callId,
+          status: result.status,
+          error: result.error,
+          from_number: env.RETELL_PHONE_NUMBER
+        }));
+      } catch (e: any) {
+        console.error('❌ TEST RETELL error:', e.message, e.stack);
+        return corsResponse(JSON.stringify({ ok: false, error: e.message }));
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // TEST COMANDO CEO - Probar comandos sin enviar WhatsApp
     // USO: /test-comando-ceo?cmd=ventas
     // ═══════════════════════════════════════════════════════════════════════
