@@ -119,7 +119,10 @@ import {
   seguimientoCredito,
   procesarBroadcastQueue,
   followUp24hLeadsNuevos,
-  reminderDocumentosCredito
+  reminderDocumentosCredito,
+  llamadasSeguimientoPostVisita,
+  llamadasReactivacionLeadsFrios,
+  llamadasRecordatorioCita
 } from './crons/followups';
 
 // Lead Scoring y Objeciones
@@ -201,7 +204,11 @@ export interface Env {
   // Email reports
   RESEND_API_KEY?: string; // API key de Resend para enviar emails
   REPORT_TO_EMAILS?: string; // Emails destino separados por coma
-  OPENAI_API_KEY?: string; // Para transcripción de audio (Whisper)
+  OPENAI_API_KEY?: string; // Para transcripción de audio (Whisper) y TTS
+  // Retell.ai - Llamadas telefónicas con IA
+  RETELL_API_KEY?: string; // API key de Retell.ai
+  RETELL_AGENT_ID?: string; // ID del agente SARA en Retell
+  RETELL_PHONE_NUMBER?: string; // Número de teléfono para llamadas salientes
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -6209,6 +6216,23 @@ Mensaje: ${mensaje}`;
                 if (transcription.success && transcription.text) {
                   console.log(`✅ Audio transcrito: "${transcription.text.substring(0, 100)}..."`);
 
+                  // Marcar en el lead que el último mensaje fue audio (para TTS en respuesta)
+                  const cleanPhoneAudio = from.replace(/\D/g, '');
+                  const { data: leadForAudio } = await supabase.client
+                    .from('leads')
+                    .select('id, notes')
+                    .or(`phone.eq.${cleanPhoneAudio},phone.like.%${cleanPhoneAudio.slice(-10)}`)
+                    .maybeSingle();
+
+                  if (leadForAudio) {
+                    const notesAudio = typeof leadForAudio.notes === 'object' ? leadForAudio.notes : {};
+                    await supabase.client
+                      .from('leads')
+                      .update({ notes: { ...notesAudio, last_message_was_audio: true } })
+                      .eq('id', leadForAudio.id);
+                    console.log('🎤 Marcado: último mensaje fue audio (TTS activado para respuesta)');
+                  }
+
                   // Procesar el texto transcrito como si fuera un mensaje normal
                   const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
                   await handler.handleIncomingMessage(`whatsapp:+${from}`, transcription.text, env);
@@ -6611,6 +6635,403 @@ Mensaje: ${mensaje}`;
         return new Response('OK', { status: 200 });
       } catch (error) {
         console.error('Facebook Leads Webhook Error:', error);
+        return new Response('OK', { status: 200 });
+      }
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // Retell.ai - Pre-Call Lookup (buscar lead antes de contestar)
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/webhook/retell/lookup' && request.method === 'POST') {
+      try {
+        const body = await request.json() as any;
+        console.log(`📞 RETELL LOOKUP: Buscando lead para llamada...`, JSON.stringify(body));
+
+        // Retell envía el número del que llama en from_number
+        const callerPhone = body.from_number?.replace('+', '') || body.to_number?.replace('+', '');
+
+        if (!callerPhone) {
+          console.log('📞 RETELL LOOKUP: No se recibió número de teléfono');
+          return new Response(JSON.stringify({
+            lead_name: '',
+            is_new_lead: 'true',
+            greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. ¿Con quién tengo el gusto?'
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        // Buscar lead en base de datos
+        const { data: lead } = await supabase.client
+          .from('leads')
+          .select('id, name, phone, status, notes, assigned_to')
+          .or(`phone.eq.${callerPhone},phone.like.%${callerPhone.slice(-10)}`)
+          .maybeSingle();
+
+        if (lead && lead.name) {
+          // Lead conocido - saludar por nombre
+          const nombre = lead.name.split(' ')[0]; // Solo primer nombre
+          console.log(`📞 RETELL LOOKUP: Lead encontrado - ${lead.name} (${callerPhone})`);
+
+          // Buscar desarrollo de interés si existe
+          let desarrolloInteres = '';
+          if (lead.notes) {
+            const notesStr = typeof lead.notes === 'string' ? lead.notes : JSON.stringify(lead.notes);
+            const matchDesarrollo = notesStr.match(/desarrollo[:\s]*([\w\s]+)/i);
+            if (matchDesarrollo) desarrolloInteres = matchDesarrollo[1].trim();
+          }
+
+          return new Response(JSON.stringify({
+            lead_name: nombre,
+            lead_full_name: lead.name,
+            lead_id: lead.id,
+            is_new_lead: 'false',
+            desarrollo_interes: desarrolloInteres,
+            greeting: `¡Hola ${nombre}! Qué gusto escucharte de nuevo. Soy Sara de Grupo Santa Rita. ¿En qué te puedo ayudar hoy?`
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        } else {
+          // Lead nuevo - pedir nombre
+          console.log(`📞 RETELL LOOKUP: Número nuevo - ${callerPhone}`);
+          return new Response(JSON.stringify({
+            lead_name: '',
+            is_new_lead: 'true',
+            greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. ¿Con quién tengo el gusto?'
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+      } catch (error) {
+        console.error('❌ Retell Lookup Error:', error);
+        return new Response(JSON.stringify({
+          lead_name: '',
+          is_new_lead: 'true',
+          greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. ¿Con quién tengo el gusto?'
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Webhook Retell.ai - Eventos de llamadas telefónicas con IA
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/webhook/retell' && request.method === 'POST') {
+      try {
+        const body = await request.json() as any;
+        console.log(`📞 RETELL WEBHOOK: Evento ${body.event} recibido`);
+
+        const { event, call } = body;
+
+        if (!call || !call.call_id) {
+          console.error('❌ Retell webhook: evento inválido (sin call_id)');
+          return new Response('OK', { status: 200 });
+        }
+
+        // Procesar evento según tipo
+        if (event === 'call_started') {
+          const isInbound = call.direction === 'inbound';
+          const leadPhone = isInbound
+            ? call.from_number?.replace('+', '')
+            : call.to_number?.replace('+', '');
+
+          console.log(`📞 Llamada ${isInbound ? 'ENTRANTE' : 'SALIENTE'} iniciada: ${call.call_id} ${isInbound ? '←' : '→'} ${leadPhone}`);
+
+          // Buscar lead existente
+          const { data: lead } = await supabase.client
+            .from('leads')
+            .select('*, team_members!leads_assigned_to_fkey(phone, name)')
+            .or(`phone.eq.${leadPhone},phone.like.%${leadPhone?.slice(-10)}`)
+            .maybeSingle();
+
+          if (lead?.team_members) {
+            const vendedorPhone = (lead.team_members as any).phone;
+            const vendedorName = (lead.team_members as any).name;
+            const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+            if (isInbound) {
+              // Llamada entrante: el lead nos está llamando
+              await meta.sendWhatsAppMessage(vendedorPhone,
+                `📞📥 ${lead.name || leadPhone} está LLAMANDO a SARA...\n` +
+                `La IA está atendiendo la llamada.`
+              );
+            } else {
+              // Llamada saliente: nosotros llamamos al lead
+              await meta.sendWhatsAppMessage(vendedorPhone,
+                `📞📤 SARA está llamando a ${lead.name || leadPhone}...`
+              );
+            }
+          } else if (isInbound) {
+            // Llamada entrante de número desconocido
+            console.log(`📞 Llamada entrante de número nuevo: ${leadPhone}`);
+          }
+        }
+
+        if (event === 'call_ended' || event === 'call_analyzed') {
+          // Intentar guardar en call_logs (si la tabla existe)
+          try {
+            // Para llamadas ENTRANTES, el lead llama a nosotros (from_number es el lead)
+            // Para llamadas SALIENTES, nosotros llamamos al lead (to_number es el lead)
+            const isInbound = call.direction === 'inbound';
+            const leadPhone = isInbound
+              ? call.from_number?.replace('+', '')
+              : call.to_number?.replace('+', '');
+
+            let { data: lead } = await supabase.client
+              .from('leads')
+              .select('id, assigned_to, name')
+              .or(`phone.eq.${leadPhone},phone.like.%${leadPhone?.slice(-10)}`)
+              .maybeSingle();
+
+            // Si es llamada ENTRANTE y NO existe el lead, CREARLO
+            if (isInbound && !lead && leadPhone) {
+              console.log(`📞 Llamada entrante de número nuevo: ${leadPhone} - Creando lead...`);
+
+              // Extraer nombre del análisis de la llamada si está disponible
+              const nombreFromCall = call.call_analysis?.custom_analysis?.lead_name ||
+                                     call.metadata?.lead_name ||
+                                     'Lead Telefónico';
+
+              // Buscar vendedor disponible para asignar (round-robin)
+              const { data: vendedores } = await supabase.client
+                .from('team_members')
+                .select('id')
+                .eq('role', 'vendedor')
+                .eq('active', true)
+                .limit(5);
+
+              const vendedorId = vendedores && vendedores.length > 0
+                ? vendedores[Math.floor(Math.random() * vendedores.length)].id
+                : null;
+
+              // Extraer datos del análisis de la llamada
+              const desarrolloInteres = call.call_analysis?.custom_analysis?.desarrollo_interes ||
+                                        call.metadata?.desarrollo || null;
+              const presupuesto = call.call_analysis?.custom_analysis?.presupuesto || null;
+              const tipoCredito = call.call_analysis?.custom_analysis?.tipo_credito || null;
+
+              const { data: nuevoLead, error: createError } = await supabase.client
+                .from('leads')
+                .insert({
+                  name: nombreFromCall,
+                  phone: leadPhone,
+                  source: 'phone_inbound',
+                  status: 'new',
+                  assigned_to: vendedorId,
+                  property_interest: desarrolloInteres,
+                  notes: {
+                    notas: [{
+                      text: `📞 Lead creado desde llamada telefónica entrante`,
+                      author: 'SARA (Retell)',
+                      timestamp: new Date().toISOString(),
+                      type: 'system'
+                    }],
+                    presupuesto: presupuesto,
+                    tipo_credito: tipoCredito,
+                    primera_llamada: new Date().toISOString()
+                  },
+                  created_at: new Date().toISOString()
+                })
+                .select('id, assigned_to, name')
+                .single();
+
+              if (nuevoLead) {
+                lead = nuevoLead;
+                console.log(`✅ Lead creado desde llamada: ${nuevoLead.id} - ${nombreFromCall}`);
+
+                // Notificar al vendedor asignado
+                if (vendedorId) {
+                  const { data: vendedor } = await supabase.client
+                    .from('team_members')
+                    .select('phone, name')
+                    .eq('id', vendedorId)
+                    .single();
+
+                  if (vendedor?.phone) {
+                    const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+                    await meta.sendWhatsAppMessage(vendedor.phone,
+                      `🆕📞 NUEVO LEAD POR TELÉFONO\n\n` +
+                      `👤 ${nombreFromCall}\n` +
+                      `📱 ${leadPhone}\n` +
+                      `🏠 Interés: ${desarrolloInteres || 'Por definir'}\n` +
+                      `💰 Presupuesto: ${presupuesto || 'Por definir'}\n\n` +
+                      `La llamada ya terminó. Te recomiendo dar seguimiento por WhatsApp.`
+                    );
+                  }
+                }
+              } else if (createError) {
+                console.error('❌ Error creando lead desde llamada:', createError);
+              }
+            }
+
+            await supabase.client.from('call_logs').insert({
+              call_id: call.call_id,
+              lead_id: lead?.id || null,
+              lead_phone: isInbound ? call.from_number : call.to_number,
+              vendor_id: lead?.assigned_to || call.metadata?.vendor_id || null,
+              duration_seconds: call.duration_ms ? Math.round(call.duration_ms / 1000) : null,
+              transcript: call.transcript || null,
+              summary: call.call_analysis?.summary || null,
+              sentiment: call.call_analysis?.sentiment || null,
+              outcome: call.call_analysis?.call_successful ? 'successful' : 'unknown',
+              created_at: new Date().toISOString()
+            });
+
+            console.log(`✅ Call log guardado: ${call.call_id}`);
+
+            // Agregar nota al lead
+            if (lead) {
+              const durationMin = call.duration_ms ? Math.round(call.duration_ms / 60000) : 0;
+              const sentimentEmoji = call.call_analysis?.sentiment === 'positive' ? '😊' :
+                                     call.call_analysis?.sentiment === 'negative' ? '😟' : '😐';
+
+              let nota = `📞 Llamada IA (${durationMin}min) ${sentimentEmoji}`;
+              if (call.call_analysis?.summary) {
+                nota += `: ${call.call_analysis.summary.substring(0, 200)}`;
+              }
+
+              const { data: existingLead } = await supabase.client
+                .from('leads')
+                .select('notes')
+                .eq('id', lead.id)
+                .single();
+
+              let notesObj = existingLead?.notes || {};
+              if (typeof notesObj === 'string') {
+                try { notesObj = JSON.parse(notesObj); } catch { notesObj = {}; }
+              }
+              const notasArray = notesObj.notas || [];
+              notasArray.push({
+                text: nota,
+                author: 'SARA (Retell)',
+                timestamp: new Date().toISOString(),
+                type: 'call'
+              });
+              notesObj.notas = notasArray;
+
+              await supabase.client.from('leads').update({ notes: notesObj }).eq('id', lead.id);
+              console.log(`📝 Nota de llamada agregada a lead ${lead.id}`);
+            }
+
+            // Notificar al vendedor
+            if (lead?.assigned_to) {
+              const { data: vendedor } = await supabase.client
+                .from('team_members')
+                .select('phone, name')
+                .eq('id', lead.assigned_to)
+                .single();
+
+              if (vendedor?.phone) {
+                const durationMin = call.duration_ms ? Math.round(call.duration_ms / 60000) : 0;
+                const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+                let mensaje = `📞 Llamada IA completada con ${lead.name || (isInbound ? call.from_number : call.to_number)}\n`;
+                mensaje += `⏱️ Duración: ${durationMin} minutos\n`;
+                if (call.call_analysis?.summary) {
+                  mensaje += `📝 Resumen: ${call.call_analysis.summary.substring(0, 300)}`;
+                }
+                await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+              }
+            }
+
+            // ═══════════════════════════════════════════════════════════════
+            // SEGUIMIENTO AUTOMÁTICO POR WHATSAPP AL LEAD
+            // Enviar mensaje + brochure + GPS después de la llamada
+            // ═══════════════════════════════════════════════════════════════
+            if (leadPhone && call.duration_ms && call.duration_ms > 30000) {
+              // Solo si la llamada duró más de 30 segundos (no fue colgada inmediatamente)
+              try {
+                const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+                const desarrolloInteres = call.call_analysis?.custom_analysis?.desarrollo_interes ||
+                                          call.metadata?.desarrollo ||
+                                          lead?.property_interest;
+
+                // 1. Mensaje de agradecimiento
+                let mensajeFollowUp = `¡Hola${lead?.name ? ' ' + lead.name.split(' ')[0] : ''}! 👋\n\n`;
+                mensajeFollowUp += `Gracias por tu llamada con Grupo Santa Rita. `;
+
+                if (desarrolloInteres) {
+                  mensajeFollowUp += `Me da gusto que te interese ${desarrolloInteres}. `;
+                }
+
+                mensajeFollowUp += `\n\nTe comparto información por este medio para que la revises con calma. `;
+                mensajeFollowUp += `Si tienes dudas, aquí estoy para ayudarte. 🏠`;
+
+                await meta.sendWhatsAppMessage(leadPhone, mensajeFollowUp);
+                console.log(`📱 WhatsApp de seguimiento enviado a ${leadPhone}`);
+
+                // 2. Enviar brochure si hay desarrollo de interés
+                if (desarrolloInteres) {
+                  // Buscar el desarrollo en properties para obtener brochure y GPS
+                  const desarrolloNormalizado = desarrolloInteres.toLowerCase()
+                    .replace('priv.', 'privada')
+                    .replace('priv ', 'privada ')
+                    .trim();
+
+                  const { data: property } = await supabase.client
+                    .from('properties')
+                    .select('name, brochure_url, gps_url, price_min, price_max')
+                    .or(`name.ilike.%${desarrolloNormalizado}%,development.ilike.%${desarrolloNormalizado}%`)
+                    .limit(1)
+                    .maybeSingle();
+
+                  if (property) {
+                    // Enviar brochure si existe
+                    if (property.brochure_url) {
+                      await new Promise(resolve => setTimeout(resolve, 2000)); // Esperar 2s
+                      await meta.sendWhatsAppDocument(
+                        leadPhone,
+                        property.brochure_url,
+                        `📄 Brochure ${property.name || desarrolloInteres}`
+                      );
+                      console.log(`📄 Brochure enviado: ${property.name}`);
+                    }
+
+                    // Enviar GPS si existe
+                    if (property.gps_url) {
+                      await new Promise(resolve => setTimeout(resolve, 2000)); // Esperar 2s
+                      await meta.sendWhatsAppMessage(
+                        leadPhone,
+                        `📍 Aquí te dejo la ubicación de ${property.name || desarrolloInteres}:\n${property.gps_url}`
+                      );
+                      console.log(`📍 GPS enviado: ${property.name}`);
+                    }
+                  }
+                }
+
+                // 3. Actualizar lead para marcar que recibió seguimiento post-llamada
+                if (lead?.id) {
+                  await supabase.client
+                    .from('leads')
+                    .update({
+                      last_contact_at: new Date().toISOString(),
+                      status: lead.status === 'new' ? 'contacted' : lead.status
+                    })
+                    .eq('id', lead.id);
+                }
+
+              } catch (whatsappError) {
+                console.error('Error enviando WhatsApp de seguimiento:', whatsappError);
+                // No fallar el webhook por error de WhatsApp
+              }
+            }
+          } catch (dbError: any) {
+            // Si la tabla call_logs no existe, solo loguear
+            console.log(`📞 Llamada ${call.call_id} procesada (tabla call_logs no existe, solo log)`);
+            if (!dbError.message?.includes('does not exist')) {
+              console.error('Error guardando call log:', dbError);
+            }
+          }
+        }
+
+        return new Response('OK', { status: 200 });
+      } catch (error) {
+        console.error('Retell Webhook Error:', error);
         return new Response('OK', { status: 200 });
       }
     }
@@ -16816,6 +17237,31 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
     if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek === 6) {
       console.log('🔧 Enviando check-in de mantenimiento...');
       await checkInMantenimiento(supabase, meta);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // LLAMADAS AUTOMÁTICAS CON IA (Retell.ai)
+    // ═══════════════════════════════════════════════════════════
+
+    // LLAMADAS POST-VISITA: Diario 11am L-V
+    // Seguimiento a leads que visitaron hace 1 día
+    if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('📞 Ejecutando llamadas de seguimiento post-visita...');
+      await llamadasSeguimientoPostVisita(supabase, meta, env);
+    }
+
+    // LLAMADAS REACTIVACIÓN: Martes y Jueves 10am
+    // Reactivar leads fríos (7+ días sin respuesta)
+    if (mexicoHour === 10 && isFirstRunOfHour && (dayOfWeek === 2 || dayOfWeek === 4)) {
+      console.log('📞 Ejecutando llamadas de reactivación leads fríos...');
+      await llamadasReactivacionLeadsFrios(supabase, meta, env);
+    }
+
+    // LLAMADAS RECORDATORIO CITA: Diario 5pm L-V
+    // Recordar citas del día siguiente
+    if (mexicoHour === 17 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('📞 Ejecutando llamadas de recordatorio de cita...');
+      await llamadasRecordatorioCita(supabase, meta, env);
     }
 
     // ═══════════════════════════════════════════════════════════

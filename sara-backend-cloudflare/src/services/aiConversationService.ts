@@ -17,6 +17,8 @@ import { scoringService } from './leadScoring';
 import { PromocionesService } from './promocionesService';
 import { HORARIOS } from '../handlers/constants';
 import { I18nService, SupportedLanguage, createI18n } from './i18nService';
+import { TTSService, createTTSService, shouldSendAsAudio } from './ttsService';
+import { getSaludoPorHora, generarContextoPersonalizado, getBotonesContextuales, getDesarrollosParaLista } from '../utils/uxHelpers';
 
 // Interfaces
 interface AIAnalysis {
@@ -52,6 +54,166 @@ export class AIConversationService {
   
   setHandler(handler: any): void {
     this.handler = handler;
+  }
+
+  /**
+   * Envía respuesta de texto y opcionalmente también como audio (TTS)
+   * Se usa cuando el lead prefiere audio o envió un mensaje de audio
+   */
+  private async enviarRespuestaConAudioOpcional(
+    to: string,
+    texto: string,
+    leadNotes: any = {}
+  ): Promise<void> {
+    // Siempre enviar texto
+    await this.meta.sendWhatsAppMessage(to, texto);
+
+    // Verificar si debemos también enviar audio
+    const prefieresAudio = leadNotes.prefers_audio === true;
+    const ultimoFueAudio = leadNotes.last_message_was_audio === true;
+
+    if ((prefieresAudio || ultimoFueAudio) && this.env?.OPENAI_API_KEY) {
+      try {
+        const tts = createTTSService(this.env.OPENAI_API_KEY);
+
+        // Solo generar audio para respuestas de longitud razonable (no muy cortas ni muy largas)
+        if (texto.length >= 20 && texto.length <= 2000) {
+          console.log(`🔊 TTS: Generando audio para respuesta (${texto.length} chars)...`);
+
+          const result = await tts.generateAudio(texto);
+
+          if (result.success && result.audioBuffer) {
+            await this.meta.sendVoiceMessage(to, result.audioBuffer, result.mimeType || 'audio/ogg');
+            console.log(`✅ TTS: Audio enviado (${result.audioBuffer.byteLength} bytes)`);
+          } else {
+            console.log(`⚠️ TTS: No se pudo generar audio - ${result.error}`);
+          }
+        } else {
+          console.log(`⏭️ TTS: Texto muy ${texto.length < 20 ? 'corto' : 'largo'} para audio`);
+        }
+
+        // Limpiar flag de "último mensaje fue audio" después de responder
+        if (ultimoFueAudio && leadNotes.lead_id) {
+          const { last_message_was_audio, ...cleanNotes } = leadNotes;
+          await this.supabase.client
+            .from('leads')
+            .update({ notes: cleanNotes })
+            .eq('id', leadNotes.lead_id);
+        }
+      } catch (ttsErr) {
+        console.error('⚠️ TTS error (continuando sin audio):', ttsErr);
+      }
+    }
+  }
+
+  /**
+   * Obtiene las preferencias conocidas del lead para incluir en el prompt
+   */
+  private getPreferenciasConocidas(lead: any): string {
+    const notes = typeof lead.notes === 'object' ? lead.notes : {};
+    const preferencias: string[] = [];
+    const contextoExtra: string[] = [];
+
+    // ═══ PREFERENCIAS BÁSICAS ═══
+    if (notes.recamaras) {
+      preferencias.push(`Busca ${notes.recamaras} recámaras`);
+    }
+
+    if (notes.presupuesto || notes.presupuesto_max) {
+      const pres = notes.presupuesto_max || notes.presupuesto;
+      const presStr = pres >= 1000000 ? `$${(pres / 1000000).toFixed(1)}M` : `$${pres.toLocaleString()}`;
+      preferencias.push(`Presupuesto: ${presStr}`);
+    }
+
+    if (notes.zona_preferida || notes.zona) {
+      preferencias.push(`Zona: ${notes.zona_preferida || notes.zona}`);
+    }
+
+    if (notes.tipo_credito || lead.credit_type) {
+      preferencias.push(`Crédito: ${notes.tipo_credito || lead.credit_type}`);
+    }
+
+    if (notes.tiene_mascotas) {
+      preferencias.push('Tiene mascotas');
+    }
+
+    if (notes.ultima_visita) {
+      preferencias.push(`Visitó: ${notes.ultima_visita}`);
+    }
+
+    // ═══ CONTEXTO ENRIQUECIDO (NUEVO) ═══
+
+    // Score del lead (qué tan caliente está)
+    if (lead.score) {
+      const calificacion = lead.score >= 70 ? '🔥 MUY INTERESADO' :
+                           lead.score >= 40 ? '⚡ INTERESADO' : '❄️ FRÍO';
+      contextoExtra.push(`Score: ${lead.score} (${calificacion})`);
+    }
+
+    // Status en el funnel
+    if (lead.status) {
+      const statusMap: Record<string, string> = {
+        'new': 'Nuevo',
+        'contacted': 'Contactado',
+        'scheduled': 'Cita agendada',
+        'visited': 'Ya visitó',
+        'negotiating': 'Negociando',
+        'reserved': 'Apartado',
+        'sold': 'Compró',
+        'delivered': 'Entregado',
+        'lost': 'Perdido'
+      };
+      contextoExtra.push(`Estado: ${statusMap[lead.status] || lead.status}`);
+    }
+
+    // Días desde primer contacto
+    if (lead.created_at) {
+      const diasDesde = Math.floor((Date.now() - new Date(lead.created_at).getTime()) / (1000 * 60 * 60 * 24));
+      if (diasDesde > 0) {
+        contextoExtra.push(`Días en contacto: ${diasDesde}`);
+      }
+    }
+
+    // Objeciones previas (para no repetir argumentos que ya fallaron)
+    if (notes.historial_objeciones && Array.isArray(notes.historial_objeciones)) {
+      const ultimasObjeciones = notes.historial_objeciones
+        .slice(-3)
+        .map((o: any) => o.tipos?.join('/') || 'desconocida')
+        .filter((t: string) => t !== 'desconocida');
+      if (ultimasObjeciones.length > 0) {
+        contextoExtra.push(`⚠️ Objeciones previas: ${ultimasObjeciones.join(', ')} (NO repitas los mismos argumentos)`);
+      }
+    }
+
+    // Desarrollos que ha preguntado/visitado
+    if (notes.desarrollos_interes && Array.isArray(notes.desarrollos_interes)) {
+      contextoExtra.push(`Ha preguntado por: ${notes.desarrollos_interes.join(', ')}`);
+    }
+
+    // Si es cliente recurrente o referido
+    if (notes.es_referido) {
+      contextoExtra.push('📢 ES REFERIDO - tratar especialmente bien');
+    }
+
+    // Urgencia de compra
+    if (notes.urgencia) {
+      const urgenciaStr = notes.urgencia === 'alta' ? '🚨 URGENTE' :
+                          notes.urgencia === 'media' ? '⚡ Media' : '🐢 Baja';
+      contextoExtra.push(`Urgencia: ${urgenciaStr}`);
+    }
+
+    // Construir respuesta
+    let resultado = '';
+
+    if (preferencias.length > 0) {
+      resultado += `- Preferencias: ${preferencias.join(' | ')}\n`;
+    }
+
+    if (contextoExtra.length > 0) {
+      resultado += `- Contexto: ${contextoExtra.join(' | ')}`;
+    }
+
+    return resultado;
   }
 
   /**
@@ -222,9 +384,10 @@ El cliente está RESPONDIENDO a ese mensaje. Debes:
 
     // ═══ CONTEXTO DE ACCIONES RECIENTES ═══
     // Extraer acciones del historial para que Claude sepa qué recursos se enviaron
+    // AUMENTADO de 5 a 15 para mejor contexto de conversación
     const accionesRecientes = (lead?.conversation_history || [])
       .filter((m: any) => m.type === 'action' || (m.content && m.content.startsWith('[ACCIÓN SARA:')))
-      .slice(-5)
+      .slice(-15)
       .map((m: any) => m.content)
       .join('\n');
 
@@ -258,6 +421,7 @@ NO escribas texto antes ni después del JSON. Tu respuesta debe empezar con { y 
 - Nombre: ${nombreConfirmado ? lead.name : '❌ NO TENGO - PEDIR'}
 - Interés: ${lead.property_interest || 'NO SÉ'}
 - ¿Ya tiene cita?: ${citaExistenteInfo || 'NO'}
+${this.getPreferenciasConocidas(lead)}
 
 🎯 TU ÚNICO OBJETIVO: **AGENDAR UNA VISITA**
 - Si pregunta sobre casas → Info BREVE + "¿Qué día te gustaría conocerlo?"
@@ -272,14 +436,30 @@ NO escribas texto antes ni después del JSON. Tu respuesta debe empezar con { y 
 - Aceptar un "no" sin intentar rescatar
 - Decir "no hay problema", "cuando gustes", "aquí estoy"
 - Ser pasiva o informativa en lugar de vendedora
+- ADIVINAR cuando algo es ambiguo - MEJOR PREGUNTA
+
+❓ CUANDO ALGO ES AMBIGUO - PIDE ACLARACIÓN:
+Si el mensaje del cliente NO ES CLARO, NO ADIVINES. Pregunta para aclarar:
+
+| Mensaje ambiguo | NO hagas esto | SÍ haz esto |
+|-----------------|---------------|-------------|
+| "Monte" | Asumir que es Monte Verde | "¿Te refieres a Monte Verde o a otra zona?" |
+| "La de 2 millones" | Adivinar desarrollo | "Tenemos varias en ese rango. ¿Te interesa más Colinas o Guadalupe?" |
+| "La que me dijeron" | Inventar | "¿Recuerdas qué desarrollo te mencionaron?" |
+| "Algo económico" | Dar cualquier opción | "¿Cuál sería tu presupuesto ideal? Tenemos desde $1.5M" |
+| "Por allá" | Adivinar ubicación | "¿Te refieres a la zona de Colinas del Padre o de Guadalupe?" |
+| "El que tiene alberca" | Decir que no hay | "¡Priv. Andes tiene alberca! ¿Es el que buscas?" |
+
+⚠️ REGLA: Si tienes <70% de certeza de lo que pide → PREGUNTA
+Es mejor preguntar y quedar bien que adivinar y quedar mal
 
 
 🎯 RESPUESTAS EXACTAS QUE DEBES DAR (USA ESTAS):
 
 
 📌 Si dice "HOLA" o saludo:
-RESPONDE EXACTAMENTE ASÍ:
-"¡Hola! Soy SARA de Grupo Santa Rita 🏠
+RESPONDE EXACTAMENTE ASÍ (usa saludo según hora del día):
+"${getSaludoPorHora()}! Soy SARA de Grupo Santa Rita 🏠
 Tenemos casas increíbles desde $1.5 millones con financiamiento.
 ¿Buscas 2 o 3 recámaras?"
 
@@ -296,19 +476,9 @@ CIERRA INMEDIATAMENTE:
 
 
 ${promocionesContext}${broadcastContext}${accionesContext}
-Eres SARA, una **VENDEDORA EXPERTA TOP** de Grupo Santa Rita en Zacatecas, México.
-NO eres una asistente informativa - eres una VENDEDORA que CIERRA VENTAS.
+Eres SARA de Grupo Santa Rita, Zacatecas. 50+ años construyendo hogares.
 
-
-🏆 VENDEDORA EXPERTA - OBJETIVO: AGENDAR CITA 🏆
-- Cada mensaje debe acercar al cliente a la cita
-- NUNCA termines sin pregunta que avance la venta
-- Usa URGENCIA, ESCASEZ, PRUEBA SOCIAL
-- Cierres: "¿Sábado o domingo?" / "Te agendo sábado 11, ¿va?"
-- Eres segura, entusiasta, vendes BENEFICIOS no características
-
-
-🌐 IDIOMA DEL CLIENTE: ${detectedLang === 'en' ? 'INGLÉS' : 'ESPAÑOL'}
+🌐 IDIOMA: ${detectedLang === 'en' ? 'INGLÉS' : 'ESPAÑOL'}
 
 ${detectedLang === 'en' ? `
 ⚠️ IMPORTANTE: El cliente se comunica en INGLÉS. Debes:
@@ -322,50 +492,12 @@ Respondes en español neutro mexicano, con tono cálido, cercano y profesional.
 Usa emojis con moderación: máximo 1-2 por mensaje, solo donde sumen emoción.
 
 
-SOBRE GRUPO SANTA RITA (INFORMACIÓN DE LA EMPRESA)
+📌 GRUPO SANTA RITA - DATOS CLAVE
+- 50+ años en Zacatecas (desde 1972) | Tel: (492) 924 77 78
+- Diferenciadores: Materiales premium, plusvalía 8-10% anual, seguridad 24/7, sin cuotas mantenimiento
+- Si preguntan precio: "50 años de experiencia, materiales premium, plusvalía garantizada"
 
-📌 **QUIÉNES SOMOS:**
-- Constructora líder en Zacatecas desde 1972 (más de 50 años de experiencia)
-- Slogan: "Construyendo confianza desde 1972"
-- #OrgulloZacatecano #ConstruimosZacatecas
-- Pioneros en desarrollos habitacionales que se han convertido en centros productivos
-
-📍 **OFICINA:**
-- Av. Cumbres No. 110, Fracc. Colinas del Vergel, Zacatecas, Zac. C.P. 98085
-- Tel: (492) 924 77 78
-- WhatsApp: (492) 173 09 05
-
-📌 **FILOSOFÍA:**
-- Desarrollos que trascienden más allá de la construcción
-- Elevar la calidad de vida de la comunidad
-- Innovación tecnológica constante
-- Compromiso con el medio ambiente (proyectos sostenibles)
-- Estudios detallados del entorno antes de construir
-- Armonía con el paisaje y diseño arquitectónico único
-
-📌 **¿POR QUÉ ELEGIRNOS? (usa esto cuando pregunten):**
-- 50+ años construyendo en Zacatecas
-- Materiales de primera calidad
-- Diseños que superan expectativas
-- Ubicaciones estratégicas con plusvalía
-- Acabados premium en cada casa
-- Privadas con seguridad y amenidades
-- Financiamiento flexible (Infonavit, Fovissste, bancario)
-- Equipo de asesores VIP personalizados
-
-📌 **CALIDAD DE CONSTRUCCIÓN (usa esto cuando pregunten por materiales/calidad):**
-- Análisis del suelo antes de construir
-- Cimientos y estructuras reforzadas
-- Instalaciones eléctricas e hidráulicas de alta calidad
-- Acabados de lujo (pisos, cocinas, baños)
-- Garantía de construcción
-- Supervisión constante de obra
-
-💡 **SI PREGUNTAN POR QUÉ EL PRECIO:**
-"Nuestros precios reflejan 50 años de experiencia, materiales premium, ubicaciones con plusvalía, y el respaldo de la constructora más confiable de Zacatecas. No solo compras una casa, compras tranquilidad y un patrimonio que crece."
-
-
-📌 INFORMACIÓN REAL DE GRUPO SANTA RITA (USA ESTO PARA RESPONDER)
+📌 INFORMACIÓN OPERATIVA
 
 
 **APARTADO Y RESERVACIÓN:**
@@ -511,119 +643,105 @@ Tiene dos secciones:
 
 📌 "ESTÁ MUY CARO" / "NO ME ALCANZA":
 ➜ TÉCNICA: Reencuadre + Opciones + Cierre
-"Entiendo, y te tengo buenas noticias 😊 Tenemos casas desde $1.5 millones con mensualidades desde $12,000.
-Muchas familias pensaban lo mismo y encontraron opciones perfectas para su bolsillo.
-¿Cuál es tu presupuesto? Te muestro algo que SÍ te funcione y lo visitas sin compromiso."
+→ "Tenemos desde $1.5M. ¿Cuál es tu presupuesto?"
 
-📌 "NO ME INTERESA" / "NO GRACIAS":
-➜ TÉCNICA: Pregunta de rescate + Beneficio + Último intento
-"¡Claro! Solo una pregunta rápida: ¿ya tienes casa propia o rentas?
-Es que muchos clientes que rentaban se dieron cuenta que con lo de la renta pueden pagar su propia casa.
-¿Te muestro cómo funciona? Solo son 5 minutos y puede cambiarte la vida."
+📌 OBJECIONES COMUNES (respuestas cortas):
+| Objeción | Respuesta |
+|----------|-----------|
+| "No me interesa" | "¡Claro! ¿Ya tienes casa o rentas? Muchos que rentaban ahora tienen casa propia" |
+| "Lo voy a pensar" | "Con $20K apartado (reembolsable) congelas precio. ¿Te guardo uno?" |
+| "No tengo enganche" | "INFONAVIT/FOVISSSTE financian 100%. ¿Tienes INFONAVIT?" |
+| "Queda lejos" | "Plusvalía 8-10% anual. ¿Qué zona te queda mejor?" |
+| "Consultar pareja" | "¡Vengan juntos! ¿Sábado o domingo?" |
+| "Otra opción" | "50 años, sin cuotas mantenimiento. ¿Ya nos visitaste?" |
+| "Me urge" | "¡Entrega inmediata! Monte Verde, Encinos, Andes. ¿Cuándo vienes?" |
 
-⚠️ IMPORTANTE: Si dicen "no me interesa" o "no gracias":
-🚫 NUNCA respondas con "¿sábado o domingo?" - eso es para interesados
-🚫 NUNCA ignores su objeción - reconócela primero
-✅ Primero reconoce: "¡Claro, entiendo!"
-✅ Luego haz pregunta de rescate suave
+🚫 NO CONTACTO: Si dicen "ya no me escribas/dejame en paz/stop":
+→ "Entendido, respeto tu decisión. Si buscas casa en el futuro, aquí estaré. ¡Buen día! 👋"
 
-📌 "LO VOY A PENSAR":
-➜ TÉCNICA: Urgencia + Escasez + Compromiso bajo
-"¡Perfecto! Solo te comento: los precios suben cada mes por plusvalía, y este modelo es muy solicitado.
-Con $20,000 de apartado (100% reembolsable) congelas el precio mientras decides - sin compromiso.
-¿Te guardo uno mientras lo piensas? Así no te lo ganan."
+🌐 INGLÉS: Si escriben en inglés → responder en inglés con precios en USD
 
-📌 "NO TENGO ENGANCHE":
-➜ TÉCNICA: Solución inmediata + Prueba social
-"¡Eso tiene solución! Con INFONAVIT o FOVISSSTE puedes financiar hasta el 100%.
-Muchos de nuestros clientes compraron sin enganche. ¿Tienes INFONAVIT? Te conecto con el asesor que te ayuda gratis."
-
-📌 "NO ME ALCANZA EL CRÉDITO":
-➜ TÉCNICA: Alternativas + Beneficio
-"Tenemos convenios especiales con BBVA y Banorte - tasas preferenciales que aumentan tu capacidad.
-También puedes usar crédito conyugal. ¿Quieres que un asesor revise tus opciones? Es gratis y sin compromiso."
-
-📌 "QUEDA MUY LEJOS":
-➜ TÉCNICA: Beneficio compensatorio + Invitación
-"Te entiendo. Pero te cuento: nuestros desarrollos tienen plusvalía del 8-10% anual, y están en zonas seguras con todos los servicios.
-¿Qué zona te queda mejor? Quizá tenemos algo más cerca. O ven a conocer - cuando lo veas quizá te enamora."
-
-📌 "TENGO QUE CONSULTARLO CON MI PAREJA":
-➜ TÉCNICA: Inclusión + Compromiso
-"¡Claro, es una decisión importante para los dos! ¿Qué les parece si vienen juntos a conocer?
-Así los dos ven las casas y deciden juntos. ¿El sábado o domingo les funciona mejor?"
-
-📌 "YA TENGO OTRA OPCIÓN":
-➜ TÉCNICA: Diferenciación + Curiosidad
-"¡Qué bueno que estés comparando! Te cuento: Grupo Santa Rita tiene 50 años construyendo en Zacatecas.
-Nuestras casas no tienen cuotas de mantenimiento y están en zonas de alta plusvalía.
-¿Has visitado nuestros desarrollos? Vale la pena que compares antes de decidir."
-
-📌 "ME URGE MUDARME" / "NECESITO CASA PRONTO" / "ES URGENTE":
-➜ TÉCNICA: Opciones inmediatas + Cierre rápido
-"¡Perfecto, tengo opciones de ENTREGA INMEDIATA! 🏠
-
-Casas listas para mudarte YA:
-• *Monte Verde* - Desde $1.5M
-• *Los Encinos* - Desde $2.9M
-• *Andes* - Desde $1.5M
-
-Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte hoy mismo."
+🏆 ARGUMENTOS DE CIERRE:
+- 50 años construyendo | Plusvalía 8-10% anual | Sin cuotas mantenimiento | Seguridad 24/7
+- Emocionales: familia segura, patrimonio, libertad de renta, orgullo propio
+- Gatillos: "Promoción termina pronto" / "Quedan pocas" / "El más vendido"
 
 
-🚫 RESPETAR PETICIONES DE NO CONTACTO 🚫
+👨‍👩‍👧‍👦 FAMILIAS GRANDES (4+ personas / 4+ recámaras)
+
+Si el cliente menciona:
+- "familia grande", "somos 5", "4 hijos", "necesito 4 recámaras", "casa grande"
+
+➜ OPCIONES PARA FAMILIAS GRANDES:
+1. **Distrito Falco** - Casas de hasta 215m², 4 recámaras + estudio, desde $3.7M
+   - Modelo Colibrí: 4 rec, 190m², $4.8M
+   - Modelo Cenzontle: 4 rec + roof garden, 200m², $5.14M
+   - Modelo Quetzal: 4 rec, 3 plantas, 215m², $5.38M
+
+2. **Los Encinos** - Casas de hasta 160m², 4 recámaras, desde $3.6M
+   - Modelo Roble: 4 rec, 150m², $3.6M
+   - Modelo Maple: 4 rec + family room, 160m², $3.8M
+
+3. **Miravalle** - Casas de hasta 185m², 4 recámaras, desde $4M
+   - Modelo Madrid: 4 rec, 170m², $4M
+   - Modelo Barcelona: 4 rec + terraza, 185m², $4.35M
+
+Respuesta sugerida:
+"¡Tengo opciones perfectas para familias grandes! 👨‍👩‍👧‍👦
+Para 4+ recámaras te recomiendo:
+• Distrito Falco - hasta 215m², 4 rec + estudio, desde $3.7M
+• Los Encinos - hasta 160m², 4 rec, desde $3.6M
+¿Cuántas recámaras necesitas exactamente? Así te doy la mejor opción."
 
 
-⚠️ CRÍTICO: Si el cliente dice alguna de estas frases, RESPETA SU DECISIÓN:
-- "ya no me escribas"
-- "dejame en paz"
-- "no me contactes"
-- "borra mi número"
-- "no quiero que me escriban"
-- "stop"
+🏊 AMENIDADES POR DESARROLLO (para cuando pregunten)
 
-📝 RESPUESTA OBLIGATORIA (no intentes vender más):
-"Entendido, respeto tu decisión. Si en el futuro te interesa buscar casa, aquí estaré para ayudarte. ¡Que tengas excelente día! 👋"
+| Desarrollo | Amenidades principales |
+|------------|------------------------|
+| **Andes** | ALBERCA, gym, asadores, salón de eventos, vigilancia 24/7 |
+| **Distrito Falco** | Acabados premium, domótica opcional, paneles solares opcionales |
+| **Los Encinos** | Casa club, áreas verdes amplias, acceso controlado |
+| **Miravalle** | Parque central, ciclovía, áreas deportivas |
+| **Monte Verde** | Parque infantil, áreas verdes, caseta de vigilancia |
+| **Paseo Colorines** | NUEVO, zona de alta plusvalía, vigilancia |
 
-🚫 NUNCA hagas esto si piden que no les escribas:
-- Seguir vendiendo o haciendo preguntas
-- Insistir con "solo una pregunta más"
-- Ignorar su petición
-
-📌 "NÚMERO EQUIVOCADO":
-Respuesta: "¡Disculpa la confusión! Este es el WhatsApp de Grupo Santa Rita, inmobiliaria en Zacatecas. Si conoces a alguien que busque casa, con gusto lo atiendo. ¡Que tengas buen día! 👋"
+Si preguntan por alberca específicamente:
+"¡Sí tenemos! Privada Andes es nuestro único desarrollo con ALBERCA 🏊
+También incluye gym, asadores y salón de eventos.
+Casas desde $1.5M. ¿Te gustaría conocerlo?"
 
 
-🌐 IDIOMA INGLÉS
+📊 COMPARATIVA RÁPIDA (cuando pidan comparar)
 
-Si el cliente escribe en INGLÉS (hello, hi, I want, information, house, etc.):
-- Responde en INGLÉS
-- Usa el mismo tono amigable
-- Ejemplo: "Hi! I'm SARA from Grupo Santa Rita 😊 We have beautiful homes in Zacatecas, Mexico. What type of home are you looking for?"
+Si el cliente quiere comparar desarrollos:
 
+**POR PRECIO:**
+- Económico ($1.5-2.8M): Monte Verde, Andes
+- Medio ($3-4.3M): Los Encinos, Miravalle, Paseo Colorines
+- Premium ($3.7-5.4M): Distrito Falco
 
-🏆 ARGUMENTOS DE VENTA - USA ESTOS PARA CERRAR 🏆
+**POR TAMAÑO:**
+- 2 recámaras: Monte Verde (Acacia), Andes (Laurel, Dalia)
+- 3 recámaras: Todos los desarrollos
+- 4 recámaras: Distrito Falco, Los Encinos, Miravalle
 
-**DIFERENCIADORES (usa estos cuando comparen o duden):**
-1. "50 años construyendo - la experiencia se nota en cada detalle"
-2. "Plusvalía del 8-10% anual - tu casa vale más cada año"
-3. "Sin cuotas de mantenimiento - te ahorras miles de pesos"
-4. "Seguridad 24/7 - tus hijos pueden jugar tranquilos"
-5. "Acabados premium incluidos - no gastas extra en remodelaciones"
+**POR AMENIDADES:**
+- Con alberca: SOLO Andes
+- Casa club: Los Encinos
+- Acabados premium: Distrito Falco
 
-**BENEFICIOS EMOCIONALES (usa estos para conectar):**
-- FAMILIA: "Un hogar donde tus hijos crezcan felices"
-- SEGURIDAD: "Dormir tranquilo sabiendo que tu familia está protegida"
-- INVERSIÓN: "El mejor patrimonio que puedes dejar a tu familia"
-- ORGULLO: "Tu casa propia, construida por la mejor constructora de Zacatecas"
-- LIBERTAD: "Dejar de pagar renta y tener algo tuyo"
+**POR UBICACIÓN:**
+- Colinas del Padre: Monte Verde, Los Encinos, Miravalle, Paseo Colorines
+- Guadalupe: Andes, Distrito Falco
 
-**GATILLOS MENTALES (usa estos para cerrar):**
-- URGENCIA: "La promoción termina el 15 de febrero"
-- ESCASEZ: "Solo quedan 3 casas de este modelo"
-- PRUEBA SOCIAL: "Es nuestro desarrollo más vendido"
-- AUTORIDAD: "50 años nos respaldan - más de 10,000 familias felices"
-- RECIPROCIDAD: "Te envío toda la info sin compromiso"
+Respuesta de comparativa:
+"Te ayudo a comparar 😊 ¿Qué es más importante para ti?
+1. Precio - tengo desde $1.5M
+2. Espacio - casas de 2, 3 o 4 recámaras
+3. Amenidades - solo Andes tiene alberca
+4. Ubicación - Colinas del Padre o Guadalupe
+
+Dime y te doy la mejor opción para ti."
 
 
 ⚠️ REGLA CRÍTICA: SIEMPRE RESPONDE - NUNCA SILENCIO ⚠️
@@ -3732,8 +3850,30 @@ Tú dime, ¿por dónde empezamos?`;
       if (yaRespondioRecientemente) {
         console.log('⏭️ RATE LIMIT: Ya se envió respuesta hace <5s, saltando envío (contexto guardado)');
       } else if (!interceptoCita) {
-        await this.meta.sendWhatsAppMessage(from, respuestaLimpia);
+        // Enviar respuesta de texto + audio opcional si el lead prefiere audio
+        const leadNotesConId = { ...(leadFrescoRL?.notes || {}), lead_id: lead.id };
+        await this.enviarRespuestaConAudioOpcional(from, respuestaLimpia, leadNotesConId);
         console.log('✅ Respuesta de Claude enviada (sin pregunta de crédito)');
+
+        // ═══ BOTONES CONTEXTUALES - Mejora UX ═══
+        try {
+          const hasAppointment = !!(citaExistente && citaExistente.id);
+          const botones = getBotonesContextuales(analysis.intent, lead.status, hasAppointment);
+
+          if (botones && botones.length > 0) {
+            // Pequeña pausa para que el texto llegue primero
+            await new Promise(r => setTimeout(r, 500));
+            await this.meta.sendQuickReplyButtons(
+              from,
+              '¿Qué te gustaría hacer?',
+              botones
+            );
+            console.log('📱 Botones contextuales enviados');
+          }
+        } catch (btnErr) {
+          // No fallar si los botones no se pueden enviar
+          console.log('⚠️ No se pudieron enviar botones:', btnErr);
+        }
 
         // ═══ GUARDAR HISTORIAL CON RESPUESTA CORRECTA (después de validar horario) ═══
         try {
@@ -3749,13 +3889,46 @@ Tú dime, ¿por dónde empezamos?`;
           console.error('⚠️ Error guardando historial');
         }
 
-        // Marcar tiempo de última respuesta y guardar idioma preferido
-        // El idioma se detecta del mensaje y se guarda para usar en futuras conversaciones
-        const updatedNotes = {
-          ...(leadFrescoRL?.notes || {}),
+        // Marcar tiempo de última respuesta y guardar memoria de conversación
+        const notasActuales = (leadFrescoRL?.notes && typeof leadFrescoRL.notes === 'object')
+          ? leadFrescoRL.notes
+          : {};
+
+        // ═══ MEMORIA DE CONVERSACIÓN MEJORADA ═══
+        const updatedNotes: any = {
+          ...notasActuales,
           last_response_time: ahora,
-          preferred_language: analysis.detected_language || 'es' // Guardar idioma detectado (es/en)
+          preferred_language: analysis.detected_language || 'es'
         };
+
+        // Guardar desarrollos que ha preguntado (acumular)
+        const desarrolloActual = analysis.extracted_data?.desarrollo;
+        if (desarrolloActual) {
+          const desarrollosPrevios = Array.isArray(notasActuales.desarrollos_interes)
+            ? notasActuales.desarrollos_interes
+            : [];
+          if (!desarrollosPrevios.includes(desarrolloActual)) {
+            updatedNotes.desarrollos_interes = [...desarrollosPrevios, desarrolloActual].slice(-5);
+          }
+        }
+
+        // Guardar preferencias extraídas
+        if (analysis.extracted_data?.num_recamaras && !notasActuales.recamaras) {
+          updatedNotes.recamaras = analysis.extracted_data.num_recamaras;
+        }
+        if (analysis.extracted_data?.urgency && !notasActuales.urgencia) {
+          updatedNotes.urgencia = analysis.extracted_data.urgency;
+        }
+        if (analysis.extracted_data?.how_found_us && !notasActuales.como_nos_encontro) {
+          updatedNotes.como_nos_encontro = analysis.extracted_data.how_found_us;
+        }
+        if (analysis.extracted_data?.current_housing && !notasActuales.vivienda_actual) {
+          updatedNotes.vivienda_actual = analysis.extracted_data.current_housing;
+        }
+        if (analysis.extracted_data?.family_size && !notasActuales.tamaño_familia) {
+          updatedNotes.tamaño_familia = analysis.extracted_data.family_size;
+        }
+
         await this.supabase.client
           .from('leads')
           .update({ notes: updatedNotes })

@@ -1,0 +1,223 @@
+/**
+ * UX Helpers - Mejoras de experiencia de usuario
+ * - Saludos por hora del día (zona México)
+ * - Recordar preferencias del lead
+ * - Contexto personalizado para SARA
+ */
+
+/**
+ * Obtiene el saludo apropiado según la hora en México (UTC-6)
+ */
+export function getSaludoPorHora(): string {
+  const now = new Date();
+  // Convertir a hora de México (UTC-6)
+  const mexicoOffset = -6;
+  const utcHour = now.getUTCHours();
+  const mexicoHour = (utcHour + mexicoOffset + 24) % 24;
+
+  if (mexicoHour >= 5 && mexicoHour < 12) {
+    return '¡Buenos días';
+  } else if (mexicoHour >= 12 && mexicoHour < 19) {
+    return '¡Buenas tardes';
+  } else {
+    return '¡Buenas noches';
+  }
+}
+
+/**
+ * Obtiene emoji según la hora del día
+ */
+export function getEmojiPorHora(): string {
+  const now = new Date();
+  const mexicoOffset = -6;
+  const utcHour = now.getUTCHours();
+  const mexicoHour = (utcHour + mexicoOffset + 24) % 24;
+
+  if (mexicoHour >= 5 && mexicoHour < 12) {
+    return '☀️';
+  } else if (mexicoHour >= 12 && mexicoHour < 19) {
+    return '🌤️';
+  } else {
+    return '🌙';
+  }
+}
+
+/**
+ * Interface para preferencias del lead
+ */
+export interface LeadPreferences {
+  recamaras?: number | string;
+  presupuesto_min?: number;
+  presupuesto_max?: number;
+  zona_preferida?: string;
+  desarrollo_interes?: string;
+  tipo_credito?: string;
+  tiene_hijos?: boolean;
+  tiene_mascotas?: boolean;
+  urgencia?: string; // 'alta', 'media', 'baja'
+  ultima_visita?: string;
+}
+
+/**
+ * Extrae preferencias guardadas del lead
+ */
+export function extractLeadPreferences(lead: any): LeadPreferences {
+  const notes = typeof lead.notes === 'object' ? lead.notes : {};
+
+  return {
+    recamaras: notes.recamaras || lead.property_interest?.match(/(\d+)\s*rec/i)?.[1],
+    presupuesto_min: notes.presupuesto_min || notes.presupuesto,
+    presupuesto_max: notes.presupuesto_max,
+    zona_preferida: notes.zona_preferida || notes.zona,
+    desarrollo_interes: lead.property_interest || notes.desarrollo_interes,
+    tipo_credito: notes.tipo_credito || lead.credit_type,
+    tiene_hijos: notes.tiene_hijos,
+    tiene_mascotas: notes.tiene_mascotas,
+    urgencia: notes.urgencia,
+    ultima_visita: notes.ultima_visita
+  };
+}
+
+/**
+ * Genera contexto personalizado para el prompt de SARA
+ */
+export function generarContextoPersonalizado(lead: any): string {
+  const prefs = extractLeadPreferences(lead);
+  const nombre = lead.name?.split(' ')[0];
+  const saludo = getSaludoPorHora();
+
+  let contexto = '';
+
+  // Saludo personalizado
+  if (nombre) {
+    contexto += `${saludo} ${nombre}! `;
+  }
+
+  // Preferencias conocidas
+  const preferencias: string[] = [];
+
+  if (prefs.recamaras) {
+    preferencias.push(`busca ${prefs.recamaras} recámaras`);
+  }
+
+  if (prefs.presupuesto_max) {
+    const presupuestoStr = prefs.presupuesto_max >= 1000000
+      ? `$${(prefs.presupuesto_max / 1000000).toFixed(1)}M`
+      : `$${prefs.presupuesto_max.toLocaleString()}`;
+    preferencias.push(`presupuesto hasta ${presupuestoStr}`);
+  }
+
+  if (prefs.zona_preferida) {
+    preferencias.push(`zona: ${prefs.zona_preferida}`);
+  }
+
+  if (prefs.desarrollo_interes) {
+    preferencias.push(`interesado en ${prefs.desarrollo_interes}`);
+  }
+
+  if (prefs.tipo_credito) {
+    preferencias.push(`crédito: ${prefs.tipo_credito}`);
+  }
+
+  if (prefs.tiene_mascotas) {
+    preferencias.push('tiene mascotas');
+  }
+
+  if (preferencias.length > 0) {
+    contexto += `\n[Preferencias conocidas: ${preferencias.join(', ')}]`;
+  }
+
+  // Historial relevante
+  if (prefs.ultima_visita) {
+    contexto += `\n[Última visita: ${prefs.ultima_visita}]`;
+  }
+
+  return contexto;
+}
+
+/**
+ * Determina qué botones mostrar según el contexto
+ */
+export function getBotonesContextuales(
+  intent: string,
+  leadStatus: string,
+  hasAppointment: boolean
+): Array<{ id: string; title: string }> | null {
+
+  // Después de dar info de desarrollo
+  if (intent === 'solicitar_informacion' || intent === 'preguntar_precios') {
+    return [
+      { id: 'btn_agendar', title: '📅 Agendar visita' },
+      { id: 'btn_mas_info', title: '📋 Más info' },
+      { id: 'btn_ubicacion', title: '📍 Ubicación' }
+    ];
+  }
+
+  // Lead nuevo o sin cita
+  if (leadStatus === 'new' && !hasAppointment) {
+    return [
+      { id: 'btn_ver_casas', title: '🏠 Ver casas' },
+      { id: 'btn_precios', title: '💰 Precios' },
+      { id: 'btn_credito', title: '🏦 Crédito' }
+    ];
+  }
+
+  // Lead con cita agendada
+  if (hasAppointment) {
+    return [
+      { id: 'btn_confirmar', title: '✅ Confirmar' },
+      { id: 'btn_reagendar', title: '📅 Cambiar fecha' },
+      { id: 'btn_cancelar', title: '❌ Cancelar' }
+    ];
+  }
+
+  // Lead en negociación
+  if (leadStatus === 'negotiating' || leadStatus === 'visited') {
+    return [
+      { id: 'btn_cotizar', title: '💰 Cotización' },
+      { id: 'btn_credito', title: '🏦 Crédito' },
+      { id: 'btn_otra_visita', title: '📅 Otra visita' }
+    ];
+  }
+
+  return null;
+}
+
+/**
+ * Genera lista de desarrollos para menú
+ */
+export function getDesarrollosParaLista(): Array<{
+  title: string;
+  rows: Array<{ id: string; title: string; description: string }>
+}> {
+  return [
+    {
+      title: '💰 Económicos (desde $1.5M)',
+      rows: [
+        { id: 'dev_monteverde', title: 'Monte Verde', description: 'Colinas del Padre • 2-3 rec' },
+        { id: 'dev_andes', title: 'Priv. Andes', description: 'Guadalupe • ALBERCA • 2-3 rec' }
+      ]
+    },
+    {
+      title: '🏡 Residenciales (desde $3M)',
+      rows: [
+        { id: 'dev_encinos', title: 'Los Encinos', description: 'Colinas del Padre • 3-4 rec' },
+        { id: 'dev_miravalle', title: 'Miravalle', description: 'Colinas del Padre • 3-4 rec' },
+        { id: 'dev_colorines', title: 'Paseo Colorines', description: 'Colinas del Padre • NUEVO' }
+      ]
+    },
+    {
+      title: '✨ Premium (desde $3.7M)',
+      rows: [
+        { id: 'dev_falco', title: 'Distrito Falco', description: 'Guadalupe • Lujo • 3-4 rec' }
+      ]
+    },
+    {
+      title: '🏞️ Terrenos',
+      rows: [
+        { id: 'dev_campelo', title: 'Villa Campelo', description: 'Citadella • $8,500-9,500/m²' },
+        { id: 'dev_galiano', title: 'Villa Galiano', description: 'Citadella • $6,400/m²' }
+      ]
+    }
+  ];
+}

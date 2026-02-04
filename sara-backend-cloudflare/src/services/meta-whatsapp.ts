@@ -436,7 +436,7 @@ export class MetaWhatsAppService {
 
   async uploadVideoFromBuffer(videoBuffer: ArrayBuffer): Promise<string> {
     const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/media`;
-    
+
     const blob = new Blob([videoBuffer], { type: 'video/mp4' });
     const formData = new FormData();
     formData.append('messaging_product', 'whatsapp');
@@ -460,6 +460,253 @@ export class MetaWhatsAppService {
     }
     console.log(`✅ Video subido a Meta: ${data.id}`);
     return data.id;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 🔊 MENSAJES DE AUDIO / VOZ
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Sube un audio a Meta y retorna el media_id
+   * Formatos soportados: audio/ogg, audio/opus, audio/mpeg (mp3), audio/aac
+   */
+  async uploadAudioFromBuffer(audioBuffer: ArrayBuffer, mimeType: string = 'audio/ogg'): Promise<string> {
+    const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/media`;
+
+    // Determinar extensión basada en mime type
+    const extensions: Record<string, string> = {
+      'audio/ogg': 'ogg',
+      'audio/opus': 'opus',
+      'audio/mpeg': 'mp3',
+      'audio/mp3': 'mp3',
+      'audio/aac': 'aac',
+      'audio/m4a': 'm4a'
+    };
+    const ext = extensions[mimeType] || 'ogg';
+
+    const blob = new Blob([audioBuffer], { type: mimeType });
+    const formData = new FormData();
+    formData.append('messaging_product', 'whatsapp');
+    formData.append('type', mimeType);
+    formData.append('file', blob, `audio.${ext}`);
+
+    console.log(`📤 Subiendo audio a Meta (${audioBuffer.byteLength} bytes, ${mimeType})...`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.accessToken}`
+      },
+      body: formData
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      console.error('❌ Error subiendo audio:', JSON.stringify(data));
+      throw new Error(data.error?.message || 'Error subiendo audio');
+    }
+    console.log(`✅ Audio subido a Meta: ${data.id}`);
+    return data.id;
+  }
+
+  /**
+   * Envía un mensaje de audio usando URL
+   */
+  async sendWhatsAppAudio(to: string, audioUrl: string): Promise<any> {
+    const phone = this.normalizePhone(to);
+    const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'audio',
+      audio: { link: audioUrl }
+    };
+
+    console.log(`🔊 Enviando audio por URL a ${phone}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      console.error('❌ Error enviando audio:', JSON.stringify(data));
+      throw new Error(data.error?.message || 'Error enviando audio');
+    }
+    console.log(`✅ Audio enviado: ${data.messages?.[0]?.id}`);
+    return data;
+  }
+
+  /**
+   * Envía un mensaje de audio usando media_id (para audios subidos)
+   */
+  async sendWhatsAppAudioById(to: string, mediaId: string): Promise<any> {
+    const phone = this.normalizePhone(to);
+    const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'audio',
+      audio: { id: mediaId }
+    };
+
+    console.log(`🔊 Enviando audio por media_id ${mediaId} a ${phone}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      console.error('❌ Error enviando audio:', JSON.stringify(data));
+      throw new Error(data.error?.message || 'Error enviando audio');
+    }
+    console.log(`✅ Audio enviado: ${data.messages?.[0]?.id}`);
+    return data;
+  }
+
+  /**
+   * Genera y envía una nota de voz usando TTS
+   * Helper que combina uploadAudioFromBuffer + sendWhatsAppAudioById
+   */
+  async sendVoiceMessage(to: string, audioBuffer: ArrayBuffer, mimeType: string = 'audio/ogg'): Promise<any> {
+    // 1. Subir audio a Meta
+    const mediaId = await this.uploadAudioFromBuffer(audioBuffer, mimeType);
+
+    // 2. Enviar como mensaje de audio
+    return this.sendWhatsAppAudioById(to, mediaId);
+  }
+
+  /**
+   * Envía mensaje con botones de respuesta rápida (máximo 3 botones)
+   * Ideal para: confirmar/cancelar, elegir opciones, siguiente paso
+   */
+  async sendQuickReplyButtons(
+    to: string,
+    bodyText: string,
+    buttons: Array<{ id: string; title: string }>,
+    headerText?: string,
+    footerText?: string
+  ): Promise<any> {
+    const phone = this.normalizePhone(to);
+    const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
+
+    // Máximo 3 botones, títulos máx 20 chars
+    const validButtons = buttons.slice(0, 3).map(btn => ({
+      type: 'reply',
+      reply: {
+        id: btn.id.substring(0, 256),
+        title: btn.title.substring(0, 20)
+      }
+    }));
+
+    const payload: any = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: bodyText.substring(0, 1024) },
+        action: { buttons: validButtons }
+      }
+    };
+
+    if (headerText) {
+      payload.interactive.header = { type: 'text', text: headerText.substring(0, 60) };
+    }
+    if (footerText) {
+      payload.interactive.footer = { text: footerText.substring(0, 60) };
+    }
+
+    console.log(`📱 Enviando botones a ${phone}: ${buttons.map(b => b.title).join(', ')}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    return response.json();
+  }
+
+  /**
+   * Envía lista desplegable con opciones (máximo 10 items)
+   * Ideal para: elegir desarrollo, seleccionar horario, menú de opciones
+   */
+  async sendListMenu(
+    to: string,
+    bodyText: string,
+    buttonText: string,
+    sections: Array<{
+      title: string;
+      rows: Array<{ id: string; title: string; description?: string }>
+    }>,
+    headerText?: string,
+    footerText?: string
+  ): Promise<any> {
+    const phone = this.normalizePhone(to);
+    const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
+
+    // Validar y limpiar secciones
+    const validSections = sections.map(section => ({
+      title: section.title.substring(0, 24),
+      rows: section.rows.slice(0, 10).map(row => ({
+        id: row.id.substring(0, 200),
+        title: row.title.substring(0, 24),
+        description: row.description?.substring(0, 72)
+      }))
+    }));
+
+    const payload: any = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        body: { text: bodyText.substring(0, 1024) },
+        action: {
+          button: buttonText.substring(0, 20),
+          sections: validSections
+        }
+      }
+    };
+
+    if (headerText) {
+      payload.interactive.header = { type: 'text', text: headerText.substring(0, 60) };
+    }
+    if (footerText) {
+      payload.interactive.footer = { text: footerText.substring(0, 60) };
+    }
+
+    console.log(`📋 Enviando lista a ${phone}: ${buttonText}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    return response.json();
   }
 
   async sendWhatsAppLocation(to: string, latitude: number, longitude: number, name?: string, address?: string): Promise<any> {

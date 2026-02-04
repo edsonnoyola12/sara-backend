@@ -5906,6 +5906,9 @@ export class WhatsAppHandler {
       case 'vendedorLlamar':
         await this.vendedorLlamar(from, params.nombre, vendedor, nombreVendedor);
         break;
+      case 'vendedorLlamarIA':
+        await this.vendedorLlamarIA(from, params.nombre, vendedor, nombreVendedor);
+        break;
       case 'vendedorProgramarLlamada':
         await this.vendedorProgramarLlamada(from, params.nombre, params.cuando, vendedor, nombreVendedor);
         break;
@@ -6854,6 +6857,9 @@ export class WhatsAppHandler {
       // ━━━ LLAMADAS ━━━
       case 'vendedorLlamar':
         await this.vendedorLlamar(from, params?.nombreLead, ceo, nombreCEO);
+        break;
+      case 'vendedorLlamarIA':
+        await this.vendedorLlamarIA(from, params?.nombre, ceo, nombreCEO);
         break;
       case 'vendedorProgramarLlamada':
         await this.vendedorProgramarLlamada(from, body, ceo, nombreCEO);
@@ -10047,6 +10053,133 @@ Responde con fecha y hora:
     } catch (e) {
       console.log('Error en llamar:', e);
       await this.twilio.sendWhatsAppMessage(from, 'Error al procesar llamada.');
+    }
+  }
+
+  /**
+   * Inicia una llamada telefónica con IA usando Retell.ai
+   * Comando: "llamar ia [nombre]"
+   */
+  private async vendedorLlamarIA(from: string, nombreLead: string, vendedor: any, nombreVendedor: string): Promise<void> {
+    try {
+      // Verificar que Retell esté configurado
+      if (!this.env.RETELL_API_KEY || !this.env.RETELL_AGENT_ID || !this.env.RETELL_PHONE_NUMBER) {
+        await this.twilio.sendWhatsAppMessage(from,
+          '❌ Llamadas IA no disponibles.\n\n' +
+          'Contacta al administrador para configurar Retell.ai:\n' +
+          '• RETELL_API_KEY\n' +
+          '• RETELL_AGENT_ID\n' +
+          '• RETELL_PHONE_NUMBER'
+        );
+        return;
+      }
+
+      // Verificar feature flag
+      const featureFlags = await this.supabase.client
+        .from('system_config')
+        .select('value')
+        .eq('key', 'feature_flags')
+        .maybeSingle();
+
+      const flags = featureFlags?.data?.value || {};
+      if (flags.retell_enabled === false) {
+        await this.twilio.sendWhatsAppMessage(from,
+          '❌ Llamadas IA desactivadas temporalmente.\n' +
+          'Usa "llamar [nombre]" para obtener el teléfono y llamar manualmente.'
+        );
+        return;
+      }
+
+      // Buscar lead
+      const vendorService = new VendorCommandsService(this.supabase);
+      const result = await vendorService.getLlamarLead(nombreLead, vendedor.id);
+
+      if (!result.found || !result.lead) {
+        await this.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}*`);
+        return;
+      }
+
+      if (result.multiple) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `⚠️ Encontré varios leads con ese nombre:\n\n` +
+          result.leads?.map((l: any) => `• ${l.name} - ${l.phone}`).join('\n') +
+          '\n\nSé más específico con el nombre.'
+        );
+        return;
+      }
+
+      const lead = result.lead;
+
+      if (!lead.phone) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `❌ ${lead.name} no tiene número de teléfono registrado.`
+        );
+        return;
+      }
+
+      // Obtener info del desarrollo de interés
+      let desarrolloInteres = '';
+      let precioDesde = '';
+      if (lead.notes?.desarrollo_interes) {
+        desarrolloInteres = lead.notes.desarrollo_interes;
+      } else if (lead.interested_in) {
+        desarrolloInteres = lead.interested_in;
+      }
+
+      // Iniciar llamada con Retell
+      const { createRetellService } = await import('../services/retellService');
+      const retell = createRetellService(
+        this.env.RETELL_API_KEY,
+        this.env.RETELL_AGENT_ID,
+        this.env.RETELL_PHONE_NUMBER
+      );
+
+      const callResult = await retell.initiateCall({
+        leadId: lead.id,
+        leadName: lead.name,
+        leadPhone: lead.phone,
+        vendorId: vendedor.id,
+        vendorName: nombreVendedor,
+        desarrolloInteres,
+        precioDesde: precioDesde || '$1.5 millones',
+        motivo: 'seguimiento'
+      });
+
+      if (callResult.success) {
+        await this.twilio.sendWhatsAppMessage(from,
+          `📞 *Llamada IA iniciada*\n\n` +
+          `👤 Lead: ${lead.name}\n` +
+          `📱 Teléfono: ${lead.phone}\n` +
+          `🏠 Interés: ${desarrolloInteres || 'Por definir'}\n\n` +
+          `SARA está llamando ahora. Te notificaré cuando termine con el resumen.`
+        );
+
+        // Agregar nota al lead
+        const notesObj = lead.notes || {};
+        const notasArray = notesObj.notas || [];
+        notasArray.push({
+          text: `📞 Llamada IA iniciada por ${nombreVendedor}`,
+          author: nombreVendedor,
+          timestamp: new Date().toISOString(),
+          type: 'call'
+        });
+        notesObj.notas = notasArray;
+
+        await this.supabase.client
+          .from('leads')
+          .update({ notes: notesObj })
+          .eq('id', lead.id);
+      } else {
+        await this.twilio.sendWhatsAppMessage(from,
+          `❌ Error iniciando llamada:\n${callResult.error}\n\n` +
+          `Puedes llamar manualmente: ${lead.phone}`
+        );
+      }
+    } catch (e) {
+      console.error('Error en llamarIA:', e);
+      await this.twilio.sendWhatsAppMessage(from,
+        '❌ Error al iniciar llamada IA. Intenta más tarde.'
+      );
     }
   }
 
