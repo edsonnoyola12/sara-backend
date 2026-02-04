@@ -17,6 +17,8 @@
 | Videos | Google Veo 3 | `src/services/veoService.ts` |
 | Calendar | Google Calendar API | `src/services/calendarService.ts` |
 | Frontend CRM | React + Vercel | `sara-crm-new/` (repo separado) |
+| **Telefonía (número Zac)** | **Zadarma** | Proveedor del número 492 |
+| Llamadas IA | Retell.ai | `src/services/retellService.ts` (en config) |
 
 ---
 
@@ -3106,3 +3108,136 @@ puedeEditarPropiedades: () => ['admin', 'coordinador'].includes(currentUser?.rol
 - `src/App.tsx` - Permisos + campos propiedades
 
 **Sistema 100% operativo - Última verificación: 2026-02-02**
+
+---
+
+### 2026-02-03 (Sesión 20) - Mejoras de Calidad de Respuestas de IA
+
+**Problemas identificados:**
+1. SARA adivinaba en lugar de preguntar cuando algo era ambiguo
+2. Contexto incompleto (solo 5 acciones pasadas a Claude)
+3. Objeciones detectadas pero no usadas en el contexto
+4. Memoria de conversación se perdía entre sesiones
+
+**Mejoras implementadas:**
+
+#### 1. Enriquecimiento de Contexto del Lead
+
+Función `getPreferenciasConocidas()` ahora incluye:
+
+| Dato | Descripción |
+|------|-------------|
+| Score | 🔥 MUY INTERESADO (70+), ⚡ INTERESADO (40+), ❄️ FRÍO (<40) |
+| Status en funnel | Nuevo, Contactado, Cita agendada, Ya visitó, etc. |
+| Días desde contacto | Calculado automáticamente |
+| Objeciones previas | Últimas 3 objeciones para NO repetir argumentos |
+| Desarrollos preguntados | Lista de desarrollos que ha consultado |
+| Es referido | Si viene de otro cliente |
+| Urgencia | Si tiene prisa por mudarse |
+
+**Acciones aumentadas:** De 5 a 15 en el historial pasado a Claude.
+
+#### 2. Mecanismo de Clarificación
+
+Nueva sección en el prompt:
+
+```
+❓ CUANDO ALGO ES AMBIGUO - PIDE ACLARACIÓN:
+Si el mensaje del cliente NO ES CLARO, NO ADIVINES. Pregunta para aclarar:
+
+| Mensaje ambiguo | NO hagas esto | SÍ haz esto |
+|-----------------|---------------|-------------|
+| "Monte" | Asumir Monte Verde | "¿Te refieres a Monte Verde?" |
+| "La de 2 millones" | Adivinar desarrollo | "Tenemos varias ¿Colinas o Guadalupe?" |
+| "Algo económico" | Dar cualquier opción | "¿Cuál sería tu presupuesto?" |
+
+⚠️ REGLA: Si tienes <70% de certeza → PREGUNTA
+```
+
+#### 3. Optimización del Prompt
+
+| Sección | Antes | Después | Reducción |
+|---------|-------|---------|-----------|
+| VENDEDORA EXPERTA | ~30 líneas | Eliminado (redundante) | 100% |
+| Info empresa | ~40 líneas | 4 líneas | 90% |
+| Objeciones | ~50 líneas | Tabla compacta | 75% |
+| **Total** | ~139 líneas | Eliminadas | - |
+
+#### 4. Memoria de Conversación Mejorada
+
+Después de cada respuesta de IA, ahora se guardan en `lead.notes`:
+
+| Campo | Descripción |
+|-------|-------------|
+| `desarrollos_interes` | Array de desarrollos preguntados (máx 5) |
+| `recamaras` | Número de recámaras buscadas |
+| `urgencia` | Nivel de urgencia (alta/media/baja) |
+| `como_nos_encontro` | Fuente del lead |
+| `vivienda_actual` | Si renta o tiene casa propia |
+| `tamaño_familia` | Tamaño de la familia |
+| `preferred_language` | Idioma preferido (es/en) |
+
+#### 5. Conexión de Historial de Objeciones
+
+`getPreferenciasConocidas()` ahora lee de `notes.historial_objeciones` (guardado por `detectarObjeciones()` en leadScoring.ts) para:
+- Mostrar objeciones previas en el contexto
+- Evitar repetir argumentos que ya fallaron
+
+**Tests verificados (7/7 pasaron):**
+
+| Test | Resultado |
+|------|-----------|
+| "Monte" (ambiguo) | ✅ Pregunta clarificación |
+| "algo economico" | ✅ Da opciones + pregunta presupuesto |
+| "cerca del centro" | ✅ Sugiere + pregunta recámaras |
+| "muy caro" | ✅ Ofrece desde $1.6M |
+| "alberca" | ✅ Solo Priv. Andes |
+| "I want to buy" (English) | ✅ Responde en inglés + USD |
+| "lo voy a pensar" | ✅ Usa urgencia + bajo compromiso |
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/services/aiConversationService.ts` | `getPreferenciasConocidas()` enriquecido |
+| `src/services/aiConversationService.ts` | Acciones de 5 → 15 |
+| `src/services/aiConversationService.ts` | Instrucciones de clarificación |
+| `src/services/aiConversationService.ts` | Prompt optimizado (-139 líneas) |
+| `src/services/aiConversationService.ts` | Memoria de conversación mejorada |
+
+**Archivos nuevos (de sesiones previas, incluidos en commit):**
+
+| Archivo | Descripción |
+|---------|-------------|
+| `src/services/ttsService.ts` | Servicio Text-to-Speech con OpenAI |
+| `src/utils/uxHelpers.ts` | Helpers UX (saludos por hora, botones contextuales) |
+
+**Commit:** `67088b45`
+**Deploy:** Pushed a origin/main
+
+---
+
+## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-03)
+
+### Flujos de IA Verificados
+
+| Flujo | Estado | Última verificación |
+|-------|--------|---------------------|
+| Saludos y presentación | ✅ | 2026-02-03 |
+| Info de desarrollos | ✅ | 2026-02-03 |
+| Alberca = Solo Andes | ✅ | 2026-02-03 |
+| Citadella del Nogal = Villa Campelo/Galiano | ✅ | 2026-02-03 |
+| Renta = "Solo vendemos" | ✅ | 2026-02-03 |
+| Ya compré otro lado = Felicita | ✅ | 2026-02-03 |
+| No contacto = Respeta | ✅ | 2026-02-03 |
+| INFONAVIT/Crédito | ✅ | 2026-02-03 |
+| Objeciones (precio, pensar, ubicación) | ✅ | 2026-02-03 |
+| Solicitud de cita | ✅ | 2026-02-03 |
+| Terrenos | ✅ | 2026-02-03 |
+| Especificaciones (grande, barata, amenidades) | ✅ | 2026-02-03 |
+| **Clarificación cuando hay ambigüedad** | ✅ | 2026-02-03 |
+| **Contexto enriquecido (score, status, objeciones)** | ✅ | 2026-02-03 |
+| **Memoria de conversación entre sesiones** | ✅ | 2026-02-03 |
+| **Respuestas en inglés con USD** | ✅ | 2026-02-03 |
+
+**Sistema 100% operativo - Última verificación: 2026-02-03**
