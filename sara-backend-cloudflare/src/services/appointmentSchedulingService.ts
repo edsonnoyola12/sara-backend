@@ -796,6 +796,42 @@ agendar ${nombreLead} mañana 4pm`;
         }
       }
 
+      // ═══════════════════════════════════════════════════════════════
+      // CANCELAR CITAS ANTERIORES (evita duplicados al reagendar)
+      // ═══════════════════════════════════════════════════════════════
+      const { data: citasAnteriores } = await this.supabase.client
+        .from('appointments')
+        .select('id, scheduled_date, scheduled_time, google_event_id')
+        .eq('lead_id', lead.id)
+        .in('status', ['scheduled', 'confirmed']);
+
+      if (citasAnteriores && citasAnteriores.length > 0) {
+        console.log(`📅 Cancelando ${citasAnteriores.length} cita(s) anterior(es) del lead ${lead.id}`);
+        for (const citaAnterior of citasAnteriores) {
+          // Cancelar en DB
+          await this.supabase.client
+            .from('appointments')
+            .update({
+              status: 'cancelled',
+              cancellation_reason: 'Reagendada automáticamente',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', citaAnterior.id);
+
+          // Cancelar en Google Calendar si tiene evento
+          if (citaAnterior.google_event_id && this.calendar) {
+            try {
+              await this.calendar.deleteEvent(citaAnterior.google_event_id);
+              console.log(`   🗑️ Evento Calendar eliminado: ${citaAnterior.google_event_id}`);
+            } catch (e) {
+              console.error('   ⚠️ Error eliminando evento Calendar:', e);
+            }
+          }
+
+          console.log(`   🗑️ Cita ${citaAnterior.id} (${citaAnterior.scheduled_date} ${citaAnterior.scheduled_time}) cancelada`);
+        }
+      }
+
       // Crear la cita en DB
       const { data: appointment, error: insertError } = await this.supabase.client
         .from('appointments')
@@ -941,6 +977,42 @@ agendar ${nombreLead} mañana 4pm`;
           console.log('📍 Ubicación encontrada:', { ubicacion, gpsLink: gpsLink ? 'SÍ' : 'NO' });
         } else {
           console.error('⚠️ No se encontró propiedad para:', desarrolloBuscar);
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // CANCELAR CITAS ANTERIORES (evita duplicados al reagendar)
+      // ═══════════════════════════════════════════════════════════════
+      const { data: citasAnteriores } = await this.supabase.client
+        .from('appointments')
+        .select('id, scheduled_date, scheduled_time, google_event_id')
+        .eq('lead_id', lead.id)
+        .in('status', ['scheduled', 'confirmed']);
+
+      if (citasAnteriores && citasAnteriores.length > 0) {
+        console.log(`📅 Cancelando ${citasAnteriores.length} cita(s) anterior(es) del lead ${lead.id}`);
+        for (const citaAnterior of citasAnteriores) {
+          // Cancelar en DB
+          await this.supabase.client
+            .from('appointments')
+            .update({
+              status: 'cancelled',
+              cancellation_reason: 'Reagendada automáticamente',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', citaAnterior.id);
+
+          // Cancelar en Google Calendar si tiene evento
+          if (citaAnterior.google_event_id && this.calendar) {
+            try {
+              await this.calendar.deleteEvent(citaAnterior.google_event_id);
+              console.log(`   🗑️ Evento Calendar eliminado: ${citaAnterior.google_event_id}`);
+            } catch (e) {
+              console.error('   ⚠️ Error eliminando evento Calendar:', e);
+            }
+          }
+
+          console.log(`   🗑️ Cita ${citaAnterior.id} (${citaAnterior.scheduled_date} ${citaAnterior.scheduled_time}) cancelada`);
         }
       }
 

@@ -1369,6 +1369,50 @@ export class WhatsAppHandler {
         console.log('📢 Contexto de broadcast pasado a IA:', leadMsgResult.broadcastContext.message?.substring(0, 50));
       }
 
+      // Si hay recursos Retell pending, enviarlos ahora que el lead respondió
+      if (leadMsgResult.sendRetellResources) {
+        const res = leadMsgResult.sendRetellResources;
+        console.log(`📞 Enviando recursos Retell para ${res.desarrollo}...`);
+
+        try {
+          // Video
+          if (res.video_url) {
+            await this.meta.sendWhatsAppMessage(
+              cleanPhone,
+              `🎬 Te comparto el video de ${res.desarrollo}:\n${res.video_url}`
+            );
+            await new Promise(resolve => setTimeout(resolve, 1500));
+          }
+
+          // Brochure
+          if (res.brochure_url) {
+            await this.meta.sendWhatsAppDocument(
+              cleanPhone,
+              res.brochure_url,
+              `📄 Catálogo ${res.desarrollo}`
+            );
+            await new Promise(resolve => setTimeout(resolve, 1500));
+          }
+
+          // GPS
+          if (res.gps_url) {
+            await this.meta.sendWhatsAppMessage(
+              cleanPhone,
+              `📍 Ubicación de ${res.desarrollo}:\n${res.gps_url}`
+            );
+          }
+
+          console.log(`✅ Recursos Retell enviados para ${res.desarrollo}`);
+        } catch (retellErr) {
+          console.error('⚠️ Error enviando recursos Retell:', retellErr);
+        }
+      }
+
+      // Actualizar lead si hay datos pending (ej: limpiar recursos Retell)
+      if (leadMsgResult.updateLead && leadMsgResult.action === 'continue_to_ai') {
+        await this.supabase.client.from('leads').update(leadMsgResult.updateLead).eq('id', lead.id);
+      }
+
       // Si llegamos aquí, continuar a análisis con IA (delegado a aiConversationService)
       const aiService = new AIConversationService(this.supabase, this.twilio, this.meta, this.calendar, this.claude, env);
       aiService.setHandler(this);
@@ -11851,6 +11895,28 @@ Responde con fecha y hora:
           // Crear nueva cita
           if (result.datos) {
             const { lead_id, lead_phone, lead_name, property, fecha, vendedor_id } = result.datos;
+
+            // Cancelar citas anteriores del lead (evita duplicados)
+            const { data: citasAnteriores } = await this.supabase.client
+              .from('appointments')
+              .select('id, scheduled_date, scheduled_time')
+              .eq('lead_id', lead_id)
+              .in('status', ['scheduled', 'confirmed']);
+
+            if (citasAnteriores && citasAnteriores.length > 0) {
+              console.log(`📅 Cancelando ${citasAnteriores.length} cita(s) anterior(es) del lead ${lead_id}`);
+              for (const citaAnterior of citasAnteriores) {
+                await this.supabase.client
+                  .from('appointments')
+                  .update({
+                    status: 'cancelled',
+                    cancellation_reason: 'Reagendada desde post-visita',
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', citaAnterior.id);
+                console.log(`   🗑️ Cita ${citaAnterior.id} cancelada`);
+              }
+            }
 
             // Crear cita en la base de datos
             await this.supabase.client.from('appointments').insert({
