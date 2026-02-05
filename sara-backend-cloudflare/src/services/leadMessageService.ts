@@ -32,6 +32,12 @@ export interface LeadMessageResult {
     sentAt: string;
   };
   deleteCalendarEvent?: string; // ID del evento a borrar de Google Calendar
+  sendRetellResources?: {
+    desarrollo: string;
+    video_url?: string;
+    brochure_url?: string;
+    gps_url?: string;
+  };
 }
 
 interface CitaActiva {
@@ -86,7 +92,11 @@ export class LeadMessageService {
       // Si es 2do mensaje, continuar normal pero logear
     }
 
-    // 0. RESPUESTA A MENSAJE AUTOMÁTICO (lead frío, aniversario, cumpleaños, etc.)
+    // 0. RECURSOS PENDING DE RETELL (lead respondió al template post-llamada)
+    const retellResult = this.checkRetellPendingResources(lead, notasLead);
+    if (retellResult.action === 'handled') return retellResult;
+
+    // 0.1. RESPUESTA A MENSAJE AUTOMÁTICO (lead frío, aniversario, cumpleaños, etc.)
     const autoResponseResult = await this.checkAutoMessageResponse(lead, body, mensajeLower, notasLead);
     if (autoResponseResult.action === 'handled') return autoResponseResult;
 
@@ -168,6 +178,52 @@ export class LeadMessageService {
     return {
       isDuplicate,
       count: consecutiveCount + 1 // +1 por el mensaje actual
+    };
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // RECURSOS PENDING DE RETELL (después de llamada telefónica)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  private checkRetellPendingResources(lead: any, notasLead: any): LeadMessageResult {
+    const pendingResources = notasLead?.pending_retell_resources;
+    if (!pendingResources) return { action: 'continue_to_ai' };
+
+    // Verificar que los recursos no sean muy viejos (máximo 48 horas)
+    const savedAt = pendingResources.saved_at ? new Date(pendingResources.saved_at).getTime() : 0;
+    const horasDesde = (Date.now() - savedAt) / (1000 * 60 * 60);
+
+    if (horasDesde > 48) {
+      console.log(`⏭️ Recursos Retell expirados para ${lead.name || lead.phone} (${horasDesde.toFixed(1)}h)`);
+      // Limpiar recursos expirados
+      return {
+        action: 'continue_to_ai',
+        updateLead: {
+          notes: {
+            ...notasLead,
+            pending_retell_resources: null // Limpiar
+          }
+        }
+      };
+    }
+
+    console.log(`📞 Lead ${lead.name || lead.phone} respondió a template Retell - enviando recursos de ${pendingResources.desarrollo}`);
+
+    // Devolver los recursos para enviar y continuar a IA para la conversación
+    return {
+      action: 'continue_to_ai',
+      sendRetellResources: {
+        desarrollo: pendingResources.desarrollo,
+        video_url: pendingResources.video_url,
+        brochure_url: pendingResources.brochure_url,
+        gps_url: pendingResources.gps_url
+      },
+      updateLead: {
+        notes: {
+          ...notasLead,
+          pending_retell_resources: null // Limpiar después de enviar
+        }
+      }
     };
   }
 

@@ -2065,3 +2065,297 @@ export async function reminderDocumentosCredito(supabase: SupabaseService, meta:
     console.error('Error en reminderDocumentosCredito:', e);
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LLAMADAS AUTOMÁTICAS DE SEGUIMIENTO (Retell.ai)
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface RetellEnv {
+  RETELL_API_KEY?: string;
+  RETELL_AGENT_ID?: string;
+  RETELL_PHONE_NUMBER?: string;
+}
+
+/**
+ * Llamadas automáticas de seguimiento post-visita
+ * Se ejecuta diario a las 11am - llama a leads que visitaron hace 1 día
+ */
+export async function llamadasSeguimientoPostVisita(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  env: RetellEnv
+): Promise<void> {
+  try {
+    if (!env.RETELL_API_KEY || !env.RETELL_AGENT_ID || !env.RETELL_PHONE_NUMBER) {
+      console.log('⏭️ Llamadas IA desactivadas - Retell no configurado');
+      return;
+    }
+
+    console.log('📞 Iniciando llamadas de seguimiento post-visita...');
+
+    const ahora = new Date();
+    const hace1Dia = new Date(ahora.getTime() - 24 * 60 * 60 * 1000);
+    const hace2Dias = new Date(ahora.getTime() - 48 * 60 * 60 * 1000);
+
+    const { data: leadsPostVisita } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, assigned_to, interested_in')
+      .eq('status', 'visited')
+      .lt('updated_at', hace1Dia.toISOString())
+      .gt('updated_at', hace2Dias.toISOString())
+      .limit(5);
+
+    if (!leadsPostVisita || leadsPostVisita.length === 0) {
+      console.log('📞 No hay leads post-visita para llamar');
+      return;
+    }
+
+    const { createRetellService } = await import('../services/retellService');
+    const retell = createRetellService(
+      env.RETELL_API_KEY,
+      env.RETELL_AGENT_ID,
+      env.RETELL_PHONE_NUMBER
+    );
+
+    let llamadasRealizadas = 0;
+
+    for (const lead of leadsPostVisita) {
+      try {
+        const notes = typeof lead.notes === 'object' ? lead.notes : {};
+        const ultimaLlamadaIA = (notes as any).ultima_llamada_ia;
+        const hoyStr = ahora.toISOString().split('T')[0];
+
+        if (ultimaLlamadaIA === hoyStr) {
+          console.log(`⏭️ ${lead.name} ya recibió llamada IA hoy`);
+          continue;
+        }
+
+        if (!lead.phone) continue;
+
+        const desarrolloInteres = lead.interested_in || (notes as any).desarrollo_interes || '';
+
+        const result = await retell.initiateCall({
+          leadId: lead.id,
+          leadName: lead.name,
+          leadPhone: lead.phone,
+          vendorId: lead.assigned_to,
+          desarrolloInteres: desarrolloInteres,
+          motivo: 'seguimiento'
+        });
+
+        if (result.success) {
+          llamadasRealizadas++;
+          console.log(`📞 Llamada iniciada a ${lead.name} (post-visita)`);
+
+          await supabase.client
+            .from('leads')
+            .update({
+              notes: {
+                ...notes,
+                ultima_llamada_ia: hoyStr,
+                llamadas_ia_count: ((notes as any).llamadas_ia_count || 0) + 1
+              }
+            })
+            .eq('id', lead.id);
+
+          if (lead.assigned_to) {
+            const { data: vendedor } = await supabase.client
+              .from('team_members')
+              .select('phone, name')
+              .eq('id', lead.assigned_to)
+              .single();
+
+            if (vendedor?.phone) {
+              await meta.sendWhatsAppMessage(vendedor.phone,
+                `📞 *LLAMADA IA POST-VISITA*\n\n` +
+                `SARA está llamando a *${lead.name}*\n` +
+                `Desarrollo: ${desarrolloInteres || 'General'}\n\n` +
+                `Te notifico cuando termine.`
+              );
+            }
+          }
+
+          await new Promise(r => setTimeout(r, 5000));
+        }
+      } catch (err) {
+        console.error(`Error en llamada a ${lead.name}:`, err);
+      }
+    }
+
+    console.log(`📞 Llamadas post-visita: ${llamadasRealizadas} realizadas`);
+
+  } catch (e) {
+    console.error('Error en llamadasSeguimientoPostVisita:', e);
+  }
+}
+
+/**
+ * Llamadas automáticas para leads fríos (7 días sin respuesta)
+ * Se ejecuta Martes y Jueves a las 10am
+ */
+export async function llamadasReactivacionLeadsFrios(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  env: RetellEnv
+): Promise<void> {
+  try {
+    if (!env.RETELL_API_KEY || !env.RETELL_AGENT_ID || !env.RETELL_PHONE_NUMBER) {
+      console.log('⏭️ Llamadas IA desactivadas - Retell no configurado');
+      return;
+    }
+
+    console.log('📞 Iniciando llamadas reactivación leads fríos...');
+
+    const ahora = new Date();
+    const hace7Dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const hace30Dias = new Date(ahora.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const { data: leadsFrios } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, assigned_to, interested_in')
+      .in('status', ['contacted', 'qualified'])
+      .lt('last_message_at', hace7Dias.toISOString())
+      .gt('last_message_at', hace30Dias.toISOString())
+      .limit(3);
+
+    if (!leadsFrios || leadsFrios.length === 0) {
+      console.log('📞 No hay leads fríos para llamar');
+      return;
+    }
+
+    const { createRetellService } = await import('../services/retellService');
+    const retell = createRetellService(
+      env.RETELL_API_KEY,
+      env.RETELL_AGENT_ID,
+      env.RETELL_PHONE_NUMBER
+    );
+
+    let llamadasRealizadas = 0;
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    for (const lead of leadsFrios) {
+      try {
+        const notes = typeof lead.notes === 'object' ? lead.notes : {};
+        const ultimaLlamadaIA = (notes as any).ultima_llamada_ia;
+
+        if (ultimaLlamadaIA) {
+          const diasDesdeUltimaLlamada = Math.floor(
+            (ahora.getTime() - new Date(ultimaLlamadaIA).getTime()) / (1000 * 60 * 60 * 24)
+          );
+          if (diasDesdeUltimaLlamada < 7) {
+            continue;
+          }
+        }
+
+        if (!lead.phone) continue;
+
+        const result = await retell.initiateCall({
+          leadId: lead.id,
+          leadName: lead.name,
+          leadPhone: lead.phone,
+          vendorId: lead.assigned_to,
+          desarrolloInteres: lead.interested_in || (notes as any).desarrollo_interes || '',
+          motivo: 'seguimiento'
+        });
+
+        if (result.success) {
+          llamadasRealizadas++;
+          console.log(`📞 Llamada iniciada a ${lead.name} (reactivación)`);
+
+          await supabase.client
+            .from('leads')
+            .update({
+              notes: {
+                ...notes,
+                ultima_llamada_ia: hoyStr,
+                llamadas_ia_count: ((notes as any).llamadas_ia_count || 0) + 1
+              }
+            })
+            .eq('id', lead.id);
+
+          await new Promise(r => setTimeout(r, 5000));
+        }
+      } catch (err) {
+        console.error(`Error en llamada a ${lead.name}:`, err);
+      }
+    }
+
+    console.log(`📞 Llamadas reactivación: ${llamadasRealizadas} realizadas`);
+
+  } catch (e) {
+    console.error('Error en llamadasReactivacionLeadsFrios:', e);
+  }
+}
+
+/**
+ * Llamadas de recordatorio de cita (1 día antes)
+ * Se ejecuta diario a las 5pm
+ */
+export async function llamadasRecordatorioCita(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  env: RetellEnv
+): Promise<void> {
+  try {
+    if (!env.RETELL_API_KEY || !env.RETELL_AGENT_ID || !env.RETELL_PHONE_NUMBER) {
+      console.log('⏭️ Llamadas IA desactivadas - Retell no configurado');
+      return;
+    }
+
+    console.log('📞 Iniciando llamadas recordatorio de cita...');
+
+    const ahora = new Date();
+    const manana = new Date(ahora.getTime() + 24 * 60 * 60 * 1000);
+    const mananaStr = manana.toISOString().split('T')[0];
+
+    const { data: citasManana } = await supabase.client
+      .from('appointments')
+      .select('id, lead_id, lead_name, lead_phone, scheduled_time, property_name, vendedor_id')
+      .eq('scheduled_date', mananaStr)
+      .in('status', ['scheduled', 'confirmed'])
+      .limit(5);
+
+    if (!citasManana || citasManana.length === 0) {
+      console.log('📞 No hay citas mañana para recordar');
+      return;
+    }
+
+    const { createRetellService } = await import('../services/retellService');
+    const retell = createRetellService(
+      env.RETELL_API_KEY,
+      env.RETELL_AGENT_ID,
+      env.RETELL_PHONE_NUMBER
+    );
+
+    let llamadasRealizadas = 0;
+
+    for (const cita of citasManana) {
+      try {
+        if (!cita.lead_phone) continue;
+
+        const result = await retell.initiateCall({
+          leadId: cita.lead_id,
+          leadName: cita.lead_name,
+          leadPhone: cita.lead_phone,
+          vendorId: cita.vendedor_id,
+          desarrolloInteres: cita.property_name || '',
+          motivo: 'recordatorio_cita',
+          notas: `Cita mañana a las ${cita.scheduled_time}`
+        });
+
+        if (result.success) {
+          llamadasRealizadas++;
+          console.log(`📞 Llamada recordatorio a ${cita.lead_name}`);
+          await new Promise(r => setTimeout(r, 5000));
+        }
+      } catch (err) {
+        console.error(`Error en llamada recordatorio a ${cita.lead_name}:`, err);
+      }
+    }
+
+    console.log(`📞 Llamadas recordatorio: ${llamadasRealizadas} realizadas`);
+
+  } catch (e) {
+    console.error('Error en llamadasRecordatorioCita:', e);
+  }
+}
