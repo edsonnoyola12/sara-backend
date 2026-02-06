@@ -218,6 +218,77 @@ export class AIConversationService {
   }
 
   /**
+   * Detecta la fase de conversación del lead para ajustar intensidad de venta.
+   * Pure function - no DB calls.
+   */
+  detectConversationPhase(lead: any, citaExistenteInfo: string): { phase: string; phaseNumber: number; allowPushToCita: boolean; pushStyle: string } {
+    const status = lead?.status || 'new';
+    const score = lead?.score || 0;
+    const msgCount = (lead?.conversation_history || []).length;
+    const hasName = !!(lead?.name && lead.name !== 'Lead' && lead.name !== 'lead');
+    const hasPropertyInterest = !!(lead?.property_interest);
+    const hasBudget = !!(lead?.notes?.presupuesto);
+    const hasRecamaras = !!(lead?.notes?.recamaras);
+    const hasCita = !!(citaExistenteInfo);
+
+    // Phase 5: Nurturing (post-visit leads)
+    const nurturingStatuses = ['visited', 'negotiating', 'reserved', 'sold', 'delivered', 'lost'];
+    if (nurturingStatuses.includes(status)) {
+      return {
+        phase: 'nurturing',
+        phaseNumber: 5,
+        allowPushToCita: status === 'visited',
+        pushStyle: status === 'visited' ? 'gentle' : 'none'
+      };
+    }
+
+    // Phase 4: Closing (already has cita)
+    if (hasCita || status === 'scheduled') {
+      return { phase: 'closing-has-cita', phaseNumber: 4, allowPushToCita: false, pushStyle: 'none' };
+    }
+
+    // Phase 4: Closing (ready to close)
+    if (hasPropertyInterest && (score >= 40 || (hasBudget && hasRecamaras) || msgCount > 7)) {
+      return { phase: 'closing', phaseNumber: 4, allowPushToCita: true, pushStyle: 'full' };
+    }
+
+    // Phase 3: Presentation (has interest but not ready)
+    if (hasPropertyInterest) {
+      return { phase: 'presentation', phaseNumber: 3, allowPushToCita: true, pushStyle: 'soft' };
+    }
+
+    // Phase 2: Qualification (some data gathered)
+    if (msgCount >= 3 || (hasName && (hasRecamaras || hasBudget))) {
+      return { phase: 'qualification', phaseNumber: 2, allowPushToCita: false, pushStyle: 'none' };
+    }
+
+    // Phase 1: Discovery (default)
+    return { phase: 'discovery', phaseNumber: 1, allowPushToCita: false, pushStyle: 'none' };
+  }
+
+  /**
+   * Returns prompt instructions tailored to the conversation phase.
+   */
+  getPhaseInstructions(phaseInfo: { phase: string; phaseNumber: number; pushStyle: string }): string {
+    switch (phaseInfo.phase) {
+      case 'discovery':
+        return `\n📍 FASE: DESCUBRIMIENTO - Sé amigable, entiende sus necesidades. NO presiones para cita. NO uses urgencia ni escasez. Pregunta qué busca (recámaras, zona, presupuesto).\n`;
+      case 'qualification':
+        return `\n📍 FASE: CALIFICACIÓN - Completa info (recámaras, presupuesto, zona). Recomienda 1-2 desarrollos. Menciona visita de forma casual, sin presión.\n`;
+      case 'presentation':
+        return `\n📍 FASE: PRESENTACIÓN - Comparte info detallada, responde preguntas. Sugiere visita de forma natural: "¿Te gustaría conocerlo en persona?"\n`;
+      case 'closing':
+        return `\n📍 FASE: CIERRE - Usa urgencia y escasez. Cierre binario: "¿Sábado o domingo?" Empuja firmemente a la cita.\n`;
+      case 'closing-has-cita':
+        return `\n📍 FASE: YA TIENE CITA - No empujes otra cita. Resuelve dudas, confirma detalles, genera emoción por la visita.\n`;
+      case 'nurturing':
+        return `\n📍 FASE: SEGUIMIENTO - Sé útil, resuelve dudas. Si ya visitó, puedes sugerir gentilmente volver a visitar.\n`;
+      default:
+        return '';
+    }
+  }
+
+  /**
    * Guarda una acción (envío de recursos) en el historial de conversación
    * Esto permite que Claude sepa qué recursos se enviaron y responda coherentemente
    */
@@ -332,6 +403,11 @@ export class AIConversationService {
       console.error('⚠️ Error verificando cita existente para prompt:', e);
     }
 
+    // ═══ DETECCIÓN DE FASE DE CONVERSACIÓN ═══
+    const phaseInfo = this.detectConversationPhase(lead, citaExistenteInfo);
+    const phaseInstructions = this.getPhaseInstructions(phaseInfo);
+    console.log(`📍 PHASE: ${phaseInfo.phase} (#${phaseInfo.phaseNumber}) | pushStyle: ${phaseInfo.pushStyle} | allowPush: ${phaseInfo.allowPushToCita}`);
+
     // Crear catálogo desde DB (optimizado: solo detalle del desarrollo de interés)
     const catalogoDB = this.crearCatalogoDB(properties, lead.property_interest);
     console.log('📋 Catálogo generado (optimizado):', catalogoDB.length, 'chars');
@@ -417,7 +493,7 @@ NO escribas texto antes ni después del JSON. Tu respuesta debe empezar con { y 
 ⚠️ REGLA #3: VENDE BENEFICIOS, NO CARACTERÍSTICAS - "Seguridad para tu familia" > "CCTV"
 ⚠️ REGLA #4: USA URGENCIA Y ESCASEZ - "Quedan pocas", "Promoción termina pronto"
 ⚠️ REGLA #5: RESPUESTAS CORTAS Y PODEROSAS - No abrumes con información
-
+${phaseInstructions}
 📊 DATOS DEL CLIENTE:
 - Nombre: ${nombreConfirmado ? lead.name : '❌ NO TENGO - PEDIR'}
 - Interés: ${lead.property_interest || 'NO SÉ'}
@@ -2003,6 +2079,21 @@ Pero si buscas casa para tu familia, tenemos excelentes opciones desde $1.5M en 
 En Santa Rita nos enfocamos en la calidad de construcción y en darte un servicio cercano. Más de 50 años en Zacatecas nos respaldan.
 
 ¿Te gustaría conocer nuestros desarrollos para que puedas comparar personalmente?`;
+        }
+      }
+
+      // ═══ CORRECCIÓN: Suavizar objeciones en fases tempranas ═══
+      // En discovery/qualification, si el cliente dice NO → siempre respetar sin insistir
+      if (phaseInfo.phaseNumber <= 2 && parsed.response) {
+        const clienteNoInteresa =
+          msgLowerCallback.includes('no me interesa') ||
+          msgLowerCallback.includes('no gracias') ||
+          msgLowerCallback.includes('no estoy interesado') ||
+          msgLowerCallback.includes('no busco') ||
+          msgLowerCallback.includes('no quiero');
+        if (clienteNoInteresa) {
+          console.log(`⚠️ CORRIGIENDO: Cliente dijo NO en fase temprana (${phaseInfo.phase}) → respuesta suave`);
+          parsed.response = `Entendido, sin problema. Si en algún momento te interesa, aquí estoy. ¡Excelente día! 👋`;
         }
       }
 
@@ -4604,43 +4695,58 @@ Tú dime, ¿por dónde empezamos?`;
                 console.error('⚠️ No se encontraron brochures en DB para los desarrollos');
               }
 
-              // ═══ PUSH A CITA - IMPORTANTE PARA CERRAR VENTA ═══
-              // ⚠️ FIX 08-ENE-2026: NO enviar push si el usuario YA quiere cita (intent: confirmar_cita)
-              // Evita preguntar "¿te gustaría visitar?" cuando ya dijeron "quiero ir hoy a las 5"
+              // ═══ PUSH A CITA - PHASE-AWARE ═══
               const yaQuiereCita = analysis.intent === 'confirmar_cita';
+              const phaseInfoPush = this.detectConversationPhase(lead, ''); // No cita in this block
+              console.log(`📍 PUSH PHASE: ${phaseInfoPush.phase} | pushStyle: ${phaseInfoPush.pushStyle} | allowPush: ${phaseInfoPush.allowPushToCita}`);
 
-              if (!yaQuiereCita) {
+              if (!yaQuiereCita && phaseInfoPush.allowPushToCita) {
                 await new Promise(r => setTimeout(r, 400));
                 const desarrollosMencionados = desarrollosLista.join(' y ');
-                // ═══ FIX: Mensaje final claro - sin "amigo", pregunta directa ═══
-                // ═══ FIX: No pedir nombre aquí - el enforcement ya lo pide en la respuesta principal ═══
-                const msgPush = tieneNombre
-                  ? `${primerNombre}, ¿te gustaría agendar una cita para visitar *${desarrollosMencionados}*? 🏠`
-                  : `¿Te gustaría agendar una cita para visitar *${desarrollosMencionados}*? 🏠`;
+                let msgPush = '';
 
-                await this.meta.sendWhatsAppMessage(from, msgPush);
-                console.log('✅ Push a cita enviado después de recursos');
-
-                // Guardar en historial para que Claude sepa que preguntamos por visita
-                try {
-                  const { data: leadHist } = await this.supabase.client
-                    .from('leads')
-                    .select('conversation_history')
-                    .eq('id', lead.id)
-                    .single();
-
-                  const histAct = leadHist?.conversation_history || [];
-                  histAct.push({ role: 'assistant', content: msgPush, timestamp: new Date().toISOString() });
-
-                  await this.supabase.client
-                    .from('leads')
-                    .update({ conversation_history: histAct.slice(-30) })
-                    .eq('id', lead.id);
-                } catch (e) {
-                  console.error('⚠️ Error guardando push en historial');
+                if (phaseInfoPush.pushStyle === 'full') {
+                  // Phase 4 closing: urgency + binary close
+                  msgPush = tieneNombre
+                    ? `${primerNombre}, estos modelos se están vendiendo rápido 🔥 ¿Te agendo para el sábado o domingo para conocer *${desarrollosMencionados}*? 🏠`
+                    : `Estos modelos se están vendiendo rápido 🔥 ¿Sábado o domingo para conocer *${desarrollosMencionados}*? 🏠`;
+                } else if (phaseInfoPush.pushStyle === 'soft') {
+                  // Phase 3 presentation: natural suggestion, no urgency
+                  msgPush = tieneNombre
+                    ? `${primerNombre}, ¿te gustaría conocer *${desarrollosMencionados}* en persona? 🏠`
+                    : `¿Te gustaría conocer *${desarrollosMencionados}* en persona? 🏠`;
+                } else if (phaseInfoPush.pushStyle === 'gentle') {
+                  // Phase 5 nurturing: gentle reminder
+                  msgPush = `Si quieres volver a visitar *${desarrollosMencionados}*, con gusto te agendo 😊`;
                 }
-              } else {
+
+                if (msgPush) {
+                  await this.meta.sendWhatsAppMessage(from, msgPush);
+                  console.log(`✅ Push a cita enviado (${phaseInfoPush.pushStyle}) después de recursos`);
+
+                  // Guardar en historial para que Claude sepa que preguntamos por visita
+                  try {
+                    const { data: leadHist } = await this.supabase.client
+                      .from('leads')
+                      .select('conversation_history')
+                      .eq('id', lead.id)
+                      .single();
+
+                    const histAct = leadHist?.conversation_history || [];
+                    histAct.push({ role: 'assistant', content: msgPush, timestamp: new Date().toISOString() });
+
+                    await this.supabase.client
+                      .from('leads')
+                      .update({ conversation_history: histAct.slice(-30) })
+                      .eq('id', lead.id);
+                  } catch (e) {
+                    console.error('⚠️ Error guardando push en historial');
+                  }
+                }
+              } else if (yaQuiereCita) {
                 console.log('ℹ️ Push a cita OMITIDO - usuario ya expresó intent: confirmar_cita');
+              } else {
+                console.log(`ℹ️ Push a cita OMITIDO - fase ${phaseInfoPush.phase} no permite push`);
               }
             } else {
               console.log('ℹ️ Lead ya tiene cita - recursos enviados, push crédito se verificará abajo');
