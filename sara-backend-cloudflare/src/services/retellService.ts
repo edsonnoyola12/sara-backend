@@ -269,36 +269,50 @@ export class RetellService {
 
   /**
    * Normaliza número de teléfono para formato de llamada
-   * Retell requiere formato E.164: +521234567890
+   * Retell requiere formato E.164: +52XXXXXXXXXX (12 dígitos para México)
+   *
+   * IMPORTANTE: Números mexicanos NO deben tener el prefijo "1" para móviles
+   * - Incorrecto: +5214921226111 (13 dígitos)
+   * - Correcto: +524921226111 (12 dígitos)
    */
   private normalizePhoneForCall(phone: string): string | null {
     // Limpiar caracteres no numéricos excepto +
     let clean = phone.replace(/[^\d+]/g, '');
 
-    // Si no tiene prefijo +, agregar
-    if (!clean.startsWith('+')) {
-      // Si es número mexicano (10 dígitos), agregar +52
-      if (clean.length === 10) {
-        clean = '+52' + clean;
-      }
-      // Si tiene 521 o 52 al inicio
-      else if (clean.startsWith('521') || clean.startsWith('52')) {
-        clean = '+' + clean;
-      }
-      // Asumir que ya tiene código de país
-      else if (clean.length >= 11) {
-        clean = '+' + clean;
-      }
-      else {
-        return null;  // Número inválido
+    // Quitar el + inicial si existe para procesar
+    if (clean.startsWith('+')) {
+      clean = clean.substring(1);
+    }
+
+    // Si empieza con 521 (código México + prefijo móvil antiguo), quitar el 1
+    // Ejemplo: 5214921226111 → 524921226111
+    if (clean.startsWith('521') && clean.length === 13) {
+      clean = '52' + clean.substring(3); // Quitar el "1" después de "52"
+    }
+
+    // Si es número mexicano de 10 dígitos (sin código de país), agregar 52
+    if (clean.length === 10) {
+      clean = '52' + clean;
+    }
+
+    // Si empieza con 52 y tiene 12 dígitos, está bien
+    // Si no empieza con 52, verificar si es otro formato válido
+    if (!clean.startsWith('52')) {
+      // Podría ser otro país, asumir que está bien si tiene al menos 10 dígitos
+      if (clean.length < 10) {
+        return null;
       }
     }
 
-    // Validar longitud mínima
-    if (clean.length < 11) {
+    // Agregar el + al inicio
+    clean = '+' + clean;
+
+    // Validar longitud: mínimo +52XXXXXXXXXX (12 dígitos sin +)
+    if (clean.length < 12) {
       return null;
     }
 
+    console.log(`   📱 Número normalizado: ${phone} → ${clean}`);
     return clean;
   }
 

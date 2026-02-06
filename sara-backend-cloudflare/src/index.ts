@@ -63,7 +63,7 @@ import {
 } from './crons/reports';
 
 // Utils
-import { enviarMensajeTeamMember, EnviarMensajeTeamResult, isPendingExpired, getPendingMessages } from './utils/teamMessaging';
+import { enviarMensajeTeamMember, EnviarMensajeTeamResult, isPendingExpired, getPendingMessages, verificarPendingParaLlamar, CALL_CONFIG } from './utils/teamMessaging';
 
 // Briefings y Recaps
 import {
@@ -1845,6 +1845,123 @@ export default {
 
       } catch (e: any) {
         console.error('❌ Error en limpiar-pending-expirados:', e);
+        return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 📞 VERIFICAR-PENDING-LLAMADAS - Sistema híbrido: llama si pasaron 2h sin respuesta
+    // USO: /verificar-pending-llamadas?api_key=XXX
+    // NOTA: Se ejecuta automáticamente en CRON cada 30 minutos
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/verificar-pending-llamadas" && request.method === "GET") {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      try {
+        // Verificar si Retell está configurado
+        if (!env.RETELL_API_KEY || !env.RETELL_AGENT_ID || !env.RETELL_PHONE_NUMBER) {
+          return corsResponse(JSON.stringify({
+            ok: false,
+            error: 'Retell no está configurado',
+            missing: {
+              RETELL_API_KEY: !env.RETELL_API_KEY,
+              RETELL_AGENT_ID: !env.RETELL_AGENT_ID,
+              RETELL_PHONE_NUMBER: !env.RETELL_PHONE_NUMBER
+            }
+          }, null, 2), 400);
+        }
+
+        const retellConfig = {
+          apiKey: env.RETELL_API_KEY,
+          agentId: env.RETELL_AGENT_ID,
+          phoneNumber: env.RETELL_PHONE_NUMBER
+        };
+
+        // Crear instancia de Meta para enviar mensajes
+        const metaService = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+        // Modo debug: mostrar estado actual sin ejecutar llamadas
+        const debugMode = url.searchParams.get('debug') === 'true';
+        const resetMode = url.searchParams.get('reset') === 'true';
+
+        if (debugMode || resetMode) {
+          // Obtener team members con pending messages
+          const { data: teamMembers } = await supabase.client
+            .from('team_members')
+            .select('*')
+            .eq('active', true)
+            .in('role', ['vendedor', 'admin']);
+
+          const pendingDetails: any[] = [];
+          const tiposConLlamada = ['briefing', 'reporte_diario', 'alerta_lead', 'recordatorio_cita'];
+          const pendingKeyMap: Record<string, string> = {
+            'briefing': 'pending_briefing',
+            'reporte_diario': 'pending_reporte_diario',
+            'alerta_lead': 'pending_alerta_lead',
+            'recordatorio_cita': 'pending_recordatorio_cita',
+          };
+
+          for (const tm of teamMembers || []) {
+            const notas = typeof tm.notes === 'string' ? JSON.parse(tm.notes || '{}') : (tm.notes || {});
+
+            for (const tipo of tiposConLlamada) {
+              const pendingKey = pendingKeyMap[tipo];
+              const pending = notas[pendingKey];
+
+              if (pending?.mensaje_completo) {
+                const sentAt = new Date(pending.sent_at).getTime();
+                const tiempoEspera = Date.now() - sentAt;
+                const horasEspera = Math.round(tiempoEspera / (1000 * 60 * 60) * 10) / 10;
+
+                pendingDetails.push({
+                  nombre: tm.name,
+                  telefono: tm.phone,
+                  tipo,
+                  enviado_hace: `${horasEspera}h`,
+                  llamada_intentada: pending.llamada_intentada || false,
+                  ultimo_error: pending.ultimo_error_llamada,
+                });
+
+                // Si es modo reset, limpiar el flag
+                if (resetMode && pending.llamada_intentada) {
+                  delete notas[pendingKey].llamada_intentada;
+                  delete notas[pendingKey].ultimo_error_llamada;
+                  await supabase.client.from('team_members').update({ notes: notas }).eq('id', tm.id);
+                }
+              }
+            }
+          }
+
+          return corsResponse(JSON.stringify({
+            ok: true,
+            mode: resetMode ? 'reset' : 'debug',
+            pending_con_llamada: pendingDetails,
+            retell_config: {
+              from_number: env.RETELL_PHONE_NUMBER,
+              agent_id: env.RETELL_AGENT_ID ? '✅ Configurado' : '❌ Falta',
+              api_key: env.RETELL_API_KEY ? '✅ Configurado' : '❌ Falta',
+            }
+          }, null, 2));
+        }
+
+        console.log('📞 Ejecutando verificación manual de pending para llamar...');
+        const result = await verificarPendingParaLlamar(supabase, metaService, retellConfig);
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          llamadas_realizadas: result.llamadas,
+          errores: result.errores,
+          detalles_errores: result.detalles || [],
+          config: {
+            horasEspera: CALL_CONFIG.esperaAntesLlamar,
+            maxLlamadasDia: CALL_CONFIG.maxLlamadasDia,
+            horasPermitidas: `${CALL_CONFIG.horasPermitidas.inicio}:00 - ${CALL_CONFIG.horasPermitidas.fin}:00 (México)`
+          }
+        }, null, 2));
+
+      } catch (e: any) {
+        console.error('❌ Error en verificar-pending-llamadas:', e);
         return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
       }
     }
@@ -17413,6 +17530,31 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
     // ═══════════════════════════════════════════════════════════
     console.log('📤 Procesando broadcasts encolados...');
     await procesarBroadcastQueue(supabase, meta);
+
+    // ═══════════════════════════════════════════════════════════
+    // SISTEMA HÍBRIDO - Verificar pending para llamar (cada 30 min)
+    // Si pasaron 2h sin respuesta, llamar con Retell
+    // ═══════════════════════════════════════════════════════════
+    if (mexicoMinute === 0 || mexicoMinute === 30) {
+      console.log('📞 Verificando pending messages para llamar...');
+
+      if (env.RETELL_API_KEY && env.RETELL_AGENT_ID && env.RETELL_PHONE_NUMBER) {
+        try {
+          const retellConfig = {
+            apiKey: env.RETELL_API_KEY,
+            agentId: env.RETELL_AGENT_ID,
+            phoneNumber: env.RETELL_PHONE_NUMBER
+          };
+
+          const result = await verificarPendingParaLlamar(supabase, meta, retellConfig);
+          console.log(`📞 Resultado: ${result.llamadas} llamadas, ${result.errores} errores`);
+        } catch (callError) {
+          console.error('⚠️ Error en verificarPendingParaLlamar:', callError);
+        }
+      } else {
+        console.log('⏭️ Retell no configurado, saltando verificación de llamadas');
+      }
+    }
     } catch (error) {
       // Capturar errores de cron en Sentry
       sentry.captureException(error, {
