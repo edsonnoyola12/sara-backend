@@ -391,6 +391,8 @@ function requiresAuth(pathname: string): boolean {
     /^\/api\/message-metrics/,               // Métricas de mensajes (CRM)
     /^\/api\/tts-metrics/,                   // Métricas de TTS (CRM)
     /^\/api\/metrics\/quality/,              // Calidad de respuestas (CRM)
+    /^\/api\/surveys/,                       // Encuestas (CRM)
+    /^\/api\/send-surveys/,                  // Enviar encuestas (CRM)
   ];
 
   for (const pattern of crmPublicPatterns) {
@@ -423,6 +425,107 @@ function createMetaWithTracking(env: any, supabase: SupabaseService): MetaWhatsA
   });
 
   return meta;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPER: Procesar respuesta a encuesta pendiente (tabla surveys)
+// ═══════════════════════════════════════════════════════════════════════════
+async function checkPendingSurveyResponse(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  phone: string,
+  mensaje: string,
+  nombre: string
+): Promise<boolean> {
+  try {
+    // Buscar encuesta pendiente para este teléfono
+    const phoneSuffix = phone.slice(-10);
+    const { data: survey } = await supabase.client
+      .from('surveys')
+      .select('*')
+      .eq('status', 'sent')
+      .or(`lead_phone.like.%${phoneSuffix}`)
+      .gt('expires_at', new Date().toISOString())
+      .order('sent_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!survey) return false;
+
+    const primerNombre = nombre?.split(' ')[0] || 'amigo';
+
+    // Procesar según tipo de encuesta
+    if (survey.survey_type === 'nps') {
+      const match = mensaje.match(/\b([0-9]|10)\b/);
+      if (!match) return false;
+
+      const score = parseInt(match[1]);
+      let categoria: string;
+      let respuesta: string;
+
+      if (score >= 9) {
+        categoria = 'promotor';
+        respuesta = `Muchas gracias ${primerNombre}! Tu calificacion de ${score}/10 nos motiva mucho.\n\nSi conoces a alguien que busque casa, con gusto lo atendemos. Solo compartenos su nombre y telefono.\n\nGracias por confiar en Grupo Santa Rita!`;
+      } else if (score >= 7) {
+        categoria = 'pasivo';
+        respuesta = `Gracias por tu respuesta ${primerNombre}! Un ${score}/10 nos dice que vamos bien.\n\nHay algo que podamos mejorar? Tu opinion nos ayuda mucho.`;
+      } else {
+        categoria = 'detractor';
+        respuesta = `Gracias por tu honestidad ${primerNombre}. Un ${score}/10 nos dice que debemos mejorar.\n\nPodrias contarnos que paso? Queremos resolver cualquier inconveniente.\n\nUn asesor te contactara pronto.`;
+      }
+
+      await meta.sendWhatsAppMessage(phone, respuesta);
+
+      // Actualizar encuesta en DB
+      await supabase.client.from('surveys').update({
+        status: 'answered',
+        nps_score: score,
+        answered_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }).eq('id', survey.id);
+
+      console.log(`📋 Encuesta CRM NPS procesada: ${nombre} = ${score}/10 (${categoria})`);
+      return true;
+
+    } else {
+      // Para otros tipos (satisfaction, post_cita, etc.)
+      const matchRating = mensaje.match(/\b([1-5])\b/);
+      const esTexto = mensaje.length > 3;
+
+      if (matchRating) {
+        const rating = parseInt(matchRating[1]);
+        await meta.sendWhatsAppMessage(phone, `Gracias por tu calificacion ${primerNombre}! ${rating >= 4 ? 'Nos alegra que hayas tenido una buena experiencia.' : 'Tomaremos en cuenta tu opinion para mejorar.'}\n\nHay algo mas que quieras compartirnos?`);
+
+        await supabase.client.from('surveys').update({
+          status: 'awaiting_feedback',
+          rating,
+          answered_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq('id', survey.id);
+
+        console.log(`📋 Encuesta CRM rating procesada: ${nombre} = ${rating}/5`);
+        return true;
+
+      } else if (survey.status === 'awaiting_feedback' || esTexto) {
+        // Es feedback de texto
+        await meta.sendWhatsAppMessage(phone, `Gracias por tu comentario ${primerNombre}! Lo tomaremos muy en cuenta.`);
+
+        await supabase.client.from('surveys').update({
+          status: 'answered',
+          feedback: mensaje,
+          updated_at: new Date().toISOString()
+        }).eq('id', survey.id);
+
+        console.log(`📋 Encuesta CRM feedback procesado: ${nombre}`);
+        return true;
+      }
+    }
+
+    return false;
+  } catch (err) {
+    console.error('Error checking pending survey:', err);
+    return false;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -6876,10 +6979,17 @@ Mensaje: ${mensaje}`;
                 .or(`phone.eq.${cleanPhoneHot},phone.like.%${cleanPhoneHot.slice(-10)}`)
                 .single();
 
-              if (leadHot && leadHot.assigned_to) {
-                // PRIMERO: Procesar respuestas a encuestas (NPS, post-entrega, etc.)
+              if (leadHot) {
+                // PRIMERO: Verificar si hay encuesta pendiente en tabla surveys (enviada desde CRM)
+                const pendingSurvey = await checkPendingSurveyResponse(supabase, meta, cleanPhoneHot, text, leadHot.name);
+                if (pendingSurvey) {
+                  console.log(`📋 Respuesta a encuesta CRM procesada para ${leadHot.name} - NO enviar respuesta genérica`);
+                  return new Response('OK', { status: 200 });
+                }
+
+                // SEGUNDO: Procesar respuestas a encuestas de CRONs (NPS, post-entrega, etc.)
                 // Estos pueden ser mensajes cortos como "1", "10", "si", "no"
-                const npsProcessed = await procesarRespuestaNPS(supabase, meta, leadHot, text);
+                const npsProcessed = leadHot.assigned_to ? await procesarRespuestaNPS(supabase, meta, leadHot, text) : false;
                 if (npsProcessed) {
                   console.log(`📊 Respuesta NPS procesada para ${leadHot.name} - NO enviar respuesta genérica`);
                   return new Response('OK', { status: 200 });
@@ -10193,7 +10303,9 @@ _Solo responde con el número_ 🙏`;
 
             if (primeraQ) {
               if (primeraQ.type === 'rating') {
-                mensajeEncuesta += `${primeraQ.text}\n_Responde del 1 al 5_`;
+                // NPS usa escala 0-10, otros ratings 1-5
+                const esNPS = template.type === 'nps' || primeraQ.text.toLowerCase().includes('0 al 10');
+                mensajeEncuesta += `${primeraQ.text}\n_Responde del ${esNPS ? '0 al 10' : '1 al 5'}_`;
               } else if (primeraQ.type === 'yesno') {
                 mensajeEncuesta += `${primeraQ.text}\n_Responde SI o NO_`;
               } else {

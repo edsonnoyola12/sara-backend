@@ -15,6 +15,7 @@
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
+import { createTTSService } from '../services/ttsService';
 
 // ═══════════════════════════════════════════════════════════
 // FELICITACIONES DE CUMPLEAÑOS - TEAM MEMBERS
@@ -433,9 +434,9 @@ export async function enviarRecapSemanal(supabase: SupabaseService, meta: MetaWh
 }
 
 // ═══════════════════════════════════════════════════════════
-// RECORDATORIOS DE CITAS - 24h y 2h antes
+// RECORDATORIOS DE CITAS - 24h y 2h antes (CON TTS)
 // ═══════════════════════════════════════════════════════════
-export async function enviarRecordatoriosCitas(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+export async function enviarRecordatoriosCitas(supabase: SupabaseService, meta: MetaWhatsAppService, options?: { openaiApiKey?: string }): Promise<void> {
   const ahora = new Date();
   const en24h = new Date(ahora.getTime() + 24 * 60 * 60 * 1000);
   const en2h = new Date(ahora.getTime() + 2 * 60 * 60 * 1000);
@@ -443,7 +444,7 @@ export async function enviarRecordatoriosCitas(supabase: SupabaseService, meta: 
   // Recordatorio 24h antes
   const { data: citas24h } = await supabase.client
     .from('appointments')
-    .select('*, leads(name, phone), team_members(name, phone)')
+    .select('*, leads(name, phone, last_message_at), team_members(name, phone)')
     .eq('status', 'scheduled')
     .eq('reminder_24h_sent', false)
     .gte('scheduled_date', ahora.toISOString().split('T')[0])
@@ -457,24 +458,52 @@ export async function enviarRecordatoriosCitas(supabase: SupabaseService, meta: 
     const desarrollo = cita.property_interest || 'Santa Rita';
     const ubicacion = cita.location || desarrollo;
     const hora = cita.scheduled_time || '10:00 AM';
+    const horaFormateada = hora.substring(0, 5);
+
+    // Verificar ventana de 24h del lead
+    const lastMsg = lead.last_message_at ? new Date(lead.last_message_at).getTime() : 0;
+    const hace24h = Date.now() - 24 * 60 * 60 * 1000;
+    const ventanaAbierta = lastMsg > hace24h;
 
     try {
-      // Usar template: recordatorio_cita_24h
-      // Template: 📅 ¡Hola {{1}}! Te recordamos tu cita mañana. 🏠 {{2}} 📍 {{3}} ⏰ {{4}}
-      const templateComponents = [
-        {
-          type: 'body',
-          parameters: [
-            { type: 'text', text: nombreCorto },
-            { type: 'text', text: desarrollo },
-            { type: 'text', text: ubicacion },
-            { type: 'text', text: hora }
-          ]
-        }
-      ];
+      if (ventanaAbierta && options?.openaiApiKey) {
+        // ═══ VENTANA ABIERTA: Mensaje directo + TTS ═══
+        const mensajePersonalizado = `¡Hola ${nombreCorto}! 📅\n\nTe recordamos tu cita de mañana:\n\n🏠 *${desarrollo}*\n📍 ${ubicacion}\n⏰ ${horaFormateada}\n\n¿Nos confirmas tu asistencia? ¡Te esperamos! 🙌`;
 
-      await meta.sendTemplate(lead.phone, 'recordatorio_cita_24h', 'es_MX', templateComponents);
-      console.log(`📅 Recordatorio 24h (template) enviado a ${lead.name}`);
+        // Enviar texto
+        await meta.sendWhatsAppMessage(lead.phone, mensajePersonalizado);
+        console.log(`📅 Recordatorio 24h (directo) enviado a ${lead.name}`);
+
+        // Generar y enviar audio TTS
+        try {
+          const tts = createTTSService(options.openaiApiKey);
+          const textoAudio = `Hola ${nombreCorto}. Te recordamos tu cita de mañana en ${desarrollo}, a las ${horaFormateada}. ¿Nos confirmas tu asistencia? Te esperamos.`;
+          const audioResult = await tts.generateAudio(textoAudio);
+
+          if (audioResult.success && audioResult.audioBuffer) {
+            await meta.sendVoiceMessage(lead.phone, audioResult.audioBuffer, audioResult.mimeType || 'audio/ogg');
+            console.log(`🔊 Audio recordatorio enviado a ${lead.name}`);
+          }
+        } catch (ttsErr) {
+          console.log(`⚠️ TTS recordatorio falló (no crítico):`, ttsErr);
+        }
+      } else {
+        // ═══ VENTANA CERRADA: Template (sin audio) ═══
+        const templateComponents = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: nombreCorto },
+              { type: 'text', text: desarrollo },
+              { type: 'text', text: ubicacion },
+              { type: 'text', text: hora }
+            ]
+          }
+        ];
+
+        await meta.sendTemplate(lead.phone, 'recordatorio_cita_24h', 'es_MX', templateComponents);
+        console.log(`📅 Recordatorio 24h (template) enviado a ${lead.name}`);
+      }
 
       await supabase.client
         .from('appointments')
@@ -488,7 +517,7 @@ export async function enviarRecordatoriosCitas(supabase: SupabaseService, meta: 
   // Recordatorio 2h antes
   const { data: citas2h } = await supabase.client
     .from('appointments')
-    .select('*, leads(name, phone), team_members(name, phone)')
+    .select('*, leads(name, phone, last_message_at), team_members(name, phone)')
     .eq('status', 'scheduled')
     .eq('reminder_2h_sent', false)
     .gte('scheduled_date', ahora.toISOString().split('T')[0])
@@ -501,23 +530,52 @@ export async function enviarRecordatoriosCitas(supabase: SupabaseService, meta: 
     const nombreCorto = lead.name?.split(' ')[0] || 'Hola';
     const desarrollo = cita.property_interest || 'Santa Rita';
     const ubicacion = cita.location || desarrollo;
+    const hora = cita.scheduled_time || '10:00';
+    const horaFormateada = hora.substring(0, 5);
+
+    // Verificar ventana de 24h del lead
+    const lastMsg = lead.last_message_at ? new Date(lead.last_message_at).getTime() : 0;
+    const hace24h = Date.now() - 24 * 60 * 60 * 1000;
+    const ventanaAbierta = lastMsg > hace24h;
 
     try {
-      // Usar template: recordatorio_cita_2h
-      // Template: ⏰ ¡{{1}}, tu cita es en 2 horas! 🏠 {{2}} 📍 {{3}}
-      const templateComponents = [
-        {
-          type: 'body',
-          parameters: [
-            { type: 'text', text: nombreCorto },
-            { type: 'text', text: desarrollo },
-            { type: 'text', text: ubicacion }
-          ]
-        }
-      ];
+      if (ventanaAbierta && options?.openaiApiKey) {
+        // ═══ VENTANA ABIERTA: Mensaje directo + TTS ═══
+        const mensajePersonalizado = `⏰ ¡${nombreCorto}, tu cita es en 2 horas!\n\n🏠 *${desarrollo}*\n📍 ${ubicacion}\n\n¡Te esperamos! 🙌`;
 
-      await meta.sendTemplate(lead.phone, 'recordatorio_cita_2h', 'es_MX', templateComponents);
-      console.log(`⏰ Recordatorio 2h (template) enviado a ${lead.name}`);
+        // Enviar texto
+        await meta.sendWhatsAppMessage(lead.phone, mensajePersonalizado);
+        console.log(`⏰ Recordatorio 2h (directo) enviado a ${lead.name}`);
+
+        // Generar y enviar audio TTS
+        try {
+          const tts = createTTSService(options.openaiApiKey);
+          const textoAudio = `${nombreCorto}, tu cita es en 2 horas en ${desarrollo}. ¡Te esperamos!`;
+          const audioResult = await tts.generateAudio(textoAudio);
+
+          if (audioResult.success && audioResult.audioBuffer) {
+            await meta.sendVoiceMessage(lead.phone, audioResult.audioBuffer, audioResult.mimeType || 'audio/ogg');
+            console.log(`🔊 Audio recordatorio 2h enviado a ${lead.name}`);
+          }
+        } catch (ttsErr) {
+          console.log(`⚠️ TTS recordatorio 2h falló (no crítico):`, ttsErr);
+        }
+      } else {
+        // ═══ VENTANA CERRADA: Template (sin audio) ═══
+        const templateComponents = [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: nombreCorto },
+              { type: 'text', text: desarrollo },
+              { type: 'text', text: ubicacion }
+            ]
+          }
+        ];
+
+        await meta.sendTemplate(lead.phone, 'recordatorio_cita_2h', 'es_MX', templateComponents);
+        console.log(`⏰ Recordatorio 2h (template) enviado a ${lead.name}`);
+      }
 
       await supabase.client
         .from('appointments')

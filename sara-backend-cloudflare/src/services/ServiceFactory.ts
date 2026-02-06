@@ -26,6 +26,7 @@ export interface Env {
   META_PHONE_NUMBER_ID: string;
   META_ACCESS_TOKEN: string;
   GEMINI_API_KEY?: string;
+  OPENAI_API_KEY?: string;
 }
 
 /**
@@ -127,7 +128,8 @@ export class ServiceFactory {
     if (!this._notification) {
       this._notification = new NotificationService(
         this.getSupabase(),
-        this.getMeta()
+        this.getMeta(),
+        this.env.OPENAI_API_KEY
       );
     }
     return this._notification;

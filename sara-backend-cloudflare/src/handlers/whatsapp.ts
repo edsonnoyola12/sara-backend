@@ -1662,6 +1662,32 @@ export class WhatsAppHandler {
       }
     }
 
+    // PENDING AUDIO (TTS) - Enviar nota de voz pendiente
+    const pendingAudioCEO = notasCEO?.pending_audio;
+    if (pendingAudioCEO?.sent_at && pendingAudioCEO?.texto) {
+      const horasDesdeAudio = (Date.now() - new Date(pendingAudioCEO.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesdeAudio <= 24 && this.env?.OPENAI_API_KEY) {
+        console.log(`🔊 [PENDING] CEO ${nombreCEO} respondió template - enviando audio TTS`);
+        try {
+          const { createTTSService } = await import('../services/ttsService');
+          const tts = createTTSService(this.env.OPENAI_API_KEY);
+          const audioResult = await tts.generateAudio(pendingAudioCEO.texto);
+          if (audioResult.success && audioResult.audioBuffer) {
+            await this.meta.sendVoiceMessage(cleanPhone, audioResult.audioBuffer, audioResult.mimeType || 'audio/ogg');
+            console.log(`✅ Audio TTS entregado a CEO (${audioResult.audioBuffer.byteLength} bytes)`);
+          }
+        } catch (ttsErr) {
+          console.error('⚠️ Error generando audio TTS:', ttsErr);
+        }
+
+        const { pending_audio, ...notasSinPendingAudio } = notasCEO;
+        await this.supabase.client.from('team_members').update({
+          notes: { ...notasSinPendingAudio, last_sara_interaction: new Date().toISOString() }
+        }).eq('id', ceo.id);
+        return;
+      }
+    }
+
     // ╔════════════════════════════════════════════════════════════════════════╗
     // ║  CRÍTICO - NO MODIFICAR SIN CORRER TESTS: npm test                      ║
     // ║  Test file: src/tests/conversationLogic.test.ts                         ║
@@ -4131,6 +4157,32 @@ export class WhatsAppHandler {
             ...notasSinPendingVideo,
             last_sara_interaction: new Date().toISOString()
           }
+        }).eq('id', vendedor.id);
+        return;
+      }
+    }
+
+    // PENDING AUDIO (TTS) - Enviar nota de voz pendiente
+    const pendingAudioVendedor = notasVendedor?.pending_audio;
+    if (pendingAudioVendedor?.sent_at && pendingAudioVendedor?.texto) {
+      const horasDesdeAudioV = (Date.now() - new Date(pendingAudioVendedor.sent_at).getTime()) / (1000 * 60 * 60);
+      if (horasDesdeAudioV <= 24 && this.env?.OPENAI_API_KEY) {
+        console.log(`🔊 [PENDING] ${nombreVendedor} respondió template - enviando audio TTS`);
+        try {
+          const { createTTSService } = await import('../services/ttsService');
+          const tts = createTTSService(this.env.OPENAI_API_KEY);
+          const audioResult = await tts.generateAudio(pendingAudioVendedor.texto);
+          if (audioResult.success && audioResult.audioBuffer) {
+            await this.meta.sendVoiceMessage(from, audioResult.audioBuffer, audioResult.mimeType || 'audio/ogg');
+            console.log(`✅ Audio TTS entregado a ${nombreVendedor} (${audioResult.audioBuffer.byteLength} bytes)`);
+          }
+        } catch (ttsErr) {
+          console.error('⚠️ Error generando audio TTS:', ttsErr);
+        }
+
+        const { pending_audio, ...notasSinPendingAudioV } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: { ...notasSinPendingAudioV, last_sara_interaction: new Date().toISOString() }
         }).eq('id', vendedor.id);
         return;
       }

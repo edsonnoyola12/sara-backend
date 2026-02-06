@@ -5,6 +5,8 @@
 
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
+import { createTTSService } from '../services/ttsService';
+import { createTTSTrackingService } from '../services/ttsTrackingService';
 
 // ═══════════════════════════════════════════════════════════
 // DETECCIÓN DE LEADS CALIENTES
@@ -216,7 +218,8 @@ export async function alertarLeadCaliente(
   meta: MetaWhatsAppService,
   lead: any,
   mensaje: string,
-  señales: HotLeadSignal[]
+  señales: HotLeadSignal[],
+  options?: { openaiApiKey?: string }
 ): Promise<void> {
   try {
     if (señales.length === 0) return;
@@ -275,6 +278,46 @@ ${señales.some(s => s.tipo === 'visita') ? '→ Agendar visita HOY si es posibl
 
     await meta.sendWhatsAppMessage(vendedor.phone, alertaMsg);
     console.log(`🔥 Alerta enviada a ${vendedor.name} por lead caliente: ${lead.name} (${tiposDetectados})`);
+
+    // ═══ TTS: Enviar audio de alerta urgente ═══
+    if (options?.openaiApiKey) {
+      try {
+        const tts = createTTSService(options.openaiApiKey);
+        const desarrollo = lead.property_interest || 'sin desarrollo especificado';
+        const textoAudio = intensidadMax === 'muy_alta'
+          ? `¡Alerta urgente! Lead muy caliente. ${nombreLead} está interesado en ${desarrollo}. Dijo: ${mensaje.substring(0, 80)}. ¡Contacta inmediatamente!`
+          : `Alerta. Lead caliente. ${nombreLead} interesado en ${desarrollo}. Señales: ${tiposDetectados}. Responde bridge ${nombreCorto}.`;
+
+        const audioResult = await tts.generateAudio(textoAudio);
+        if (audioResult.success && audioResult.audioBuffer) {
+          const sendResult = await meta.sendVoiceMessage(vendedor.phone, audioResult.audioBuffer, audioResult.mimeType || 'audio/ogg');
+          console.log(`🔊 Audio alerta lead caliente enviado a ${vendedor.name}`);
+
+          // 🔊 TTS Tracking
+          const messageId = sendResult?.messages?.[0]?.id;
+          if (messageId) {
+            try {
+              const ttsTracking = createTTSTrackingService(supabase);
+              await ttsTracking.logTTSSent({
+                messageId,
+                recipientPhone: vendedor.phone,
+                recipientType: 'team_member',
+                recipientId: vendedor.id,
+                recipientName: vendedor.name,
+                ttsType: 'alerta_lead',
+                textoOriginal: textoAudio,
+                audioBytes: audioResult.audioBuffer.byteLength,
+                duracionEstimada: audioResult.duration
+              });
+            } catch (trackErr) {
+              // No crítico
+            }
+          }
+        }
+      } catch (ttsErr) {
+        console.log(`⚠️ TTS alerta lead caliente falló (no crítico):`, ttsErr);
+      }
+    }
 
     // Guardar en notas del lead
     const notasActualizadas = {
