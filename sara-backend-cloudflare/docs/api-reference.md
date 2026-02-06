@@ -1,7 +1,7 @@
 # API Reference - SARA Backend
 
 > **Base URL:** `https://sara-backend.edson-633.workers.dev`
-> **Última actualización:** 2026-01-30
+> **Última actualización:** 2026-02-05
 
 ---
 
@@ -19,7 +19,9 @@
 10. [Templates WhatsApp](#templates-whatsapp)
 11. [Testing y Debug](#testing-y-debug)
 12. [Sistema](#sistema)
-13. [Servicios Internos](#servicios-internos)
+13. [Encuestas (CRM)](#encuestas-crm)
+14. [Métricas de Mensajes (CRM)](#métricas-de-mensajes-crm)
+15. [Servicios Internos](#servicios-internos)
 
 ---
 
@@ -41,6 +43,10 @@ Authorization: Bearer <API_SECRET>
 - `/status` - Dashboard HTML
 - `/analytics` - Analytics HTML
 - `/api/properties` - Catálogo público
+- `/api/surveys` - Encuestas (CRM)
+- `/api/send-surveys` - Enviar encuestas (CRM)
+- `/api/message-metrics` - Métricas de mensajes (CRM)
+- `/api/tts-metrics` - Métricas de TTS (CRM)
 
 ---
 
@@ -736,6 +742,99 @@ await bridge.cerrarBridge(bridgeId: string)
 
 // Extender bridge
 await bridge.extenderBridge(bridgeId: string, minutosExtra: number)
+```
+
+---
+
+## Encuestas (CRM)
+
+### GET /api/surveys
+Listar encuestas enviadas desde el CRM.
+
+```bash
+GET /api/surveys?status=all
+```
+
+**Filtros disponibles:** `all`, `sent`, `answered`, `awaiting_feedback`
+
+```json
+{
+  "surveys": [
+    {
+      "id": "uuid",
+      "lead_id": "uuid",
+      "lead_name": "Roberto García",
+      "phone": "5610016226",
+      "template_type": "nps",
+      "status": "answered",
+      "nps_score": 9,
+      "nps_category": "promotor",
+      "feedback": "Excelente atención",
+      "sent_at": "2026-02-05T...",
+      "answered_at": "2026-02-05T..."
+    }
+  ],
+  "metrics": {
+    "total": 2,
+    "answered": 1,
+    "avg_nps": 9.0,
+    "promoters": 1,
+    "passives": 0,
+    "detractors": 0
+  }
+}
+```
+
+### POST /api/send-surveys
+Enviar encuesta a uno o más leads/vendedores.
+
+```json
+{
+  "template": {
+    "name": "NPS - Net Promoter Score",
+    "type": "nps",
+    "greeting": "Hola {nombre}...",
+    "questions": [
+      { "text": "Del 0 al 10, ¿qué tan probable es que nos recomiendes?", "type": "rating" }
+    ],
+    "closing": "¡Gracias!"
+  },
+  "leads": [
+    { "id": "uuid", "phone": "5610016226", "name": "Roberto" }
+  ],
+  "targetType": "leads"
+}
+```
+
+---
+
+## Métricas de Mensajes (CRM)
+
+### GET /api/message-metrics
+Métricas de mensajes WhatsApp enviados/recibidos.
+
+```json
+{
+  "metrics": {
+    "total_messages": 150,
+    "by_type": { "text": 120, "template": 20, "image": 10 },
+    "by_direction": { "outgoing": 100, "incoming": 50 },
+    "by_day": [...]
+  }
+}
+```
+
+### GET /api/tts-metrics
+Métricas de mensajes de voz TTS generados.
+
+```json
+{
+  "metrics": {
+    "total_generated": 25,
+    "total_sent": 23,
+    "avg_duration_seconds": 8.5
+  }
+}
 ```
 
 ---

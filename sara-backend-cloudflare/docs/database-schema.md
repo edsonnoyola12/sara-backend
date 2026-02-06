@@ -1,7 +1,7 @@
 # Database Schema - SARA Backend
 
 > **Base de datos:** Supabase (PostgreSQL)
-> **Última actualización:** 2026-01-30
+> **Última actualización:** 2026-02-05
 
 ---
 
@@ -258,17 +258,33 @@ draft → sent → viewed → negotiating → accepted → reserved → contract
 
 ## surveys
 
-Encuestas post-visita y NPS.
+Encuestas enviadas desde CRM y CRONs automáticos. Soporta NPS, satisfacción, post-cita, rescate y custom.
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
 | `id` | UUID | Primary key |
-| `lead_id` | UUID | FK → leads.id |
-| `type` | TEXT | Tipo (post_visit, nps, feedback) |
-| `rating` | INTEGER | Calificación (1-10) |
-| `response` | TEXT | Respuesta abierta |
-| `appointment_id` | UUID | FK → appointments.id |
+| `lead_id` | UUID | FK → leads.id (nullable para vendedores) |
+| `phone` | TEXT | Teléfono del destinatario |
+| `lead_name` | TEXT | Nombre del destinatario |
+| `template_type` | TEXT | Tipo (nps, satisfaction, post_cita, rescate, custom) |
+| `template_name` | TEXT | Nombre de la plantilla usada |
+| `questions` | JSONB | Preguntas enviadas |
+| `status` | TEXT | sent, awaiting_feedback, answered |
+| `nps_score` | INTEGER | Calificación NPS (0-10) |
+| `nps_category` | TEXT | promotor, pasivo, detractor |
+| `rating` | INTEGER | Calificación general (1-5) |
+| `feedback` | TEXT | Respuesta abierta / comentarios |
+| `response` | TEXT | Respuesta cruda del destinatario |
+| `appointment_id` | UUID | FK → appointments.id (nullable) |
+| `sent_at` | TIMESTAMP | Fecha de envío |
+| `answered_at` | TIMESTAMP | Fecha de respuesta |
 | `created_at` | TIMESTAMP | Fecha de creación |
+
+### Flujo de encuesta CRM
+```
+POST /api/send-surveys → status: "sent" → Lead responde →
+  checkPendingSurveyResponse() → status: "answered" + nps_score/category
+```
 
 ---
 

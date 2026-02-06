@@ -3277,7 +3277,62 @@ Después de cada respuesta de IA, ahora se guardan en `lead.notes`:
 
 ---
 
-## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-03)
+### 2026-02-05 (Sesión 21) - Métricas de Mensajes + Encuestas CRM
+
+**Nuevas funcionalidades:**
+
+#### 1. Vista de Métricas de Mensajes en CRM
+- Gráficas con Recharts (barras y pie)
+- Búsqueda y filtros
+- Carga paralela de `/api/message-metrics` y `/api/tts-metrics`
+- Etiquetas en español
+
+#### 2. Encuestas CRM - Fix Completo
+
+**Problema:** La pestaña "Enviar" de Encuestas mostraba KPIs en 0 porque leía de `leads.survey_completed` en lugar de la tabla `surveys`.
+
+**Fixes aplicados:**
+
+| Problema | Fix |
+|----------|-----|
+| KPIs en 0 (leían de leads array) | Ahora leen de API `/api/surveys` |
+| NPS decía "del 1 al 5" para tipo NPS | Corregido a "del 0 al 10" |
+| Respuesta a encuesta tratada como mensaje normal | `checkPendingSurveyResponse()` intercepta antes de IA |
+| Endpoints requerían auth | Agregados a `crmPublicPatterns` |
+
+**Endpoints públicos para CRM agregados:**
+- `/api/surveys` - Listar encuestas con métricas
+- `/api/send-surveys` - Enviar encuestas
+- `/api/message-metrics` - Métricas de mensajes WhatsApp
+- `/api/tts-metrics` - Métricas de TTS
+
+**Nueva función `checkPendingSurveyResponse()`:**
+- Consulta tabla `surveys` por teléfono con status `sent` o `awaiting_feedback`
+- Procesa respuestas NPS (0-10) y rating (1-5)
+- Clasifica: promotor (9-10), pasivo (7-8), detractor (0-6)
+- Actualiza survey con score, categoría y feedback
+
+#### 3. TTS en Recordatorios de Citas
+- Recordatorios 24h ahora incluyen audio TTS cuando ventana 24h está abierta
+- Si ventana cerrada → template sin audio (como antes)
+
+**Archivos modificados Backend:**
+- `src/index.ts` - checkPendingSurveyResponse, crmPublicPatterns, fix NPS format
+- `src/handlers/whatsapp.ts` - Import checkPendingSurveyResponse
+- `src/crons/briefings.ts` - TTS en recordatorios de citas
+- `src/crons/leadScoring.ts` - Import ttsService
+- `src/services/ServiceFactory.ts` - ttsService factory
+
+**Archivos modificados CRM:**
+- `src/App.tsx` - KPIs leen de API surveys, gráfica NPS, comentarios de API
+
+**Commits:**
+- CRM: `eed1d86` - fix: KPIs de encuestas leen de API /api/surveys
+- Backend: `de67f2e9` - feat: TTS en recordatorios + endpoints encuestas publicos
+
+---
+
+## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-05)
 
 ### Flujos de IA Verificados
 
@@ -3295,9 +3350,30 @@ Después de cada respuesta de IA, ahora se guardan en `lead.notes`:
 | Solicitud de cita | ✅ | 2026-02-03 |
 | Terrenos | ✅ | 2026-02-03 |
 | Especificaciones (grande, barata, amenidades) | ✅ | 2026-02-03 |
-| **Clarificación cuando hay ambigüedad** | ✅ | 2026-02-03 |
-| **Contexto enriquecido (score, status, objeciones)** | ✅ | 2026-02-03 |
-| **Memoria de conversación entre sesiones** | ✅ | 2026-02-03 |
-| **Respuestas en inglés con USD** | ✅ | 2026-02-03 |
+| Clarificación cuando hay ambigüedad | ✅ | 2026-02-03 |
+| Contexto enriquecido (score, status, objeciones) | ✅ | 2026-02-03 |
+| Memoria de conversación entre sesiones | ✅ | 2026-02-03 |
+| Respuestas en inglés con USD | ✅ | 2026-02-03 |
 
-**Sistema 100% operativo - Última verificación: 2026-02-03**
+### Paneles CRM Verificados
+
+| Panel | Estado | Última verificación |
+|-------|--------|---------------------|
+| Vendedor | ✅ | 2026-02-02 |
+| Coordinador | ✅ | 2026-02-02 |
+| Marketing | ✅ | 2026-02-02 |
+| CEO/Admin | ✅ | 2026-02-02 |
+| **Métricas de Mensajes** | ✅ | 2026-02-05 |
+| **Encuestas (Enviar + Resultados)** | ✅ | 2026-02-05 |
+
+### Endpoints CRM Públicos
+
+| Endpoint | Descripción | Verificado |
+|----------|-------------|------------|
+| `/api/surveys` | Listar encuestas + métricas | ✅ 2026-02-05 |
+| `/api/send-surveys` | Enviar encuestas | ✅ 2026-02-05 |
+| `/api/message-metrics` | Métricas de mensajes | ✅ 2026-02-05 |
+| `/api/tts-metrics` | Métricas de TTS | ✅ 2026-02-05 |
+| `/api/properties` | Catálogo de propiedades | ✅ 2026-02-02 |
+
+**Sistema 100% operativo - Última verificación: 2026-02-05**
