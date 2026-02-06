@@ -3367,6 +3367,58 @@ Después de cada respuesta de IA, ahora se guardan en `lead.notes`:
 
 **Sistema 100% operativo - Última verificación: 2026-02-06**
 
+#### QA Exhaustivo Consumer Journey - 38/38 Tests (via /test-ai-response)
+
+| # | Fase | Mensaje | Intent | Resultado |
+|---|------|---------|--------|-----------|
+| **FASE 1: PRIMER CONTACTO** |
+| 1 | Saludo | "hola" | saludo | ✅ Pregunta recámaras |
+| 2 | Facebook | "vi su anuncio en facebook" | interes_desarrollo | ✅ Lista desarrollos |
+| 3 | Familia | "busco casa familia de 4" | interes_desarrollo | ✅ Opciones 3-4 rec |
+| **FASE 2: EXPLORACIÓN** |
+| 4 | Desarrollo | "que tienen en monte verde" | interes_desarrollo | ✅ 4 modelos + precios |
+| 5 | Premium | "distrito falco que tiene" | interes_desarrollo | ✅ Premium + precios |
+| 6 | Terrenos | "tienen terrenos" | interes_desarrollo | ✅ Citadella del Nogal |
+| 7 | Alberca | "casas con alberca" | interes_desarrollo | ✅ Solo Priv. Andes |
+| **FASE 3: PREGUNTAS** |
+| 8 | Barata | "la mas barata" | interes_desarrollo | ✅ Desde $1.6M |
+| 9 | Grande | "la mas grande" | interes_desarrollo | ✅ Calandria 215m² |
+| 10 | GPS | "me mandan ubicacion" | - | ✅ GPS=true |
+| 11 | Brochure | "tienen brochure" | - | ✅ Brochure=true |
+| **FASE 4: FINANCIAMIENTO** |
+| 12 | INFONAVIT | "aceptan credito infonavit" | info_credito | ✅ Sí + opciones |
+| 13 | Enganche | "cuanto es el enganche minimo" | info_credito | ✅ 10% + INFONAVIT 100% |
+| 14 | Mensualidades | "mensualidades casa 2 millones" | info_credito | ✅ $18-22K aprox |
+| 15 | Ingreso | "gano 12 mil al mes" | info_credito | ✅ Opciones accesibles |
+| **FASE 5: OBJECIONES** |
+| 16 | Caro | "esta muy caro" | interes_desarrollo | ✅ Desde $1.6M |
+| 17 | Pensar | "lo voy a pensar" | otro | ✅ Urgencia + apartado $20K |
+| 18 | Lejos | "zacatecas me queda lejos" | otro | ✅ Plusvalía 8-10% |
+| 19 | Competencia | "en javer tienen mas bonitas" | otro | ✅ No critica, ofrece valor |
+| **FASE 6: CIERRE** |
+| 20 | Visitar | "si quiero ir a ver las casas" | solicitar_cita | ✅ "¿Sábado o domingo?" |
+| 21 | Confirmar | "el sabado a las 11" | confirmar_cita | ✅ Agenda + pregunta desarrollo |
+| 22 | Agendar | "agendar cita el domingo" | solicitar_cita | ✅ Opciones de desarrollo |
+| **FASE 7: EDGE CASES** |
+| 23 | Renta | "casas en renta" | otro | ✅ "Solo vendemos" |
+| 24 | Ya compré | "ya compre en otro lado" | otro | ✅ Felicita + referidos |
+| 25 | No contacto | "ya no me escribas" | despedida | ✅ Respeta decisión |
+| 26 | Robot | "eres persona real o robot" | hablar_humano | ✅ "Soy SARA, virtual 🤖" |
+| **FASE 8: IDIOMA/EXTREMOS** |
+| 27 | English | "I want to buy a house" | interes_desarrollo | ✅ Inglés + USD |
+| 28 | Fuera tema | "venden hamburguesas" | otro | ✅ Redirige a casas |
+| 29 | Urgencia | "me urge mudarme este mes" | interes_desarrollo | ✅ Entrega inmediata |
+| 30 | Typos | "informasion monterrede" | interes_desarrollo | ✅ Monte Verde detectado |
+| **FASE 9: SITUACIONES REALES** |
+| 31 | Mascotas | "puedo tener perro" | interes_desarrollo | ✅ Pet-friendly |
+| 32 | Seguridad | "que tan segura es la zona" | interes_desarrollo | ✅ Vigilancia 24/7 |
+| 33 | Escuelas | "que escuelas hay cerca" | info_desarrollo | ✅ Info por zona |
+| 34 | Cortesía | "ok gracias" | otro | ✅ Mantiene conversación |
+| 35 | El Nogal | "me interesa el nogal" | solicitar_cita | ✅ Citadella + cierra cita |
+| 36 | Humano | "quiero hablar con alguien real" | hablar_humano | ✅ Conecta con asesor |
+| 37 | Freelancer | "soy freelancer sin nomina" | info_credito | ✅ Opciones para independientes |
+| 38 | Entrega | "cuanto tardan en entregar" | otro | ✅ 3-4 meses por desarrollo |
+
 ---
 
 ## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-06)
@@ -3376,23 +3428,34 @@ Después de cada respuesta de IA, ahora se guardan en `lead.notes`:
 | Flujo | Estado | Última verificación |
 |-------|--------|---------------------|
 | Saludos y presentación | ✅ | 2026-02-06 |
-| Info de desarrollos (Monte Verde 3 rec) | ✅ | 2026-02-06 |
+| Info de desarrollos (Monte Verde, Falco, Andes, etc.) | ✅ | 2026-02-06 |
 | Alberca = Solo Andes | ✅ | 2026-02-06 |
-| Citadella del Nogal = Villa Campelo/Galiano | ✅ | 2026-02-05 |
-| Renta = "Solo vendemos" | ✅ | 2026-02-05 |
-| Ya compré otro lado = Felicita | ✅ | 2026-02-05 |
-| No contacto = Respeta | ✅ | 2026-02-05 |
+| Citadella del Nogal = Villa Campelo/Galiano | ✅ | 2026-02-06 |
+| Renta = "Solo vendemos" | ✅ | 2026-02-06 |
+| Ya compré otro lado = Felicita | ✅ | 2026-02-06 |
+| No contacto = Respeta | ✅ | 2026-02-06 |
 | INFONAVIT/Crédito | ✅ | 2026-02-06 |
-| Objeciones (precio, pensar, ubicación) | ✅ | 2026-02-05 |
+| Objeciones (precio, pensar, ubicación, competencia) | ✅ | 2026-02-06 |
 | Solicitud de cita / visita | ✅ | 2026-02-06 |
-| Terrenos | ✅ | 2026-02-05 |
-| Especificaciones (grande, barata, amenidades) | ✅ | 2026-02-05 |
+| Terrenos | ✅ | 2026-02-06 |
+| Especificaciones (grande, barata, amenidades) | ✅ | 2026-02-06 |
 | Clarificación cuando hay ambigüedad | ✅ | 2026-02-03 |
 | Contexto enriquecido (score, status, objeciones) | ✅ | 2026-02-03 |
 | Memoria de conversación entre sesiones | ✅ | 2026-02-03 |
-| Respuestas en inglés con USD | ✅ | 2026-02-05 |
-| **GPS/Ubicación enviada automáticamente** | ✅ | 2026-02-06 |
-| **Comandos vendedor (mis leads, citas)** | ✅ | 2026-02-06 |
+| Respuestas en inglés con USD | ✅ | 2026-02-06 |
+| GPS/Ubicación enviada automáticamente | ✅ | 2026-02-06 |
+| Brochure enviado automáticamente | ✅ | 2026-02-06 |
+| Comandos vendedor (mis leads, citas) | ✅ | 2026-02-06 |
+| Enganche/mensualidades/ingreso | ✅ | 2026-02-06 |
+| Freelancer sin nómina | ✅ | 2026-02-06 |
+| Mascotas pet-friendly | ✅ | 2026-02-06 |
+| Seguridad de zona | ✅ | 2026-02-06 |
+| Escuelas cercanas | ✅ | 2026-02-06 |
+| Urgencia / entrega inmediata | ✅ | 2026-02-06 |
+| Typos detectados correctamente | ✅ | 2026-02-06 |
+| Hablar con humano | ✅ | 2026-02-06 |
+| Tiempo de entrega por desarrollo | ✅ | 2026-02-06 |
+| Fuera de tema → redirige a casas | ✅ | 2026-02-06 |
 
 ### Paneles CRM Verificados
 
