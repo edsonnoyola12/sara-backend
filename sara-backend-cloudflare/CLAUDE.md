@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-06 (Sesión 22)
+> Última actualización: 2026-02-06 (Sesión 23)
 
 ---
 
@@ -3506,6 +3506,10 @@ Después de cada respuesta de IA, ahora se guardan en `lead.notes`:
 | **"Si" fallback usa property_interest** | ✅ | 2026-02-06 |
 | **No hardcodear Los Encinos como default** | ✅ | 2026-02-06 |
 | **Enforcement de nombre post-procesamiento** | ✅ | 2026-02-06 |
+| **No double/triple name asks** | ✅ | 2026-02-06 |
+| **Name loop limit (máx 3 intentos)** | ✅ | 2026-02-06 |
+| **Nombre de lead no usado como ubicación** | ✅ | 2026-02-06 |
+| **Colinas del Padre safety net** | ✅ | 2026-02-06 |
 
 ### Paneles CRM Verificados
 
@@ -3528,4 +3532,65 @@ Después de cada respuesta de IA, ahora se guardan en `lead.notes`:
 | `/api/tts-metrics` | Métricas de TTS | ✅ 2026-02-05 |
 | `/api/properties` | Catálogo de propiedades | ✅ 2026-02-02 |
 
-**Sistema 100% operativo - Última verificación: 2026-02-06**
+**Sistema 100% operativo - Última verificación: 2026-02-06 (Sesión 23)**
+
+---
+
+### 2026-02-06 (Sesión 23) - Fix 4 Issues de Conversaciones Reales (Round 2)
+
+**Análisis de las 3 conversaciones reales en la base de datos reveló 4 nuevos problemas:**
+
+#### Fix A: Eliminar mensajes dobles/triples de nombre
+
+**Problema:** 4 code paths independientes pedían nombre sin coordinarse, causando 2-3 mensajes consecutivos:
+1. Enforcement (post-procesamiento) - agrega a respuesta
+2. Intercept (cita sin nombre) - envía mensaje SEPARADO
+3. Push-to-cita (después de recursos) - envía mensaje SEPARADO
+4. Safety check (creación de cita) - envía mensaje SEPARADO
+
+**Solución:** Enforcement (#1) es la fuente de verdad. Los otros 3 ya no piden nombre:
+
+| Path | Antes | Ahora |
+|------|-------|-------|
+| Push-to-cita (línea ~4542) | Pedía nombre en ternario | Solo pregunta por visita |
+| Safety check (línea ~6927) | Enviaba WhatsApp separado | Solo log, enforcement ya pidió |
+| Intercept (línea ~3730) | Enviaba WhatsApp separado | Verifica `enforcementYaAgrego` antes |
+
+#### Fix B: Name Loop - Máximo 3 intentos
+
+**Problema:** Lead con 30+ mensajes sin nombre porque SARA preguntaba en cada turno.
+
+**Solución:** Contador de name asks en historial, se detiene después de 3:
+
+| Ubicación | Cambio |
+|-----------|--------|
+| Enforcement (línea ~2033) | `nameAskCount < 3` guard |
+| Intercept (línea ~3730) | `nameAskCountIntercept < 3` guard |
+
+#### Fix C: Nombre de lead usado como ubicación
+
+**Problema:** Claude decía "Está en Edson" en lugar de "Está en Guadalupe" - usaba el nombre del lead como ubicación.
+
+**Solución:** Post-procesamiento que detecta patrones "Está en [nombre]", "ubicado en [nombre]", etc. y los reemplaza con la ubicación correcta basada en el contexto del desarrollo:
+- Falco/Andes → Guadalupe
+- Monte Verde/Encinos/Miravalle/Colorines → Colinas del Padre, Zacatecas
+- Default → Zacatecas
+
+#### Fix D: Colinas del Padre safety net
+
+**Problema:** Claude a veces decía "En Colinas del Padre SOLO tenemos Villa Campelo" (incorrecto).
+
+**Solución:** Post-procesamiento que detecta y corrige, listando los desarrollos reales:
+- Monte Verde (desde $1.6M)
+- Los Encinos (desde $3.0M)
+- Miravalle (desde $3.0M)
+- Paseo Colorines (desde $3.0M)
+- Terrenos en Citadella del Nogal (Guadalupe)
+
+**Archivos modificados:**
+- `src/services/aiConversationService.ts` - Los 4 fixes (+85 líneas, -15 líneas)
+
+**Tests:** 351/351 pasando ✅
+
+**Commit:** `c72bc092`
+**Deploy:** Version ID `d4b02b5b-c7f1-49f2-881e-723b08ad8f80`
