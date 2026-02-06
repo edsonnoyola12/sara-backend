@@ -39,6 +39,8 @@ import { SLAMonitoringService, createSLAMonitoring } from './services/slaMonitor
 import { AutoAssignmentService, createAutoAssignment } from './services/autoAssignmentService';
 import { LeadAttributionService, createLeadAttribution } from './services/leadAttributionService';
 import { AIConversationService } from './services/aiConversationService';
+import { TTSTrackingService, createTTSTrackingService, TTSMessageData, TTSType, RecipientType } from './services/ttsTrackingService';
+import { MessageTrackingService, createMessageTrackingService, MessageData } from './services/messageTrackingService';
 
 // CRON modules
 import {
@@ -386,6 +388,9 @@ function requiresAuth(pathname: string): boolean {
     /^\/api\/offers/,                        // Business Intelligence - Offers
     /^\/api\/reports/,                       // Business Intelligence - Reports
     /^\/api\/reportes/,                      // Reportes legacy
+    /^\/api\/message-metrics/,               // Métricas de mensajes (CRM)
+    /^\/api\/tts-metrics/,                   // Métricas de TTS (CRM)
+    /^\/api\/metrics\/quality/,              // Calidad de respuestas (CRM)
   ];
 
   for (const pattern of crmPublicPatterns) {
@@ -396,6 +401,28 @@ function requiresAuth(pathname: string): boolean {
   return pathname.startsWith('/api/') ||
          pathname.startsWith('/test-') ||
          pathname.startsWith('/debug-');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPER: Crear MetaWhatsAppService con tracking habilitado
+// ═══════════════════════════════════════════════════════════════════════════
+function createMetaWithTracking(env: any, supabase: SupabaseService): MetaWhatsAppService {
+  const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+  // Configurar tracking automático de mensajes
+  const msgTracking = createMessageTrackingService(supabase);
+  meta.setTrackingCallback(async (data) => {
+    await msgTracking.logMessageSent({
+      messageId: data.messageId,
+      recipientPhone: data.recipientPhone,
+      recipientType: 'lead', // Default, se puede mejorar
+      messageType: data.messageType,
+      categoria: data.categoria,
+      contenido: data.contenido
+    });
+  });
+
+  return meta;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -676,6 +703,49 @@ export default {
 
         console.log(`🔊 TEST TTS: Iniciando para phone=${phone}, texto="${texto.substring(0, 30)}..."`);
 
+        // Verificar ventana 24h antes de enviar
+        const cleanPhoneTTS = phone.replace(/\D/g, '');
+        const { data: teamMemberTTS } = await supabase.client
+          .from('team_members')
+          .select('id, name, phone, notes')
+          .or(`phone.eq.${cleanPhoneTTS},phone.like.%${cleanPhoneTTS.slice(-10)}`)
+          .maybeSingle();
+
+        const tmNotesTTS = typeof teamMemberTTS?.notes === 'string'
+          ? JSON.parse(teamMemberTTS.notes || '{}')
+          : (teamMemberTTS?.notes || {});
+        const lastInteractionTTS = tmNotesTTS.last_sara_interaction;
+        const hace24hTTS = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const ventanaAbiertaTTS = lastInteractionTTS && lastInteractionTTS > hace24hTTS;
+
+        const metaTTS = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+        // Si ventana cerrada, enviar template primero y guardar audio como pending
+        if (!ventanaAbiertaTTS && teamMemberTTS) {
+          console.log(`🔊 TEST TTS: Ventana cerrada para ${teamMemberTTS.name}, enviando template + guardando pending...`);
+          const nombreCortoTTS = teamMemberTTS.name?.split(' ')[0] || 'Hola';
+          await metaTTS.sendTemplate(phone, 'reactivar_equipo', 'es_MX', [
+            { type: 'body', parameters: [{ type: 'text', text: nombreCortoTTS }] }
+          ]);
+
+          // Guardar audio como pending para entregar cuando responda
+          tmNotesTTS.pending_audio = {
+            sent_at: new Date().toISOString(),
+            texto: texto,
+            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+          };
+          await supabase.client.from('team_members').update({ notes: tmNotesTTS }).eq('id', teamMemberTTS.id);
+
+          return corsResponse(JSON.stringify({
+            ok: true,
+            phone,
+            ventana_cerrada: true,
+            mensaje: 'Template enviado. Responde al mensaje para recibir el audio.',
+            texto_guardado: texto.substring(0, 50) + '...'
+          }));
+        }
+
+        // Ventana abierta o no es team member - generar y enviar audio
         const { createTTSService } = await import('./services/ttsService');
         const tts = createTTSService(env.OPENAI_API_KEY);
 
@@ -688,13 +758,34 @@ export default {
 
         console.log(`✅ TEST TTS: Audio generado (${result.audioBuffer.byteLength} bytes)`);
 
-        const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-        const sendResult = await meta.sendVoiceMessage(phone, result.audioBuffer, result.mimeType || 'audio/ogg');
+        const sendResult = await metaTTS.sendVoiceMessage(phone, result.audioBuffer, result.mimeType || 'audio/ogg');
         console.log(`✅ TEST TTS: Enviado a WhatsApp:`, JSON.stringify(sendResult).substring(0, 100));
+
+        // 🔊 TTS Tracking - Registrar mensaje enviado
+        const messageId = sendResult?.messages?.[0]?.id;
+        if (messageId) {
+          try {
+            const ttsTracking = createTTSTrackingService(supabase);
+            await ttsTracking.logTTSSent({
+              messageId,
+              recipientPhone: phone,
+              recipientType: teamMemberTTS ? 'team_member' : 'lead',
+              recipientId: teamMemberTTS?.id,
+              recipientName: teamMemberTTS ? (teamMemberTTS as any).name : undefined,
+              ttsType: 'test',
+              textoOriginal: texto,
+              audioBytes: result.audioBuffer.byteLength,
+              duracionEstimada: result.duration
+            });
+          } catch (trackError) {
+            console.log(`📊 TTS Tracking: ${(trackError as Error).message}`);
+          }
+        }
 
         return corsResponse(JSON.stringify({
           ok: true,
           phone,
+          message_id: messageId,
           texto_original: texto,
           audio_bytes: result.audioBuffer.byteLength,
           duracion_estimada: result.duration,
@@ -1590,7 +1681,7 @@ export default {
       try {
         // Inicializar servicios necesarios
         const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
-        const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+        const meta = createMetaWithTracking(env, supabase);
         const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
 
         // Llamar al handler de WhatsApp
@@ -4965,6 +5056,139 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
       return corsResponse(JSON.stringify(quality, null, 2));
     }
 
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // GET /api/tts-metrics - Métricas de audios TTS enviados y escuchados
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if (url.pathname === '/api/tts-metrics' && request.method === 'GET') {
+      try {
+        const dias = parseInt(url.searchParams.get('days') || '30');
+        const ttsTracking = createTTSTrackingService(supabase);
+
+        // Obtener métricas agregadas
+        const metrics = await ttsTracking.getMetrics(dias);
+
+        // Obtener mensajes recientes
+        const recentMessages = await ttsTracking.getRecentMessages(20);
+
+        // Calcular totales
+        const totals = metrics.reduce((acc, m) => ({
+          enviados: acc.enviados + m.totalEnviados,
+          entregados: acc.entregados + m.totalEntregados,
+          escuchados: acc.escuchados + m.totalEscuchados,
+          fallidos: acc.fallidos + m.totalFallidos
+        }), { enviados: 0, entregados: 0, escuchados: 0, fallidos: 0 });
+
+        const tasaEscuchaGlobal = totals.entregados > 0
+          ? Math.round(totals.escuchados / totals.entregados * 100)
+          : 0;
+
+        return corsResponse(JSON.stringify({
+          periodo: `últimos ${dias} días`,
+          resumen: {
+            total_enviados: totals.enviados,
+            total_entregados: totals.entregados,
+            total_escuchados: totals.escuchados,
+            total_fallidos: totals.fallidos,
+            tasa_escucha_global: `${tasaEscuchaGlobal}%`
+          },
+          por_tipo: metrics.map(m => ({
+            tipo: m.ttsType,
+            enviados: m.totalEnviados,
+            entregados: m.totalEntregados,
+            escuchados: m.totalEscuchados,
+            fallidos: m.totalFallidos,
+            tasa_escucha: `${m.tasaEscuchaPct}%`
+          })),
+          ultimos_mensajes: recentMessages.map((msg: any) => ({
+            tipo: msg.tts_type,
+            destinatario: msg.recipient_name || msg.recipient_phone?.slice(-4),
+            status: msg.status,
+            enviado: msg.sent_at,
+            escuchado: msg.played_at || null
+          }))
+        }, null, 2));
+      } catch (e: any) {
+        // Si la tabla no existe, retornar instrucciones
+        if (e.message?.includes('42P01') || e.code === '42P01') {
+          return corsResponse(JSON.stringify({
+            error: 'Tabla tts_messages no existe',
+            instrucciones: 'Ejecutar sql/tts_tracking.sql en Supabase Dashboard',
+            sql_file: '/sql/tts_tracking.sql'
+          }), 200);
+        }
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // GET /api/message-metrics - Métricas de TODOS los mensajes enviados
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if (url.pathname === '/api/message-metrics' && request.method === 'GET') {
+      try {
+        const dias = parseInt(url.searchParams.get('days') || '7');
+        const msgTracking = createMessageTrackingService(supabase);
+
+        // Obtener métricas agregadas
+        const metrics = await msgTracking.getMetrics(dias);
+
+        // Obtener resumen 24h
+        const resumen24h = await msgTracking.get24hSummary();
+
+        // Obtener mensajes recientes
+        const recentMessages = await msgTracking.getRecentMessages(30);
+
+        // Calcular totales
+        const totals = metrics.reduce((acc, m) => ({
+          enviados: acc.enviados + m.totalEnviados,
+          entregados: acc.entregados + m.totalEntregados,
+          leidos: acc.leidos + m.totalLeidos,
+          fallidos: acc.fallidos + m.totalFallidos
+        }), { enviados: 0, entregados: 0, leidos: 0, fallidos: 0 });
+
+        const tasaLecturaGlobal = totals.entregados > 0
+          ? Math.round(totals.leidos / totals.entregados * 100)
+          : 0;
+
+        return corsResponse(JSON.stringify({
+          periodo: `últimos ${dias} días`,
+          resumen_24h: resumen24h,
+          resumen_periodo: {
+            total_enviados: totals.enviados,
+            total_entregados: totals.entregados,
+            total_leidos: totals.leidos,
+            total_fallidos: totals.fallidos,
+            tasa_lectura_global: `${tasaLecturaGlobal}%`
+          },
+          por_tipo_y_categoria: metrics.map(m => ({
+            tipo: m.messageType,
+            categoria: m.categoria,
+            enviados: m.totalEnviados,
+            entregados: m.totalEntregados,
+            leidos: m.totalLeidos,
+            fallidos: m.totalFallidos,
+            tasa_lectura: `${m.tasaLecturaPct}%`
+          })),
+          ultimos_mensajes: recentMessages.slice(0, 20).map((msg: any) => ({
+            tipo: msg.message_type,
+            categoria: msg.categoria,
+            destinatario: msg.recipient_name || msg.recipient_phone?.slice(-4),
+            contenido: msg.contenido?.substring(0, 50),
+            status: msg.status,
+            enviado: msg.sent_at,
+            leido: msg.read_at || null
+          }))
+        }, null, 2));
+      } catch (e: any) {
+        if (e.message?.includes('42P01') || e.code === '42P01') {
+          return corsResponse(JSON.stringify({
+            error: 'Tabla messages_sent no existe',
+            instrucciones: 'Ejecutar sql/message_tracking.sql en Supabase Dashboard'
+          }), 200);
+        }
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
     // ═══════════════════════════════════════════════════════════
     // API Routes - Reportes CEO (Diario, Semanal, Mensual)
     // ═══════════════════════════════════════════════════════════
@@ -6158,6 +6382,35 @@ Mensaje: ${mensaje}`;
               // Si la tabla no existe, solo loguear
               console.log(`📬 ${statusType.toUpperCase()}: ${recipientId} (tabla no existe, solo log)`);
             }
+
+            // 🔊 TTS Tracking - Actualizar estado de mensajes TTS
+            if (statusType === 'delivered' || statusType === 'read' || statusType === 'failed') {
+              try {
+                const ttsTracking = createTTSTrackingService(supabase);
+                const updated = await ttsTracking.updateTTSStatus(
+                  messageId,
+                  statusType as 'delivered' | 'read' | 'failed',
+                  statusType === 'failed' ? errorTitle : undefined
+                );
+                if (updated) {
+                  console.log(`🔊 TTS Status actualizado: ${messageId.substring(0, 20)}... → ${statusType}`);
+                }
+              } catch (ttsError) {
+                // Silencioso si falla - no es crítico
+              }
+
+              // 📬 Message Tracking - Actualizar estado de TODOS los mensajes
+              try {
+                const msgTracking = createMessageTrackingService(supabase);
+                await msgTracking.updateMessageStatus(
+                  messageId,
+                  statusType as 'delivered' | 'read' | 'failed',
+                  statusType === 'failed' ? errorTitle : undefined
+                );
+              } catch (msgError) {
+                // Silencioso si falla
+              }
+            }
           }
           return new Response('OK', { status: 200 });
         }
@@ -6270,7 +6523,7 @@ Mensaje: ${mensaje}`;
           // ═══ FIN DEDUPLICACIÓN ═══
 
           const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
-          const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+          const meta = createMetaWithTracking(env, supabase);
           const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
           const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
 
@@ -6656,7 +6909,7 @@ Mensaje: ${mensaje}`;
                   const señalesCalientes = detectarSeñalesCalientes(text);
                   if (señalesCalientes.length > 0) {
                   console.log(`🔥 Señales calientes detectadas para ${leadHot.name}: ${señalesCalientes.map(s => s.tipo).join(', ')}`);
-                  await alertarLeadCaliente(supabase, meta, leadHot, text, señalesCalientes);
+                  await alertarLeadCaliente(supabase, meta, leadHot, text, señalesCalientes, { openaiApiKey: env.OPENAI_API_KEY });
                 }
 
                 // Detectar objeciones
@@ -15163,7 +15416,7 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
     if (url.pathname === '/test-recordatorios-citas') {
       console.log('🧪 TEST: Ejecutando recordatorios de citas...');
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-      const notificationService = new NotificationService(supabase, meta);
+      const notificationService = new NotificationService(supabase, meta, env.OPENAI_API_KEY);
       const result = await notificationService.enviarRecordatoriosCitas();
       return corsResponse(JSON.stringify({
         ok: true,
@@ -17112,9 +17365,9 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
     }
 
     // ═══════════════════════════════════════════════════════════
-    // SISTEMA CENTRALIZADO DE NOTIFICACIONES
+    // SISTEMA CENTRALIZADO DE NOTIFICACIONES (CON TTS)
     // ═══════════════════════════════════════════════════════════
-    const notificationService = new NotificationService(supabase, meta);
+    const notificationService = new NotificationService(supabase, meta, env.OPENAI_API_KEY);
 
     // RECORDATORIOS DE CITAS - cada ejecución del cron (24h y 2h antes)
     // ✅ FIX 14-ENE-2026: Verificar consistencia ANTES de enviar mensajes

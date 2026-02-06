@@ -4,12 +4,19 @@
 
 import { SupabaseService } from './supabase';
 import { MetaWhatsAppService } from './meta-whatsapp';
+import { createTTSService } from './ttsService';
+import { createTTSTrackingService } from './ttsTrackingService';
 
 export class NotificationService {
+  private openaiApiKey?: string;
+
   constructor(
     private supabase: SupabaseService,
-    private meta: MetaWhatsAppService
-  ) {}
+    private meta: MetaWhatsAppService,
+    openaiApiKey?: string
+  ) {
+    this.openaiApiKey = openaiApiKey;
+  }
 
   async notificarVendedor(vendedorId: string, mensaje: string): Promise<boolean> {
     try {
@@ -110,14 +117,54 @@ export class NotificationService {
           try {
             const nombreCorto = cita.lead_name?.split(' ')[0] || 'Hola';
             const desarrollo = cita.property_name || 'nuestro desarrollo';
+            const horaFormateada = (cita.scheduled_time || '').substring(0, 5);
             const esLlamada = (cita as any).appointment_type === 'llamada';
             const mensaje = esLlamada
-              ? `📞 ¡Hola ${nombreCorto}! Te recordamos tu llamada mañana a las ${(cita.scheduled_time || '').substring(0, 5)}. Te contactaremos para platicar sobre ${desarrollo}. 🏠`
-              : `📅 ¡Hola ${nombreCorto}! Te recordamos tu cita mañana a las ${(cita.scheduled_time || '').substring(0, 5)}. 🏠 ${desarrollo}. ¡Te esperamos!`;
+              ? `📞 ¡Hola ${nombreCorto}! Te recordamos tu llamada mañana a las ${horaFormateada}. Te contactaremos para platicar sobre ${desarrollo}. 🏠`
+              : `📅 ¡Hola ${nombreCorto}! Te recordamos tu cita mañana a las ${horaFormateada}. 🏠 ${desarrollo}. ¡Te esperamos!`;
             await this.meta.sendWhatsAppMessage(
               cita.lead_phone,
               mensaje
             );
+
+            // ═══ TTS: Enviar audio del recordatorio ═══
+            if (this.openaiApiKey) {
+              try {
+                const tts = createTTSService(this.openaiApiKey);
+                const textoAudio = esLlamada
+                  ? `Hola ${nombreCorto}. Te recordamos tu llamada mañana a las ${horaFormateada}. Te contactaremos para platicar sobre ${desarrollo}.`
+                  : `Hola ${nombreCorto}. Te recordamos tu cita mañana a las ${horaFormateada} en ${desarrollo}. ¡Te esperamos!`;
+                const audioResult = await tts.generateAudio(textoAudio);
+                if (audioResult.success && audioResult.audioBuffer) {
+                  const sendResult = await this.meta.sendVoiceMessage(cita.lead_phone, audioResult.audioBuffer, audioResult.mimeType || 'audio/ogg');
+                  console.log(`🔊 Audio recordatorio 24h enviado a ${cita.lead_name}`);
+
+                  // 🔊 TTS Tracking
+                  const messageId = sendResult?.messages?.[0]?.id;
+                  if (messageId) {
+                    try {
+                      const ttsTracking = createTTSTrackingService(this.supabase);
+                      await ttsTracking.logTTSSent({
+                        messageId,
+                        recipientPhone: cita.lead_phone,
+                        recipientType: 'lead',
+                        recipientId: cita.lead_id,
+                        recipientName: cita.lead_name,
+                        ttsType: 'recordatorio_cita_24h',
+                        textoOriginal: textoAudio,
+                        audioBytes: audioResult.audioBuffer.byteLength,
+                        duracionEstimada: audioResult.duration
+                      });
+                    } catch (trackErr) {
+                      // No crítico
+                    }
+                  }
+                }
+              } catch (ttsErr) {
+                console.log(`⚠️ TTS recordatorio 24h falló (no crítico):`, ttsErr);
+              }
+            }
+
             await this.supabase.client
               .from('appointments')
               .update({ reminder_24h_sent: true })
@@ -181,14 +228,54 @@ export class NotificationService {
           try {
             const nombreCorto = cita.lead_name?.split(' ')[0] || 'Hola';
             const desarrollo = cita.property_name || 'nuestro desarrollo';
+            const horaFormateada = (cita.scheduled_time || '').substring(0, 5);
             const esLlamada = (cita as any).appointment_type === 'llamada';
             const mensaje2h = esLlamada
-              ? `📞 ¡${nombreCorto}, tu llamada es en 2 horas! Te contactaremos a las ${cita.scheduled_time || ''} para platicar sobre ${desarrollo}. 🏠`
-              : `⏰ ¡${nombreCorto}, tu cita es en 2 horas! 🏠 ${desarrollo} a las ${cita.scheduled_time || ''}. ¡Te esperamos!`;
+              ? `📞 ¡${nombreCorto}, tu llamada es en 2 horas! Te contactaremos a las ${horaFormateada} para platicar sobre ${desarrollo}. 🏠`
+              : `⏰ ¡${nombreCorto}, tu cita es en 2 horas! 🏠 ${desarrollo} a las ${horaFormateada}. ¡Te esperamos!`;
             await this.meta.sendWhatsAppMessage(
               cita.lead_phone,
               mensaje2h
             );
+
+            // ═══ TTS: Enviar audio del recordatorio 2h ═══
+            if (this.openaiApiKey) {
+              try {
+                const tts = createTTSService(this.openaiApiKey);
+                const textoAudio = esLlamada
+                  ? `${nombreCorto}, tu llamada es en 2 horas. Te contactaremos a las ${horaFormateada} para platicar sobre ${desarrollo}.`
+                  : `${nombreCorto}, tu cita es en 2 horas en ${desarrollo}. ¡Te esperamos!`;
+                const audioResult = await tts.generateAudio(textoAudio);
+                if (audioResult.success && audioResult.audioBuffer) {
+                  const sendResult = await this.meta.sendVoiceMessage(cita.lead_phone, audioResult.audioBuffer, audioResult.mimeType || 'audio/ogg');
+                  console.log(`🔊 Audio recordatorio 2h enviado a ${cita.lead_name}`);
+
+                  // 🔊 TTS Tracking
+                  const messageId = sendResult?.messages?.[0]?.id;
+                  if (messageId) {
+                    try {
+                      const ttsTracking = createTTSTrackingService(this.supabase);
+                      await ttsTracking.logTTSSent({
+                        messageId,
+                        recipientPhone: cita.lead_phone,
+                        recipientType: 'lead',
+                        recipientId: cita.lead_id,
+                        recipientName: cita.lead_name,
+                        ttsType: 'recordatorio_cita_2h',
+                        textoOriginal: textoAudio,
+                        audioBytes: audioResult.audioBuffer.byteLength,
+                        duracionEstimada: audioResult.duration
+                      });
+                    } catch (trackErr) {
+                      // No crítico
+                    }
+                  }
+                }
+              } catch (ttsErr) {
+                console.log(`⚠️ TTS recordatorio 2h falló (no crítico):`, ttsErr);
+              }
+            }
+
             await this.supabase.client
               .from('appointments')
               .update({ reminder_2h_sent: true })

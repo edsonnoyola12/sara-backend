@@ -94,14 +94,46 @@ function cleanupRateLimits(): void {
   }
 }
 
+// Tipo para callback de tracking
+export type MessageTrackingCallback = (data: {
+  messageId: string;
+  recipientPhone: string;
+  messageType: 'text' | 'audio' | 'image' | 'video' | 'document' | 'template' | 'buttons' | 'list';
+  categoria?: string;
+  contenido?: string;
+}) => Promise<void>;
+
 export class MetaWhatsAppService {
   private phoneNumberId: string;
   private accessToken: string;
   private apiVersion = 'v22.0';
+  private trackingCallback?: MessageTrackingCallback;
 
   constructor(phoneNumberId: string, accessToken: string) {
     this.phoneNumberId = phoneNumberId;
     this.accessToken = accessToken;
+  }
+
+  /**
+   * Configura el callback para tracking de mensajes
+   * Llamar después de crear el servicio para habilitar tracking
+   */
+  setTrackingCallback(callback: MessageTrackingCallback): void {
+    this.trackingCallback = callback;
+  }
+
+  /**
+   * Llama al callback de tracking si está configurado
+   */
+  private async track(data: Parameters<MessageTrackingCallback>[0]): Promise<void> {
+    if (this.trackingCallback) {
+      try {
+        await this.trackingCallback(data);
+      } catch (e) {
+        // No crítico - solo log
+        console.log(`📊 Tracking error: ${(e as Error).message}`);
+      }
+    }
   }
 
   private normalizePhone(phone: string): string {
@@ -261,6 +293,19 @@ export class MetaWhatsAppService {
       throw new Error(data.error?.message || 'Error enviando mensaje');
     }
     console.log(`✅ Meta WA enviado: ${data.messages?.[0]?.id}`);
+
+    // 📊 Tracking de mensaje enviado
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId,
+        recipientPhone: phone,
+        messageType: 'text',
+        categoria: bypassRateLimit ? 'respuesta_sara' : 'broadcast',
+        contenido: cleanBody.substring(0, 200)
+      });
+    }
+
     return data;
   }
 
@@ -576,6 +621,19 @@ export class MetaWhatsAppService {
       throw new Error(data.error?.message || 'Error enviando audio');
     }
     console.log(`✅ Audio enviado: ${data.messages?.[0]?.id}`);
+
+    // 📊 Tracking de audio enviado
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId,
+        recipientPhone: phone,
+        messageType: 'audio',
+        categoria: 'audio_tts',
+        contenido: 'Audio TTS'
+      });
+    }
+
     return data;
   }
 
@@ -643,7 +701,21 @@ export class MetaWhatsAppService {
       },
       body: JSON.stringify(payload)
     });
-    return response.json();
+    const data = await response.json();
+
+    // 📊 Tracking de botones enviados
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId,
+        recipientPhone: phone,
+        messageType: 'buttons',
+        categoria: 'botones_interactivos',
+        contenido: bodyText.substring(0, 200)
+      });
+    }
+
+    return data;
   }
 
   /**
@@ -706,7 +778,21 @@ export class MetaWhatsAppService {
       },
       body: JSON.stringify(payload)
     });
-    return response.json();
+    const data = await response.json();
+
+    // 📊 Tracking de lista enviada
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId,
+        recipientPhone: phone,
+        messageType: 'list',
+        categoria: 'lista_interactiva',
+        contenido: bodyText.substring(0, 200)
+      });
+    }
+
+    return data;
   }
 
   async sendWhatsAppLocation(to: string, latitude: number, longitude: number, name?: string, address?: string): Promise<any> {
@@ -898,6 +984,19 @@ export class MetaWhatsAppService {
       throw new Error(data.error?.message || 'Error enviando template');
     }
     console.log(`✅ Template enviado: ${data.messages?.[0]?.id}`);
+
+    // 📊 Tracking de template enviado
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId,
+        recipientPhone: phone,
+        messageType: 'template',
+        categoria: `template_${templateName}`,
+        contenido: `Template: ${templateName}`
+      });
+    }
+
     return data;
   }
 }
