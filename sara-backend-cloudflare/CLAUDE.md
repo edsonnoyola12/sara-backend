@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-05
+> Última actualización: 2026-02-06
 
 ---
 
@@ -17,8 +17,8 @@
 | Videos | Google Veo 3 | `src/services/veoService.ts` |
 | Calendar | Google Calendar API | `src/services/calendarService.ts` |
 | Frontend CRM | React + Vercel | `sara-crm-new/` (repo separado) |
-| **Telefonía (número Zac)** | **Zadarma** | Proveedor del número 492 |
-| Llamadas IA | Retell.ai | `src/services/retellService.ts` (en config) |
+| **Telefonía (número Zac)** | **Zadarma** | Proveedor del número +524923860066 |
+| **Llamadas IA** | **Retell.ai** | `src/services/retellService.ts` - Sistema híbrido |
 
 ---
 
@@ -85,6 +85,8 @@ npm test
 | `src/services/pdfReportService.ts` | ~700 | Generador de reportes PDF/HTML |
 | `src/services/webhookService.ts` | ~500 | Webhooks salientes para integraciones |
 | `src/services/cacheService.ts` | ~270 | Cache inteligente con KV |
+| `src/services/retellService.ts` | ~350 | Llamadas telefónicas con Retell.ai |
+| `src/utils/teamMessaging.ts` | ~460 | Sistema híbrido mensajes + llamadas |
 
 ### Secciones Protegidas
 
@@ -187,6 +189,62 @@ Si no hay ventana abierta → el mensaje NO LLEGA.
 - `pending_resumen_semanal` - Resumen semanal (sábado)
 
 **Aplica a:** Leads, Vendedores, Coordinadores, Asesores, Marketing
+
+### 5.1 Sistema Híbrido de Llamadas con Retell (2026-02-05)
+
+Cuando la ventana de 24h está cerrada y el mensaje es importante, SARA puede **LLAMAR** al team member usando Retell.ai.
+
+**Flujo híbrido:**
+```
+Mensaje a enviar
+├── Ventana ABIERTA → Mensaje directo ✅
+└── Ventana CERRADA
+    ├── CRÍTICO (alerta_lead, recordatorio_cita) → LLAMAR inmediatamente 📞
+    └── NORMAL (briefing, reporte_diario)
+        ├── 1. Enviar template + guardar pending
+        └── 2. Si no responde en 2h → LLAMAR 📞
+    └── BAJO (resumen_semanal) → Solo template, nunca llamar
+```
+
+**Configuración (`src/utils/teamMessaging.ts`):**
+```typescript
+CALL_CONFIG = {
+  horasPermitidas: { inicio: 9, fin: 20 },  // 9 AM - 8 PM México
+  esperaAntesLlamar: 2,                      // Horas antes de llamar
+  maxLlamadasDia: 2,                         // Máximo llamadas por persona
+  tiposConLlamada: ['briefing', 'reporte_diario', 'alerta_lead', 'recordatorio_cita']
+}
+```
+
+**Prioridades por tipo de mensaje:**
+| Tipo | Prioridad | Comportamiento |
+|------|-----------|----------------|
+| `alerta_lead` | CRÍTICO | Llamar inmediatamente si ventana cerrada |
+| `recordatorio_cita` | CRÍTICO | Llamar inmediatamente si ventana cerrada |
+| `briefing` | NORMAL | Template primero, llamar después de 2h |
+| `reporte_diario` | NORMAL | Template primero, llamar después de 2h |
+| `resumen_semanal` | BAJO | Solo template, nunca llamar |
+
+**CRON de verificación:**
+- Ejecuta cada 30 minutos (en minuto :00 y :30)
+- Busca pending messages con más de 2h sin respuesta
+- Llama usando Retell si está en horario permitido
+
+**Endpoint manual:**
+```bash
+# Ver estado actual
+GET /verificar-pending-llamadas?api_key=XXX&debug=true
+
+# Resetear flags de llamada_intentada
+GET /verificar-pending-llamadas?api_key=XXX&reset=true
+
+# Ejecutar llamadas
+GET /verificar-pending-llamadas?api_key=XXX
+```
+
+**Formato de teléfonos para Retell (E.164):**
+- Los números mexicanos se normalizan automáticamente
+- `5214921226111` → `+524921226111` (se quita el `1` después de `52`)
 
 ### 6. Flujos Post-Compra (Automáticos)
 
