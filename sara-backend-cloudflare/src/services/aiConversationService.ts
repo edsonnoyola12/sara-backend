@@ -2030,6 +2030,27 @@ Por WhatsApp te atiendo 24/7 🙌
         }
       }
 
+      // ═══ ENFORCEMENT: Pedir nombre si no lo tenemos ═══
+      if (!nombreConfirmado && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        const askingName = respLower.includes('nombre') ||
+                           respLower.includes('cómo te llamas') ||
+                           respLower.includes('como te llamas') ||
+                           respLower.includes('me compartes tu nombre') ||
+                           respLower.includes('con quién tengo el gusto') ||
+                           respLower.includes('con quien tengo el gusto');
+
+        // Don't append if it's a farewell/no-contact/wrong-number response
+        const esDespedida = parsed.intent === 'despedida' ||
+                            respLower.includes('respeto tu decisión') ||
+                            respLower.includes('disculpa la confusión');
+
+        if (!askingName && !esDespedida) {
+          console.log('⚠️ ENFORCEMENT: Claude no pidió nombre - agregando solicitud');
+          parsed.response += '\n\nPor cierto, ¿con quién tengo el gusto? 😊';
+        }
+      }
+
       return {
         intent: parsed.intent || 'otro',
         secondary_intents: secondaryIntents,
@@ -2270,9 +2291,13 @@ En *Guadalupe* está Andes (excelente ubicación) y Distrito Falco (el más excl
 Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
           fallbackIntent = 'interes_desarrollo';
         } else if (msgLower.includes('sí') || msgLower.includes('si') || msgLower.includes('claro')) {
-          // No asumir que quiere cita solo porque dijo "sí" - preguntar qué necesita
-          fallbackResponse = `¡Genial ${lead.name}! 😊 Cuéntame más, ¿qué zona te interesa o qué tipo de casa buscas?`;
-          fallbackIntent = 'descubrimiento';
+          if (lead.property_interest && lead.property_interest !== 'null') {
+            fallbackResponse = `¡Genial ${lead.name}! 😊 ¿Te gustaría visitar ${lead.property_interest}? ¿Qué día y hora te funcionan?`;
+            fallbackIntent = 'solicitar_cita';
+          } else {
+            fallbackResponse = `¡Genial ${lead.name}! 😊 Cuéntame más, ¿qué zona te interesa o qué tipo de casa buscas?`;
+            fallbackIntent = 'descubrimiento';
+          }
         } else if (msgLower.includes('cita') || msgLower.includes('visita') || msgLower.includes('conocer') || msgLower.includes('ir a ver')) {
           fallbackResponse = `¡Con gusto ${lead.name}! 🏠 ¿Qué día y hora te funcionan mejor para la visita?`;
           fallbackIntent = 'solicitar_cita';
@@ -2382,7 +2407,7 @@ O si prefieres, te conecto con un asesor.`;
             horaExtraida = `${hora}:${minutos.toString().padStart(2, '0')}`;
           }
 
-          const desarrolloGuardado = lead.property_interest || 'Los Encinos';
+          const desarrolloGuardado = lead.property_interest || '';
 
           // ═══ Si es REAGENDAMIENTO, devolver intent especial ═══
           if (esReagendamiento) {
@@ -2397,8 +2422,22 @@ O si prefieres, te conecto con un asesor.`;
                 desarrollo: desarrolloGuardado
               },
               response: nombreLead
-                ? `¡Claro ${nombreLead}! Cambio tu cita para ${msgLower.includes('mañana') ? 'mañana' : 'hoy'} a las ${horaExtraida} en *${desarrolloGuardado}*. ¿Todo bien con el cambio?`
-                : `¡Claro! Cambio tu cita para ${msgLower.includes('mañana') ? 'mañana' : 'hoy'} a las ${horaExtraida} en *${desarrolloGuardado}*. ¿Todo bien con el cambio?`,
+                ? `¡Claro ${nombreLead}! Cambio tu cita para ${msgLower.includes('mañana') ? 'mañana' : 'hoy'} a las ${horaExtraida}${desarrolloGuardado ? ` en *${desarrolloGuardado}*` : ''}. ¿Todo bien con el cambio?`
+                : `¡Claro! Cambio tu cita para ${msgLower.includes('mañana') ? 'mañana' : 'hoy'} a las ${horaExtraida}${desarrolloGuardado ? ` en *${desarrolloGuardado}*` : ''}. ¿Todo bien con el cambio?`,
+              send_gps: false,
+              send_video_desarrollo: false,
+              send_contactos: false,
+              contactar_vendedor: false
+            };
+          }
+
+          // Si no tiene desarrollo guardado, preguntar cuál quiere visitar
+          if (!desarrolloGuardado) {
+            return {
+              intent: 'solicitar_cita',
+              secondary_intents: [],
+              extracted_data: { ...fallbackData, fecha: fechaExtraida, hora: horaExtraida },
+              response: `¡Perfecto! ¿Qué desarrollo te gustaría visitar?\n\n🏡 Monte Verde - Desde $1.6M\n🏡 Los Encinos - Desde $3.0M\n🏡 Miravalle - Desde $3.0M\n🏡 Andes - Desde $1.6M\n🏡 Distrito Falco - Desde $3.7M`,
               send_gps: false,
               send_video_desarrollo: false,
               send_contactos: false,
@@ -2944,7 +2983,7 @@ Tú dime, ¿por dónde empezamos?`;
                 // 3. Enviar confirmación al LEAD
                 // Solo incluir ubicación si NO es cita de llamada
                 const esLlamada = citaActiva.appointment_type === 'llamada';
-                const desarrolloReagendar = citaActiva.property_name || lead.property_interest || 'Los Encinos';
+                const desarrolloReagendar = citaActiva.property_name || lead.property_interest || '';
                 if (!esLlamada) {
                   console.log('🔍 BUSCANDO GPS para desarrollo:', desarrolloReagendar);
                 } else {
