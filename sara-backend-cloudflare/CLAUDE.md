@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-06
+> Última actualización: 2026-02-06 (Sesión 22)
 
 ---
 
@@ -3332,28 +3332,67 @@ Después de cada respuesta de IA, ahora se guardan en `lead.notes`:
 
 ---
 
-## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-05)
+### 2026-02-06 (Sesión 22) - QA Real WhatsApp + Health Check
+
+**Pruebas reales de WhatsApp ejecutadas con ambos teléfonos de prueba:**
+
+#### Mensajes de Lead (5610016226 - Edson)
+
+| # | Mensaje Enviado | Score | Status | Resultado |
+|---|-----------------|-------|--------|-----------|
+| 1 | "hola busco casa en monte verde de 3 recamaras" | 56 | scheduled | ✅ DELIVERED |
+| 2 | "y tienen credito infonavit gano como 15 mil al mes" | 64 | scheduled | ✅ DELIVERED |
+| 3 | "donde queda monte verde me pueden mandar ubicacion" | 64 | scheduled | ✅ DELIVERED |
+| 4 | "ok si quiero ir a ver las casas cuando puedo ir" | 64 | scheduled | ✅ DELIVERED |
+
+#### Comandos de Vendedor (5212224558475 - Vendedor Test)
+
+| # | Comando | Resultado |
+|---|---------|-----------|
+| 1 | "mis leads" | ✅ DELIVERED |
+| 2 | "citas" | ✅ DELIVERED |
+
+**6/6 mensajes reales entregados por WhatsApp.**
+
+**Nota sobre segundo teléfono:** El 5212224558475 está registrado como "Vendedor Test" en team_members, por lo que `/test-lead` lo procesa como vendedor (no como lead). Para probarlo como lead usar `/test-vendedor-msg`.
+
+#### Health Check
+
+| Componente | Estado |
+|------------|--------|
+| Status | ✅ healthy |
+| Supabase | ✅ ok (3 leads) |
+| Follow-ups | ✅ ok |
+| Videos | ✅ ok |
+
+**Sistema 100% operativo - Última verificación: 2026-02-06**
+
+---
+
+## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-06)
 
 ### Flujos de IA Verificados
 
 | Flujo | Estado | Última verificación |
 |-------|--------|---------------------|
-| Saludos y presentación | ✅ | 2026-02-03 |
-| Info de desarrollos | ✅ | 2026-02-03 |
-| Alberca = Solo Andes | ✅ | 2026-02-03 |
-| Citadella del Nogal = Villa Campelo/Galiano | ✅ | 2026-02-03 |
-| Renta = "Solo vendemos" | ✅ | 2026-02-03 |
-| Ya compré otro lado = Felicita | ✅ | 2026-02-03 |
-| No contacto = Respeta | ✅ | 2026-02-03 |
-| INFONAVIT/Crédito | ✅ | 2026-02-03 |
-| Objeciones (precio, pensar, ubicación) | ✅ | 2026-02-03 |
-| Solicitud de cita | ✅ | 2026-02-03 |
-| Terrenos | ✅ | 2026-02-03 |
-| Especificaciones (grande, barata, amenidades) | ✅ | 2026-02-03 |
+| Saludos y presentación | ✅ | 2026-02-06 |
+| Info de desarrollos (Monte Verde 3 rec) | ✅ | 2026-02-06 |
+| Alberca = Solo Andes | ✅ | 2026-02-06 |
+| Citadella del Nogal = Villa Campelo/Galiano | ✅ | 2026-02-05 |
+| Renta = "Solo vendemos" | ✅ | 2026-02-05 |
+| Ya compré otro lado = Felicita | ✅ | 2026-02-05 |
+| No contacto = Respeta | ✅ | 2026-02-05 |
+| INFONAVIT/Crédito | ✅ | 2026-02-06 |
+| Objeciones (precio, pensar, ubicación) | ✅ | 2026-02-05 |
+| Solicitud de cita / visita | ✅ | 2026-02-06 |
+| Terrenos | ✅ | 2026-02-05 |
+| Especificaciones (grande, barata, amenidades) | ✅ | 2026-02-05 |
 | Clarificación cuando hay ambigüedad | ✅ | 2026-02-03 |
 | Contexto enriquecido (score, status, objeciones) | ✅ | 2026-02-03 |
 | Memoria de conversación entre sesiones | ✅ | 2026-02-03 |
-| Respuestas en inglés con USD | ✅ | 2026-02-03 |
+| Respuestas en inglés con USD | ✅ | 2026-02-05 |
+| **GPS/Ubicación enviada automáticamente** | ✅ | 2026-02-06 |
+| **Comandos vendedor (mis leads, citas)** | ✅ | 2026-02-06 |
 
 ### Paneles CRM Verificados
 
@@ -3376,4 +3415,4 @@ Después de cada respuesta de IA, ahora se guardan en `lead.notes`:
 | `/api/tts-metrics` | Métricas de TTS | ✅ 2026-02-05 |
 | `/api/properties` | Catálogo de propiedades | ✅ 2026-02-02 |
 
-**Sistema 100% operativo - Última verificación: 2026-02-05**
+**Sistema 100% operativo - Última verificación: 2026-02-06**
