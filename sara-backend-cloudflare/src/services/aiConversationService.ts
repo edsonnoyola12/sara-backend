@@ -2030,8 +2030,20 @@ Por WhatsApp te atiendo 24/7 🙌
         }
       }
 
-      // ═══ ENFORCEMENT: Pedir nombre si no lo tenemos ═══
-      if (!nombreConfirmado && parsed.response) {
+      // ═══ ENFORCEMENT: Pedir nombre si no lo tenemos (máx 3 veces) ═══
+      // Contar cuántas veces ya pedimos nombre en el historial
+      const nameAskCount = (lead.conversation_history || [])
+        .filter((m: any) => m.role === 'assistant')
+        .filter((m: any) => {
+          const c = (m.content || '').toLowerCase();
+          return c.includes('me compartes tu nombre') ||
+                 c.includes('con quién tengo el gusto') ||
+                 c.includes('con quien tengo el gusto') ||
+                 c.includes('cómo te llamas') ||
+                 c.includes('cuál es tu nombre');
+        }).length;
+
+      if (!nombreConfirmado && parsed.response && nameAskCount < 3) {
         const respLower = parsed.response.toLowerCase();
         const askingName = respLower.includes('nombre') ||
                            respLower.includes('cómo te llamas') ||
@@ -2046,9 +2058,11 @@ Por WhatsApp te atiendo 24/7 🙌
                             respLower.includes('disculpa la confusión');
 
         if (!askingName && !esDespedida) {
-          console.log('⚠️ ENFORCEMENT: Claude no pidió nombre - agregando solicitud');
+          console.log(`⚠️ ENFORCEMENT: Claude no pidió nombre - agregando solicitud (intento ${nameAskCount + 1}/3)`);
           parsed.response += '\n\nPor cierto, ¿con quién tengo el gusto? 😊';
         }
+      } else if (nameAskCount >= 3) {
+        console.log(`ℹ️ Ya pedimos nombre ${nameAskCount} veces - dejando de preguntar`);
       }
 
       return {
@@ -3724,10 +3738,25 @@ Tú dime, ¿por dónde empezamos?`;
       const yaPreguntoNombre = ultimoMsgSaraHist.includes('me compartes tu nombre') ||
                                ultimoMsgSaraHist.includes('cuál es tu nombre');
 
+      // ═══ FIX: Contar cuántas veces ya pedimos nombre (máx 3) ═══
+      const nameAskCountIntercept = (lead.conversation_history || [])
+        .filter((m: any) => m.role === 'assistant')
+        .filter((m: any) => {
+          const c = (m.content || '').toLowerCase();
+          return c.includes('me compartes tu nombre') ||
+                 c.includes('con quién tengo el gusto') ||
+                 c.includes('con quien tengo el gusto') ||
+                 c.includes('cómo te llamas') ||
+                 c.includes('cuál es tu nombre');
+        }).length;
+
       // ═══ FIX: Si se van a enviar recursos, NO preguntar nombre aquí (se pregunta al final del push) ═══
       const seEnviaranRecursos = analysis.send_video_desarrollo || desarrolloInteres;
 
-      if (!tieneNombreReal && !yaPreguntoNombre && !seEnviaranRecursos && (analysis.intent === 'confirmar_cita' || claudeResponse.toLowerCase().includes('te agendo') || claudeResponse.toLowerCase().includes('agendarte'))) {
+      // ═══ FIX: Si el enforcement ya agregó "¿con quién tengo el gusto?" a claudeResponse, no interceptar ═══
+      const enforcementYaAgrego = claudeResponse.includes('¿con quién tengo el gusto?');
+
+      if (!tieneNombreReal && !yaPreguntoNombre && !seEnviaranRecursos && !enforcementYaAgrego && nameAskCountIntercept < 3 && (analysis.intent === 'confirmar_cita' || claudeResponse.toLowerCase().includes('te agendo') || claudeResponse.toLowerCase().includes('agendarte'))) {
         console.log('🛑 INTERCEPTANDO: Claude quiere agendar pero no hay nombre (sin recursos)');
         const respuestaForzada = `¡Qué bien que te interesa *${desarrolloInteres || 'visitarnos'}*! 😊 Para agendarte, ¿me compartes tu nombre?`;
         await this.meta.sendWhatsAppMessage(from, respuestaForzada);
@@ -3861,7 +3890,54 @@ Tú dime, ¿por dónde empezamos?`;
           }
         }
       }
-      
+
+      // ═══════════════════════════════════════════════════════════════
+      // FIX C: Corregir nombre del lead usado como ubicación
+      // Claude a veces usa el nombre del lead en contexto de ubicación
+      // Ej: "Está en Edson" en lugar de "Está en Guadalupe"
+      // ═══════════════════════════════════════════════════════════════
+      if (nombreCliente && nombreCliente !== 'amigo' && nombreCliente !== 'Sin nombre' && nombreCliente !== 'Cliente' && nombreCliente.length > 2) {
+        const nombreEscaped = nombreCliente.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const locationPatterns = [
+          { regex: new RegExp(`[Ee]stá en ${nombreEscaped}`, 'gi'), prefix: 'Está en' },
+          { regex: new RegExp(`[Uu]bicado en ${nombreEscaped}`, 'gi'), prefix: 'ubicado en' },
+          { regex: new RegExp(`[Qq]ueda en ${nombreEscaped}`, 'gi'), prefix: 'queda en' },
+          { regex: new RegExp(`[Zz]ona de ${nombreEscaped}`, 'gi'), prefix: 'zona de' },
+        ];
+
+        for (const { regex, prefix } of locationPatterns) {
+          if (regex.test(respuestaLimpia)) {
+            console.error(`⚠️ CORRIGIENDO: Nombre "${nombreCliente}" usado como ubicación`);
+            const respLowerLoc = respuestaLimpia.toLowerCase();
+            const esFalco = respLowerLoc.includes('falco') || respLowerLoc.includes('calzada solidaridad');
+            const esAndes = respLowerLoc.includes('andes') || respLowerLoc.includes('siglo xxi');
+            const esColinas = respLowerLoc.includes('monte verde') || respLowerLoc.includes('encinos') || respLowerLoc.includes('miravalle') || respLowerLoc.includes('colorines');
+
+            const correctLocation = esFalco || esAndes ? 'Guadalupe'
+              : esColinas ? 'Colinas del Padre, Zacatecas'
+              : 'Zacatecas';
+
+            respuestaLimpia = respuestaLimpia.replace(regex, `${prefix} ${correctLocation}`);
+          }
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // FIX D: Safety net - Colinas del Padre NO es "solo Villa Campelo"
+      // Colinas del Padre tiene casas (Monte Verde, Encinos, Miravalle, etc.)
+      // Los terrenos están en Citadella del Nogal (Guadalupe)
+      // ═══════════════════════════════════════════════════════════════
+      const respLowerColinas = respuestaLimpia.toLowerCase();
+      if (respLowerColinas.includes('colinas del padre') &&
+          respLowerColinas.includes('solo') &&
+          (respLowerColinas.includes('villa campelo') || respLowerColinas.includes('campelo'))) {
+        console.error('⚠️ CORRIGIENDO: Colinas del Padre tiene casas, no solo terrenos');
+        respuestaLimpia = respuestaLimpia.replace(
+          /[Ee]n Colinas del Padre (?:tenemos |hay )?(?:SOLO |solo |únicamente )(?:Villa Campelo|terrenos)[^.]*/gi,
+          'En Colinas del Padre tenemos casas en *Monte Verde* (desde $1.6M), *Los Encinos* (desde $3.0M), *Miravalle* (desde $3.0M) y *Paseo Colorines* (desde $3.0M). Los terrenos están en *Citadella del Nogal* (en Guadalupe)'
+        );
+      }
+
       // ═══════════════════════════════════════════════════════════════
       // VERIFICAR SI DEBE ACTIVARSE FLUJO DE BANCO/CRÉDITO ANTES DE ENVIAR
       // ═══════════════════════════════════════════════════════════════
@@ -4537,9 +4613,10 @@ Tú dime, ¿por dónde empezamos?`;
                 await new Promise(r => setTimeout(r, 400));
                 const desarrollosMencionados = desarrollosLista.join(' y ');
                 // ═══ FIX: Mensaje final claro - sin "amigo", pregunta directa ═══
+                // ═══ FIX: No pedir nombre aquí - el enforcement ya lo pide en la respuesta principal ═══
                 const msgPush = tieneNombre
                   ? `${primerNombre}, ¿te gustaría agendar una cita para visitar *${desarrollosMencionados}*? 🏠`
-                  : `¿Te gustaría agendar una cita para visitar *${desarrollosMencionados}*? 🏠\n\nPara agendarte, ¿me compartes tu nombre? 😊`;
+                  : `¿Te gustaría agendar una cita para visitar *${desarrollosMencionados}*? 🏠`;
 
                 await this.meta.sendWhatsAppMessage(from, msgPush);
                 console.log('✅ Push a cita enviado después de recursos');
@@ -6926,15 +7003,8 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       // Verificación de seguridad: NO crear cita sin nombre
       else if (!tieneNombre) {
         console.error('⚠️ Intento de cita SIN NOMBRE - no se creará');
-        // ═══ FIX: Solo preguntar si no lo hicimos ya ═══
-        const ultMsgSara = (lead.conversation_history || [])
-          .filter((m: any) => m.role === 'assistant')
-          .slice(-1)[0]?.content?.toLowerCase() || '';
-        if (!ultMsgSara.includes('me compartes tu nombre')) {
-          await this.meta.sendWhatsAppMessage(from, '¡Me encanta que quieras visitarnos! 😊 Solo para darte mejor atención, ¿me compartes tu nombre?');
-        } else {
-          console.log('ℹ️ Ya preguntamos nombre, esperando respuesta');
-        }
+        console.log('ℹ️ Enforcement de nombre ya pidió el nombre en la respuesta principal');
+        // No enviar mensaje separado - el enforcement en analyzeWithAI ya agregó la pregunta
       }
       // Si tenemos nombre, desarrollo válido y NO tiene cita previa, crear cita
       else {
