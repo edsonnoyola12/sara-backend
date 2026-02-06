@@ -3367,6 +3367,53 @@ Después de cada respuesta de IA, ahora se guardan en `lead.notes`:
 
 **Sistema 100% operativo - Última verificación: 2026-02-06**
 
+### 2026-02-06 (Sesión 22 - Parte 2) - Fix 3 Issues de Conversaciones Reales
+
+**Análisis de conversaciones reales en la base de datos reveló 3 problemas:**
+
+#### Fix 1: "Si" fallback usa property_interest
+
+**Problema:** Cuando lead dice "si"/"claro" en el fallback, SARA siempre respondía "¿qué zona te interesa?" incluso si el lead ya tenía `property_interest`.
+
+**Fix en `aiConversationService.ts` (línea ~2272):**
+- Si `lead.property_interest` existe → `"¿Te gustaría visitar [desarrollo]? ¿Qué día y hora te funcionan?"`
+- Si no existe → mantiene la pregunta genérica de zona
+
+#### Fix 2: Eliminado default hardcodeado 'Los Encinos'
+
+**Problema:** Cuando no había `property_interest`, el código defaulteaba a `'Los Encinos'` creando confusión.
+
+**Fixes aplicados:**
+- **Línea ~2389:** `lead.property_interest || 'Los Encinos'` → `lead.property_interest || ''`
+  - Si no hay desarrollo, pregunta "¿Qué desarrollo te gustaría visitar?" con lista completa
+- **Línea ~2965:** `citaActiva.property_name || lead.property_interest || 'Los Encinos'` → `... || ''`
+  - Para reagendamiento, no asume desarrollo si no se conoce
+
+#### Fix 3: Enforcement de nombre post-procesamiento
+
+**Problema:** El prompt dice "CRÍTICO: Pide el nombre" pero Claude a veces lo ignora y agenda citas sin nombre.
+
+**Fix:** Después de que Claude responde, si `nombreConfirmado === false` y la respuesta NO pide nombre, se agrega:
+```
+\n\nPor cierto, ¿con quién tengo el gusto? 😊
+```
+- Excluye respuestas de despedida/no-contacto/número equivocado
+
+#### Tests verificados (via /test-ai-response):
+
+| Test | Resultado |
+|------|-----------|
+| `msg=si` (con property_interest) | ✅ Ofrece visita al desarrollo |
+| `msg=si` (sin property_interest) | ✅ Pregunta zona/tipo de casa |
+| `msg=mañana a las 10am` (sin property_interest) | ✅ Pregunta qué desarrollo visitar con lista |
+| `msg=tienen casas con alberca` + `name=Lead` (sin nombre) | ✅ Agrega "¿con quién tengo el gusto?" al final |
+
+**Tests:** 351/351 pasando ✅
+**Commit:** `85001c3c`
+**Deploy:** Version ID `d7665c39-113a-4294-a513-ed63a2e5c1d2`
+
+---
+
 #### QA Exhaustivo Consumer Journey - 38/38 Tests (via /test-ai-response)
 
 | # | Fase | Mensaje | Intent | Resultado |
@@ -3456,6 +3503,9 @@ Después de cada respuesta de IA, ahora se guardan en `lead.notes`:
 | Hablar con humano | ✅ | 2026-02-06 |
 | Tiempo de entrega por desarrollo | ✅ | 2026-02-06 |
 | Fuera de tema → redirige a casas | ✅ | 2026-02-06 |
+| **"Si" fallback usa property_interest** | ✅ | 2026-02-06 |
+| **No hardcodear Los Encinos como default** | ✅ | 2026-02-06 |
+| **Enforcement de nombre post-procesamiento** | ✅ | 2026-02-06 |
 
 ### Paneles CRM Verificados
 
