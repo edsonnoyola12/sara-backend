@@ -100,7 +100,7 @@ export async function ejecutarTareaOneTime(
 // ═══════════════════════════════════════════════════════════
 // BRIEFING MATUTINO - 8 AM L-V
 // ═══════════════════════════════════════════════════════════
-export async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhatsAppService, vendedor: any): Promise<void> {
+export async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhatsAppService, vendedor: any, options?: { openaiApiKey?: string }): Promise<void> {
   console.log(`\n═══════════════════════════════════════════════════════════`);
   console.log(`📋 BRIEFING MATUTINO - Iniciando para: ${vendedor.name}`);
   console.log(`   📱 Teléfono: ${vendedor.phone}`);
@@ -309,7 +309,12 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
     const resultado = await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
       tipoMensaje: 'briefing',
       guardarPending: true,
-      pendingKey: 'pending_briefing'
+      pendingKey: 'pending_briefing',
+      // TTS: Enviar briefing también como nota de voz si hay API key
+      ttsConfig: options?.openaiApiKey ? {
+        enabled: true,
+        openaiApiKey: options.openaiApiKey
+      } : undefined
     });
 
     if (resultado.success) {

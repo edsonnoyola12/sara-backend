@@ -652,7 +652,7 @@ export default {
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       const { data: yo } = await supabase.client.from("team_members").select("*").eq("phone", "5215610016226").single();
       if (yo) {
-        await enviarBriefingMatutino(supabase, meta, yo);
+        await enviarBriefingMatutino(supabase, meta, yo, { openaiApiKey: env.OPENAI_API_KEY });
         return corsResponse(JSON.stringify({ ok: true, message: "Briefing enviado a " + yo.name }));
       }
       return corsResponse(JSON.stringify({ ok: false, message: "Usuario no encontrado" }));
@@ -1287,7 +1287,7 @@ export default {
               .eq('phone', TEST_PHONE)
               .single();
             if (vendedor) {
-              await enviarBriefingMatutino(supabase, meta, vendedor);
+              await enviarBriefingMatutino(supabase, meta, vendedor, { openaiApiKey: env.OPENAI_API_KEY });
               resultados.briefing = '✅ Briefing enviado';
             } else {
               resultados.briefing = '❌ Vendedor no encontrado';
@@ -16259,7 +16259,7 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
       let enviados = 0;
       for (const v of vendedores || []) {
         if (!v.phone || !v.recibe_briefing) continue;
-        await enviarBriefingMatutino(supabase, meta, v);
+        await enviarBriefingMatutino(supabase, meta, v, { openaiApiKey: env.OPENAI_API_KEY });
         enviados++;
       }
       return corsResponse(JSON.stringify({ ok: true, message: 'Briefings enviados', count: enviados }));
@@ -16281,7 +16281,7 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
         last_briefing_sent: null
       };
 
-      await enviarBriefingMatutino(supabase, meta, vendedorTest);
+      await enviarBriefingMatutino(supabase, meta, vendedorTest, { openaiApiKey: env.OPENAI_API_KEY });
       return corsResponse(JSON.stringify({ ok: true, message: `Briefing enviado a ${vendedorTest.phone}` }));
     }
 
@@ -16974,7 +16974,7 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
         for (const v of lote) {
           console.log(`\n   ═══ PROCESANDO: ${v.name} ═══`);
           try {
-            await enviarBriefingMatutino(supabase, meta, v);
+            await enviarBriefingMatutino(supabase, meta, v, { openaiApiKey: env.OPENAI_API_KEY });
             enviados++;
           } catch (err) {
             console.error(`   ❌ Error enviando briefing a ${v.name}:`, err);

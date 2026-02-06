@@ -71,8 +71,9 @@ export class AIConversationService {
     // Verificar si debemos también enviar audio
     const prefieresAudio = leadNotes.prefers_audio === true;
     const ultimoFueAudio = leadNotes.last_message_was_audio === true;
+    const esRespuestaLarga = texto.length > 300; // Mensajes largos se envían como audio
 
-    if ((prefieresAudio || ultimoFueAudio) && this.env?.OPENAI_API_KEY) {
+    if ((prefieresAudio || ultimoFueAudio || esRespuestaLarga) && this.env?.OPENAI_API_KEY) {
       try {
         const tts = createTTSService(this.env.OPENAI_API_KEY);
 
@@ -6626,7 +6627,9 @@ Un asesor te contactará muy pronto. ¿Hay algo más en lo que pueda ayudarte?`;
     // Solo enviar respuestaPrincipal si NO se envió ya en el flujo anterior
     // (evitar doble mensaje cuando hora fuera de horario)
     if (!yaEnvioMensajeHorarioInvalido) {
-      await this.meta.sendWhatsAppMessage(from, respuestaPrincipal);
+      // Usar TTS si el lead prefiere audio o su último mensaje fue audio
+      const leadNotesForTTS = { ...(typeof lead.notes === 'object' ? lead.notes : {}), lead_id: lead.id };
+      await this.enviarRespuestaConAudioOpcional(from, respuestaPrincipal, leadNotesForTTS);
       console.log('✅ Respuesta enviada');
     } else {
       console.log('⏭️ Respuesta ya enviada anteriormente (horario inválido)');

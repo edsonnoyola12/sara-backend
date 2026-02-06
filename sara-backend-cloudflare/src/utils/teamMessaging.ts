@@ -9,6 +9,7 @@
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { createRetellService, RetellService } from '../services/retellService';
+import { createTTSService, TTSService } from '../services/ttsService';
 
 export interface EnviarMensajeTeamResult {
   success: boolean;
@@ -99,6 +100,11 @@ export async function enviarMensajeTeamMember(
       phoneNumber: string;
     };
     mensajeParaLlamada?: string; // Resumen corto para que SARA diga por teléfono
+    // TTS config - enviar también como nota de voz
+    ttsConfig?: {
+      enabled: boolean;
+      openaiApiKey: string;
+    };
   }
 ): Promise<EnviarMensajeTeamResult> {
   const { tipoMensaje = 'notificacion', guardarPending = true } = opciones || {};
@@ -126,6 +132,26 @@ export async function enviarMensajeTeamMember(
       try {
         await meta.sendWhatsAppMessage(teamMember.phone, mensaje);
         console.log(`   ✅ Enviado DIRECTO a ${teamMember.name}`);
+
+        // TTS: Si está habilitado, también enviar como nota de voz
+        if (opciones?.ttsConfig?.enabled && opciones.ttsConfig.openaiApiKey) {
+          try {
+            const tts = createTTSService(opciones.ttsConfig.openaiApiKey);
+            // Solo generar audio si el mensaje es razonablemente largo
+            if (mensaje.length >= 50 && mensaje.length <= 3000) {
+              console.log(`   🔊 TTS: Generando audio para briefing...`);
+              const audioResult = await tts.generateAudio(mensaje);
+              if (audioResult.success && audioResult.audioBuffer) {
+                await meta.sendVoiceMessage(teamMember.phone, audioResult.audioBuffer, audioResult.mimeType || 'audio/ogg');
+                console.log(`   ✅ TTS: Nota de voz enviada (${audioResult.audioBuffer.byteLength} bytes)`);
+              }
+            }
+          } catch (ttsErr) {
+            console.log(`   ⚠️ TTS falló (no crítico):`, ttsErr);
+            // No fallar el envío si TTS falla
+          }
+        }
+
         return { success: true, method: 'direct', ventanaAbierta: true };
       } catch (directError: any) {
         console.log(`   ⚠️ Directo falló (${directError?.message}), usando fallback...`);
