@@ -10,10 +10,46 @@ compatibility_flags = ["nodejs_compat"]
 # ═══════════════════════════════════════════════════════════════════════════
 
 [triggers]
-# Crons (máximo 5 en Cloudflare free):
-# - */2 * * * *     : Check leads sin asignar cada 2 min (incluye precios día 1 a las 12 AM México)
-# - 0 14 * * 1-5    : Followups 2 PM L-V
-# - 0 1 * * *       : Tareas nocturnas + Backup diario 1 AM (TODOS los días)
+# Crons (máximo 5 en Cloudflare free) - HORAS EN UTC, México = UTC-6:
+#
+# */2 * * * *   → Cada 2 min (24/7):
+#   - Recordatorios de citas (24h y 2h antes)
+#   - Encuestas post-cita
+#   - Follow-ups automáticos pendientes
+#   - Propuestas de follow-up a vendedores
+#   - Detectar no-shows
+#   - Timeout confirmaciones vendedor
+#   - Flujo post-visita
+#   - Videos pendientes (Veo 3)
+#   - Lead scoring (cada 2h, 8am-8pm MX)
+#   - Re-engagement leads sin respuesta (cada hora, 9am-7pm MX L-V)
+#   - Verificar pending llamadas Retell (cada 30min)
+#   - Cumpleaños, alertas leads fríos/calientes (horarios fijos L-V)
+#   - Follow-up 24h leads nuevos (10am + 4pm MX)
+#   - Re-engagement directo leads fríos (11am + 5pm MX L-S)
+#   - Coaching, nurturing, hipotecas (días específicos)
+#   - Aplicar precios programados (día 1, 12 AM MX)
+#
+# 0 14 * * 1-5  → 2 PM UTC = 8 AM México (L-V):
+#   - Reactivar ventanas 24h equipo (7:55 AM MX)
+#   - Briefing matutino vendedores (template briefing_matutino)
+#   - Reporte diario consolidado CEO
+#   - Alertas proactivas CEO
+#   - Reporte semanal CEO (lunes)
+#   - Reportes semanales vendedores/asesores/marketing (lunes)
+#   - Seguimiento hipotecas (mar/jue)
+#   - Remarketing leads fríos (miércoles)
+#   - Reactivación leads perdidos (1er lunes mes)
+#   - Reportes mensuales CEO/vendedores/asesores/marketing (día 1)
+#
+# 0 1 * * *     → 1 AM UTC = 7 PM México (diario):
+#   - Reporte diario vendedores (template reporte_vendedor)
+#   - Reporte diario asesores (template reporte_asesor)
+#   - Reporte diario marketing
+#   - Recap semanal vendedores (sábado 2 PM MX → mexicoHour=14)
+#   - Video semanal de logros (sábado)
+#   - Backup diario
+#
 crons = ["*/2 * * * *", "0 14 * * 1-5", "0 1 * * *"]
 
 # KV Namespace para cache (PRODUCTION)

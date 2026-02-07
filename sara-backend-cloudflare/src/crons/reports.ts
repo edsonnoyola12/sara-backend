@@ -1650,10 +1650,24 @@ ${insightsText}
 _¡Descansa y mañana con todo!_ 🚀`;
 
       // ═══ USAR HELPER QUE RESPETA VENTANA 24H ═══
+      const insightPrincipal = insights.length > 0 ? insights[0] : '¡Buen día!';
+      const templateParams = [
+        nombreCorto,
+        `${leadsHoyCount}`,
+        `${citasCompletadas}`,
+        `${citasHoyTotal}`,
+        `$${(pipelineValue/1000000).toFixed(1)}M`,
+        insightPrincipal
+      ];
+
       const resultado = await enviarMensajeTeamMember(supabase, meta, vendedor, msg, {
         tipoMensaje: 'reporte_diario',
         guardarPending: true,
-        pendingKey: 'pending_reporte_diario'
+        pendingKey: 'pending_reporte_diario',
+        templateOverride: {
+          name: 'reporte_vendedor',
+          params: templateParams
+        }
       });
 
       if (resultado.success) {
@@ -2060,10 +2074,21 @@ export async function enviarReporteDiarioAsesores(supabase: SupabaseService, met
       const msg = `📊 *TU RESUMEN DEL DÍA*\nHola *${nombreCorto}* 👋\n_${fechaHoy}_\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *HOY*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes nuevas: *${nuevasHoy.length}* ${calcVar(nuevasHoy.length, nuevasAyer.length)}\n• Aprobadas: *${aprobadasAsesorHoy.length}* ${aprobadasAsesorHoy.length > 0 ? '🎉' : ''}\n\n━━━━━━━━━━━━━━━━━━━━━\n📋 *TU PIPELINE*\n━━━━━━━━━━━━━━━━━━━━━\n• Pendientes: ${pendientes}\n• En proceso: ${enProceso}\n• En banco: ${enBanco}\n• Total activo: *${pipelineAsesor.length}*\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Descansa y mañana con todo!_ 🚀`;
 
       // ═══ USAR HELPER QUE RESPETA VENTANA 24H ═══
+      const templateParams = [
+        nombreCorto,
+        `${nuevasHoy.length}`,
+        `${aprobadasAsesorHoy.length}`,
+        `${pipelineAsesor.length} expedientes`
+      ];
+
       const resultado = await enviarMensajeTeamMember(supabase, meta, asesor, msg, {
         tipoMensaje: 'reporte_diario_asesor',
         guardarPending: true,
-        pendingKey: 'pending_reporte_diario'
+        pendingKey: 'pending_reporte_diario',
+        templateOverride: {
+          name: 'reporte_asesor',
+          params: templateParams
+        }
       });
 
       if (resultado.success) {

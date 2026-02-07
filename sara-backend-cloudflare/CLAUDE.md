@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-06 (Sesión 24)
+> Última actualización: 2026-02-06 (Sesión 25)
 
 ---
 
@@ -28,7 +28,7 @@
 # 1. Lee la documentación completa
 cat SARA_COMANDOS.md | head -500
 
-# 2. Verifica tests (OBLIGATORIO - 351 tests)
+# 2. Verifica tests (OBLIGATORIO - 351+ tests)
 npm test
 
 # 3. Si falla algún test, NO hagas cambios
@@ -50,24 +50,24 @@ npm test
 
 | Archivo | Líneas | Función | Riesgo |
 |---------|--------|---------|--------|
-| `src/index.ts` | ~14,300 | Router principal + CRONs | ALTO |
-| `src/handlers/whatsapp.ts` | ~11,000 | Handler de mensajes | ALTO |
-| `src/services/aiConversationService.ts` | ~7,355 | IA + prompts | ALTO |
+| `src/index.ts` | ~18,000 | Router principal + CRONs | ALTO |
+| `src/handlers/whatsapp.ts` | ~12,000 | Handler de mensajes | ALTO |
+| `src/services/aiConversationService.ts` | ~7,850 | IA + prompts + phase-aware | ALTO |
 | `src/services/creditFlowService.ts` | ~1,400 | Flujo hipotecario | MEDIO |
 
 ### Módulos CRON Extraídos (2026-01-29)
 
 | Módulo | Líneas | Funciones |
 |--------|--------|-----------|
-| `src/crons/reports.ts` | ~400 | Reportes diarios/semanales |
-| `src/crons/briefings.ts` | ~500 | Briefings matutinos, logEvento |
-| `src/crons/alerts.ts` | ~450 | Alertas de leads, cumpleaños |
-| `src/crons/followups.ts` | ~800 | Follow-ups, nurturing, broadcasts |
-| `src/crons/leadScoring.ts` | ~550 | Scoring, señales calientes, objeciones |
-| `src/crons/nurturing.ts` | ~1200 | Recuperación crédito, NPS, referidos, post-compra |
-| `src/crons/maintenance.ts` | ~340 | Bridges, leads estancados, aniversarios |
-| `src/crons/videos.ts` | ~710 | Videos Veo 3 personalizados |
-| `src/crons/dashboard.ts` | ~700 | Status, analytics, health, backup |
+| `src/crons/reports.ts` | ~2,640 | Reportes diarios/semanales/mensuales (usa template reporte_vendedor/reporte_asesor) |
+| `src/crons/briefings.ts` | ~680 | Briefings matutinos (usa template briefing_matutino), logEvento |
+| `src/crons/alerts.ts` | ~2,070 | Alertas de leads, cumpleaños, leads fríos/calientes |
+| `src/crons/followups.ts` | ~2,360 | Follow-ups, nurturing, broadcasts, re-engagement |
+| `src/crons/leadScoring.ts` | ~660 | Scoring, señales calientes, objeciones |
+| `src/crons/nurturing.ts` | ~1,580 | Recuperación crédito, NPS, referidos, post-compra, satisfacción |
+| `src/crons/maintenance.ts` | ~400 | Bridges, leads estancados, aniversarios |
+| `src/crons/videos.ts` | ~780 | Videos Veo 3 personalizados |
+| `src/crons/dashboard.ts` | ~1,020 | Status, analytics, health, backup |
 
 ### Servicios de Inteligencia de Negocio (2026-01-29)
 
@@ -86,7 +86,12 @@ npm test
 | `src/services/webhookService.ts` | ~500 | Webhooks salientes para integraciones |
 | `src/services/cacheService.ts` | ~270 | Cache inteligente con KV |
 | `src/services/retellService.ts` | ~350 | Llamadas telefónicas con Retell.ai |
-| `src/utils/teamMessaging.ts` | ~460 | Sistema híbrido mensajes + llamadas |
+| `src/services/ttsService.ts` | ~200 | Text-to-Speech con OpenAI |
+| `src/services/ttsTrackingService.ts` | ~150 | Tracking de métricas TTS |
+| `src/services/surveyService.ts` | ~300 | Servicio de encuestas |
+| `src/services/encuestasService.ts` | ~200 | Envío y procesamiento encuestas |
+| `src/services/messageQueueService.ts` | ~200 | Cola de mensajes (preparación futura) |
+| `src/utils/teamMessaging.ts` | ~510 | Sistema híbrido mensajes + llamadas + templateOverride |
 
 ### Secciones Protegidas
 
@@ -171,9 +176,22 @@ Si no hay ventana abierta → el mensaje NO LLEGA.
 - Función `enviarMensajeTeamMember()` en `src/utils/teamMessaging.ts`
 - Verifica `last_sara_interaction` del team member
 - Si ventana abierta → envía mensaje directo
-- Si ventana cerrada → envía template `reactivar_equipo` + guarda en `pending_*`
-- Cuando responden → se entrega el mensaje pendiente
+- Si ventana cerrada → envía template con datos reales + guarda en `pending_*`
+- Cuando responden → se entrega el mensaje pendiente completo
 - Fallback: si template falla, intenta enviar directo
+
+**Templates con datos reales (en vez de genérico `reactivar_equipo`):**
+- `briefing_matutino` (UTILITY, APPROVED) → params: nombre, citas, leads, tip
+- `reporte_vendedor` (UTILITY, APPROVED) → params: nombre, leads_nuevos, citas_completadas, citas_total, pipeline, insight
+- `reporte_asesor` (UTILITY, APPROVED) → params: nombre, solicitudes, aprobadas, pipeline_activo
+
+**Implementado via `templateOverride` en opciones de `enviarMensajeTeamMember()`:**
+```typescript
+await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
+  tipoMensaje: 'briefing',
+  templateOverride: { name: 'briefing_matutino', params: ['Oscar', '3 citas', '5 leads', 'Tip del día'] }
+});
+```
 
 **Pending messages se verifican PRIMERO:**
 - En `handleVendedorMessage` (whatsapp.ts ~línea 3810)
@@ -462,7 +480,7 @@ sara-backend-cloudflare/
 │   │   ├── videos.ts         # Videos Veo 3
 │   │   └── dashboard.ts      # Status y analytics
 │   ├── services/
-│   │   ├── aiConversationService.ts  # IA (7K líneas)
+│   │   ├── aiConversationService.ts  # IA (~7,850 líneas, phase-aware)
 │   │   ├── ceoCommandsService.ts
 │   │   ├── vendorCommandsService.ts
 │   │   ├── asesorCommandsService.ts
@@ -470,12 +488,16 @@ sara-backend-cloudflare/
 │   │   ├── bridgeService.ts
 │   │   ├── creditFlowService.ts
 │   │   ├── metaWhatsAppService.ts
+│   │   ├── retellService.ts          # Llamadas Retell.ai
+│   │   ├── ttsService.ts             # Text-to-Speech OpenAI
+│   │   ├── surveyService.ts          # Encuestas
+│   │   ├── messageQueueService.ts    # Cola mensajes (futuro)
 │   │   ├── supabase.ts
-│   │   └── ...69 servicios total
+│   │   └── ...85 servicios total
 │   ├── utils/
 │   │   └── conversationLogic.ts
 │   └── tests/
-│       └── ...11 archivos de test
+│       └── ...13 archivos de test
 ├── wrangler.toml             # Config Cloudflare
 ├── SARA_COMANDOS.md          # Documentación detallada
 └── CLAUDE.md                 # Este archivo
@@ -582,7 +604,7 @@ Ver documentación en `docs/`:
 ## QA COMPLETADO (2026-01-28)
 
 ### SARA responde correctamente:
-- ✅ Preguntas de desarrollos (36 propiedades en catálogo)
+- ✅ Preguntas de desarrollos (38 propiedades en catálogo)
 - ✅ Citadella del Nogal = Villa Campelo + Villa Galiano
 - ✅ Monte Verde, Distrito Falco, Los Encinos, Miravalle, Andes, etc.
 - ✅ NO inventa información (dice "no tengo esa info")
@@ -942,7 +964,7 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Flujo real WhatsApp | 3 | ✅ |
 
 **Respuestas verificadas:**
-- ✅ Precios correctos de 36 propiedades
+- ✅ Precios correctos de 38 propiedades
 - ✅ Sinónimos: Citadella del Nogal = Villa Campelo/Galiano
 - ✅ Errores ortográficos: "informasion monteverde" → entiende
 - ✅ NO inventa tasas de interés → redirige a bancos
@@ -983,7 +1005,7 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Funcionalidad | Estado |
 |---------------|--------|
 | Responder preguntas de desarrollos | ✅ |
-| Información de 36 propiedades | ✅ |
+| Información de 38 propiedades | ✅ |
 | Precios y disponibilidad | ✅ |
 | Manejo de objeciones | ✅ |
 | Detectar errores ortográficos | ✅ |
@@ -1025,26 +1047,47 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 
 ### ⏰ CRONs AUTOMATIZADOS
 
-| CRON | Frecuencia | Estado |
-|------|------------|--------|
-| Leads sin asignar | Cada 2 min | ✅ |
-| Follow-ups | 2 PM L-V | ✅ |
-| Briefing matutino | 8 AM | ✅ |
-| Reporte 7 PM | 7 PM | ✅ |
-| Alertas/Cumpleaños | Diario | ✅ |
-| Scoring leads | Diario | ✅ |
-| NPS/Encuestas | Viernes 10am | ✅ |
-| Seguimiento post-entrega | Lun/Jue 10am | ✅ |
-| Satisfacción casa | Martes 11am | ✅ |
-| Check-in mantenimiento | Sábado 10am | ✅ |
-| Referidos | Miércoles 11am | ✅ |
+| CRON | Frecuencia | Template/Función | Estado |
+|------|------------|------------------|--------|
+| Recordatorios citas | Cada 2 min | notificationService | ✅ |
+| Encuestas post-cita | Cada 2 min | notificationService | ✅ |
+| Follow-ups pendientes | Cada 2 min | followupService | ✅ |
+| Detectar no-shows | Cada 2 min | detectarNoShows | ✅ |
+| Videos pendientes | Cada 2 min | verificarVideosPendientes | ✅ |
+| Verificar pending llamadas | Cada 30 min | Retell.ai | ✅ |
+| Re-engagement leads | Cada hora 9am-7pm L-V | verificarReengagement | ✅ |
+| Lead scoring | Cada 2h 8am-8pm | actualizarLeadScores | ✅ |
+| Briefing matutino | 8 AM L-V | `briefing_matutino` template | ✅ |
+| Reporte CEO | 8 AM L-V | enviarReporteDiarioConsolidadoCEO | ✅ |
+| Alertas CEO | 8 AM L-V | enviarAlertasProactivasCEO | ✅ |
+| Cumpleaños | 9 AM L-V | felicitarCumpleaños | ✅ |
+| Alertas leads fríos | 10 AM L-V | enviarAlertasLeadsFrios | ✅ |
+| Follow-up 24h leads nuevos | 10 AM + 4 PM L-V | followUp24hLeadsNuevos | ✅ |
+| Re-engagement directo | 11 AM + 5 PM L-S | reengagementDirectoLeads | ✅ |
+| Coaching vendedores | 10 AM Mar/Jue | IACoachingService | ✅ |
+| Nurturing educativo | 11 AM Mar/Jue | nurturingEducativo | ✅ |
+| Reporte vendedores 7PM | 7 PM L-V | `reporte_vendedor` template | ✅ |
+| Reporte asesores 7PM | 7 PM L-V | `reporte_asesor` template | ✅ |
+| Reporte marketing 7PM | 7 PM L-V | enviarReporteDiarioMarketing | ✅ |
+| Recap semanal | Sábado 2 PM | enviarRecapSemanal | ✅ |
+| Reportes semanales | Lunes 8-9 AM | CEO/vendedores/asesores/marketing | ✅ |
+| Reportes mensuales | Día 1 8-9 AM | CEO/vendedores/asesores/marketing | ✅ |
+| NPS/Encuestas | Viernes 10am | enviarEncuestaNPS | ✅ |
+| Seguimiento post-entrega | Lun/Jue 10am | seguimientoPostEntrega | ✅ |
+| Satisfacción casa | Martes 11am | encuestaSatisfaccionCasa | ✅ |
+| Referidos | Miércoles 11am | solicitarReferidos | ✅ |
+| Check-in mantenimiento | Sábado 10am | checkInMantenimiento | ✅ |
+| Llamadas Retell post-visita | 11 AM L-V | llamadasSeguimientoPostVisita | ✅ |
+| Llamadas Retell reactivación | 10 AM Mar/Jue | llamadasReactivacionLeadsFrios | ✅ |
 
 ### 🔒 FLUJOS DE NEGOCIO
 
 | Flujo | Estado |
 |-------|--------|
 | Lead → CRM → Vendedor (notificación automática) | ✅ |
-| Ventana 24h WhatsApp (templates si cerrada) | ✅ |
+| Ventana 24h WhatsApp (templates con datos reales si cerrada) | ✅ |
+| Templates con datos: briefing_matutino, reporte_vendedor, reporte_asesor | ✅ |
+| Llamadas Retell.ai si no responden en 2h | ✅ |
 | Bridge chat directo (6 min, #cerrar, #mas) | ✅ |
 | Crédito hipotecario (calificación + asesor) | ✅ |
 | Videos Veo 3 personalizados | ✅ |
@@ -1640,7 +1683,7 @@ const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana',
 1. `leads` - 20+ campos, estados del funnel
 2. `team_members` - roles, pending messages
 3. `appointments` - citas con Google Calendar
-4. `properties` - catálogo de 36 propiedades
+4. `properties` - catálogo de 38 propiedades
 5. `mortgage_applications` - créditos hipotecarios
 6. `pending_videos` - videos Veo 3
 7. `offers` - ciclo de vida de ofertas
@@ -2425,7 +2468,7 @@ npm test
 |----------|-----------|
 | /test-ventana-24h | ✅ 2 abiertas, 16 cerradas |
 | /api/leads | ✅ 32 leads |
-| /api/properties | ✅ 36 propiedades |
+| /api/properties | ✅ 38 propiedades |
 | /health | ✅ healthy |
 
 #### Estado de Producción

@@ -5802,6 +5802,24 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
             buttonText: 'Ver ubicación 📍',
             buttonUrl: 'https://maps.app.goo.gl/{{1}}',
             buttonExample: ['qR8vK3xYz9M']
+          },
+          {
+            name: 'briefing_matutino',
+            category: 'UTILITY',
+            text: '📋 *Briefing* - Buenos días {{1}}!\n\n🗓️ Citas hoy: {{2}}\n⚠️ Leads pendientes: {{3}}\n\n{{4}}\n\nResponde *briefing* para ver detalles completos. 💪',
+            example: [['Oscar', '3 citas', '5 leads', '💡 Tip: Escribe mis leads para ver tus prospectos']]
+          },
+          {
+            name: 'reporte_vendedor',
+            category: 'UTILITY',
+            text: '📊 *Reporte del día* {{1}}\n\n📈 Leads nuevos: {{2}}\n🗓️ Citas: {{3}} completadas de {{4}}\n💰 Pipeline: {{5}}\n\n{{6}}\n\nResponde *reporte* para detalles. 📋',
+            example: [['Oscar', '4', '2', '3', '$5.2M', '🔥 Tienes 2 citas mañana']]
+          },
+          {
+            name: 'reporte_asesor',
+            category: 'UTILITY',
+            text: '📊 *Reporte del día* {{1}}\n\n📋 Solicitudes nuevas: {{2}}\n✅ Aprobadas hoy: {{3}}\n📁 Pipeline activo: {{4}}\n\nResponde para ver detalles completos. 📋',
+            example: [['Leticia', '2', '1', '5 expedientes']]
           }
         ];
 
@@ -17469,8 +17487,8 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
       await generarVideoSemanalLogros(supabase, meta, env);
     }
 
-    // Sábado 12pm: Recap semanal
-    if (mexicoHour === 12 && isFirstRunOfHour && dayOfWeek === 6 && vendedores) {
+    // Sábado 2pm: Recap semanal
+    if (mexicoHour === 14 && isFirstRunOfHour && dayOfWeek === 6 && vendedores) {
       console.log('📊 Enviando recap semanal...');
       for (const v of vendedores) {
         if (!v.phone || !v.recibe_recap) continue;

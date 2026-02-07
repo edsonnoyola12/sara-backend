@@ -307,10 +307,21 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
     console.log(`   📝 Mensaje tiene ${mensaje.length} caracteres`);
 
     // ═══ USAR HELPER QUE RESPETA VENTANA 24H ═══
+    const templateParams = [
+      nombreCorto,
+      `${citasHoy?.length || 0} citas`,
+      `${totalAcciones} leads`,
+      tipDelDia
+    ];
+
     const resultado = await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
       tipoMensaje: 'briefing',
       guardarPending: true,
       pendingKey: 'pending_briefing',
+      templateOverride: {
+        name: 'briefing_matutino',
+        params: templateParams
+      },
       // TTS: Enviar briefing también como nota de voz si hay API key
       ttsConfig: options?.openaiApiKey ? {
         enabled: true,

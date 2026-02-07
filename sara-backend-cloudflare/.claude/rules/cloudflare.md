@@ -71,14 +71,14 @@ interface Env {
 
 ---
 
-## CRONs Configurados
+## CRONs Configurados (HORAS EN UTC, México = UTC-6)
 
 ```toml
 [triggers]
 crons = [
-  "*/2 * * * *",    # Cada 2 min: leads sin asignar
-  "0 14 * * 1-5",   # 2 PM L-V: follow-ups
-  "0 1 * * *"       # 1 AM diario: tareas nocturnas
+  "*/2 * * * *",    # Cada 2 min (24/7): recordatorios, follow-ups, alertas, scoring, videos, Retell
+  "0 14 * * 1-5",   # 2 PM UTC = 8 AM México L-V: briefings, reportes CEO, semanales, mensuales
+  "0 1 * * *"       # 1 AM UTC = 7 PM México diario: reportes vendedores/asesores/marketing, recap sábado
 ]
 ```
 
@@ -88,10 +88,17 @@ async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
   const cron = event.cron;
 
   if (cron === '*/2 * * * *') {
-    await checkLeadsSinAsignar();
+    // Cada 2 min: usa mexicoHour para decidir qué ejecutar
+    // Incluye: recordatorios citas, encuestas, follow-ups, scoring,
+    // alertas, cumpleaños, nurturing, videos Veo3, llamadas Retell
+    await tareasCada2Minutos();
   } else if (cron === '0 14 * * 1-5') {
-    await enviarFollowUps();
+    // 8 AM México L-V: briefings matutinos (template briefing_matutino),
+    // reportes CEO, semanales (lunes), mensuales (día 1)
+    await tareasMatutinas();
   } else if (cron === '0 1 * * *') {
+    // 7 PM México diario: reportes vendedores (template reporte_vendedor),
+    // reportes asesores (template reporte_asesor), marketing, recap sábado 2PM
     await tareasNocturnas();
   }
 }

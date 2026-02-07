@@ -105,6 +105,11 @@ export async function enviarMensajeTeamMember(
       enabled: boolean;
       openaiApiKey: string;
     };
+    // Template override - usar template específico con datos en vez de reactivar_equipo genérico
+    templateOverride?: {
+      name: string;
+      params: string[];
+    };
   }
 ): Promise<EnviarMensajeTeamResult> {
   const { tipoMensaje = 'notificacion', guardarPending = true } = opciones || {};
@@ -178,13 +183,16 @@ export async function enviarMensajeTeamMember(
     }
 
     // 4. VENTANA CERRADA o ENVÍO DIRECTO FALLÓ → Enviar template + guardar pending
-    console.log(`   📨 Enviando template ${REACTIVATION_TEMPLATE}...`);
+    const templateName = opciones?.templateOverride?.name || REACTIVATION_TEMPLATE;
+    const templateComponents = opciones?.templateOverride
+      ? [{ type: 'body', parameters: opciones.templateOverride.params.map(p => ({ type: 'text', text: p })) }]
+      : [{ type: 'body', parameters: [{ type: 'text', text: nombreCorto }] }];
+
+    console.log(`   📨 Enviando template ${templateName}...`);
 
     try {
-      await meta.sendTemplate(teamMember.phone, REACTIVATION_TEMPLATE, 'es_MX', [
-        { type: 'body', parameters: [{ type: 'text', text: nombreCorto }] }
-      ]);
-      console.log(`   ✅ Template enviado a ${teamMember.name}`);
+      await meta.sendTemplate(teamMember.phone, templateName, 'es_MX', templateComponents);
+      console.log(`   ✅ Template ${templateName} enviado a ${teamMember.name}`);
     } catch (templateError: any) {
       console.error(`   ❌ Template falló: ${templateError?.message}`);
 
