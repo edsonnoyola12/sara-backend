@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-06 (Sesión 23)
+> Última actualización: 2026-02-06 (Sesión 24)
 
 ---
 
@@ -3072,7 +3072,114 @@ class MessageQueueService {
 
 ---
 
-## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-02)
+## RECURSOS: DÓNDE ESTÁ TODO (Brochures, Videos, GPS, Precios, Fotos)
+
+### Fuente principal: Supabase tabla `properties`
+
+| Columna | Tipo | Qué guarda |
+|---------|------|------------|
+| `price` | BIGINT | Precio base (sin equipar) |
+| `price_equipped` | BIGINT | Precio equipada (closets + cocina) - **SE USA POR DEFAULT** |
+| `gps_link` | TEXT | Google Maps link (`https://maps.app.goo.gl/...`) |
+| `youtube_link` | TEXT | Video YouTube del desarrollo |
+| `matterport_link` | TEXT | Recorrido 3D Matterport |
+| `brochure_urls` | TEXT[] | Array de URLs de brochure HTML |
+| `photo_url` | TEXT | Foto principal de la propiedad |
+| `gallery_urls` | TEXT | Galería de fotos |
+
+### Brochures HTML (Cloudflare Pages)
+
+**Repo:** `/Users/end/Desktop/brochures-santarita/`
+**URL base:** `https://brochures-santarita.pages.dev/`
+
+| Desarrollo | Archivo HTML | URL |
+|------------|-------------|-----|
+| Monte Verde | `monte_verde.html` | `brochures-santarita.pages.dev/monte_verde.html` |
+| Andes | `andes.html` | `brochures-santarita.pages.dev/andes.html` |
+| Los Encinos | `los_encinos.html` | `brochures-santarita.pages.dev/los_encinos.html` |
+| Distrito Falco | `distrito_falco.html` | `brochures-santarita.pages.dev/distrito_falco.html` |
+| Miravalle | `miravalle.html` | `brochures-santarita.pages.dev/miravalle.html` |
+| Monte Real | `monte_real.html` | `brochures-santarita.pages.dev/monte_real.html` (placeholder) |
+
+**Cómo se envían:** `aiConversationService.ts` lee `brochure_urls` de properties. Si contiene `.html` o `pages.dev` → se envía como link de texto (no como documento PDF).
+
+**Brochures PDF (hardcoded fallback):** `src/services/resourceService.ts` tiene URLs `gruposantarita.com/brochures/*.pdf` - usados solo por comandos de vendedor en `whatsapp.ts`.
+
+### Videos YouTube por Desarrollo
+
+| Desarrollo | Video ID | Thumbnail |
+|------------|----------|-----------|
+| Los Encinos | `xzPXJ00yK0A` | `img.youtube.com/vi/xzPXJ00yK0A/maxresdefault.jpg` |
+| Monte Verde | `49rVtCtBnHg` | `img.youtube.com/vi/49rVtCtBnHg/maxresdefault.jpg` |
+| Distrito Falco | `reig3OGmBn4` | `img.youtube.com/vi/reig3OGmBn4/maxresdefault.jpg` |
+| Andes | `gXWVb_kzkgM` | `img.youtube.com/vi/gXWVb_kzkgM/maxresdefault.jpg` |
+| Miravalle | `49rVtCtBnHg` | `img.youtube.com/vi/49rVtCtBnHg/maxresdefault.jpg` |
+
+**Dónde están hardcodeados:** `handlers/whatsapp.ts:11050-11057` (thumbnails).
+**Fuente dinámica:** `properties.youtube_link` en Supabase.
+
+### GPS / Ubicaciones
+
+**De Supabase:** Cada propiedad tiene `gps_link` → se envía automáticamente cuando lead pide ubicación.
+
+**Hardcodeados (oficinas):**
+
+| Lugar | URL | Archivos |
+|-------|-----|----------|
+| Oficinas Santa Rita | `https://maps.app.goo.gl/hUk6aH8chKef6NRY7` | `aiConversationService.ts:4508`, `index.ts:3729` |
+| Oficinas (alt) | `https://maps.app.goo.gl/xPvgfA686v4y6YJ47` | `handlers/whatsapp.ts:12029-12032` |
+
+### Fotos de Desarrollos (para videos Veo3 y promos)
+
+Hardcodeadas en `src/crons/videos.ts:396-401` y `src/index.ts:8375-8380`:
+
+| Desarrollo | URL Foto |
+|------------|----------|
+| Monte Verde | `gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg` |
+| Los Encinos | `gruposantarita.com.mx/wp-content/uploads/2021/07/M4215335.jpg` |
+| Andes | `gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg` |
+| Miravalle | `gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-min-scaled-e1740520053367.jpg` |
+| Distrito Falco | `gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg` |
+| Acacia (MV) | `gruposantarita.com.mx/wp-content/uploads/2024/10/ACACIA-1-scaled.jpg` |
+
+### Precios (siempre de Supabase)
+
+**NO hay precios hardcodeados en código.** Siempre se leen de `properties.price` y `properties.price_equipped`.
+
+- SARA muestra `price_equipped` por default (casas equipadas con closets + cocina)
+- Para actualizar precios: ejecutar SQL en Supabase Dashboard → SQL Editor
+- Último SQL de precios: `sql/EJECUTAR_EN_SUPABASE.sql` (Feb 2026)
+
+### Resumen: Dónde buscar cada recurso
+
+| Recurso | Fuente principal | Fallback hardcodeado |
+|---------|------------------|---------------------|
+| **Precios** | `properties.price_equipped` / `properties.price` | Ninguno |
+| **Brochures** | `properties.brochure_urls` (Supabase) | `resourceService.ts` (PDFs) |
+| **GPS** | `properties.gps_link` (Supabase) | Oficinas en `aiConversationService.ts` |
+| **Videos YouTube** | `properties.youtube_link` (Supabase) | Thumbnails en `whatsapp.ts:11050` |
+| **Matterport 3D** | `properties.matterport_link` (Supabase) | Ninguno |
+| **Fotos** | `properties.photo_url` (Supabase) | `crons/videos.ts:396` y `index.ts:8375` |
+| **Brochure HTMLs** | `brochures-santarita.pages.dev` (Cloudflare Pages) | Ninguno |
+
+### Phase-Aware Conversation (Sesión 23-24)
+
+SARA ajusta su intensidad de venta según la fase del lead:
+
+| Fase | # | Condición | Estilo de push |
+|------|---|-----------|----------------|
+| Discovery | 1 | Lead nuevo, sin datos | Sin push, amigable |
+| Qualification | 2 | 3+ mensajes o tiene nombre+recámaras | Sin push |
+| Presentation | 3 | Tiene property_interest | Push suave |
+| Closing | 4 | Score>=40 o tiene presupuesto+recámaras | Push fuerte ("¿sábado o domingo?") |
+| Nurturing | 5 | Status visited/negotiating/reserved | Push gentil |
+
+**Archivos:** `aiConversationService.ts` - `detectConversationPhase()` (línea 224), `getPhaseInstructions()` (línea 272).
+**Endpoint test:** `/test-ai-response` incluye `phase` y `phaseNumber` en respuesta JSON.
+
+---
+
+## ✅ CHECKLIST COMPLETO DE FUNCIONALIDADES (Actualizado 2026-02-06)
 
 ### Flujos de IA Verificados
 
