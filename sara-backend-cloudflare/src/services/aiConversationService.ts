@@ -37,6 +37,8 @@ interface AIAnalysis {
   hora_sugerida?: string;
   desarrollo_cita?: string;
   detected_language?: SupportedLanguage; // Idioma detectado del mensaje (es/en)
+  phase?: string;
+  phaseNumber?: number;
 }
 
 // Handler reference para acceder a métodos auxiliares
@@ -2168,7 +2170,9 @@ Por WhatsApp te atiendo 24/7 🙌
         send_matterport: parsed.send_matterport || false,
         send_contactos: parsed.send_contactos || false,
         contactar_vendedor: parsed.contactar_vendedor || false,
-        detected_language: detectedLang // Idioma detectado para usar en executeAIDecision
+        detected_language: detectedLang, // Idioma detectado para usar en executeAIDecision
+        phase: phaseInfo.phase,
+        phaseNumber: phaseInfo.phaseNumber
       };
       
       // ━━━━━━━━━━━━━━━

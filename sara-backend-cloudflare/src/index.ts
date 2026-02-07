@@ -2221,6 +2221,8 @@ export default {
           send_video: analysis.send_video || false,
           send_brochure: analysis.send_brochure || false,
           send_video_desarrollo: analysis.send_video_desarrollo || false,
+          phase: analysis.phase || 'unknown',
+          phaseNumber: analysis.phaseNumber || 0,
           nota: 'Usa el MISMO servicio que los leads reales (AIConversationService)'
         }));
 
