@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-07 (Sesión 28)
+> Última actualización: 2026-02-07 (Sesión 29)
 
 ---
 
@@ -28,7 +28,7 @@
 # 1. Lee la documentación completa
 cat SARA_COMANDOS.md | head -500
 
-# 2. Verifica tests (OBLIGATORIO - 351+ tests)
+# 2. Verifica tests (OBLIGATORIO - 369+ tests)
 npm test
 
 # 3. Si falla algún test, NO hagas cambios
@@ -3940,4 +3940,63 @@ else console.log('Wamid guardado en notes');
 **Tests:** 351/351 pasando
 **Commit:** `76db935c`
 **Deploy:** Version ID `e12faf2f`
+**Push:** origin/main
+
+### 2026-02-07 (Sesión 29) - Fix Encuestas Interceptando Mensajes Normales
+
+**Bug reportado:** Usuario envió "Si me gustaría el sábado a las 10 am" → SARA interpretó "10" como NPS score 10/10 → respondió con mensaje de referidos en vez de agendar la visita.
+
+**Causa raíz:** 5 handlers de encuesta (NPS, entrega, satisfacción, mantenimiento + `checkPendingSurveyResponse`) usaban regex/includes demasiado amplios que matcheaban números o palabras comunes en cualquier contexto.
+
+#### Cambio 1: Helper `isLikelySurveyResponse()` (nurturing.ts)
+
+```typescript
+export function isLikelySurveyResponse(mensaje: string, maxWords = 6, maxChars = 40): boolean {
+  // Rechaza mensajes largos (>6 palabras / >40 chars)
+  // Rechaza si contiene palabras de agenda (sábado, am, pm, cita, visita...)
+  // Rechaza si contiene palabras de propiedad (casa, terreno, crédito, precio...)
+}
+```
+
+#### Cambio 2: Regex estrictos en handlers (nurturing.ts)
+
+| Handler | Antes | Después |
+|---------|-------|---------|
+| `procesarRespuestaNPS` | `/\b([0-9]\|10)\b/` (cualquier número) | `/^\s*(\d{1,2})\s*$/` (número debe ser TODO el mensaje) |
+| `procesarRespuestaSatisfaccionCasa` | `mensaje.includes('1')` | `/^\s*([1-4])\s*$/` (1-4 debe ser TODO el mensaje) |
+| `procesarRespuestaEntrega` | `includes('no', 'falta')` | + `isLikelySurveyResponse(msg, 15, 120)` |
+| `procesarRespuestaMantenimiento` | `includes('sí', 'bien')` | + `isLikelySurveyResponse(msg, 15, 120)` |
+| `checkPendingSurveyResponse` | mismos regex amplios | mismos regex estrictos |
+
+#### Cambio 3: TTL de 48h en flags de encuesta (nurturing.ts)
+
+Cada handler ahora verifica `esperando_respuesta_*_at` — si tiene más de 48h, auto-limpia el flag y retorna false. Previene que flags viejos capturen mensajes semanas después.
+
+Flags con timestamp agregados en:
+- `enviarEncuestaNPS()` → `esperando_respuesta_nps_at`
+- `seguimientoPostEntrega()` → `esperando_respuesta_entrega_at`
+- `encuestaSatisfaccionCasa()` → `esperando_respuesta_satisfaccion_casa_at`
+- `checkInMantenimiento()` → `esperando_respuesta_mantenimiento_at`
+
+#### Cambio 4: Endpoint `/cleanup-test-leads` (index.ts)
+
+Elimina lead + TODOS los registros relacionados (surveys, appointments, mortgage_applications, messages, reservations, offers, follow_ups, activities) por número de teléfono. El cleanup anterior no borraba surveys.
+
+#### Cambio 5: 18 tests nuevos (postCompra.test.ts)
+
+- 12 tests de `isLikelySurveyResponse` (7 false-positive prevention + 5 true-positive)
+- 5 tests de clasificación estricta de satisfacción
+- 1 test adicional de regex
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/crons/nurturing.ts` | Helper + fix 4 handlers + timestamps en 4 flag-setters |
+| `src/index.ts` | Fix `checkPendingSurveyResponse` + import + endpoint cleanup |
+| `src/tests/postCompra.test.ts` | 18 tests nuevos (47→65 en archivo, 351→369 total) |
+
+**Tests:** 369/369 pasando
+**Commit:** `3682d8b0`
+**Deploy:** Version ID `677e395b`
 **Push:** origin/main
