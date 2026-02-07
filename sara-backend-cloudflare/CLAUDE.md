@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-07 (Sesión 27)
+> Última actualización: 2026-02-07 (Sesión 28)
 
 ---
 
@@ -3863,4 +3863,81 @@ Reporta 0 porque es sábado y no hubo briefings hoy. El lunes 8 AM los wamids se
 **Tests:** 351/351 pasando
 **Commit:** `90dd4d36`
 **Deploy:** Version ID `7187a2b7`
+**Push:** origin/main
+
+---
+
+### 2026-02-07 (Sesión 28) - Fix Persistencia de Wamid + Prueba E2E Delivery Tracking
+
+**Problema:** El wamid se capturaba en `enviarMensajeTeamMember()` pero no se persistía en la BD. La prueba E2E siempre mostraba "Wamids guardados: 0".
+
+**3 bugs identificados y corregidos:**
+
+#### Bug 1: `/test-briefing/{phone}` creaba vendedor virtual
+
+El endpoint creaba un objeto con `id: 'test'` en vez de buscar el team member real en la BD. Cuando `enviarMensajeTeamMember()` hacía `UPDATE team_members SET notes=... WHERE id='test'`, no matcheaba ninguna fila.
+
+**Fix (index.ts):** Buscar el team member real por teléfono antes de llamar a `enviarBriefingMatutino()`:
+```typescript
+const { data: realMember } = await supabase.client
+  .from('team_members')
+  .select('*')
+  .or(`phone.eq.${phoneFormatted},phone.like.%${phoneFormatted?.slice(-10)}`)
+  .maybeSingle();
+const vendedorTest = realMember || { id: 'test', ... }; // fallback si no existe
+```
+
+#### Bug 2: `briefings.ts` sobreescribía notes con copia stale
+
+Secuencia del bug:
+1. `notasActuales` leído de `vendedor.notes` (copia local)
+2. `enviarMensajeTeamMember()` guarda wamid en notes (BD actualizada)
+3. `enviarBriefingMatutino()` sobreescribe notes con `notasActuales` (SIN wamid)
+
+**Fix (briefings.ts):** Re-leer notes de BD después de `enviarMensajeTeamMember()`:
+```typescript
+const { data: freshMember } = await supabase.client
+  .from('team_members').select('notes').eq('id', vendedor.id).maybeSingle();
+const freshNotas = typeof freshMember?.notes === 'string'
+  ? JSON.parse(freshMember.notes || '{}') : (freshMember?.notes || notasActuales);
+freshNotas.last_briefing_context = { ... };
+```
+
+#### Bug 3: `teamMessaging.ts` no usaba `JSON.stringify` ni verificaba errores
+
+El update de Supabase podía fallar silenciosamente sin logging.
+
+**Fix (teamMessaging.ts):**
+```typescript
+// ANTES: await supabase.client.from('team_members').update({ notes: notasActuales })...
+// DESPUÉS:
+const { error: wamidError } = await supabase.client.from('team_members').update({
+  notes: JSON.stringify(notasActuales)
+}).eq('id', teamMember.id);
+if (wamidError) console.error('Error guardando wamid:', wamidError);
+else console.log('Wamid guardado en notes');
+```
+
+#### Prueba E2E Exitosa
+
+| Paso | Resultado |
+|------|-----------|
+| 1. Enviar reporte 7PM a Vendedor Test | ✅ Directo (ventana abierta) |
+| 2. Wamid capturado | ✅ `wamid.HBgNNTIxMjIyNDU1ODQ3NRU...` |
+| 3. Wamid guardado en notes | ✅ `last_team_message_wamids: [1]` |
+| 4. Meta callback `sent` | ✅ Recibido |
+| 5. Meta callback `delivered` | ✅ Recibido |
+| 6. CRON :50 delivery check | ✅ 1 verificado, 1 entregado, 0 sin entregar |
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/index.ts` | `/test-briefing/{phone}` busca team member real en BD |
+| `src/crons/briefings.ts` | Re-lee notes frescas post-envío |
+| `src/utils/teamMessaging.ts` | `JSON.stringify` + error logging en updates |
+
+**Tests:** 351/351 pasando
+**Commit:** `76db935c`
+**Deploy:** Version ID `e12faf2f`
 **Push:** origin/main
