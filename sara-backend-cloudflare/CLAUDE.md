@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-06 (Sesión 25)
+> Última actualización: 2026-02-06 (Sesión 26)
 
 ---
 
@@ -570,8 +570,10 @@ Ver archivos en `.claude/rules/`:
 - `supabase.md` - Reglas para base de datos
 
 Ver documentación en `docs/`:
+- `FLUJOS_CRITICOS.md` - **Horario completo de mensajes + 7 flujos críticos + reglas de oro**
 - `architecture.md` - Diagramas de arquitectura
 - `api-reference.md` - Referencia de APIs internas
+- `database-schema.md` - Schemas de Supabase (10 tablas)
 
 ---
 
@@ -3744,3 +3746,58 @@ Después de cada respuesta de IA, ahora se guardan en `lead.notes`:
 
 **Commit:** `c72bc092`
 **Deploy:** Version ID `d4b02b5b-c7f1-49f2-881e-723b08ad8f80`
+
+---
+
+### 2026-02-06 (Sesión 24) - Phase-Aware Conversation
+
+**SARA ajusta su intensidad de venta según la fase del lead.**
+
+Documentado en sección "Phase-Aware Conversation" arriba.
+
+---
+
+### 2026-02-06 (Sesión 25) - Templates con Datos Reales + Documentación + Flujos Críticos
+
+#### Parte 1: Verificación de Templates
+
+3 templates APPROVED en Meta:
+- `briefing_matutino` (UTILITY) → params: nombre, citas, leads, tip
+- `reporte_vendedor` (UTILITY) → params: nombre, leads_nuevos, citas_completadas, citas_total, pipeline, insight
+- `reporte_asesor` (UTILITY) → params: nombre, solicitudes, aprobadas, pipeline_activo
+
+Template de prueba enviado a Vendedor Test (5212224558475) via `/api/send-template`.
+
+#### Parte 2: Auditoría y Sync de Documentación
+
+4 archivos estaban desactualizados y fueron corregidos:
+
+| Archivo | Problemas |
+|---------|-----------|
+| `wrangler.toml` | CRONs decían "Followups 2PM L-V" en vez de "Briefings 8AM MX" |
+| `.claude/rules/cloudflare.md` | Descripciones de CRONs incorrectas |
+| `CLAUDE.md` | Líneas de código incorrectas (index.ts 14K→18K), servicios 69→85, tests 11→13 |
+| `sara.md` (memoria) | Templates no marcados APPROVED, líneas incorrectas |
+
+**Commit:** `e4247ace`
+**Deploy:** Version ID `c2b235ad`
+
+#### Parte 3: Diagrama de Flujos Críticos
+
+Creado **`docs/FLUJOS_CRITICOS.md`** (917 líneas) - Documento de referencia permanente:
+
+| Sección | Contenido |
+|---------|-----------|
+| **Horario completo** | Cada mensaje de 7:55 AM a 7 PM, a quién, qué template, condición técnica |
+| **Por día específico** | Lunes (semanales), Martes (hipotecas+coaching), Miércoles (remarketing+referidos), etc. |
+| **Continuos 24/7** | Recordatorios citas, encuestas, follow-ups, scoring, videos, Retell |
+| **Resumen por rol** | Tabla visual: vendedores, CEO, asesores, marketing, leads |
+| **7 flujos críticos** | Lead→IA, Equipo→Comando, Ventana 24h, CRONs, Pending, Follow-ups, Scoring |
+| **15 reglas de oro** | Pending primero, dedup, encuestas antes de IA, ventana 24h, etc. |
+| **Puntos de falla** | Síntomas + causas probables + fixes |
+
+**Commit:** `b37485f2`
+**Deploy:** Version ID `902d3009`
+**Push:** 2 commits a origin/main
+
+**Tests:** 351/351 pasando
