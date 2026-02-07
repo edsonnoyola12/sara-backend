@@ -411,9 +411,9 @@ export class WhatsAppHandler {
         }
       }
 
-      // Obtener datos
+      // Obtener datos (skipTeamCheck=true: team check done below with cached teamMembers)
       const [leadResult, properties, teamMembers] = await Promise.all([
-        this.getOrCreateLead(cleanPhone),
+        this.getOrCreateLead(cleanPhone, true),
         this.getAllProperties(),
         this.getAllTeamMembers()
       ]);
@@ -454,13 +454,9 @@ export class WhatsAppHandler {
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // ACTUALIZAR ÚLTIMA ACTIVIDAD DEL LEAD
+      // NOTA: last_activity_at se actualiza junto con last_message_at
+      // más abajo (~línea 1062) para ahorrar 1 subrequest
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      if (lead?.id) {
-        await this.supabase.client.from('leads')
-          .update({ last_activity_at: new Date().toISOString() })
-          .eq('id', lead.id);
-      }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // 🚨 DETECCIÓN DE "NO ME MOLESTES" (DNC - Do Not Contact)
@@ -595,7 +591,7 @@ export class WhatsAppHandler {
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       console.log(`📋 POST-VISITA CHECK: Buscando contexto para phone ${cleanPhone}`);
       try {
-        const postVisitResult = await this.buscarYProcesarPostVisitaPorPhone(cleanPhone, trimmedBody);
+        const postVisitResult = await this.buscarYProcesarPostVisitaPorPhone(cleanPhone, trimmedBody, teamMembers);
         console.log(`📋 POST-VISITA CHECK: Resultado = ${postVisitResult ? 'ENCONTRADO' : 'NO ENCONTRADO'}`);
         if (postVisitResult) {
           console.log(`📋 POST-VISITA: Respuesta procesada de vendedor ${cleanPhone}`);
@@ -687,50 +683,15 @@ export class WhatsAppHandler {
         const { CreditFlowService } = await import('../services/creditFlowService');
         const creditService = new CreditFlowService(this.supabase, this.env?.OPENAI_API_KEY);
 
-        // Verificar si está en flujo de crédito activo (SOLO si NO es team_member)
-        const enFlujoCredito = !esTeamMemberCredito && lead?.id ? await creditService.estaEnFlujoCredito(lead.id) : false;
-
-        if (enFlujoCredito) {
-          console.log(`🏦 Lead ${lead.id} en flujo de crédito - procesando respuesta`);
-          const resultado = await creditService.procesarRespuesta(lead.id, trimmedBody);
-          console.log(`🏦 Resultado:`, JSON.stringify(resultado, null, 2));
-
-          // Si el flujo indica pasar a IA (pregunta no relacionada)
-          if (resultado?.passToAI) {
-            console.log(`🏦 Pregunta no relacionada con crédito - pasando a IA`);
-            // NO hacer return, continuar al flujo normal de IA
-          } else if (resultado && resultado.respuesta) {
-            await this.meta.sendWhatsAppMessage(cleanPhone, resultado.respuesta);
-
-            // Si hay acción de conectar asesor
-            console.log(`🏦 Accion: ${resultado.accion}, Asesor: ${resultado.datos?.asesor?.name || 'NULL'}`);
-
-            if (resultado.accion === 'conectar_asesor') {
-              const asesor = resultado.datos?.asesor;
-
-              if (asesor && resultado.context) {
-                // Enviar mensaje al cliente con datos del asesor
-                const msgCliente = creditService.generarMensajeAsesor(asesor, resultado.context);
-                console.log(`🏦 Enviando datos asesor al lead: ${msgCliente.substring(0, 50)}...`);
-                await this.meta.sendWhatsAppMessage(cleanPhone, msgCliente);
-
-                // Notificar al asesor (solo si está activo)
-                if (asesor.phone && asesor.is_active !== false) {
-                  const msgAsesor = creditService.generarNotificacionAsesor(lead, resultado.context);
-                  console.log(`🏦 Notificando asesor ${asesor.name} en ${asesor.phone}`);
-                  await this.meta.sendWhatsAppMessage(asesor.phone, msgAsesor);
-                  console.log(`📤 Asesor ${asesor.name} notificado exitosamente`);
-                } else {
-                  console.error(`⚠️ Asesor sin teléfono o inactivo (is_active=${asesor.is_active})`);
-                }
-              } else {
-                console.error(`⚠️ No se encontró asesor o contexto - enviando mensaje genérico`);
-                await this.meta.sendWhatsAppMessage(cleanPhone,
-                  `Te contactaremos pronto con un asesor especializado.\n\n¡Gracias por tu interés! 🏠`);
-              }
-            }
-            console.log(`🏦 Flujo crédito completado - return`);
-            return;
+        // DESACTIVADO (Sesión 29): El flujo de crédito autónomo está deshabilitado.
+        // Razón: Vendemos CASAS, no créditos. El crédito es una herramienta para cerrar la venta.
+        // Las preguntas de crédito ahora las maneja SARA/Claude con instrucciones de redirigir a VISITA.
+        // Si el lead estaba en credit_flow, limpiar ese status para que vuelva al flujo normal.
+        if (!esTeamMemberCredito && lead?.id) {
+          const enFlujoCredito = await creditService.estaEnFlujoCredito(lead.id);
+          if (enFlujoCredito) {
+            console.log(`🏦 Lead ${lead.id} estaba en credit_flow - limpiando para flujo normal`);
+            await this.supabase.client.from('leads').update({ status: 'contacted' }).eq('id', lead.id).eq('status', 'credit_flow');
           }
         }
 
@@ -817,128 +778,16 @@ export class WhatsAppHandler {
           console.log('🤔 Respuesta no clara a confirmación, pasando a SARA...');
         }
 
-        // ✅ FIX: Si es respuesta a template de info_credito
+        // DESACTIVADO (Sesión 29): Respuestas a info_credito ahora pasan a SARA/Claude
+        // Razón: No agendamos citas con asesor de crédito directamente. Primero la VISITA.
         if (templateType === 'info_credito') {
-          const bodyLower = body.toLowerCase().trim();
-          const esAfirmativo = /^(s[ií]|ok|okey|claro|perfecto|listo|de acuerdo|va|vale|genial|excelente|por supuesto|correcto|me interesa|quiero|necesito)$/i.test(bodyLower) ||
-                              bodyLower.includes('interesa') || bodyLower.includes('quiero') || bodyLower.includes('necesito');
-
-          // Detectar si menciona fecha/hora (para llamada de crédito)
-          const mencionaHora = /\d{1,2}[\s:.]?\s*(am|pm|hrs?)?|\d{1,2}:\d{2}|mañana|tarde|hoy|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo/i.test(bodyLower);
-
-          if (esAfirmativo || mencionaHora) {
-            console.log('✅ Lead INTERESADO en crédito:', body, '| mencionaHora:', mencionaHora);
-            const nombreLead = lead.name?.split(' ')[0] || '';
-
-            // Marcar que necesita crédito (en notes)
-            templateNotes.needs_credit = true;
-            templateNotes.credit_interested_at = new Date().toISOString();
-
-            if (mencionaHora) {
-              // El lead ya dio fecha/hora - crear cita de LLAMADA de crédito
-              // AHORA SÍ limpiar template_sent porque ya se agendó la llamada
-              delete templateNotes.template_sent;
-              delete templateNotes.template_sent_at;
-              await this.supabase.client.from('leads').update({
-                notes: templateNotes
-              }).eq('id', lead.id);
-
-              // Parsear fecha/hora del mensaje
-              const fechaParseada = this.parseFechaEspanol(body);
-              const fechaCita = fechaParseada?.fecha || new Date().toISOString().split('T')[0];
-              const horaCita = fechaParseada?.hora || '12:00';
-
-              // Buscar asesor de crédito
-              const { data: asesores } = await this.supabase.client
-                .from('team_members')
-                .select('id, phone, name')
-                .eq('role', 'asesor')
-                .eq('is_active', true)
-                .limit(1);
-
-              const asesor = asesores && asesores.length > 0 ? asesores[0] : null;
-
-              // CREAR CITA tipo LLAMADA en la base de datos
-              // Columnas válidas: lead_id, lead_name, lead_phone, vendedor_id, vendedor_name,
-              // scheduled_date, scheduled_time, appointment_type, property_name, location, status, duration_minutes
-              const { data: citaCreada, error: errorCita } = await this.supabase.client
-                .from('appointments')
-                .insert([{
-                  lead_id: lead.id,
-                  lead_name: lead.name,
-                  lead_phone: lead.phone,
-                  vendedor_id: asesor?.id || lead.assigned_to,
-                  vendedor_name: asesor?.name || 'Asesor de crédito',
-                  scheduled_date: fechaCita,
-                  scheduled_time: horaCita,
-                  appointment_type: 'llamada',
-                  property_name: lead.property_interest || 'Crédito hipotecario',
-                  location: 'Llamada telefónica',
-                  status: 'scheduled',
-                  duration_minutes: 15
-                }])
-                .select()
-                .single();
-
-              if (errorCita) {
-                console.error('❌ Error creando cita de llamada:', errorCita);
-              } else {
-                console.log('✅ Cita de LLAMADA creada:', citaCreada?.id);
-              }
-
-              await this.twilio.sendWhatsAppMessage(from,
-                `¡Perfecto ${nombreLead}! 📞\n\n` +
-                `Agendado: *Llamada con asesor de crédito*\n` +
-                `📅 ${fechaCita} a las ${horaCita}\n\n` +
-                `Un asesor te contactará para ayudarte con tu crédito hipotecario.\n\n` +
-                `Si necesitas cambiar la hora, solo avísame. 😊`
-              );
-
-              // Notificar al asesor de crédito
-              if (asesor) {
-                await this.twilio.sendWhatsAppMessage(`whatsapp:+${asesor.phone}`,
-                  `📞 *LLAMADA DE CRÉDITO AGENDADA*\n\n` +
-                  `👤 ${lead.name}\n` +
-                  `📱 ${lead.phone}\n` +
-                  `📅 ${fechaCita} a las ${horaCita}\n` +
-                  `🏠 Interés: ${lead.property_interest || 'No especificado'}\n\n` +
-                  `El cliente espera tu llamada.`
-                );
-              }
-
-              // Notificar al vendedor asignado
-              if (lead.assigned_to) {
-                const { data: vendedorData } = await this.supabase.client
-                  .from('team_members')
-                  .select('phone, name')
-                  .eq('id', lead.assigned_to)
-                  .single();
-                if (vendedorData?.phone) {
-                  await this.twilio.sendWhatsAppMessage(`whatsapp:+${vendedorData.phone}`,
-                    `📞 *LLAMADA DE CRÉDITO AGENDADA*\n\n` +
-                    `👤 ${lead.name}\n` +
-                    `📅 ${fechaCita} a las ${horaCita}\n` +
-                    `🏦 Asesor: ${asesor?.name || 'Por asignar'}\n\n` +
-                    `_Tu lead solicitó info de crédito._`
-                  );
-                }
-              }
-            } else {
-              // Solo dijo "sí" - preguntar cuándo y guardar notes
-              await this.supabase.client.from('leads').update({
-                notes: templateNotes
-              }).eq('id', lead.id);
-
-              await this.twilio.sendWhatsAppMessage(from,
-                `¡Perfecto ${nombreLead}! 🎉\n\n` +
-                `Te conecto con un asesor de crédito hipotecario.\n\n` +
-                `¿Qué día y hora te funciona para que te llame? 📞`
-              );
-            }
-            return; // No continuar a SARA
-          }
-          // Si no es claro, continuar a SARA para que interprete
-          console.log('🤔 Respuesta no clara a info_credito, pasando a SARA...');
+          console.log('🏦 Respuesta a info_credito - pasando a SARA para redirigir a VISITA');
+          // Limpiar template_sent para que no siga interceptando
+          delete templateNotes.template_sent;
+          delete templateNotes.template_sent_at;
+          templateNotes.needs_credit = true;
+          await this.supabase.client.from('leads').update({ notes: templateNotes }).eq('id', lead.id);
+          // NO return - continúa a SARA/Claude que redirigirá a agendar visita
         }
 
         // ✅ FIX: Si es respuesta a template de seguimiento o reactivación
@@ -1202,15 +1051,16 @@ export class WhatsAppHandler {
       const msgLower = body.toLowerCase();
 
       // ╔════════════════════════════════════════════════════════════════════════╗
-      // ║  CRÍTICO: ACTUALIZAR last_message_at SIEMPRE QUE UN LEAD ESCRIBE       ║
+      // ║  CRÍTICO: ACTUALIZAR last_message_at + last_activity_at EN 1 QUERY     ║
       // ║  Esto es fundamental para detectar la ventana de 24h de WhatsApp       ║
       // ╚════════════════════════════════════════════════════════════════════════╝
       try {
+        const ahora = new Date().toISOString();
         await this.supabase.client
           .from('leads')
-          .update({ last_message_at: new Date().toISOString() })
+          .update({ last_message_at: ahora, last_activity_at: ahora })
           .eq('id', lead.id);
-        console.log(`✅ last_message_at actualizado para lead ${lead.id}`);
+        console.log(`✅ last_message_at + last_activity_at actualizado para lead ${lead.id}`);
       } catch (e) {
         console.error('⚠️ Error actualizando last_message_at:', e);
       }
@@ -10587,9 +10437,9 @@ Responde con fecha y hora:
   // OBTENER O CREAR LEAD
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  private async getOrCreateLead(phone: string): Promise<{ lead: any; isNew: boolean }> {
+  private async getOrCreateLead(phone: string, skipTeamCheck = false): Promise<{ lead: any; isNew: boolean }> {
     const leadService = new LeadManagementService(this.supabase);
-    return leadService.getOrCreateLead(phone);
+    return leadService.getOrCreateLead(phone, skipTeamCheck);
   }
 
   private async getVendedorMenosCarga(): Promise<any> {
@@ -11850,21 +11700,26 @@ Responde con fecha y hora:
   }
 
   // Buscar por teléfono (para cuando el vendedor usa un teléfono override)
-  private async buscarYProcesarPostVisitaPorPhone(phone: string, mensaje: string): Promise<any | null> {
+  private async buscarYProcesarPostVisitaPorPhone(phone: string, mensaje: string, cachedTeamMembers?: any[]): Promise<any | null> {
     try {
       const phoneSuffix = phone.replace(/\D/g, '').slice(-10);
       console.log(`📋 POST-VISITA SEARCH: Buscando phoneSuffix=${phoneSuffix}`);
 
       const postVisitService = new (await import('../services/postVisitService')).PostVisitService(this.supabase);
 
-      // Buscar todos los team_members y ver si alguno tiene post_visit_context con este teléfono
-      const { data: teamMembers, error } = await this.supabase.client
-        .from('team_members')
-        .select('id, name, notes');
-
-      console.log(`📋 POST-VISITA SEARCH: team_members encontrados=${teamMembers?.length || 0}, error=${error?.message || 'ninguno'}`);
-
-      if (!teamMembers) return null;
+      // Use cached team_members if provided, otherwise fetch from DB
+      let teamMembers: any[];
+      if (cachedTeamMembers && cachedTeamMembers.length > 0) {
+        teamMembers = cachedTeamMembers;
+        console.log(`📋 POST-VISITA SEARCH: Usando ${teamMembers.length} team_members del cache`);
+      } else {
+        const { data, error } = await this.supabase.client
+          .from('team_members')
+          .select('id, name, notes');
+        console.log(`📋 POST-VISITA SEARCH: team_members encontrados=${data?.length || 0}, error=${error?.message || 'ninguno'}`);
+        if (!data) return null;
+        teamMembers = data;
+      }
 
       let foundAnyContext = false;
       for (const tm of teamMembers) {

@@ -327,6 +327,45 @@ export class AIConversationService {
     }
   }
 
+  /**
+   * Batch version: guarda múltiples acciones en historial con 1 READ + 1 WRITE
+   * en lugar de 2 subrequests por acción individual.
+   */
+  async guardarAccionesEnHistorialBatch(leadId: string, acciones: Array<{accion: string, detalles?: string}>): Promise<void> {
+    if (acciones.length === 0) return;
+    try {
+      const { data: leadData } = await this.supabase.client
+        .from('leads')
+        .select('conversation_history')
+        .eq('id', leadId)
+        .single();
+
+      const historial = leadData?.conversation_history || [];
+      const now = new Date().toISOString();
+
+      for (const { accion, detalles } of acciones) {
+        const mensajeAccion = detalles
+          ? `[ACCIÓN SARA: ${accion} - ${detalles}]`
+          : `[ACCIÓN SARA: ${accion}]`;
+        historial.push({
+          role: 'assistant',
+          content: mensajeAccion,
+          timestamp: now,
+          type: 'action'
+        });
+      }
+
+      await this.supabase.client
+        .from('leads')
+        .update({ conversation_history: historial.slice(-30) })
+        .eq('id', leadId);
+
+      console.log(`📝 ${acciones.length} acciones guardadas en historial (batch)`);
+    } catch (e) {
+      console.error('⚠️ Error guardando acciones en historial (batch):', e);
+    }
+  }
+
   async analyzeWithAI(message: string, lead: any, properties: any[]): Promise<AIAnalysis> {
 
     // ═══ EARLY RATE LIMIT CHECK - Evitar doble respuesta ═══
@@ -599,9 +638,7 @@ Usa emojis con moderación: máximo 1-2 por mensaje, solo donde sumen emoción.
 - SÍ aceptamos Cofinanciamiento (INFONAVIT o FOVISSSTE + Banco)
 - SÍ aceptamos crédito conyugal
 - Convenios especiales: Tasa preferencial y SIN comisiones con BBVA y Banorte
-- Asesores de crédito:
-  • BBVA: Alejandro Palmas - 4929268100
-  • Banorte: Leticia Lara García - 4929272839
+- Crédito: Se tramita en la visita con el equipo de ventas (NUNCA dar teléfonos de asesores directamente)
 
 **TIEMPOS DE ENTREGA POR DESARROLLO:**
 - Monte Verde: 3 meses (Casas: Acacia, Eucalipto, Olivo, Fresno)
@@ -862,7 +899,7 @@ Dime y te doy la mejor opción para ti."
 ✅ SIEMPRE debes responder así:
 1. Si tienes la info en el catálogo ➜ Responde con DATOS REALES
 2. Si es sobre amenidades ➜ Invita a VISITAR para conocer a detalle
-3. Si es sobre crédito ➜ Ofrece conectar con ASESOR VIP
+3. Si es sobre crédito ➜ Responde útil + cierra con AGENDAR VISITA al desarrollo
 4. Si es sobre proceso de compra ➜ Usa los ESTÁNDARES MEXICANOS de arriba
 5. Si no sabes algo específico ➜ Conecta con un VENDEDOR HUMANO
 
@@ -872,8 +909,8 @@ NUNCA digas:
 - "No tengo esa información"
 
 EN SU LUGAR di:
-- "Para darte la información más precisa sobre eso, te conecto con un asesor que te puede ayudar. ¿Te parece?"
-- "Ese detalle lo puede confirmar el vendedor cuando visites. ¿Agendamos una cita?"
+- "Ese detalle lo puede confirmar cuando nos visites. ¿Agendamos una cita?"
+- "En la visita te damos toda esa información. ¿Qué día te funciona?"
 
 
 CUANDO PIDE INFORMACIÓN GENERAL (sin mencionar desarrollo específico)
@@ -914,13 +951,13 @@ Todos con financiamiento y sin cuotas de mantenimiento 💪
 ¿Cuál te llama más la atención? Te cuento más y agendamos una visita sin compromiso 🏠"
 
 
-⚠️ DIFERENCIA CRÍTICA: VENDEDOR vs ASESOR DE CRÉDITO ⚠️
+⚠️ REGLA DE ORO: VENDEMOS CASAS, NO CRÉDITOS ⚠️
 
-SON ROLES DIFERENTES:
-- VENDEDOR = Vende casas, muestra desarrollos, atiende visitas
-- ASESOR DE CRÉDITO/ASESOR VIP = Solo para trámites de crédito hipotecario con bancos
-
-⚠️ NUNCA confundas estos roles. Si pide vendedor, NO le ofrezcas asesor VIP.
+- SIEMPRE cierra con AGENDAR VISITA al desarrollo
+- Si preguntan por crédito → responde útil PERO cierra con "en la visita te ayudamos con todo el proceso de crédito"
+- NUNCA ofrezcas conectar con "asesor de crédito" o "asesor VIP" directamente
+- El crédito se tramita DESPUÉS de la visita, no antes
+- NUNCA preguntes banco, ingreso, enganche tú misma — eso lo hacen en la visita
 
 
 CUANDO QUIERE HABLAR CON VENDEDOR/PERSONA REAL
@@ -940,20 +977,17 @@ CUANDO QUIERE HABLAR CON VENDEDOR/PERSONA REAL
 🚫 NUNCA DIGAS que eres "una persona real" o "asesora real" - ERES UNA IA y debes ser honesta.
 
 ✅ RESPUESTA CORRECTA cuando pidan persona real:
-"Soy SARA, asistente virtual de Grupo Santa Rita 🤖 Pero con gusto te conecto con uno de nuestros asesores humanos.
+"Soy SARA, asistente virtual de Grupo Santa Rita 🤖 Pero con gusto te conecto con uno de nuestros vendedores.
 
 Para que te contacten, ¿me compartes tu nombre?"
 
 DEBES:
-1) Si NO tienes nombre ➜ Pedir nombre: "¡Claro! Para conectarte con un asesor, ¿me das tu nombre?"
-2) Si NO tienes celular ➜ Pedir celular: "¡Perfecto [nombre]! ¿Me das tu número para que el asesor te contacte?"
+1) Si NO tienes nombre ➜ Pedir nombre: "¡Claro! Para conectarte, ¿me das tu nombre?"
+2) Si NO tienes celular ➜ Pedir celular: "¡Perfecto [nombre]! ¿Me das tu número para que te contacten?"
 3) Si tienes nombre Y celular ➜ Responder:
    "¡Listo [nombre]! Ya notifiqué a nuestro equipo de ventas para que te contacten pronto.
-
-   ¿Hay algún desarrollo en particular que te interese para pasarle el dato al asesor?"
+   ¿Hay algún desarrollo en particular que te interese?"
 4) Activar contactar_vendedor: true en el JSON (NO send_contactos)
-
-⚠️ IMPORTANTE: Después de conectar con vendedor, NO preguntes si quiere asesor VIP ni menciones crédito.
 
 
 ESTILO DE RESPUESTA Y FORMATO VISUAL
@@ -996,7 +1030,7 @@ REGLAS:
 Flujo: Info modelo → "¿Te gustaría visitarlo?" → Cliente da fecha → Confirmas cita
 
 💰 NUNCA INVENTAR TASAS: No menciones % específicos ni compares bancos
-Respuesta: "Las tasas varían según tu perfil. Te conecto con nuestro asesor hipotecario."
+Respuesta: "Las tasas varían según banco y perfil. En la visita te ayudamos con todo el proceso de crédito."
 
 
 ⚠️ MÚLTIPLES INTENCIONES: Si el cliente pregunta varias cosas, responde TODAS (no ignores ninguna)
@@ -1024,18 +1058,21 @@ Si menciona casas + crédito → primero muestra casas, guía a visita, el créd
 ⚠️ CASAS PRIMERO: Si menciona casa + crédito → muestra casas → agenda visita → crédito después
 
 
-CRÉDITO - REGLAS SIMPLES:
-🚫 NUNCA preguntes proactivamente por crédito (ni antes ni después de cita)
-✅ Si pide crédito → "¡Te conecto con el asesor!" (no preguntes ingreso/enganche/banco)
+CRÉDITO - REGLAS:
+🚫 NUNCA preguntes proactivamente por crédito
+🚫 NUNCA ofrezcas "conectar con asesor de crédito" ni "asesor VIP"
+🚫 NUNCA preguntes banco, ingreso, enganche — eso se ve en la visita
+✅ Si pide crédito → responde útil ("Sí, aceptamos INFONAVIT, crédito bancario, etc.") + cierra con VISITA
+✅ Ejemplo: "¡Claro que aceptamos crédito! Tenemos opciones desde $1.6M. ¿Te gustaría venir a conocer? En la visita te ayudamos con todo el trámite de crédito."
 ✅ Si dice "no necesito crédito" → enfócate en la casa
-✅ Si dice "ya estoy en proceso" → felicita y pregunta si necesita algo más
+✅ Si dice "ya estoy en proceso" → felicita y agenda visita
 ✅ Si dice "ya tengo cita" → confirma y no crees otra
 
 
 RESPUESTAS CORTAS ("SÍ", "OK", NÚMEROS)
 Interpreta según CONTEXTO:
 - "sí" a visitar → pide nombre (si falta) o día/hora
-- "sí" a crédito → conecta con asesor
+- "sí" a crédito → redirige a visita: "¡Perfecto! En la visita te ayudamos con todo el crédito. ¿Sábado o domingo?"
 - Número (8-20) después de "¿hora?" → ES LA HORA ("12" = 12:00 PM)
 
 
@@ -1179,9 +1216,8 @@ EL CLIENTE YA TIENE CITA CONFIRMADA.
 - NUNCA digas "¿te gustaría visitar las casas?"
 - NUNCA digas "¿qué día te gustaría visitarnos?"
 - NUNCA crees otra cita
-- Si habla de crédito ➜ ofrece ASESOR VIP, no visita
+- Si habla de crédito ➜ responde útil: "¡Claro! En tu visita te ayudamos con todo el proceso de crédito"
 - Si dice "ya agendé" ➜ confirma su cita existente
-- Respuesta correcta: "¿Te gustaría que te conectemos con uno de nuestros asesores VIP para ayudarte con el crédito?"
 🚫 FIN PROHIBICIÓN 🚫
 ` : ''}
 
@@ -1189,7 +1225,7 @@ EL CLIENTE YA TIENE CITA CONFIRMADA.
 REGLAS DE CITA
 ${nombreConfirmado ? `✅ NOMBRE: "${lead.name}" - NO pedir de nuevo` : '❌ NOMBRE: Pídelo antes de fecha/hora'}
 Secuencia: ${nombreConfirmado ? 'Pide FECHA/HORA directo' : 'Pide NOMBRE → luego fecha/hora'} → Confirma → Despide (SIN preguntar crédito)
-🚫 Si ya tiene cita: NO ofrezcas otra. Si pide asesor hipotecario → send_contactos: true
+🚫 Si ya tiene cita: NO ofrezcas otra. Si pide crédito → "en tu visita te ayudamos con eso"
 
 EXTRACCIÓN DE NOMBRE: Si dice "soy X" / "me llamo X" → extracted_data.nombre = X
 
@@ -1780,7 +1816,7 @@ Pero te cuento algo: con las opciones de crédito actuales, la mensualidad puede
           console.log('⚠️ CORRIGIENDO: Claude fingió ser humano - somos IA');
           parsed.response = `Soy SARA, asistente virtual de Grupo Santa Rita 🤖
 
-Pero con gusto te conecto con uno de nuestros asesores humanos. Para que te contacten, ¿me compartes tu nombre?`;
+Pero con gusto te conecto con uno de nuestros vendedores. Para que te contacten, ¿me compartes tu nombre?`;
           parsed.contactar_vendedor = true;
         }
       }
@@ -2417,7 +2453,7 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
 • Seguimiento de tu proceso
 • Ayuda con crédito
 
-O si prefieres, te conecto con un asesor.`;
+¿Te gustaría agendar una visita para conocer nuestras casas? 🏠`;
           fallbackIntent = 'otro';
         }
       } else {
@@ -3596,8 +3632,9 @@ Tú dime, ¿por dónde empezamos?`;
         // Enviar respuesta
         await this.meta.sendWhatsAppMessage(from, contextoDecision.respuesta);
 
-        // ═══ Si quiere_asesor = true, NOTIFICAR AL ASESOR (solo si no fue notificado antes) ═══
-        if ((contextoDecision.datos as any)?.quiere_asesor === true && !lead.asesor_notificado) {
+        // ═══ DESACTIVADO (Sesión 29): No conectar con asesor de crédito directamente ═══
+        // El crédito se maneja en la VISITA, no antes
+        if (false && (contextoDecision.datos as any)?.quiere_asesor === true && !lead.asesor_notificado) {
           console.log('💳 REGLA 4.6 ACTIVADA: Notificando al asesor de crédito...');
           try {
             // Buscar asesor
@@ -4180,8 +4217,9 @@ Tú dime, ¿por dónde empezamos?`;
         console.log('⏸️ Respuesta de Claude NO enviada (ya se envió pregunta de nombre para cita)');
       }
       
-      // 3. Si Claude dice NOTIFICAR ASESOR HIPOTECARIO → Ejecutar
-      if (analysis.send_contactos) {
+      // 3. DESACTIVADO (Sesión 29): No notificar asesor hipotecario directamente
+      // El crédito se maneja en la VISITA, no antes
+      if (false && analysis.send_contactos) {
         console.log('🧠 Claude decidió: Notificar asesor hipotecario');
         
         // VERIFICAR si ya existe solicitud hipotecaria (evitar notificaciones duplicadas)
@@ -4601,6 +4639,9 @@ Tú dime, ¿por dónde empezamos?`;
             const primerNombre = nombreCliente ? nombreCliente.split(' ')[0] : '';
             const tieneNombre = primerNombre && primerNombre !== 'Sin';
 
+            // Collect actions for batch historial update (saves subrequests)
+            const accionesHistorial: Array<{accion: string, detalles?: string}> = [];
+
             // Enviar recursos de CADA desarrollo
             for (const dev of desarrollosLista) {
               const devNorm = dev.toLowerCase().trim();
@@ -4626,11 +4667,10 @@ Tú dime, ¿por dónde empezamos?`;
                     : `Aquí te comparto *${dev}*:`;
                   await this.meta.sendWhatsAppMessage(from, `${intro}\n\n${recursos.join('\n\n')}`);
                   console.log(`✅ Recursos enviados para: ${dev}`);
-                  // Guardar acción en historial para contexto
                   const recursosDesc = [];
                   if (propiedadMatch.youtube_link) recursosDesc.push('video');
                   if (propiedadMatch.matterport_link) recursosDesc.push('recorrido 3D');
-                  await this.guardarAccionEnHistorial(lead.id, `Envié ${recursosDesc.join(' y ')}`, dev);
+                  accionesHistorial.push({ accion: `Envié ${recursosDesc.join(' y ')}`, detalles: dev });
                 }
 
                 // GPS del desarrollo - ENVIAR SI EL LEAD LO PIDIÓ EXPLÍCITAMENTE
@@ -4638,8 +4678,7 @@ Tú dime, ¿por dónde empezamos?`;
                   await new Promise(r => setTimeout(r, 400));
                   await this.meta.sendWhatsAppMessage(from, `📍 *Ubicación de ${dev}:*\n${propiedadMatch.gps_link}\n\n_Ahí te lleva directo en Google Maps_`);
                   console.log(`✅ GPS enviado para: ${dev}`);
-                  // Guardar acción en historial
-                  await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', dev);
+                  accionesHistorial.push({ accion: 'Envié ubicación GPS', detalles: dev });
                 } else if (!analysis.send_gps) {
                   console.log(`ℹ️ GPS de ${dev} disponible pero no solicitado`);
                 } else {
@@ -4649,9 +4688,9 @@ Tú dime, ¿por dónde empezamos?`;
                 console.error(`⚠️ No se encontró propiedad para: ${dev}`);
               }
             }
-            
+
             console.log('✅ Recursos enviados de', desarrollosLista.length, 'desarrollos');
-            
+
             // ═══ FIX: EMPUJAR A CITA DESPUÉS DE RECURSOS ═══
             // Verificar si NO tiene cita programada
             const { data: citaExiste } = await this.supabase.client
@@ -4660,7 +4699,7 @@ Tú dime, ¿por dónde empezamos?`;
               .eq('lead_id', lead.id)
               .in('status', ['scheduled', 'confirmed', 'pending'])
               .limit(1);
-            
+
             const tieneCita = citaExiste && citaExiste.length > 0;
 
             // ═══ BROCHURE SIEMPRE - independiente de si tiene cita ═══
@@ -4695,9 +4734,15 @@ Tú dime, ¿por dónde empezamos?`;
                     );
                   }
                 }
-                await this.guardarAccionEnHistorial(lead.id, 'Envié brochure', dev);
+                accionesHistorial.push({ accion: 'Envié brochure', detalles: dev });
               }
             }
+
+            // Batch save all resource actions (1 READ + 1 WRITE instead of 2 per action)
+            if (accionesHistorial.length > 0) {
+              await this.guardarAccionesEnHistorialBatch(lead.id, accionesHistorial);
+            }
+
             if (brochuresEnviados.length === 0) {
               console.error('⚠️ No se encontraron brochures en DB para los desarrollos');
             }
@@ -5265,11 +5310,16 @@ Tú dime, ¿por dónde empezamos?`;
     
     const respuestaNegativa = /^(no|nel|nop|nope|negativo|para nada)$/i.test(originalMessage.trim());
     
-    console.log('👍 DEBUG - preguntabaCredito:', preguntabaCredito);
-    console.log('👍 DEBUG - preguntabaBanco:', preguntabaBanco);
-    console.log('👍 DEBUG - preguntabaIngreso:', preguntabaIngreso);
-    console.log('👍 DEBUG - preguntabaEnganche:', preguntabaEnganche);
-    console.log('👍 DEBUG - preguntabaAsesorVIP:', preguntabaAsesorVIP);
+    // DESACTIVADO (Sesión 29): Forzar TODAS las variables de crédito a false
+    // Razón: Vendemos CASAS, no créditos. El crédito se tramita en la VISITA.
+    // Los bloques de post-procesamiento de crédito (pasos 1-6) quedan desactivados.
+    // preguntabaBanco = false; // Ya no interceptamos respuestas de banco
+    // preguntabaIngreso = false; // Ya no interceptamos respuestas de ingreso
+    // preguntabaEnganche = false; // Ya no interceptamos respuestas de enganche
+    // preguntabaModalidad ya desactivada con `if (false && ...)` arriba
+
+    console.log('👍 DEBUG - preguntabaCredito:', preguntabaCredito, '(redirige a visita)');
+    console.log('👍 DEBUG - preguntabaAsesorVIP:', preguntabaAsesorVIP, '(redirige a visita)');
     console.log('👍 DEBUG - preguntabaVisita:', preguntabaVisita);
     console.log('👍 DEBUG - preguntabaModalidad:', preguntabaModalidad);
     // ━━━━━━━━━━━
@@ -5368,31 +5418,23 @@ Tú dime, ¿por dónde empezamos?`;
     // PRIORIDAD: Si SARA preguntó sobre crédito y cliente dice SÍ ➜ Preguntar BANCO
     // ⚠️ NO interceptar si es pregunta general - dejar que Claude responda
     // ━━━━━━━━━━━
+    // DESACTIVADO (Sesión 29): Ya no ofrecemos asesor de crédito directo.
+    // Si el lead dice SÍ a crédito → redirigimos a VISITA
     if ((preguntabaCredito || preguntabaAsesorVIP) && respuestaAfirmativa && !esPreguntaGeneral) {
-      console.log('🏦 FLUJO CRÉDITO: Cliente dice SÍ ➜ Preguntar MODALIDAD y HORA');
+      console.log('🏠 CRÉDITO → VISITA: Cliente interesado en crédito, redirigiendo a visita');
+      await this.supabase.client.from('leads').update({ needs_mortgage: true }).eq('id', lead.id);
+      const desarrollo = lead.property_interest || '';
+      analysis.intent = 'solicitar_cita';
+      analysis.response = `¡Perfecto ${nombreCliente}! Con gusto te ayudamos con el crédito.${desarrollo ? `\n\n${desarrollo} tiene excelentes opciones para ti.` : ''}
 
-      // Marcar que necesita crédito
-      await this.supabase.client
-        .from('leads')
-        .update({ needs_mortgage: true })
-        .eq('id', lead.id);
+Lo mejor es que vengas a conocer las casas y en la visita te ayudamos con todo el proceso de crédito.
 
-      // Preguntar cómo quiere que lo contacte el asesor
-      analysis.intent = 'info_credito';
-      analysis.response = `¡Perfecto ${nombreCliente}! Te conecto con nuestro asesor de crédito.
-
-¿Cómo prefieres que te contacte?
-1️⃣ Llamada telefónica
-2️⃣ Videollamada (Zoom)
-3️⃣ Presencial en oficina
-
-¿Y a qué hora te queda bien?`;
+¿Te funciona este sábado o domingo? 🏠`;
     }
 
-    // ━━━━━━━━━━━
-    // FLUJO CRÉDITO: Cliente responde MODALIDAD ➜ Conectar con asesor
-    // ━━━━━━━━━━━
-    if (preguntabaModalidad && !esPreguntaGeneral) {
+    // DESACTIVADO (Sesión 29): El flujo de modalidad→asesor ya no existe
+    // Las preguntas de crédito ahora redirigen a VISITA
+    if (false && preguntabaModalidad && !esPreguntaGeneral) {
       console.log('🏦 FLUJO CRÉDITO: Cliente responde modalidad ➜ Conectar con asesor');
 
       // Detectar modalidad elegida
@@ -5517,10 +5559,8 @@ Tú dime, ¿por dónde empezamos?`;
     }
     
     let forzandoCita = false;
-    // ═══ FIX: Si YA manejamos flujo de crédito (preguntabaCredito/AsesorVIP + sí), NO sobrescribir ═══
-    const yaManejamosCredito = (preguntabaCredito || preguntabaAsesorVIP) && respuestaAfirmativa;
 
-    if (preguntabaVisita && respuestaAfirmativa && !yaManejamosCredito) {
+    if (preguntabaVisita && respuestaAfirmativa) {
       console.log('🏠 FORZANDO CITA - Cliente dijo SÍ a visita');
       analysis.intent = 'solicitar_cita';
       forzandoCita = true;
@@ -5549,8 +5589,6 @@ Tú dime, ¿por dónde empezamos?`;
         console.log('📅 Tiene nombre y desarrollo, pidiendo FECHA');
         analysis.response = `¡Perfecto ${nombreCliente}! 😊 ¿Qué día y hora te gustaría visitarnos en ${tieneDesarrollo}?`;
       }
-    } else if (yaManejamosCredito && preguntabaVisita) {
-      console.log('ℹ️ Flujo de crédito tiene prioridad sobre visita (ya tiene cita probablemente)');
     }
     
     // ━━━━━━━━━━━
@@ -5588,7 +5626,8 @@ Tú dime, ¿por dónde empezamos?`;
     const puedeIniciarFlujoCredito = pidioCredito && !bancoDetectado && 
                                       (!preguntabaVisita || yaTieneCitaConfirmada);
     
-    if (puedeIniciarFlujoCredito) {
+    // DESACTIVADO (Sesión 29): Ya no iniciamos flujo de crédito autónomo
+    if (false && puedeIniciarFlujoCredito) {
       console.log('🏦 FLUJO CRÉDITO: Pidió crédito ➜ Preguntar MODALIDAD y HORA');
 
       // Marcar que necesita crédito
@@ -5613,7 +5652,8 @@ Tú dime, ¿por dónde empezamos?`;
     // ━━━━━━━━━━━
     // FLUJO CRÉDITO: Si menciona banco → Guardar y preguntar modalidad
     // ━━━━━━━━━━━
-    else if (bancoDetectado && !esPreguntaGeneral && !lead.asesor_notificado) {
+    // DESACTIVADO (Sesión 29)
+    else if (false && bancoDetectado && !esPreguntaGeneral && !lead.asesor_notificado) {
       console.log('🏦 Mencionó banco ➜ Guardar y preguntar modalidad');
 
       // Guardar banco preferido
@@ -5641,7 +5681,8 @@ Tú dime, ¿por dónde empezamos?`;
                                             ultimoMsgSara?.content?.includes('enganche');
 
     // ⚠️ NO interceptar si es pregunta general - dejar que Claude responda
-    if (preguntabaConfirmacionEnganche && respuestaAfirmativa && !esPreguntaGeneral) {
+    // DESACTIVADO (Sesión 29)
+    if (false && preguntabaConfirmacionEnganche && respuestaAfirmativa && !esPreguntaGeneral) {
       console.log('🏦 FLUJO CRÉDITO PASO 4.6: Cliente confirmó enganche ➜ Ejecutando PASO 4');
       
       // Extraer enganche del mensaje anterior de SARA: "¿Quisiste decir $234,000 de enganche?"
@@ -5722,7 +5763,8 @@ Tú dime, ¿por dónde empezamos?`;
                           originalMessage === '2' ||
                           originalMessage.toLowerCase().includes('📌');
     
-    if (preguntabaDocumentosOAsesor && eligioDocumentos) {
+    // DESACTIVADO (Sesión 29)
+    if (false && preguntabaDocumentosOAsesor && eligioDocumentos) {
       console.log('📌 FLUJO CRÉDITO PASO 5: Cliente eligió DOCUMENTOS');
       
       const bancoCliente = lead.banco_preferido?.toUpperCase() || 'BANCO';
@@ -5974,7 +6016,7 @@ ${checklistFinal}
                            originalMessage.toLowerCase().includes('si tengo') ||
                            originalMessage.toLowerCase().includes('listos');
     
-    if (preguntabaDocumentos && diceFaltanDocs) {
+    if (false && preguntabaDocumentos && diceFaltanDocs) { // DESACTIVADO Sesión 29
       console.log('📌 FLUJO CRÉDITO PASO 5.1: Le faltan documentos');
       
       analysis.response = `No te preocupes ${nombreCliente} 📌
@@ -5991,7 +6033,7 @@ Dime cuáles te faltan y te digo cómo conseguirlos rápido 📌`;
       analysis.intent = 'info_credito';
     }
     
-    else if (preguntabaDocumentos && diceTieneTodos) {
+    else if (false && preguntabaDocumentos && diceTieneTodos) { // DESACTIVADO Sesión 29
       console.log('📌 FLUJO CRÉDITO PASO 5.1: Tiene todos los documentos');
       
       const bancoCliente = lead.banco_preferido || 'crédito';
@@ -6030,7 +6072,7 @@ Dime cuáles te faltan y te digo cómo conseguirlos rápido 📌`;
     const preguntabaCualesFaltan = ultimoMsgSara?.content?.includes('Cuáles te faltan') ||
                                     ultimoMsgSara?.content?.includes('cuáles te faltan');
     
-    if (preguntabaCualesFaltan) {
+    if (false && preguntabaCualesFaltan) { // DESACTIVADO Sesión 29
       console.log('📌 FLUJO CRÉDITO PASO 5.2: Identificando documento faltante');
       
       const msg = originalMessage.toLowerCase();
@@ -6121,7 +6163,7 @@ Avísame cuando lo tengas y seguimos 📌`;
       analysis.intent = 'info_credito';
     }
     
-    else if (preguntabaDocumentosOAsesor && eligioAsesor) {
+    else if (false && preguntabaDocumentosOAsesor && eligioAsesor) { // DESACTIVADO Sesión 29
       console.log('📌 FLUJO CRÉDITO PASO 5: Cliente eligió ASESOR');
       
       const bancoCliente = lead.banco_preferido || 'crédito';
@@ -6179,7 +6221,7 @@ Te voy a conectar con nuestro asesor especialista en ${bancoCliente}.
                              originalMessage.toLowerCase().includes('persona') ||
                              originalMessage === '3';
     
-    if (preguntabaModalidadContacto && (eligioLlamada || eligioWhatsApp || eligioPresencial)) {
+    if (false && preguntabaModalidadContacto && (eligioLlamada || eligioWhatsApp || eligioPresencial)) { // DESACTIVADO Sesión 29
       console.log('📌 FLUJO CRÉDITO PASO 6: Cliente eligió modalidad de contacto');
       
       let modalidad = '';
@@ -6368,7 +6410,7 @@ Mientras tanto, si tienes dudas estoy aquí para ayudarte 📌`;
     // FLUJO CRÉDITO PASO 1.5: Cliente dijo SÍ a asesor ➜ Verificar si ya tiene banco
     // ⚠️ NO interceptar si es pregunta general - dejar que Claude responda
     // ━━━━━━━━━━━
-    else if (preguntabaAsesorVIP && respuestaAfirmativa && !preguntabaVisita && !esPreguntaGeneral) {
+    else if (false && preguntabaAsesorVIP && respuestaAfirmativa && !preguntabaVisita && !esPreguntaGeneral) { // DESACTIVADO Sesión 29
       console.log('🏦 FLUJO CRÉDITO PASO 1.5: Quiere asesor');
 
       const nombreCompletoTemp2 = lead.name || '';
@@ -6443,7 +6485,7 @@ Mientras tanto, si tienes dudas estoy aquí para ayudarte 📌`;
     const textoSinNumeros = originalMessage.replace(/[\d\-\+\(\)]/g, '').trim();
     const pareceNombre = textoSinNumeros.length > 3;
     
-    if (preguntabaNombreCelular && (telefonoEnMensaje || pareceNombre) && analysis.intent !== 'solicitar_cita' && !preguntabaVisita) {
+    if (false && preguntabaNombreCelular && (telefonoEnMensaje || pareceNombre) && analysis.intent !== 'solicitar_cita' && !preguntabaVisita) { // DESACTIVADO Sesión 29
       console.log('🏦 FLUJO CRÉDITO PASO 5.5: Nombre/Celular recibido ➜ Preguntar MODALIDAD');
       
       // Extraer y guardar nombre (preferir el extraído por OpenAI, ya limpio)
@@ -6491,7 +6533,7 @@ Mientras tanto, si tienes dudas estoy aquí para ayudarte 📌`;
     // FLUJO CRÉDITO PASO 6: Cliente eligió MODALIDAD ➜ CONECTAR CON ASESOR
     // ⚠️ NO interceptar si es pregunta general - dejar que Claude responda
     // ━━━━━━━━━━━
-    else if (preguntabaModalidad && modalidadDetectada && !esPreguntaGeneral) {
+    else if (false && preguntabaModalidad && modalidadDetectada && !esPreguntaGeneral) { // DESACTIVADO Sesión 29
       console.log('🏦 FLUJO CRÉDITO PASO 6: Modalidad elegida:', modalidadDetectada.nombre, '➜ CONECTANDO');
       
       // Guardar modalidad
