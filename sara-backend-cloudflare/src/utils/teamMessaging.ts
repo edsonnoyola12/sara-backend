@@ -135,8 +135,9 @@ export async function enviarMensajeTeamMember(
     // 3. SI VENTANA ABIERTA → Intentar envío directo
     if (ventanaAbierta) {
       try {
-        await meta.sendWhatsAppMessage(teamMember.phone, mensaje);
-        console.log(`   ✅ Enviado DIRECTO a ${teamMember.name}`);
+        const sendResult = await meta.sendWhatsAppMessage(teamMember.phone, mensaje);
+        const wamid = sendResult?.messages?.[0]?.id;
+        console.log(`   ✅ Enviado DIRECTO a ${teamMember.name} (wamid: ${wamid?.substring(0, 20)}...)`);
 
         // TTS: Si está habilitado, también enviar como nota de voz
         if (opciones?.ttsConfig?.enabled && opciones.ttsConfig.openaiApiKey) {
@@ -157,7 +158,18 @@ export async function enviarMensajeTeamMember(
           }
         }
 
-        return { success: true, method: 'direct', ventanaAbierta: true };
+        // Guardar wamid en notes para tracking de delivery
+        if (wamid) {
+          notasActuales.last_team_message_wamids = [
+            ...(notasActuales.last_team_message_wamids || []).slice(-4),
+            { wamid, sent_at: new Date().toISOString(), tipo: tipoMensaje }
+          ];
+          await supabase.client.from('team_members').update({
+            notes: notasActuales
+          }).eq('id', teamMember.id);
+        }
+
+        return { success: true, method: 'direct', ventanaAbierta: true, messageId: wamid };
       } catch (directError: any) {
         console.log(`   ⚠️ Directo falló (${directError?.message}), usando fallback...`);
         // Continuar con template como fallback
@@ -190,9 +202,11 @@ export async function enviarMensajeTeamMember(
 
     console.log(`   📨 Enviando template ${templateName}...`);
 
+    let templateWamid: string | undefined;
     try {
-      await meta.sendTemplate(teamMember.phone, templateName, 'es_MX', templateComponents);
-      console.log(`   ✅ Template ${templateName} enviado a ${teamMember.name}`);
+      const templateResult = await meta.sendTemplate(teamMember.phone, templateName, 'es_MX', templateComponents);
+      templateWamid = templateResult?.messages?.[0]?.id;
+      console.log(`   ✅ Template ${templateName} enviado a ${teamMember.name} (wamid: ${templateWamid?.substring(0, 20)}...)`);
     } catch (templateError: any) {
       console.error(`   ❌ Template falló: ${templateError?.message}`);
 
@@ -208,10 +222,10 @@ export async function enviarMensajeTeamMember(
 
     // 5. Template enviado exitosamente → Guardar mensaje como pending
     if (guardarPending) {
-      await guardarMensajePending(supabase, teamMember.id, notasActuales, pendingKey, mensaje, expirationHours);
+      await guardarMensajePending(supabase, teamMember.id, notasActuales, pendingKey, mensaje, expirationHours, templateWamid, tipoMensaje);
     }
 
-    return { success: true, method: 'template', ventanaAbierta: false };
+    return { success: true, method: 'template', ventanaAbierta: false, messageId: templateWamid };
 
   } catch (error) {
     console.error(`❌ Error en enviarMensajeTeamMember para ${teamMember.name}:`, error);
@@ -228,7 +242,9 @@ async function guardarMensajePending(
   notasActuales: any,
   pendingKey: string,
   mensaje: string,
-  expirationHours: number
+  expirationHours: number,
+  wamid?: string | null,
+  tipoMensaje?: string
 ): Promise<void> {
   const ahora = new Date();
   const expiresAt = new Date(ahora.getTime() + expirationHours * 60 * 60 * 1000);
@@ -238,9 +254,18 @@ async function guardarMensajePending(
     [pendingKey]: {
       sent_at: ahora.toISOString(),
       mensaje_completo: mensaje,
-      expires_at: expiresAt.toISOString() // Nuevo: expiración explícita
+      expires_at: expiresAt.toISOString(),
+      wamid: wamid || null
     }
   };
+
+  // Guardar wamid en tracking array para verificación de delivery
+  if (wamid) {
+    nuevasNotas.last_team_message_wamids = [
+      ...(notasActuales.last_team_message_wamids || []).slice(-4),
+      { wamid, sent_at: ahora.toISOString(), tipo: tipoMensaje || 'notificacion' }
+    ];
+  }
 
   await supabase.client
     .from('team_members')
@@ -506,4 +531,174 @@ export function esHorarioParaLlamar(): boolean {
   const horaMexico = new Date().getUTCHours() - 6;
   const horaAjustada = horaMexico < 0 ? horaMexico + 24 : horaMexico;
   return horaAjustada >= CALL_CONFIG.horasPermitidas.inicio && horaAjustada < CALL_CONFIG.horasPermitidas.fin;
+}
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * VERIFICACIÓN DE DELIVERY DE MENSAJES AL EQUIPO
+ * Detecta mensajes aceptados por Meta pero nunca entregados (ej: número bloqueado)
+ * Ejecutar cada 10 minutos desde CRON
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+export async function verificarDeliveryTeamMessages(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  adminPhone: string
+): Promise<{ checked: number; delivered: number; undelivered: number; detalles: any[] }> {
+  console.log('📬 Verificando delivery de mensajes al equipo...');
+
+  let checked = 0;
+  let delivered = 0;
+  let undelivered = 0;
+  const detalles: any[] = [];
+
+  try {
+    // 1. Obtener todos los team members activos
+    const { data: teamMembers, error } = await supabase.client
+      .from('team_members')
+      .select('id, name, phone, notes')
+      .eq('active', true);
+
+    if (error || !teamMembers) {
+      console.error('❌ Error obteniendo team members para delivery check:', error);
+      return { checked: 0, delivered: 0, undelivered: 0, detalles: [] };
+    }
+
+    const ahora = Date.now();
+    const TREINTA_MIN = 30 * 60 * 1000;
+    const VEINTICUATRO_H = 24 * 60 * 60 * 1000;
+
+    for (const tm of teamMembers) {
+      const notas = typeof tm.notes === 'string' ? JSON.parse(tm.notes || '{}') : (tm.notes || {});
+
+      // 2. Recopilar wamids de: last_team_message_wamids + pending keys con wamid
+      const wamidsToCheck: Array<{ wamid: string; sent_at: string; tipo: string; source: string }> = [];
+
+      // De last_team_message_wamids
+      if (Array.isArray(notas.last_team_message_wamids)) {
+        for (const entry of notas.last_team_message_wamids) {
+          if (entry?.wamid) {
+            wamidsToCheck.push({ ...entry, source: 'direct' });
+          }
+        }
+      }
+
+      // De pending keys
+      for (const key of Object.keys(PENDING_KEY_CONFIG)) {
+        const pendingKey = PENDING_KEY_CONFIG[key];
+        const pending = notas[pendingKey];
+        if (pending?.wamid && pending?.sent_at) {
+          wamidsToCheck.push({
+            wamid: pending.wamid,
+            sent_at: pending.sent_at,
+            tipo: key,
+            source: 'pending'
+          });
+        }
+      }
+
+      if (wamidsToCheck.length === 0) continue;
+
+      // 3. Filtrar: solo wamids con >30 min y <24h de antigüedad
+      const wamidsFiltrados = wamidsToCheck.filter(w => {
+        const sentAt = new Date(w.sent_at).getTime();
+        const edad = ahora - sentAt;
+        return edad > TREINTA_MIN && edad < VEINTICUATRO_H;
+      });
+
+      if (wamidsFiltrados.length === 0) continue;
+
+      // 4. Consultar message_delivery_status por cada wamid
+      const wamidIds = wamidsFiltrados.map(w => w.wamid);
+      const { data: statusRows } = await supabase.client
+        .from('message_delivery_status')
+        .select('message_id, status')
+        .in('message_id', wamidIds);
+
+      const statusMap = new Map<string, string>();
+      if (statusRows) {
+        for (const row of statusRows) {
+          statusMap.set(row.message_id, row.status);
+        }
+      }
+
+      // 5. Clasificar cada wamid
+      let tmUndelivered = 0;
+      const cleanWamids: string[] = []; // wamids delivered/read para limpiar
+
+      for (const w of wamidsFiltrados) {
+        checked++;
+        const status = statusMap.get(w.wamid);
+
+        if (status === 'delivered' || status === 'read') {
+          delivered++;
+          cleanWamids.push(w.wamid);
+        } else {
+          // sent, failed, o no existe en la tabla → no entregado
+          undelivered++;
+          tmUndelivered++;
+          detalles.push({
+            nombre: tm.name,
+            telefono: tm.phone,
+            wamid: w.wamid,
+            tipo: w.tipo,
+            status: status || 'no_callback',
+            sent_at: w.sent_at,
+            edad_min: Math.round((ahora - new Date(w.sent_at).getTime()) / 60000)
+          });
+        }
+      }
+
+      // 6. Limpiar wamids entregados del tracking
+      if (cleanWamids.length > 0 && Array.isArray(notas.last_team_message_wamids)) {
+        notas.last_team_message_wamids = notas.last_team_message_wamids.filter(
+          (w: any) => !cleanWamids.includes(w?.wamid)
+        );
+      }
+
+      // 7. Guardar delivery_issues si hay problemas
+      if (tmUndelivered > 0) {
+        notas.delivery_issues = {
+          count: tmUndelivered,
+          last_checked: new Date().toISOString(),
+          detalles: detalles.filter(d => d.telefono === tm.phone).slice(-3)
+        };
+      } else {
+        // Limpiar issues previos si ya se resolvieron
+        delete notas.delivery_issues;
+      }
+
+      // Actualizar notes
+      await supabase.client.from('team_members').update({ notes: notas }).eq('id', tm.id);
+    }
+
+    // 8. Si hay undelivered → enviar alerta al admin (CEO)
+    if (undelivered > 0) {
+      const resumen = detalles.map(d =>
+        `- ${d.nombre}: ${d.tipo} (${d.status}, hace ${d.edad_min}min)`
+      ).join('\n');
+
+      const alerta = `⚠️ *ALERTA: ${undelivered} mensaje(s) sin entregar al equipo*\n\n` +
+        `Estos mensajes fueron aceptados por Meta pero NO llegaron al teléfono:\n\n` +
+        `${resumen}\n\n` +
+        `Posibles causas:\n` +
+        `- Número bloqueó a SARA\n` +
+        `- Teléfono apagado/sin internet\n` +
+        `- Error de Meta\n\n` +
+        `Verificados: ${checked} | Entregados: ${delivered} | Sin entregar: ${undelivered}`;
+
+      try {
+        await meta.sendWhatsAppMessage(adminPhone, alerta);
+        console.log(`📬 Alerta de delivery enviada al admin (${undelivered} sin entregar)`);
+      } catch (alertError) {
+        console.error('❌ Error enviando alerta de delivery al admin:', alertError);
+      }
+    }
+
+    console.log(`📬 Delivery check completado: ${checked} verificados, ${delivered} entregados, ${undelivered} sin entregar`);
+  } catch (err) {
+    console.error('❌ Error en verificarDeliveryTeamMessages:', err);
+  }
+
+  return { checked, delivered, undelivered, detalles };
 }

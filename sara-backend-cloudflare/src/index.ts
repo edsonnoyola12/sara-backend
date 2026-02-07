@@ -65,7 +65,7 @@ import {
 } from './crons/reports';
 
 // Utils
-import { enviarMensajeTeamMember, EnviarMensajeTeamResult, isPendingExpired, getPendingMessages, verificarPendingParaLlamar, CALL_CONFIG } from './utils/teamMessaging';
+import { enviarMensajeTeamMember, EnviarMensajeTeamResult, isPendingExpired, getPendingMessages, verificarPendingParaLlamar, verificarDeliveryTeamMessages, CALL_CONFIG } from './utils/teamMessaging';
 
 // Briefings y Recaps
 import {
@@ -5922,6 +5922,7 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
         return corsResponse(JSON.stringify({ error: error.message }), 500);
       }
     }
+
 
     // Endpoint genérico para enviar cualquier template
     if (url.pathname === '/api/send-template' && request.method === 'POST') {
@@ -17915,6 +17916,21 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
     // ═══════════════════════════════════════════════════════════
     console.log('📤 Procesando broadcasts encolados...');
     await procesarBroadcastQueue(supabase, meta);
+
+    // ═══════════════════════════════════════════════════════════
+    // DELIVERY CHECK - Verificar que mensajes al equipo llegaron (cada 10 min)
+    // Detecta mensajes aceptados por Meta pero nunca entregados
+    // ═══════════════════════════════════════════════════════════
+    if (mexicoMinute % 10 === 0) {
+      try {
+        const deliveryResult = await verificarDeliveryTeamMessages(supabase, meta, '5214922019052');
+        if (deliveryResult.undelivered > 0) {
+          console.log(`⚠️ ${deliveryResult.undelivered} mensajes sin entregar al equipo`);
+        }
+      } catch (deliveryError) {
+        console.error('⚠️ Error en verificarDeliveryTeamMessages:', deliveryError);
+      }
+    }
 
     // ═══════════════════════════════════════════════════════════
     // SISTEMA HÍBRIDO - Verificar pending para llamar (cada 30 min)
