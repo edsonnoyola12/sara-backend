@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-07 (Sesión 29)
+> Última actualización: 2026-02-07 (Sesión 30)
 
 ---
 
@@ -3999,4 +3999,72 @@ Elimina lead + TODOS los registros relacionados (surveys, appointments, mortgage
 **Tests:** 369/369 pasando
 **Commit:** `3682d8b0`
 **Deploy:** Version ID `677e395b`
+**Push:** origin/main
+
+---
+
+### 2026-02-07 (Sesión 30) - Fix "Too many subrequests" en Cloudflare Worker
+
+**Problema:** SARA lanzaba error `"Too many subrequests"` cuando un lead escribía y se activaba el envío de recursos (video, brochure, GPS) + creación de cita. El worst-case hacía ~45-55 subrequests.
+
+**Verificación:** El Worker ya tenía `usage_model: "standard"` (límite 1000) en Cloudflare Dashboard. El campo `usage_model` en `wrangler.toml` es ignorado en wrangler v4 — solo se configura desde el Dashboard.
+
+**5 optimizaciones aplicadas:**
+
+| Optimización | Archivo | Subrequests Ahorrados |
+|--------------|---------|----------------------|
+| Batch `guardarAccionEnHistorial` | `aiConversationService.ts` | 4-8 |
+| Merge `last_activity_at` + `last_message_at` en 1 query | `whatsapp.ts` | 1 |
+| Pasar `teamMembers` cacheados a `buscarYProcesarPostVisitaPorPhone` | `whatsapp.ts` | 1 |
+| Skip team_members check redundante en `getOrCreateLead` | `leadManagementService.ts` + `whatsapp.ts` | 1 |
+| Comentario en `wrangler.toml` sobre usage_model en Dashboard | `wrangler.toml` | (documentación) |
+| **Total** | | **7-11** |
+
+#### Cambio 1: `guardarAccionesEnHistorialBatch()` (aiConversationService.ts)
+
+Nuevo método que guarda N acciones con 1 READ + 1 WRITE (antes: 2 subrequests por acción).
+
+```typescript
+async guardarAccionesEnHistorialBatch(leadId: string, acciones: Array<{accion: string, detalles?: string}>): Promise<void>
+```
+
+El bloque de envío de recursos (video, GPS, brochure) ahora colecta acciones en `accionesHistorial[]` y llama batch al final.
+
+#### Cambio 2: Merge lead updates (whatsapp.ts)
+
+```typescript
+// ANTES: 2 queries separadas
+await update({ last_activity_at }); // línea 460
+await update({ last_message_at }); // línea 1062
+
+// DESPUÉS: 1 query combinada
+await update({ last_message_at: ahora, last_activity_at: ahora });
+```
+
+#### Cambio 3: teamMembers cacheados en postVisita (whatsapp.ts)
+
+`buscarYProcesarPostVisitaPorPhone()` ahora acepta `cachedTeamMembers?` opcional. El call site pasa los `teamMembers` ya cargados en Phase 2.
+
+#### Cambio 4: skipTeamCheck en getOrCreateLead (leadManagementService.ts)
+
+`getOrCreateLead(phone, skipTeamCheck=false)` — el caller pasa `true` porque ya verifica team members con el cache de `getAllTeamMembers()`.
+
+#### Nota sobre usage_model
+
+- `wrangler.toml` ya NO soporta `usage_model` en wrangler v4 (genera warning)
+- Se configura en **Cloudflare Dashboard > Workers > sara-backend > Settings**
+- Ya estaba en `"standard"` (límite 1000 subrequests) — verificado via API
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `wrangler.toml` | Comentario documentando que usage_model va en Dashboard |
+| `src/services/aiConversationService.ts` | Nuevo `guardarAccionesEnHistorialBatch()` + refactor resource block |
+| `src/handlers/whatsapp.ts` | Merge lead updates, pasar teamMembers a postVisita, skipTeamCheck |
+| `src/services/leadManagementService.ts` | Parámetro `skipTeamCheck` en `getOrCreateLead()` |
+
+**Tests:** 369/369 pasando
+**Commits:** `12ba4343`, `a8a9f6c0`
+**Deploy:** Version ID `a28425a4`
 **Push:** origin/main
