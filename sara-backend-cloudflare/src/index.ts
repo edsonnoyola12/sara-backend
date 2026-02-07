@@ -16654,21 +16654,29 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
     // TEST: Enviar briefing a número específico
     if (url.pathname.startsWith('/test-briefing/')) {
       const phone = url.pathname.split('/').pop();
-      console.log(`TEST: Enviando briefing a ${phone}...`);
+      const phoneFormatted = phone?.startsWith('52') ? phone : '52' + phone;
+      console.log(`TEST: Enviando briefing a ${phoneFormatted}...`);
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
 
-      // Crear vendedor virtual para el test
-      const vendedorTest = {
+      // Buscar team member real en DB
+      const { data: realMember } = await supabase.client
+        .from('team_members')
+        .select('*')
+        .or(`phone.eq.${phoneFormatted},phone.like.%${phoneFormatted?.slice(-10)}`)
+        .maybeSingle();
+
+      const vendedorTest = realMember || {
         id: 'test',
         name: 'Usuario',
-        phone: phone?.startsWith('52') ? phone : '52' + phone,
+        phone: phoneFormatted,
         role: 'vendedor',
         recibe_briefing: true,
         last_briefing_sent: null
       };
 
+      console.log(`TEST: Usando ${realMember ? 'team member REAL' : 'vendedor VIRTUAL'} (id: ${vendedorTest.id})`);
       await enviarBriefingMatutino(supabase, meta, vendedorTest, { openaiApiKey: env.OPENAI_API_KEY });
-      return corsResponse(JSON.stringify({ ok: true, message: `Briefing enviado a ${vendedorTest.phone}` }));
+      return corsResponse(JSON.stringify({ ok: true, message: `Briefing enviado a ${vendedorTest.phone}`, realMember: !!realMember, id: vendedorTest.id }));
     }
 
     // ═══════════════════════════════════════════════════════════════

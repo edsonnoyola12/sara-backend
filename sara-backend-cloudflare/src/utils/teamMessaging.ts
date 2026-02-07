@@ -164,9 +164,14 @@ export async function enviarMensajeTeamMember(
             ...(notasActuales.last_team_message_wamids || []).slice(-4),
             { wamid, sent_at: new Date().toISOString(), tipo: tipoMensaje }
           ];
-          await supabase.client.from('team_members').update({
-            notes: notasActuales
+          const { error: wamidError } = await supabase.client.from('team_members').update({
+            notes: JSON.stringify(notasActuales)
           }).eq('id', teamMember.id);
+          if (wamidError) {
+            console.error(`   ⚠️ Error guardando wamid en notes:`, wamidError);
+          } else {
+            console.log(`   📝 Wamid ${wamid.substring(0, 15)}... guardado en notes (${notasActuales.last_team_message_wamids.length} total)`);
+          }
         }
 
         return { success: true, method: 'direct', ventanaAbierta: true, messageId: wamid };
@@ -267,12 +272,16 @@ async function guardarMensajePending(
     ];
   }
 
-  await supabase.client
+  const { error: pendingError } = await supabase.client
     .from('team_members')
-    .update({ notes: nuevasNotas })
+    .update({ notes: JSON.stringify(nuevasNotas) })
     .eq('id', teamMemberId);
 
-  console.log(`   💾 Mensaje guardado como ${pendingKey} (expira en ${expirationHours}h)`);
+  if (pendingError) {
+    console.error(`   ⚠️ Error guardando pending:`, pendingError);
+  } else {
+    console.log(`   💾 Mensaje guardado como ${pendingKey} (expira en ${expirationHours}h)${wamid ? `, wamid: ${wamid.substring(0, 15)}...` : ''}`);
+  }
 }
 
 /**

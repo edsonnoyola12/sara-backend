@@ -330,20 +330,30 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
     });
 
     if (resultado.success) {
+      // Re-leer notes de BD para no sobreescribir wamid guardado por enviarMensajeTeamMember
+      const { data: freshMember } = await supabase.client
+        .from('team_members')
+        .select('notes')
+        .eq('id', vendedor.id)
+        .maybeSingle();
+      const freshNotas = typeof freshMember?.notes === 'string'
+        ? JSON.parse(freshMember.notes || '{}')
+        : (freshMember?.notes || notasActuales);
+
       // Actualizar notas con contexto del briefing
-      notasActuales.last_briefing_context = {
+      freshNotas.last_briefing_context = {
         sent_at: new Date().toISOString(),
         citas: citasHoy?.length || 0,
         delivered: resultado.method === 'direct',
         method: resultado.method
       };
       if (resultado.method === 'direct') {
-        delete notasActuales.pending_briefing; // Limpiar si se envió directo
+        delete freshNotas.pending_briefing; // Limpiar si se envió directo
       }
 
       await supabase.client.from('team_members').update({
         last_briefing_sent: hoyStr,
-        notes: JSON.stringify(notasActuales)
+        notes: JSON.stringify(freshNotas)
       }).eq('id', vendedor.id);
 
       console.log(`   ✅ Briefing ${resultado.method === 'direct' ? 'enviado DIRECTO' : 'template+pending'} a ${vendedor.name}`);
