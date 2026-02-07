@@ -165,6 +165,9 @@ export class TTSService {
       return this.numeroAPalabras(valor) + ' pesos';
     });
 
+    // Normalizar Unicode (NFC) para evitar que TTS tartamudee con acentos descompuestos
+    clean = clean.normalize('NFC');
+
     // Normalizar espacios
     clean = clean.replace(/\s+/g, ' ').trim();
 

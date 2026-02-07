@@ -4658,43 +4658,47 @@ Tú dime, ¿por dónde empezamos?`;
               .limit(1);
             
             const tieneCita = citaExiste && citaExiste.length > 0;
-            
-            if (!tieneCita) {
-              // ═══ FIX 07-ENE-2026: BROCHURE de TODOS los desarrollos (desde DB) ═══
-              const brochuresEnviados: string[] = [];
-              for (const dev of desarrollosLista) {
-                // Buscar brochure en propiedades
-                const propConBrochure = properties.find(p =>
-                  p.development?.toLowerCase().includes(dev.toLowerCase()) &&
-                  p.brochure_urls
-                );
-                // brochure_urls puede ser string o array
-                const brochureRaw = propConBrochure?.brochure_urls;
-                const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
 
-                if (brochureUrl && !brochuresEnviados.includes(brochureUrl)) {
-                  brochuresEnviados.push(brochureUrl);
-                  await new Promise(r => setTimeout(r, 400));
-                  // ⚠️ FIX 25-ENE-2026: Enviar como DOCUMENTO PDF, no solo texto con URL
+            // ═══ BROCHURE SIEMPRE - independiente de si tiene cita ═══
+            const brochuresEnviados: string[] = [];
+            for (const dev of desarrollosLista) {
+              const propConBrochure = properties.find(p =>
+                p.development?.toLowerCase().includes(dev.toLowerCase()) &&
+                p.brochure_urls
+              );
+              const brochureRaw = propConBrochure?.brochure_urls;
+              const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
+
+              if (brochureUrl && !brochuresEnviados.includes(brochureUrl)) {
+                brochuresEnviados.push(brochureUrl);
+                await new Promise(r => setTimeout(r, 400));
+                const esHTML = brochureUrl.includes('.html') || brochureUrl.includes('pages.dev');
+                if (esHTML) {
+                  const cleanUrl = brochureUrl.replace(/\.html$/, '');
+                  await this.meta.sendWhatsAppMessage(from,
+                    `📋 *Brochure ${dev}:*\n${cleanUrl}\n\n_Fotos, planos, precios y características_`
+                  );
+                  console.log(`✅ Brochure HTML enviado para ${dev}:`, cleanUrl);
+                } else {
                   try {
                     const filename = `Brochure_${dev.replace(/\s+/g, '_')}.pdf`;
                     await this.meta.sendWhatsAppDocument(from, brochureUrl, filename, `📋 Brochure ${dev} - Modelos, precios y características`);
                     console.log(`✅ Brochure PDF enviado para ${dev}:`, brochureUrl);
                   } catch (docError) {
-                    // Fallback: si falla envío de documento, enviar como link
                     console.error(`⚠️ Error enviando brochure como documento, enviando como link:`, docError);
                     await this.meta.sendWhatsAppMessage(from,
                       `📋 *Brochure ${dev}:*\n${brochureUrl}\n\n_Modelos, precios y características_`
                     );
                   }
-                  // Guardar acción en historial
-                  await this.guardarAccionEnHistorial(lead.id, 'Envié brochure PDF', dev);
                 }
+                await this.guardarAccionEnHistorial(lead.id, 'Envié brochure', dev);
               }
-              if (brochuresEnviados.length === 0) {
-                console.error('⚠️ No se encontraron brochures en DB para los desarrollos');
-              }
+            }
+            if (brochuresEnviados.length === 0) {
+              console.error('⚠️ No se encontraron brochures en DB para los desarrollos');
+            }
 
+            if (!tieneCita) {
               // ═══ PUSH A CITA - PHASE-AWARE ═══
               const yaQuiereCita = analysis.intent === 'confirmar_cita';
               const phaseInfoPush = this.detectConversationPhase(lead, ''); // No cita in this block
@@ -4816,15 +4820,24 @@ Tú dime, ¿por dónde empezamos?`;
 
                 if (brochureUrl) {
                   await new Promise(r => setTimeout(r, 400));
-                  try {
-                    const filename = `Brochure_${devParaBrochure.replace(/\s+/g, '_')}.pdf`;
-                    await this.meta.sendWhatsAppDocument(from, brochureUrl, filename, `📋 Brochure ${devParaBrochure} - Modelos, precios y características`);
-                    console.log(`✅ Brochure PDF enviado (solicitado): ${devParaBrochure} - ${brochureUrl}`);
-                  } catch (docError) {
-                    console.error(`⚠️ Error enviando brochure como documento:`, docError);
-                    await this.meta.sendWhatsAppMessage(from, `📋 *Brochure ${devParaBrochure}:*\n${brochureUrl}\n\n_Modelos, precios y características_`);
+                  const esHTMLBrochure = brochureUrl.includes('.html') || brochureUrl.includes('pages.dev');
+                  if (esHTMLBrochure) {
+                    const cleanUrl = brochureUrl.replace(/\.html$/, '');
+                    await this.meta.sendWhatsAppMessage(from,
+                      `📋 *Brochure ${devParaBrochure}:*\n${cleanUrl}\n\n_Fotos, planos, precios y características_`
+                    );
+                    console.log(`✅ Brochure HTML enviado (solicitado): ${devParaBrochure} - ${cleanUrl}`);
+                  } else {
+                    try {
+                      const filename = `Brochure_${devParaBrochure.replace(/\s+/g, '_')}.pdf`;
+                      await this.meta.sendWhatsAppDocument(from, brochureUrl, filename, `📋 Brochure ${devParaBrochure} - Modelos, precios y características`);
+                      console.log(`✅ Brochure PDF enviado (solicitado): ${devParaBrochure} - ${brochureUrl}`);
+                    } catch (docError) {
+                      console.error(`⚠️ Error enviando brochure como documento:`, docError);
+                      await this.meta.sendWhatsAppMessage(from, `📋 *Brochure ${devParaBrochure}:*\n${brochureUrl}\n\n_Modelos, precios y características_`);
+                    }
                   }
-                  await this.guardarAccionEnHistorial(lead.id, 'Envié brochure PDF solicitado', devParaBrochure);
+                  await this.guardarAccionEnHistorial(lead.id, 'Envié brochure solicitado', devParaBrochure);
                 } else {
                   console.error(`⚠️ ${devParaBrochure} no tiene brochure_urls en DB`);
                 }
@@ -7386,19 +7399,25 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
           const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
 
           if (brochureUrl) {
-            // ⚠️ FIX 25-ENE-2026: Enviar como DOCUMENTO PDF, no solo texto con URL
-            try {
-              const filename = `Brochure_${desarrolloParaBrochure.replace(/\s+/g, '_')}.pdf`;
-              await this.meta.sendWhatsAppDocument(from, brochureUrl, filename, `📄 Brochure ${desarrolloParaBrochure} - Fotos, videos, tour 3D, ubicación y precios`);
-              console.log(`✅ Brochure PDF enviado: ${desarrolloParaBrochure} - ${brochureUrl}`);
-            } catch (docError) {
-              // Fallback: si falla envío de documento, enviar como link
-              console.error(`⚠️ Error enviando brochure como documento, enviando como link:`, docError);
-              const msgBrochure = `📄 *Brochure completo de ${desarrolloParaBrochure}:*\n${brochureUrl}\n\nAhí encuentras fotos, videos, tour 3D, ubicación y precios.`;
-              await this.meta.sendWhatsAppMessage(from, msgBrochure);
+            const esHTMLBrochure3 = brochureUrl.includes('.html') || brochureUrl.includes('pages.dev');
+            if (esHTMLBrochure3) {
+              const cleanUrl = brochureUrl.replace(/\.html$/, '');
+              await this.meta.sendWhatsAppMessage(from,
+                `📄 *Brochure completo de ${desarrolloParaBrochure}:*\n${cleanUrl}\n\n_Fotos, planos, precios y características_`
+              );
+              console.log(`✅ Brochure HTML enviado: ${desarrolloParaBrochure} - ${cleanUrl}`);
+            } else {
+              try {
+                const filename = `Brochure_${desarrolloParaBrochure.replace(/\s+/g, '_')}.pdf`;
+                await this.meta.sendWhatsAppDocument(from, brochureUrl, filename, `📄 Brochure ${desarrolloParaBrochure} - Fotos, videos, tour 3D, ubicación y precios`);
+                console.log(`✅ Brochure PDF enviado: ${desarrolloParaBrochure} - ${brochureUrl}`);
+              } catch (docError) {
+                console.error(`⚠️ Error enviando brochure como documento, enviando como link:`, docError);
+                await this.meta.sendWhatsAppMessage(from, `📄 *Brochure completo de ${desarrolloParaBrochure}:*\n${brochureUrl}\n\nAhí encuentras fotos, planos, precios y características.`);
+              }
             }
             // Guardar acción en historial
-            await this.guardarAccionEnHistorial(lead.id, 'Envié brochure PDF completo', desarrolloParaBrochure);
+            await this.guardarAccionEnHistorial(lead.id, 'Envié brochure completo', desarrolloParaBrochure);
           } else {
             console.error(`⚠️ ${desarrolloParaBrochure} NO tiene brochure_urls en DB`);
           }
