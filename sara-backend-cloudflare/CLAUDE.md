@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-06 (Sesión 26)
+> Última actualización: 2026-02-07 (Sesión 27)
 
 ---
 
@@ -3801,3 +3801,66 @@ Creado **`docs/FLUJOS_CRITICOS.md`** (917 líneas) - Documento de referencia per
 **Push:** 2 commits a origin/main
 
 **Tests:** 351/351 pasando
+
+---
+
+### 2026-02-07 (Sesión 27) - Detección de Mensajes No Entregados al Equipo
+
+**Problema descubierto:**
+Meta API devuelve HTTP 200 `accepted` cuando envías un template o mensaje, pero eso NO garantiza que llegó al teléfono. Si el destinatario bloqueó el número Business, Meta acepta pero nunca entrega. El usuario descubrió esto cuando el Vendedor Test tenía bloqueado a SARA — todos los mensajes se "enviaron" pero ninguno llegó. 17/18 miembros del equipo tienen ventana cerrada → se les manda template → si el template no llega, nadie se entera.
+
+**Solución implementada (3 cambios, 2 archivos):**
+
+#### Cambio 1: Captura de wamid en `enviarMensajeTeamMember()` (teamMessaging.ts)
+
+| Punto | Cambio |
+|-------|--------|
+| Envío directo (línea ~138) | `sendWhatsAppMessage` ahora captura resultado y extrae `wamid` |
+| Envío template (línea ~207) | `sendTemplate` ahora captura resultado y extrae `templateWamid` |
+| Notes tracking | Guarda wamid en `notes.last_team_message_wamids` (array rolling de últimos 5) |
+| Pending object | `guardarMensajePending()` ahora almacena `wamid` en el objeto pending |
+| Return values | Ambos paths retornan `messageId: wamid` en el resultado |
+
+#### Cambio 2: Nueva función `verificarDeliveryTeamMessages()` (teamMessaging.ts, ~80 líneas)
+
+**Lógica:**
+1. Obtiene todos los team_members activos
+2. Recopila wamids de: `last_team_message_wamids` + pending keys con wamid
+3. Filtra solo wamids con >30 min y <24h de antigüedad
+4. Consulta `message_delivery_status` por batch (tabla ya poblada por webhook handler existente)
+5. `delivered`/`read` → limpiar del tracking
+6. `sent`/`failed`/no existe → marcar como undelivered
+7. Guarda `delivery_issues` en notes del team member
+8. Envía alerta WhatsApp al CEO (Oscar: 5214922019052) si hay undelivered
+
+#### Cambio 3: CRON cada 10 min + limpieza (index.ts)
+
+```typescript
+// En CRON */2 * * * *, cada 10 minutos:
+if (mexicoMinute % 10 === 0) {
+  const deliveryResult = await verificarDeliveryTeamMessages(supabase, meta, '5214922019052');
+}
+```
+
+- Import actualizado con `verificarDeliveryTeamMessages`
+- Endpoint temporal `/api/send-raw` eliminado (era debug del bug de número bloqueado)
+
+#### Verificación en producción
+
+```
+📬 Verificando delivery de mensajes al equipo...
+📬 Delivery check completado: 0 verificados, 0 entregados, 0 sin entregar
+```
+Reporta 0 porque es sábado y no hubo briefings hoy. El lunes 8 AM los wamids se capturarán y el check empezará a verificar delivery.
+
+**Archivos modificados:**
+
+| Archivo | Líneas | Cambio |
+|---------|--------|--------|
+| `src/utils/teamMessaging.ts` | +170 | Captura wamid + `verificarDeliveryTeamMessages()` |
+| `src/index.ts` | +15/-29 | Import + CRON cada 10 min + eliminar `/api/send-raw` |
+
+**Tests:** 351/351 pasando
+**Commit:** `90dd4d36`
+**Deploy:** Version ID `7187a2b7`
+**Push:** origin/main
