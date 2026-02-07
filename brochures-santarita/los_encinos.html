@@ -7,27 +7,31 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f5f5f5; }
-        .hero { background: linear-gradient(135deg, #5d4037 0%, #8d6e63 100%); color: white; text-align: center; padding: 60px 20px; }
+        .hero { background: linear-gradient(135deg, #2d5a27 0%, #4a7c43 100%); color: white; text-align: center; padding: 60px 20px; }
         .hero-brand { font-size: 0.9em; letter-spacing: 3px; margin-bottom: 20px; opacity: 0.9; }
         .hero h1 { font-size: 3.5em; font-family: Georgia, serif; margin-bottom: 15px; }
         .hero-tagline { font-size: 1.1em; opacity: 0.9; margin-bottom: 30px; }
         .hero-price { background: rgba(255,255,255,0.15); display: inline-block; padding: 15px 50px; border-radius: 50px; font-size: 1.4em; font-weight: bold; }
         .hero-location { margin-top: 25px; font-size: 1em; }
         .section-title { text-align: center; padding: 50px 20px 30px; }
-        .section-title h2 { font-family: Georgia, serif; font-size: 2em; color: #333; border-bottom: 3px solid #5d4037; display: inline-block; padding-bottom: 10px; }
+        .section-title h2 { font-family: Georgia, serif; font-size: 2em; color: #333; border-bottom: 3px solid #2d5a27; display: inline-block; padding-bottom: 10px; }
         .models { max-width: 1100px; margin: 0 auto; padding: 0 20px 50px; }
         .model-card { background: white; border-radius: 15px; overflow: hidden; margin-bottom: 40px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); }
         .model-image { width: 100%; height: 350px; object-fit: cover; }
         .model-content { padding: 30px; }
-        .model-name { font-family: Georgia, serif; font-size: 2em; color: #5d4037; margin-bottom: 5px; }
+        .model-name { font-family: Georgia, serif; font-size: 2em; color: #2d5a27; margin-bottom: 5px; }
         .model-desc { color: #666; font-style: italic; margin-bottom: 15px; font-size: 1.05em; }
-        .model-phrase { background: #f8f9fa; padding: 15px 20px; border-radius: 10px; margin-bottom: 20px; color: #555; border-left: 4px solid #5d4037; }
+        .model-phrase { background: #f8f9fa; padding: 15px 20px; border-radius: 10px; margin-bottom: 20px; color: #555; border-left: 4px solid #2d5a27; }
+        .model-extras { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        .model-extra-badge { background: #2d5a27; color: white; padding: 5px 15px; border-radius: 20px; font-size: 0.85em; font-weight: 600; }
         .specs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px; }
-        .spec { background: #efebe9; padding: 20px 15px; border-radius: 12px; text-align: center; }
+        .spec { background: #e8f5e9; padding: 20px 15px; border-radius: 12px; text-align: center; }
         .spec-icon { font-size: 1.8em; margin-bottom: 8px; }
-        .spec-value { font-size: 1.5em; font-weight: bold; color: #5d4037; }
+        .spec-value { font-size: 1.5em; font-weight: bold; color: #2d5a27; }
         .spec-label { font-size: 0.85em; color: #666; margin-top: 5px; }
-        .model-price { font-size: 2.2em; font-weight: bold; color: #333; margin-bottom: 25px; }
+        .model-price { font-size: 2.2em; font-weight: bold; color: #333; margin-bottom: 5px; }
+        .model-price-alt { font-size: 1.1em; color: #888; margin-bottom: 25px; }
+        .model-includes { font-size: 0.95em; color: #666; margin-bottom: 15px; padding: 10px 15px; background: #f0f7f0; border-radius: 8px; }
         .buttons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
         .btn { padding: 16px 20px; border-radius: 12px; text-decoration: none; color: white; font-weight: 600; text-align: center; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 1em; transition: transform 0.2s, opacity 0.2s; }
         .btn:hover { transform: translateY(-2px); opacity: 0.9; }
@@ -39,13 +43,16 @@
         .poi-section { max-width: 1100px; margin: 0 auto 50px; padding: 0 20px; }
         .poi-card { background: white; border-radius: 15px; padding: 30px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); }
         .poi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 25px; }
-        .poi-grid h4 { color: #5d4037; margin-bottom: 15px; }
+        .poi-grid h4 { color: #2d5a27; margin-bottom: 15px; }
         .poi-grid ul { list-style: none; color: #555; line-height: 2; }
-        .footer { background: #5d4037; color: white; text-align: center; padding: 40px 20px; }
+        .footer { background: #2d5a27; color: white; text-align: center; padding: 40px 20px; }
         .footer-brand { font-size: 1.3em; font-weight: bold; margin-bottom: 10px; }
         .footer-note { opacity: 0.8; font-size: 0.9em; }
-        .loading { text-align: center; padding: 50px; font-size: 1.2em; color: #666; }
-        @media (max-width: 768px) { .specs { grid-template-columns: repeat(2, 1fr); } .buttons { grid-template-columns: 1fr; } .hero h1 { font-size: 2.5em; } }
+        @media (max-width: 768px) {
+            .specs { grid-template-columns: repeat(2, 1fr); }
+            .buttons { grid-template-columns: 1fr; }
+            .hero h1 { font-size: 2.5em; }
+        }
     </style>
 </head>
 <body>
@@ -53,103 +60,162 @@
         <div class="hero-brand">G R U P O &nbsp; S A N T A &nbsp; R I T A</div>
         <h1>Los Encinos</h1>
         <p class="hero-tagline">RESIDENCIAL PREMIUM EN COLINAS DEL PADRE</p>
-        <div class="hero-price" id="hero-price">Cargando precios...</div>
+        <div class="hero-price">Desde $2,997,760 (equipada)</div>
         <p class="hero-location"><span style="color:#ff6b6b">📍</span> Colinas del Padre, Zacatecas, Zac.</p>
     </div>
     <div class="section-title"><h2>Nuestros Modelos</h2></div>
-    <div class="models" id="models-container"><div class="loading">⏳ Cargando modelos...</div></div>
+    <div class="models" id="models-container"></div>
     <div class="section-title"><h2>📍 ¿Qué hay cerca?</h2></div>
     <div class="poi-section">
         <div class="poi-card">
             <div class="poi-grid">
-                <div><h4>🛒 Comercio</h4><ul><li>🏪 Walmart Colinas del Padre - 5 min</li><li>🏬 Plaza Galerías - 15 min</li><li>🏦 Zona bancaria - 7 min</li></ul></div>
-                <div><h4>🏥 Salud</h4><ul><li>🏥 Hospital General - 10 min</li><li>💊 Farmacias - 3 min</li><li>🩺 Clínicas - 5 min</li></ul></div>
+                <div><h4>🛒 Comercio</h4><ul><li>🏪 Walmart Colinas del Padre - 5 min</li><li>🏬 Plaza Galerias - 15 min</li><li>🏦 Zona bancaria - 7 min</li></ul></div>
+                <div><h4>🏥 Salud</h4><ul><li>🏥 Hospital General - 10 min</li><li>💊 Farmacias - 3 min</li><li>🩺 Clinicas - 5 min</li></ul></div>
                 <div><h4>🎓 Educación</h4><ul><li>📚 Escuelas primarias y secundarias</li><li>🎒 Preparatorias</li><li>🏫 UAZ Campus - 15 min</li></ul></div>
-                <div><h4>🎡 Entretenimiento</h4><ul><li>🌳 Parque La Encantada - 7 min</li><li>🏛️ Centro Histórico - 15 min</li><li>🍽️ Restaurantes y cafés</li></ul></div>
+                <div><h4>🎡 Entretenimiento</h4><ul><li>🌳 Parque La Encantada - 7 min</li><li>🏛️ Centro Historico - 15 min</li><li>🍽️ Restaurantes y cafes</li></ul></div>
             </div>
         </div>
     </div>
     <div class="footer">
         <div class="footer-brand">🏗️ Grupo Santa Rita</div>
-        <p>Más de 50 años construyendo hogares en Zacatecas</p>
-        <p class="footer-note" id="footer-note">Precios vigentes | Incluye: Cocina integral, clósets, canceles en baños</p>
-        <p class="footer-note" style="margin-top: 15px; font-size: 0.7em; line-height: 1.5; max-width: 800px; margin-left: auto; margin-right: auto; text-align: justify;">⚠️ <strong>AVISO LEGAL:</strong> Disponibilidad sujeta a cambio. Las propiedades anunciadas están sujetas a disponibilidad y pueden dejar de estar en venta sin previo aviso. El vendedor se reserva el derecho de modificar precios, características, acabados, planos arquitectónicos, equipamiento y condiciones comerciales sin previo aviso. Fotografías, renders y planos son de carácter ilustrativo y pueden no representar con exactitud el producto final. Superficies y medidas aproximadas pueden variar al acabar la obra o mediciones oficiales. La información presentada no constituye compromiso contractual; las condiciones definitivas se establecerán en el contrato de compraventa. El comprador deberá verificar información actualizada directamente con el vendedor o asesor autorizado antes de tomar decisiones de compra. No aplica con otras promociones.</p>
+        <p>Mas de 50 años construyendo hogares en Zacatecas</p>
+        <p class="footer-note">Precios vigentes Febrero 2026 | Incluye: Cocina integral, closets, canceles en baños</p>
+        <p class="footer-note" style="margin-top: 15px; font-size: 0.7em; line-height: 1.5; max-width: 800px; margin-left: auto; margin-right: auto; text-align: justify;">⚠️ <strong>AVISO LEGAL:</strong> Disponibilidad sujeta a cambio. Las propiedades anunciadas estan sujetas a disponibilidad y pueden dejar de estar en venta sin previo aviso. El vendedor se reserva el derecho de modificar precios, caracteristicas, acabados, planos arquitectonicos, equipamiento y condiciones comerciales sin previo aviso. Fotografias, renders y planos son de caracter ilustrativo. La informacion presentada no constituye compromiso contractual. No aplica con otras promociones.</p>
     </div>
     <script>
-        const SUPABASE_URL = 'https://bpxnknoldqyjacvlxqzl.supabase.co';
-        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJweG5rbm9sZHF5amFjdmx4cXpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk1MDAzMDcsImV4cCI6MjA2NTA3NjMwN30.rD8spXi1lWOQCzv3AXOA6bkQdBazaHPpj7RkkMn4MYk';
         const DEVELOPMENT = 'Los Encinos';
         const WHATSAPP = '524921170835';
-        const PHOTOS = {
-            'Roble Descendente': 'https://gruposantarita.com.mx/wp-content/uploads/2021/07/M4215335.jpg',
-            'Encino Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01-1.jpg',
-            'Maple Ascendente': 'https://gruposantarita.com.mx/wp-content/uploads/2021/07/M4215841.jpg',
-            'Encino Blanco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01.jpg',
-            'Encino Dorado': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01-2.jpg'
-        };
-        const DEFAULT_PHOTO = 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01.jpg';
 
-        async function fetchModels() {
-            const response = await fetch(`${SUPABASE_URL}/rest/v1/properties?development=eq.${encodeURIComponent(DEVELOPMENT)}&order=price.asc`, {
-                headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
-            });
-            return response.json();
-        }
+        const models = [
+            {
+                name: 'Encino Blanco',
+                bedrooms: 3, bathrooms: 2.5, area_m2: 123.50, floors: 2, land: '120m²',
+                price_equipped: 2997760, price_base: 2877640,
+                photo: 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/ENCINO-BLANCO-1-scaled.jpg',
+                youtube: 'https://youtu.be/F5Z8QG7pxEo',
+                matterport: 'https://my.matterport.com/show/?m=kd8DJvdpJqC',
+                gps: 'https://maps.app.goo.gl/5J14RtW9vHh6v3EK6',
+                sales_phrase: 'Entrada a Los Encinos desde $2.9M',
+                ideal: 'Familias que buscan zona premium accesible',
+                includes: 'Cocina integral, closets, canceles en baños'
+            },
+            {
+                name: 'Encino Verde',
+                bedrooms: 3, bathrooms: 2.5, area_m2: 133.10, floors: 2, land: '120m²',
+                price_equipped: 3211458, price_base: 3082653,
+                photo: 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/ENCINO-VERDE-5-scaled.jpg',
+                youtube: 'https://youtu.be/F5Z8QG7pxEo',
+                matterport: 'https://my.matterport.com/show/?m=kd8DJvdpJqC',
+                gps: 'https://maps.app.goo.gl/5J14RtW9vHh6v3EK6',
+                sales_phrase: 'Mas espacio y mejor distribucion',
+                ideal: 'Familias medianas',
+                includes: 'Cocina integral, closets, canceles en baños'
+            },
+            {
+                name: 'Encino Dorado',
+                bedrooms: 3, bathrooms: 2.5, area_m2: 146.27, floors: 2, land: '120m²',
+                price_equipped: 3371254, price_base: 3235908,
+                photo: 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/ENCINO-DORADO-0-scaled.jpg',
+                youtube: 'https://youtu.be/F5Z8QG7pxEo',
+                matterport: 'https://my.matterport.com/show/?m=kd8DJvdpJqC',
+                gps: 'https://maps.app.goo.gl/5J14RtW9vHh6v3EK6',
+                sales_phrase: 'El equilibrio perfecto espacio-precio',
+                ideal: 'Familias en crecimiento',
+                includes: 'Cocina integral, closets, canceles en baños'
+            },
+            {
+                name: 'Roble',
+                bedrooms: 3, bathrooms: 2.5, area_m2: 140.70, floors: 2, land: '120m²',
+                price_equipped: 3409723, price_base: 3271840,
+                photo: 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/ROBLE-1-scaled.jpg',
+                youtube: 'https://youtu.be/F5Z8QG7pxEo',
+                matterport: 'https://my.matterport.com/show/?m=kd8DJvdpJqC',
+                gps: 'https://maps.app.goo.gl/5J14RtW9vHh6v3EK6',
+                sales_phrase: 'Diseño moderno con amplitud',
+                ideal: 'Familias que valoran el diseño',
+                includes: 'Cocina integral, closets, canceles en baños',
+                has_vestidor: true
+            },
+            {
+                name: 'Maple',
+                bedrooms: 3, bathrooms: 2.5, area_m2: 143.40, floors: 2, land: '120m²',
+                price_equipped: 3445449, price_base: 3305689,
+                photo: 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/MAPLE-0-scaled.jpg',
+                youtube: 'https://youtu.be/F5Z8QG7pxEo',
+                matterport: 'https://my.matterport.com/show/?m=kd8DJvdpJqC',
+                gps: 'https://maps.app.goo.gl/5J14RtW9vHh6v3EK6',
+                sales_phrase: 'Premium con vestidor incluido',
+                ideal: 'Familias que buscan extras premium',
+                includes: 'Cocina integral, closets, canceles en baños, VESTIDOR',
+                has_vestidor: true
+            },
+            {
+                name: 'Nogal',
+                bedrooms: 3, bathrooms: 2.5, area_m2: 152.10, floors: 2, land: '120m²',
+                price_equipped: 3614476, price_base: 3467789,
+                photo: 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/NOGAL-2-scaled.jpg',
+                youtube: 'https://youtu.be/F5Z8QG7pxEo',
+                matterport: 'https://my.matterport.com/show/?m=kd8DJvdpJqC',
+                gps: 'https://maps.app.goo.gl/5J14RtW9vHh6v3EK6',
+                sales_phrase: 'Amplitud y lujo para familias grandes',
+                ideal: 'Familias grandes que buscan espacio',
+                includes: 'Cocina integral, closets, canceles en baños, VESTIDOR',
+                has_vestidor: true
+            },
+            {
+                name: 'Sabino',
+                bedrooms: 3, bathrooms: 2.5, area_m2: 155.60, floors: 2, land: '120m²',
+                price_equipped: 3799879, price_base: 3645670,
+                photo: 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/SABINO-0-scaled.jpg',
+                youtube: 'https://youtu.be/F5Z8QG7pxEo',
+                matterport: 'https://my.matterport.com/show/?m=kd8DJvdpJqC',
+                gps: 'https://maps.app.goo.gl/5J14RtW9vHh6v3EK6',
+                sales_phrase: 'El TOPE DE GAMA de Los Encinos',
+                ideal: 'Quien busca lo mejor en Colinas del Padre',
+                includes: 'Cocina integral, closets, canceles en baños, VESTIDOR',
+                has_vestidor: true
+            }
+        ];
 
         function formatPrice(price) {
             return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(price);
         }
 
         function renderModel(model) {
-            const photo = model.photo_url || PHOTOS[model.name] || DEFAULT_PHOTO;
-            const hasVideo = model.youtube_link && model.youtube_link !== '';
-            const has3D = model.matterport_link && model.matterport_link !== '';
+            const hasVideo = model.youtube && model.youtube !== 'none' && model.youtube !== '';
+            const has3D = model.matterport && model.matterport !== 'none' && model.matterport !== '';
+            let extras = '';
+            if (model.has_vestidor) {
+                extras = '<div class="model-extras"><span class="model-extra-badge">👔 Vestidor</span></div>';
+            }
             return `
                 <div class="model-card">
-                    <img class="model-image" src="${photo}" alt="${model.name}" onerror="this.src='${DEFAULT_PHOTO}'">
+                    <img class="model-image" src="${model.photo}" alt="${model.name}" onerror="this.style.display='none'">
                     <div class="model-content">
                         <h3 class="model-name">${model.name}</h3>
-                        <p class="model-desc">${model.description || ''}</p>
-                        <div class="model-phrase">🏡 ${model.sales_phrase || ''} 👫 ${model.ideal_client || ''}</div>
+                        <p class="model-desc">${model.land ? 'Terreno: ' + model.land : ''}</p>
+                        ${extras}
+                        <div class="model-phrase">🏡 ${model.sales_phrase} 👫 Ideal: ${model.ideal}</div>
                         <div class="specs">
-                            <div class="spec"><div class="spec-icon">🛏️</div><div class="spec-value">${model.bedrooms || '-'}</div><div class="spec-label">Recámaras</div></div>
-                            <div class="spec"><div class="spec-icon">🚿</div><div class="spec-value">${model.bathrooms || '-'}</div><div class="spec-label">Baños</div></div>
-                            <div class="spec"><div class="spec-icon">📐</div><div class="spec-value">${model.area_m2 || '-'}</div><div class="spec-label">m²</div></div>
-                            <div class="spec"><div class="spec-icon">🏠</div><div class="spec-value">${model.floors || '-'}</div><div class="spec-label">Planta${model.floors > 1 ? 's' : ''}</div></div>
+                            <div class="spec"><div class="spec-icon">🛏️</div><div class="spec-value">${model.bedrooms}</div><div class="spec-label">Recamaras</div></div>
+                            <div class="spec"><div class="spec-icon">🚿</div><div class="spec-value">${model.bathrooms}</div><div class="spec-label">Baños</div></div>
+                            <div class="spec"><div class="spec-icon">📐</div><div class="spec-value">${model.area_m2}</div><div class="spec-label">m² construidos</div></div>
+                            <div class="spec"><div class="spec-icon">🏠</div><div class="spec-value">${model.floors}</div><div class="spec-label">Planta${model.floors > 1 ? 's' : ''}</div></div>
                         </div>
-                        <div class="model-price">${formatPrice(model.price)} MXN</div>
+                        <div class="model-price">Equipada: ${formatPrice(model.price_equipped)}</div>
+                        <div class="model-price-alt">Sin equipo: ${formatPrice(model.price_base)}</div>
+                        <div class="model-includes">✅ Incluye: ${model.includes}</div>
                         <div class="buttons">
                             <a href="https://wa.me/${WHATSAPP}?text=Hola,%20me%20interesa%20el%20modelo%20${encodeURIComponent(model.name)}%20en%20${encodeURIComponent(DEVELOPMENT)}" class="btn btn-whatsapp" target="_blank">💬 WhatsApp</a>
-                            <a href="${hasVideo ? model.youtube_link : '#'}" class="btn btn-video ${!hasVideo ? 'btn-disabled' : ''}" target="_blank">▶️ ${hasVideo ? 'Ver Video' : 'Próximamente'}</a>
-                            <a href="${has3D ? model.matterport_link : '#'}" class="btn btn-3d ${!has3D ? 'btn-disabled' : ''}" target="_blank">🏠 ${has3D ? 'Recorrido 3D' : 'Próximamente'}</a>
-                            <a href="${model.gps_link || '#'}" class="btn btn-location" target="_blank">📍 Ver Ubicación</a>
+                            <a href="${hasVideo ? model.youtube : '#'}" class="btn btn-video ${!hasVideo ? 'btn-disabled' : ''}" target="_blank">▶️ ${hasVideo ? 'Ver Video' : 'Proximamente'}</a>
+                            <a href="${has3D ? model.matterport : '#'}" class="btn btn-3d ${!has3D ? 'btn-disabled' : ''}" target="_blank">🏠 ${has3D ? 'Recorrido 3D' : 'Proximamente'}</a>
+                            <a href="${model.gps}" class="btn btn-location" target="_blank">📍 Ver Ubicacion</a>
                         </div>
                     </div>
                 </div>`;
         }
 
-        async function init() {
-            try {
-                const models = await fetchModels();
-                if (models.length > 0) {
-                    const minPrice = Math.min(...models.map(m => parseFloat(m.price)));
-                    document.getElementById('hero-price').textContent = `Desde ${formatPrice(minPrice)} MXN`;
-                    const validUntil = models[0].price_valid_until;
-                    if (validUntil) {
-                        const date = new Date(validUntil);
-                        const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-                        document.getElementById('footer-note').textContent = `Precios vigentes ${monthNames[date.getMonth()]} ${date.getFullYear()} | Incluye: Cocina integral, clósets, canceles en baños`;
-                    }
-                    document.getElementById('models-container').innerHTML = models.map(renderModel).join('');
-                } else {
-                    document.getElementById('models-container').innerHTML = '<p class="loading">No se encontraron modelos.</p>';
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                document.getElementById('models-container').innerHTML = '<p class="loading">Error al cargar. Intente más tarde.</p>';
-            }
-        }
-        init();
+        document.getElementById('models-container').innerHTML = models.map(renderModel).join('');
     </script>
 </body>
 </html>
