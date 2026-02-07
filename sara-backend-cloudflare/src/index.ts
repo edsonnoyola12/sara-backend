@@ -154,7 +154,8 @@ import {
   encuestaSatisfaccionCasa,
   procesarRespuestaSatisfaccionCasa,
   checkInMantenimiento,
-  procesarRespuestaMantenimiento
+  procesarRespuestaMantenimiento,
+  isLikelySurveyResponse
 } from './crons/nurturing';
 
 // Maintenance - Bridge, followups, stagnant leads, anniversaries
@@ -452,12 +453,15 @@ async function checkPendingSurveyResponse(
 
     if (!survey) return false;
 
+    // Validar que parece respuesta a encuesta antes de procesar
+    if (!isLikelySurveyResponse(mensaje)) return false;
+
     const primerNombre = nombre?.split(' ')[0] || 'amigo';
 
     // Procesar según tipo de encuesta
     if (survey.survey_type === 'nps') {
-      const match = mensaje.match(/\b([0-9]|10)\b/);
-      if (!match) return false;
+      const match = mensaje.trim().match(/^\s*(\d{1,2})\s*$/);
+      if (!match || parseInt(match[1]) > 10) return false;
 
       const score = parseInt(match[1]);
       let categoria: string;
@@ -489,7 +493,7 @@ async function checkPendingSurveyResponse(
 
     } else {
       // Para otros tipos (satisfaction, post_cita, etc.)
-      const matchRating = mensaje.match(/\b([1-5])\b/);
+      const matchRating = mensaje.trim().match(/^\s*([1-5])\s*$/);
       const esTexto = mensaje.length > 3;
 
       if (matchRating) {
@@ -2039,6 +2043,72 @@ export default {
 
       } catch (e: any) {
         console.error('❌ Error en limpiar-pending-expirados:', e);
+        return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🧹 CLEANUP-TEST-LEADS - Elimina lead + todas las dependencias (surveys incluidas)
+    // USO: /cleanup-test-leads?phone=5610016226&api_key=XXX
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/cleanup-test-leads" && request.method === "GET") {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      try {
+        const phone = url.searchParams.get('phone');
+        if (!phone) {
+          return corsResponse(JSON.stringify({ ok: false, error: 'Falta parámetro phone' }), 400);
+        }
+
+        const phoneSuffix = phone.replace(/\D/g, '').slice(-10);
+        const deletedFrom: Record<string, number> = {};
+
+        // 1. Buscar leads que coincidan
+        const { data: allLeads } = await supabase.client
+          .from('leads')
+          .select('id, phone, name')
+          .not('phone', 'is', null);
+        const matchingLeads = (allLeads || []).filter(l =>
+          l.phone?.replace(/\D/g, '').slice(-10) === phoneSuffix
+        );
+
+        if (matchingLeads.length === 0) {
+          return corsResponse(JSON.stringify({ ok: true, message: 'No se encontraron leads con ese teléfono', phone }));
+        }
+
+        for (const lead of matchingLeads) {
+          // Delete from all related tables
+          const tables = ['surveys', 'appointments', 'mortgage_applications', 'messages', 'reservations', 'offers'];
+          for (const table of tables) {
+            try {
+              const { data } = await supabase.client.from(table).delete().eq('lead_id', lead.id).select('id');
+              if (data && data.length > 0) deletedFrom[table] = (deletedFrom[table] || 0) + data.length;
+            } catch {}
+          }
+          // Also delete surveys by phone (they might not have lead_id)
+          try {
+            const { data } = await supabase.client.from('surveys').delete().like('lead_phone', `%${phoneSuffix}`).select('id');
+            if (data && data.length > 0) deletedFrom['surveys_by_phone'] = (deletedFrom['surveys_by_phone'] || 0) + data.length;
+          } catch {}
+          // Optional tables
+          try { await supabase.client.from('follow_ups').delete().eq('lead_id', lead.id); } catch {}
+          try { await supabase.client.from('activities').delete().eq('lead_id', lead.id); } catch {}
+          // Delete the lead itself
+          const { error } = await supabase.client.from('leads').delete().eq('id', lead.id);
+          if (!error) deletedFrom['leads'] = (deletedFrom['leads'] || 0) + 1;
+        }
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          phone,
+          leads_found: matchingLeads.length,
+          leads_deleted: matchingLeads.map(l => ({ id: l.id, name: l.name })),
+          deleted_from: deletedFrom
+        }, null, 2));
+
+      } catch (e: any) {
+        console.error('❌ Error en cleanup-test-leads:', e);
         return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
       }
     }

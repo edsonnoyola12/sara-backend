@@ -8,6 +8,24 @@ import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { puedeEnviarMensajeAutomatico, registrarMensajeAutomatico } from './followups';
 
 // ═══════════════════════════════════════════════════════════
+// HELPER: Validar si un mensaje parece respuesta a encuesta
+// Evita que mensajes normales (ej: "el sábado a las 10 am")
+// sean interceptados como respuestas de encuesta
+// ═══════════════════════════════════════════════════════════
+export function isLikelySurveyResponse(mensaje: string, maxWords: number = 6, maxChars: number = 40): boolean {
+  const trimmed = mensaje.trim();
+  // Survey responses are SHORT
+  if (trimmed.split(/\s+/).length > maxWords || trimmed.length > maxChars) return false;
+  // If contains scheduling words → NOT a survey response
+  const schedulingWords = /\b(sábado|sabado|domingo|lunes|martes|miércoles|miercoles|jueves|viernes|hora|am|pm|mañana|manana|tarde|noche|cita|visita|agendar|agenda)\b/i;
+  if (schedulingWords.test(trimmed)) return false;
+  // If contains property/house words → NOT a survey response
+  const propertyWords = /\b(casas?|recámaras?|recamaras?|desarrollos?|créditos?|creditos?|terrenos?|precios?|infonavit|presupuesto|ubicación|ubicacion)\b/i;
+  if (propertyWords.test(trimmed)) return false;
+  return true;
+}
+
+// ═══════════════════════════════════════════════════════════
 // RECUPERACIÓN DE ABANDONOS EN PROCESO DE CRÉDITO
 // Re-engagement para leads que empezaron crédito pero no continuaron
 // ═══════════════════════════════════════════════════════════
@@ -833,7 +851,8 @@ Tu respuesta nos ayuda a mejorar 🙏`;
           ...notas,
           encuesta_nps_enviada: hoyStr,
           encuesta_nps_status: cliente.status,
-          esperando_respuesta_nps: true
+          esperando_respuesta_nps: true,
+          esperando_respuesta_nps_at: new Date().toISOString()
         };
 
         await supabase.client
@@ -873,9 +892,24 @@ export async function procesarRespuestaNPS(
     return false;
   }
 
-  // Extraer número del mensaje
-  const match = mensaje.match(/\b([0-9]|10)\b/);
-  if (!match) {
+  // TTL check: si la bandera tiene más de 48h, auto-limpiar
+  const flagSetAt = (notas as any)?.esperando_respuesta_nps_at;
+  if (flagSetAt) {
+    const horasDesde = (Date.now() - new Date(flagSetAt).getTime()) / (1000 * 60 * 60);
+    if (horasDesde > 48) {
+      await supabase.client.from('leads').update({
+        notes: { ...notas, esperando_respuesta_nps: false }
+      }).eq('id', lead.id);
+      return false;
+    }
+  }
+
+  // Validar que parece respuesta a encuesta (corto, sin palabras de agenda/propiedad)
+  if (!isLikelySurveyResponse(mensaje)) return false;
+
+  // Extraer número del mensaje - solo si es el contenido principal
+  const match = mensaje.trim().match(/^\s*(\d{1,2})\s*$/);
+  if (!match || parseInt(match[1]) > 10) {
     return false; // No es una respuesta NPS válida
   }
 
@@ -1030,7 +1064,8 @@ Si hay algo pendiente o algún detalle por resolver, responde y te ayudamos de i
         const notasActualizadas = {
           ...notas,
           seguimiento_entrega_enviado: hoyStr,
-          esperando_respuesta_entrega: true
+          esperando_respuesta_entrega: true,
+          esperando_respuesta_entrega_at: new Date().toISOString()
         };
 
         await supabase.client
@@ -1084,6 +1119,21 @@ export async function procesarRespuestaEntrega(
   if (!(notas as any)?.esperando_respuesta_entrega) {
     return false;
   }
+
+  // TTL check: si la bandera tiene más de 48h, auto-limpiar
+  const flagSetAt = (notas as any)?.esperando_respuesta_entrega_at;
+  if (flagSetAt) {
+    const horasDesde = (Date.now() - new Date(flagSetAt).getTime()) / (1000 * 60 * 60);
+    if (horasDesde > 48) {
+      await supabase.client.from('leads').update({
+        notes: { ...notas, esperando_respuesta_entrega: false }
+      }).eq('id', lead.id);
+      return false;
+    }
+  }
+
+  // Validar que parece respuesta a encuesta (allow longer for entrega since can be descriptive)
+  if (!isLikelySurveyResponse(mensaje, 15, 120)) return false;
 
   const nombre = lead.name?.split(' ')[0] || 'vecino';
   const mensajeLower = mensaje.toLowerCase();
@@ -1236,7 +1286,8 @@ Tu opinión nos ayuda a mejorar 🙏`;
           ...notas,
           encuesta_satisfaccion_casa_enviada: hoyStr,
           meses_en_casa: mesesDesdeEntrega,
-          esperando_respuesta_satisfaccion_casa: true
+          esperando_respuesta_satisfaccion_casa: true,
+          esperando_respuesta_satisfaccion_casa_at: new Date().toISOString()
         };
 
         await supabase.client
@@ -1272,23 +1323,46 @@ export async function procesarRespuestaSatisfaccionCasa(
     return false;
   }
 
+  // TTL check: si la bandera tiene más de 48h, auto-limpiar
+  const flagSetAt = (notas as any)?.esperando_respuesta_satisfaccion_casa_at;
+  if (flagSetAt) {
+    const horasDesde = (Date.now() - new Date(flagSetAt).getTime()) / (1000 * 60 * 60);
+    if (horasDesde > 48) {
+      await supabase.client.from('leads').update({
+        notes: { ...notas, esperando_respuesta_satisfaccion_casa: false }
+      }).eq('id', lead.id);
+      return false;
+    }
+  }
+
+  // Validar que parece respuesta a encuesta
+  if (!isLikelySurveyResponse(mensaje)) return false;
+
   const nombre = lead.name?.split(' ')[0] || 'vecino';
   const mensajeLower = mensaje.toLowerCase();
+  const trimmed = mensaje.trim();
 
-  // Detectar calificación
+  // Detectar calificación - números SOLO si son el mensaje completo
   let calificacion: number | null = null;
   let categoria = '';
 
-  if (mensaje.includes('1') || mensajeLower.includes('excelente') || mensajeLower.includes('encanta')) {
+  const matchNum = trimmed.match(/^\s*([1-4])\s*$/);
+  if (matchNum) {
+    const num = parseInt(matchNum[1]);
+    if (num === 1) { calificacion = 1; categoria = 'excelente'; }
+    else if (num === 2) { calificacion = 2; categoria = 'buena'; }
+    else if (num === 3) { calificacion = 3; categoria = 'regular'; }
+    else if (num === 4) { calificacion = 4; categoria = 'mala'; }
+  } else if (mensajeLower.includes('excelente') || mensajeLower.includes('encanta')) {
     calificacion = 1;
     categoria = 'excelente';
-  } else if (mensaje.includes('2') || mensajeLower.includes('buena') || mensajeLower.includes('contento')) {
+  } else if (mensajeLower.includes('buena') || mensajeLower.includes('contento')) {
     calificacion = 2;
     categoria = 'buena';
-  } else if (mensaje.includes('3') || mensajeLower.includes('regular') || mensajeLower.includes('mejorar')) {
+  } else if (mensajeLower.includes('regular') || mensajeLower.includes('mejorar')) {
     calificacion = 3;
     categoria = 'regular';
-  } else if (mensaje.includes('4') || mensajeLower.includes('mala') || mensajeLower.includes('problema')) {
+  } else if (mensajeLower.includes('mala') || mensajeLower.includes('problema')) {
     calificacion = 4;
     categoria = 'mala';
   }
@@ -1467,7 +1541,8 @@ Responde *SÍ* si todo está bien o *AYUDA* si necesitas contactos de proveedore
           ...notas,
           ultimo_checkin_mantenimiento: hoyStr,
           años_en_casa: añosDesdeEntrega,
-          esperando_respuesta_mantenimiento: true
+          esperando_respuesta_mantenimiento: true,
+          esperando_respuesta_mantenimiento_at: new Date().toISOString()
         };
 
         await supabase.client
@@ -1502,6 +1577,21 @@ export async function procesarRespuestaMantenimiento(
   if (!(notas as any)?.esperando_respuesta_mantenimiento) {
     return false;
   }
+
+  // TTL check: si la bandera tiene más de 48h, auto-limpiar
+  const flagSetAt = (notas as any)?.esperando_respuesta_mantenimiento_at;
+  if (flagSetAt) {
+    const horasDesde = (Date.now() - new Date(flagSetAt).getTime()) / (1000 * 60 * 60);
+    if (horasDesde > 48) {
+      await supabase.client.from('leads').update({
+        notes: { ...notas, esperando_respuesta_mantenimiento: false }
+      }).eq('id', lead.id);
+      return false;
+    }
+  }
+
+  // Validar que parece respuesta a encuesta
+  if (!isLikelySurveyResponse(mensaje, 15, 120)) return false;
 
   const nombre = lead.name?.split(' ')[0] || 'vecino';
   const mensajeLower = mensaje.toLowerCase();

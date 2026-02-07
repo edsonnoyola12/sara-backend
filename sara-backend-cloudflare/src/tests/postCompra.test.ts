@@ -127,16 +127,28 @@ describe('Flujos Post-Compra', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Clasificación de satisfacción con la casa', () => {
+    // Updated to match FIXED logic (strict number matching)
     function clasificarSatisfaccion(mensaje: string): { calificacion: number | null, categoria: string } {
       const mensajeLower = mensaje.toLowerCase();
+      const trimmed = mensaje.trim();
 
-      if (mensaje.includes('1') || mensajeLower.includes('excelente') || mensajeLower.includes('encanta')) {
+      // Numbers ONLY if they are the ENTIRE message
+      const matchNum = trimmed.match(/^\s*([1-4])\s*$/);
+      if (matchNum) {
+        const num = parseInt(matchNum[1]);
+        if (num === 1) return { calificacion: 1, categoria: 'excelente' };
+        if (num === 2) return { calificacion: 2, categoria: 'buena' };
+        if (num === 3) return { calificacion: 3, categoria: 'regular' };
+        if (num === 4) return { calificacion: 4, categoria: 'mala' };
+      }
+
+      if (mensajeLower.includes('excelente') || mensajeLower.includes('encanta')) {
         return { calificacion: 1, categoria: 'excelente' };
-      } else if (mensaje.includes('2') || mensajeLower.includes('buena') || mensajeLower.includes('contento')) {
+      } else if (mensajeLower.includes('buena') || mensajeLower.includes('contento')) {
         return { calificacion: 2, categoria: 'buena' };
-      } else if (mensaje.includes('3') || mensajeLower.includes('regular') || mensajeLower.includes('mejorar')) {
+      } else if (mensajeLower.includes('regular') || mensajeLower.includes('mejorar')) {
         return { calificacion: 3, categoria: 'regular' };
-      } else if (mensaje.includes('4') || mensajeLower.includes('mala') || mensajeLower.includes('problema')) {
+      } else if (mensajeLower.includes('mala') || mensajeLower.includes('problema')) {
         return { calificacion: 4, categoria: 'mala' };
       }
 
@@ -555,6 +567,123 @@ Tu opinión nos ayuda a mejorar 🙏`;
       const result = generarRespuestaSatisfaccion(4, 'Ana');
       expect(result.requiereAtencion).toBe(true);
       expect(result.respuesta).toContain('Lamentamos');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TESTS: Prevención de falsos positivos en encuestas
+  // Bug original: "Si me gustaría el sábado a las 10 am" → NPS score 10
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('isLikelySurveyResponse - Prevención de falsos positivos', () => {
+    // Replicate the function from nurturing.ts for testing (same logic)
+    function isLikelySurveyResponse(mensaje: string, maxWords: number = 6, maxChars: number = 40): boolean {
+      const trimmed = mensaje.trim();
+      if (trimmed.split(/\s+/).length > maxWords || trimmed.length > maxChars) return false;
+      const schedulingWords = /\b(sábado|sabado|domingo|lunes|martes|miércoles|miercoles|jueves|viernes|hora|am|pm|mañana|manana|tarde|noche|cita|visita|agendar|agenda)\b/i;
+      if (schedulingWords.test(trimmed)) return false;
+      const propertyWords = /\b(casas?|recámaras?|recamaras?|desarrollos?|créditos?|creditos?|terrenos?|precios?|infonavit|presupuesto|ubicación|ubicacion)\b/i;
+      if (propertyWords.test(trimmed)) return false;
+      return true;
+    }
+
+    // These should NOT be treated as survey responses
+    it('"Si me gustaría el sábado a las 10 am" should NOT trigger survey', () => {
+      expect(isLikelySurveyResponse('Si me gustaría el sábado a las 10 am')).toBe(false);
+    });
+
+    it('"quiero casa de 1 planta" should NOT trigger survey', () => {
+      expect(isLikelySurveyResponse('quiero casa de 1 planta')).toBe(false);
+    });
+
+    it('"no tengo presupuesto todavía" should NOT trigger survey', () => {
+      expect(isLikelySurveyResponse('no tengo presupuesto todavía')).toBe(false);
+    });
+
+    it('"si me interesa ver las casas" should NOT trigger survey', () => {
+      expect(isLikelySurveyResponse('si me interesa ver las casas')).toBe(false);
+    });
+
+    it('"me gustaría agendar una cita para el viernes" should NOT trigger survey', () => {
+      expect(isLikelySurveyResponse('me gustaría agendar una cita para el viernes')).toBe(false);
+    });
+
+    it('"busco terreno en el nogal" should NOT trigger survey', () => {
+      expect(isLikelySurveyResponse('busco terreno en el nogal')).toBe(false);
+    });
+
+    it('"cuanto cuesta el credito infonavit" should NOT trigger survey', () => {
+      expect(isLikelySurveyResponse('cuanto cuesta el credito infonavit')).toBe(false);
+    });
+
+    // These SHOULD be treated as survey responses
+    it('"10" SHOULD be treated as survey response', () => {
+      expect(isLikelySurveyResponse('10')).toBe(true);
+    });
+
+    it('"3" SHOULD be treated as survey response', () => {
+      expect(isLikelySurveyResponse('3')).toBe(true);
+    });
+
+    it('"si" SHOULD be treated as survey response', () => {
+      expect(isLikelySurveyResponse('si')).toBe(true);
+    });
+
+    it('"no" SHOULD be treated as survey response', () => {
+      expect(isLikelySurveyResponse('no')).toBe(true);
+    });
+
+    it('"excelente" SHOULD be treated as survey response', () => {
+      expect(isLikelySurveyResponse('excelente')).toBe(true);
+    });
+
+    it('"todo bien gracias" SHOULD be treated as survey response', () => {
+      expect(isLikelySurveyResponse('todo bien gracias')).toBe(true);
+    });
+  });
+
+  describe('Satisfacción casa - clasificación estricta (sin falsos positivos)', () => {
+    // Simulates the FIXED logic in procesarRespuestaSatisfaccionCasa
+    function clasificarSatisfaccionEstricta(mensaje: string): { calificacion: number | null, categoria: string } {
+      const mensajeLower = mensaje.toLowerCase();
+      const trimmed = mensaje.trim();
+
+      // Numbers ONLY if they are the ENTIRE message
+      const matchNum = trimmed.match(/^\s*([1-4])\s*$/);
+      if (matchNum) {
+        const num = parseInt(matchNum[1]);
+        if (num === 1) return { calificacion: 1, categoria: 'excelente' };
+        if (num === 2) return { calificacion: 2, categoria: 'buena' };
+        if (num === 3) return { calificacion: 3, categoria: 'regular' };
+        if (num === 4) return { calificacion: 4, categoria: 'mala' };
+      }
+      if (mensajeLower.includes('excelente') || mensajeLower.includes('encanta')) return { calificacion: 1, categoria: 'excelente' };
+      if (mensajeLower.includes('buena') || mensajeLower.includes('contento')) return { calificacion: 2, categoria: 'buena' };
+      if (mensajeLower.includes('regular') || mensajeLower.includes('mejorar')) return { calificacion: 3, categoria: 'regular' };
+      if (mensajeLower.includes('mala') || mensajeLower.includes('problema')) return { calificacion: 4, categoria: 'mala' };
+      return { calificacion: null, categoria: '' };
+    }
+
+    it('"1" solo → excelente', () => {
+      expect(clasificarSatisfaccionEstricta('1').calificacion).toBe(1);
+    });
+
+    it('"3" solo → regular', () => {
+      expect(clasificarSatisfaccionEstricta('3').calificacion).toBe(3);
+    });
+
+    it('"quiero casa de 1 planta" → NO debe clasificar (1 es parte de texto)', () => {
+      // After isLikelySurveyResponse filters it, this wouldn't reach clasificar
+      // But even if it did, the strict regex wouldn't match
+      expect(clasificarSatisfaccionEstricta('quiero casa de 1 planta').calificacion).toBeNull();
+    });
+
+    it('"10" → NO debe clasificar (fuera de rango 1-4)', () => {
+      expect(clasificarSatisfaccionEstricta('10').calificacion).toBeNull();
+    });
+
+    it('"me encanta mi casa" → excelente (text match)', () => {
+      expect(clasificarSatisfaccionEstricta('me encanta mi casa').calificacion).toBe(1);
     });
   });
 });
