@@ -4068,3 +4068,44 @@ await update({ last_message_at: ahora, last_activity_at: ahora });
 **Commits:** `12ba4343`, `a8a9f6c0`
 **Deploy:** Version ID `a28425a4`
 **Push:** origin/main
+
+#### Cambio 5: Combinar recursos en 1 mensaje por desarrollo (aiConversationService.ts)
+
+**Problema persistente:** Test 5 (3 desarrollos: Monte Verde + Los Encinos + Distrito Falco) seguía fallando con "Too many subrequests" porque enviaba 3 mensajes separados (video, GPS, brochure) por cada desarrollo = 9 Meta API calls solo para recursos.
+
+**Fix:** Combinar video+matterport+GPS+brochure HTML link en **1 solo mensaje** por desarrollo:
+
+```
+*Monte Verde:*
+🎬 Video: https://youtube.com/...
+🏠 Recorrido 3D: https://matterport.com/...
+📍 Ubicación: https://maps.app.goo.gl/...
+📋 Brochure: https://brochures-santarita.pages.dev/monte_verde
+```
+
+- Para 3 desarrollos: 9 Meta API calls → 3 (ahorra 6 subrequests)
+- Brochures PDF siguen como documento separado (solo HTML links se combinan)
+
+#### Cambio 6: Eliminar save redundante del push-to-cita (aiConversationService.ts)
+
+El push-to-cita hacía READ + WRITE de `conversation_history` justo después del batch save que ya hizo READ + WRITE. Eliminado — el push se captura en el siguiente turno de conversación.
+
+- Ahorra 2 subrequests adicionales
+
+**Resumen de ahorro total Sesión 30:**
+
+| Optimización | Subrequests Ahorrados |
+|--------------|----------------------|
+| Batch guardarAccionEnHistorial | 4-8 |
+| Merge last_activity_at + last_message_at | 1 |
+| teamMembers cacheados en postVisita | 1 |
+| skipTeamCheck en getOrCreateLead | 1 |
+| Combinar recursos en 1 mensaje/desarrollo | 4-6 |
+| Eliminar push-to-cita historial save | 2 |
+| **Total** | **13-19** |
+
+**5/5 pruebas exhaustivas pasaron** (incluyendo 3 desarrollos simultáneos).
+
+**Commits:** `12ba4343`, `a8a9f6c0`, `1337d847`, `b94f1f84`
+**Deploy final:** Version ID `3781ac05`
+**Push:** origin/main
