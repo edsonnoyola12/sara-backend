@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-07 (Sesión 30)
+> Última actualización: 2026-02-08 (Sesión 31)
 
 ---
 
@@ -4108,4 +4108,42 @@ El push-to-cita hacía READ + WRITE de `conversation_history` justo después del
 
 **Commits:** `12ba4343`, `a8a9f6c0`, `1337d847`, `b94f1f84`
 **Deploy final:** Version ID `3781ac05`
+**Push:** origin/main
+
+---
+
+### 2026-02-08 (Sesión 31) - Fix `adelante` Command in Test Endpoint + Status Alias
+
+**2 bugs corregidos:**
+
+#### Bug 1: `/test-comando-ceo` no ejecutaba `adelante`/`atrás`
+
+**Problema:** `adelante Roberto` via `/test-comando-ceo` retornaba `{ needsExternalHandler: true }` en vez de mover el lead. El service layer (`ceoCommandsService.executeHandler`) marca `ceoMoverLead` como externo — el handler real está en `whatsapp.ts:ceoMoverLead()`, pero el test endpoint nunca llega ahí.
+
+**Fix (src/index.ts ~línea 1011):** Cuando `executeHandler` retorna `needsExternalHandler` para `ceoMoverLead`, el test endpoint ahora ejecuta la lógica de búsqueda + actualización inline (sin enviar WhatsApp).
+
+#### Bug 2: Status `scheduled` no reconocido en funnel
+
+**Problema:** `appointmentService.ts:305` pone status `scheduled` al crear cita, pero `FUNNEL_STAGES` tiene `visit_scheduled`. `indexOf('scheduled')` retornaba -1 → el advance fallaba.
+
+**Fix:** Mapear `scheduled` → `visit_scheduled` antes del `indexOf` en 3 lugares:
+
+| Archivo | Línea | Cambio |
+|---------|-------|--------|
+| `src/index.ts` | ~1060 | `if (currentStatus === 'scheduled') currentStatus = 'visit_scheduled'` |
+| `src/handlers/whatsapp.ts` | 2674 | `if (currentStatus === 'scheduled') currentStatus = 'visit_scheduled'` |
+| `src/services/vendorCommandsService.ts` | 1365 | `if (effectiveStatus === 'scheduled') effectiveStatus = 'visit_scheduled'` |
+
+**Pruebas E2E en producción:**
+
+| Test | Status antes | Status después | Resultado |
+|------|-------------|----------------|-----------|
+| `adelante Roberto` | `new` | `contacted` | ✅ |
+| `adelante Roberto` | `contacted` | `qualified` | ✅ |
+| `atras Roberto` | `qualified` | `contacted` | ✅ |
+| `adelante Roberto` | **`scheduled`** | `visited` | ✅ (mapea → `visit_scheduled` → `visited`) |
+
+**Tests:** 369/369 pasando
+**Commit:** `b45c7596`
+**Deploy:** Version ID `62c0fb3c`
 **Push:** origin/main
