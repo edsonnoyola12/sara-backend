@@ -118,11 +118,15 @@ export class RetellService {
           },
           // Variables dinámicas para el agente
           retell_llm_dynamic_variables: {
-            lead_name: context.leadName,
+            lead_name: context.leadName || '',
+            is_new_lead: (!context.leadName || context.leadName === 'Cliente' || context.leadName === 'Cliente Test') ? 'true' : 'false',
+            greeting: this.buildGreeting(context),
             desarrollo: context.desarrolloInteres || 'nuestros desarrollos',
+            desarrollo_interes: context.desarrolloInteres || '',
             precio_desde: context.precioDesde || '$1.5 millones',
             vendedor_nombre: context.vendorName || 'un asesor',
-            notas_adicionales: context.notas || ''
+            notas_adicionales: context.notas || '',
+            source: context.notas || 'WhatsApp'
           }
         })
       });
@@ -314,6 +318,28 @@ export class RetellService {
 
     console.log(`   📱 Número normalizado: ${phone} → ${clean}`);
     return clean;
+  }
+
+  /**
+   * Genera el saludo inicial personalizado para la llamada
+   * Si conocemos al lead → confirma nombre y menciona desarrollo
+   * Si NO conocemos al lead → pide el nombre primero
+   */
+  private buildGreeting(context: CallContext): string {
+    const nombre = context.leadName;
+    const esNuevo = !nombre || nombre === 'Cliente' || nombre === 'Cliente Test';
+
+    if (esNuevo) {
+      // Lead desconocido → presentarse con valor + pedir nombre
+      return '¡Hola! Soy Sara de Grupo Santa Rita. Te llamo para apoyarte en tu búsqueda de casa. ¿Con quién tengo el gusto?';
+    }
+
+    // Lead conocido → confirmar nombre + explicar propósito
+    const primerNombre = nombre.split(' ')[0];
+    if (context.desarrolloInteres) {
+      return `¡Hola! ¿Hablo con ${primerNombre}? Soy Sara de Grupo Santa Rita. Te llamo para apoyarte con tu interés en ${context.desarrolloInteres} y resolver cualquier duda que tengas. ¿Tienes un minutito?`;
+    }
+    return `¡Hola! ¿Hablo con ${primerNombre}? Soy Sara de Grupo Santa Rita. Te llamo para apoyarte en tu búsqueda de casa — ya sea con información, crédito o agendar una visita. ¿Tienes un minutito?`;
   }
 
   /**

@@ -7432,7 +7432,7 @@ Mensaje: ${mensaje}`;
           return new Response(JSON.stringify({
             lead_name: '',
             is_new_lead: 'true',
-            greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. ¿Con quién tengo el gusto?'
+            greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?'
           }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
@@ -7442,7 +7442,7 @@ Mensaje: ${mensaje}`;
         // Buscar lead en base de datos
         const { data: lead } = await supabase.client
           .from('leads')
-          .select('id, name, phone, status, notes, assigned_to')
+          .select('id, name, phone, status, notes, assigned_to, property_interest')
           .or(`phone.eq.${callerPhone},phone.like.%${callerPhone.slice(-10)}`)
           .maybeSingle();
 
@@ -7451,13 +7451,17 @@ Mensaje: ${mensaje}`;
           const nombre = lead.name.split(' ')[0]; // Solo primer nombre
           console.log(`📞 RETELL LOOKUP: Lead encontrado - ${lead.name} (${callerPhone})`);
 
-          // Buscar desarrollo de interés si existe
-          let desarrolloInteres = '';
-          if (lead.notes) {
+          // Buscar desarrollo de interés: primero property_interest, luego notes
+          let desarrolloInteres = lead.property_interest || '';
+          if (!desarrolloInteres && lead.notes) {
             const notesStr = typeof lead.notes === 'string' ? lead.notes : JSON.stringify(lead.notes);
             const matchDesarrollo = notesStr.match(/desarrollo[:\s]*([\w\s]+)/i);
             if (matchDesarrollo) desarrolloInteres = matchDesarrollo[1].trim();
           }
+
+          const greetingConDesarrollo = desarrolloInteres
+            ? `¡Hola ${nombre}! Qué gusto escucharte. Soy Sara de Grupo Santa Rita. Te llamo para apoyarte con tu interés en ${desarrolloInteres} y resolver cualquier duda que tengas. ¿En qué te puedo ayudar?`
+            : `¡Hola ${nombre}! Qué gusto escucharte. Soy Sara de Grupo Santa Rita. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿En qué te puedo ayudar?`;
 
           return new Response(JSON.stringify({
             lead_name: nombre,
@@ -7465,18 +7469,18 @@ Mensaje: ${mensaje}`;
             lead_id: lead.id,
             is_new_lead: 'false',
             desarrollo_interes: desarrolloInteres,
-            greeting: `¡Hola ${nombre}! Qué gusto escucharte de nuevo. Soy Sara de Grupo Santa Rita. ¿En qué te puedo ayudar hoy?`
+            greeting: greetingConDesarrollo
           }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
           });
         } else {
-          // Lead nuevo - pedir nombre
+          // Lead nuevo - pedir nombre PRIMERO para personalizar la llamada
           console.log(`📞 RETELL LOOKUP: Número nuevo - ${callerPhone}`);
           return new Response(JSON.stringify({
             lead_name: '',
             is_new_lead: 'true',
-            greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. ¿Con quién tengo el gusto?'
+            greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?'
           }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
@@ -7487,7 +7491,7 @@ Mensaje: ${mensaje}`;
         return new Response(JSON.stringify({
           lead_name: '',
           is_new_lead: 'true',
-          greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. ¿Con quién tengo el gusto?'
+          greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?'
         }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
