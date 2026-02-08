@@ -4642,7 +4642,10 @@ Tú dime, ¿por dónde empezamos?`;
             // Collect actions for batch historial update (saves subrequests)
             const accionesHistorial: Array<{accion: string, detalles?: string}> = [];
 
-            // Enviar recursos de CADA desarrollo
+            // ═══ OPTIMIZACIÓN: 1 mensaje combinado por desarrollo (video+GPS+brochure) ═══
+            // Antes: 3 mensajes separados × N desarrollos = 3N fetch calls
+            // Ahora: 1 mensaje combinado × N desarrollos = N fetch calls (PDFs aparte)
+            const brochuresEnviados: string[] = [];
             for (const dev of desarrollosLista) {
               const devNorm = dev.toLowerCase().trim();
               const propiedadMatch = properties.find((p: any) => {
@@ -4651,38 +4654,67 @@ Tú dime, ¿por dónde empezamos?`;
               });
 
               if (propiedadMatch) {
-                // Video + Matterport agrupados en 1 mensaje para evitar spam
-                const recursos: string[] = [];
+                // Collect ALL resource parts for this development in 1 message
+                const partes: string[] = [];
+                const recursosDesc: string[] = [];
+
                 if (propiedadMatch.youtube_link) {
-                  recursos.push(`🎬 *Video:* ${propiedadMatch.youtube_link}`);
+                  partes.push(`🎬 *Video:* ${propiedadMatch.youtube_link}`);
+                  recursosDesc.push('video');
                 }
                 if (propiedadMatch.matterport_link) {
-                  recursos.push(`🏠 *Recorrido 3D:* ${propiedadMatch.matterport_link}`);
+                  partes.push(`🏠 *Recorrido 3D:* ${propiedadMatch.matterport_link}`);
+                  recursosDesc.push('recorrido 3D');
+                }
+                if (analysis.send_gps === true && propiedadMatch.gps_link) {
+                  partes.push(`📍 *Ubicación:* ${propiedadMatch.gps_link}\n_Ahí te lleva directo en Google Maps_`);
+                  recursosDesc.push('GPS');
                 }
 
-                if (recursos.length > 0) {
+                // Brochure HTML link goes in the combined message (PDF sent separately)
+                const brochureRaw = propiedadMatch.brochure_urls;
+                const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
+                let brochurePDF = false;
+                if (brochureUrl && !brochuresEnviados.includes(brochureUrl)) {
+                  const esHTML = brochureUrl.includes('.html') || brochureUrl.includes('pages.dev');
+                  if (esHTML) {
+                    const cleanUrl = brochureUrl.replace(/\.html$/, '');
+                    partes.push(`📋 *Brochure:* ${cleanUrl}\n_Fotos, planos, precios y características_`);
+                    brochuresEnviados.push(brochureUrl);
+                    recursosDesc.push('brochure');
+                  } else {
+                    brochurePDF = true; // Will send as separate document below
+                  }
+                }
+
+                // Send 1 combined message with all resources for this development
+                if (partes.length > 0) {
                   await new Promise(r => setTimeout(r, 400));
                   const intro = tieneNombre
                     ? `*${primerNombre}*, aquí te comparto *${dev}*:`
                     : `Aquí te comparto *${dev}*:`;
-                  await this.meta.sendWhatsAppMessage(from, `${intro}\n\n${recursos.join('\n\n')}`);
-                  console.log(`✅ Recursos enviados para: ${dev}`);
-                  const recursosDesc = [];
-                  if (propiedadMatch.youtube_link) recursosDesc.push('video');
-                  if (propiedadMatch.matterport_link) recursosDesc.push('recorrido 3D');
-                  accionesHistorial.push({ accion: `Envié ${recursosDesc.join(' y ')}`, detalles: dev });
+                  await this.meta.sendWhatsAppMessage(from, `${intro}\n\n${partes.join('\n\n')}`);
+                  console.log(`✅ Recursos combinados enviados para ${dev}: ${recursosDesc.join(', ')}`);
+                  accionesHistorial.push({ accion: `Envié ${recursosDesc.join(', ')}`, detalles: dev });
                 }
 
-                // GPS del desarrollo - ENVIAR SI EL LEAD LO PIDIÓ EXPLÍCITAMENTE
-                if (analysis.send_gps === true && propiedadMatch.gps_link) {
+                // PDF brochure must be sent as separate document
+                if (brochurePDF && brochureUrl) {
+                  brochuresEnviados.push(brochureUrl);
                   await new Promise(r => setTimeout(r, 400));
-                  await this.meta.sendWhatsAppMessage(from, `📍 *Ubicación de ${dev}:*\n${propiedadMatch.gps_link}\n\n_Ahí te lleva directo en Google Maps_`);
-                  console.log(`✅ GPS enviado para: ${dev}`);
-                  accionesHistorial.push({ accion: 'Envié ubicación GPS', detalles: dev });
-                } else if (!analysis.send_gps) {
+                  try {
+                    const filename = `Brochure_${dev.replace(/\s+/g, '_')}.pdf`;
+                    await this.meta.sendWhatsAppDocument(from, brochureUrl, filename, `📋 Brochure ${dev} - Modelos, precios y características`);
+                    console.log(`✅ Brochure PDF enviado para ${dev}:`, brochureUrl);
+                  } catch (docError) {
+                    console.error(`⚠️ Error enviando brochure como documento, enviando como link:`, docError);
+                    await this.meta.sendWhatsAppMessage(from, `📋 *Brochure ${dev}:*\n${brochureUrl}\n\n_Modelos, precios y características_`);
+                  }
+                  accionesHistorial.push({ accion: 'Envié brochure PDF', detalles: dev });
+                }
+
+                if (!analysis.send_gps) {
                   console.log(`ℹ️ GPS de ${dev} disponible pero no solicitado`);
-                } else {
-                  console.error(`⚠️ GPS de ${dev} solicitado pero no disponible en DB`);
                 }
               } else {
                 console.error(`⚠️ No se encontró propiedad para: ${dev}`);
@@ -4701,42 +4733,6 @@ Tú dime, ¿por dónde empezamos?`;
               .limit(1);
 
             const tieneCita = citaExiste && citaExiste.length > 0;
-
-            // ═══ BROCHURE SIEMPRE - independiente de si tiene cita ═══
-            const brochuresEnviados: string[] = [];
-            for (const dev of desarrollosLista) {
-              const propConBrochure = properties.find(p =>
-                p.development?.toLowerCase().includes(dev.toLowerCase()) &&
-                p.brochure_urls
-              );
-              const brochureRaw = propConBrochure?.brochure_urls;
-              const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
-
-              if (brochureUrl && !brochuresEnviados.includes(brochureUrl)) {
-                brochuresEnviados.push(brochureUrl);
-                await new Promise(r => setTimeout(r, 400));
-                const esHTML = brochureUrl.includes('.html') || brochureUrl.includes('pages.dev');
-                if (esHTML) {
-                  const cleanUrl = brochureUrl.replace(/\.html$/, '');
-                  await this.meta.sendWhatsAppMessage(from,
-                    `📋 *Brochure ${dev}:*\n${cleanUrl}\n\n_Fotos, planos, precios y características_`
-                  );
-                  console.log(`✅ Brochure HTML enviado para ${dev}:`, cleanUrl);
-                } else {
-                  try {
-                    const filename = `Brochure_${dev.replace(/\s+/g, '_')}.pdf`;
-                    await this.meta.sendWhatsAppDocument(from, brochureUrl, filename, `📋 Brochure ${dev} - Modelos, precios y características`);
-                    console.log(`✅ Brochure PDF enviado para ${dev}:`, brochureUrl);
-                  } catch (docError) {
-                    console.error(`⚠️ Error enviando brochure como documento, enviando como link:`, docError);
-                    await this.meta.sendWhatsAppMessage(from,
-                      `📋 *Brochure ${dev}:*\n${brochureUrl}\n\n_Modelos, precios y características_`
-                    );
-                  }
-                }
-                accionesHistorial.push({ accion: 'Envié brochure', detalles: dev });
-              }
-            }
 
             // Batch save all resource actions (1 READ + 1 WRITE instead of 2 per action)
             if (accionesHistorial.length > 0) {
@@ -4776,25 +4772,7 @@ Tú dime, ¿por dónde empezamos?`;
                 if (msgPush) {
                   await this.meta.sendWhatsAppMessage(from, msgPush);
                   console.log(`✅ Push a cita enviado (${phaseInfoPush.pushStyle}) después de recursos`);
-
-                  // Guardar en historial para que Claude sepa que preguntamos por visita
-                  try {
-                    const { data: leadHist } = await this.supabase.client
-                      .from('leads')
-                      .select('conversation_history')
-                      .eq('id', lead.id)
-                      .single();
-
-                    const histAct = leadHist?.conversation_history || [];
-                    histAct.push({ role: 'assistant', content: msgPush, timestamp: new Date().toISOString() });
-
-                    await this.supabase.client
-                      .from('leads')
-                      .update({ conversation_history: histAct.slice(-30) })
-                      .eq('id', lead.id);
-                  } catch (e) {
-                    console.error('⚠️ Error guardando push en historial');
-                  }
+                  // Push se guardará en conversation_history en el siguiente turno (ahorra 2 subrequests)
                 }
               } else if (yaQuiereCita) {
                 console.log('ℹ️ Push a cita OMITIDO - usuario ya expresó intent: confirmar_cita');
