@@ -2671,7 +2671,8 @@ export class WhatsAppHandler {
       const lead = leads[0] as any;
       console.log(`📌 Lead keys: ${Object.keys(lead).join(', ')}`);
       console.log(`📌 Lead status fields: funnel_status=${lead.funnel_status}, stage=${lead.stage}, status=${lead.status}`);
-      const currentStatus = lead.funnel_status || lead.stage || lead.status || 'new';
+      let currentStatus = lead.funnel_status || lead.stage || lead.status || 'new';
+      if (currentStatus === 'scheduled') currentStatus = 'visit_scheduled';
       const currentIndex = FUNNEL_STAGES.indexOf(currentStatus);
       let newIndex = direccion === 'next' ? currentIndex + 1 : currentIndex - 1;
 

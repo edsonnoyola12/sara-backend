@@ -1362,7 +1362,9 @@ export class VendorCommandsService {
       }
 
       const lead = leads[0];
-      const currentIndex = this.FUNNEL_STAGES.indexOf(lead.status);
+      let effectiveStatus = lead.status;
+      if (effectiveStatus === 'scheduled') effectiveStatus = 'visit_scheduled';
+      const currentIndex = this.FUNNEL_STAGES.indexOf(effectiveStatus);
 
       if (currentIndex === -1) {
         // Status no está en el funnel estándar, moverlo a contacted

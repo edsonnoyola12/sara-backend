@@ -1011,6 +1011,79 @@ export default {
       if (detected.action === 'call_handler' && detected.handlerName) {
         try {
           const result = await ceoService.executeHandler(detected.handlerName, 'Test CEO', detected.handlerParams);
+
+          // Handle ceoMoverLead inline (normally handled by whatsapp.ts)
+          if (result.needsExternalHandler && detected.handlerName === 'ceoMoverLead') {
+            const params = detected.handlerParams as any;
+            const nombreLead = params?.nombreLead || '';
+            const direccion: 'next' | 'prev' = params?.direccion || 'next';
+
+            const normalizar = (str: string) => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            const nombreNormalizado = normalizar(nombreLead);
+
+            // Search lead by name
+            let { data: leads } = await supabase.client
+              .from('leads')
+              .select('*')
+              .ilike('name', `%${nombreLead}%`)
+              .limit(5);
+
+            if (!leads || leads.length === 0) {
+              const { data: allLeads } = await supabase.client.from('leads').select('*').limit(100);
+              leads = allLeads?.filter(l => normalizar(l.name || '').includes(nombreNormalizado)) || [];
+            }
+
+            if (!leads || leads.length === 0) {
+              return corsResponse(JSON.stringify({ ok: false, comando: cmd, error: `No encontré a "${nombreLead}"` }));
+            }
+
+            if (leads.length > 1) {
+              const exactMatch = leads.find(l => normalizar(l.name || '') === nombreNormalizado);
+              if (exactMatch) {
+                leads = [exactMatch];
+              } else {
+                const nombresUnicos = new Set(leads.map(l => normalizar(l.name || '')));
+                if (nombresUnicos.size === 1) {
+                  leads = [leads[0]];
+                } else {
+                  return corsResponse(JSON.stringify({ ok: false, comando: cmd, error: `Múltiples leads: ${leads.map(l => l.name).join(', ')}` }));
+                }
+              }
+            }
+
+            const lead = leads[0] as any;
+            const FUNNEL_STAGES = ['new', 'contacted', 'qualified', 'visit_scheduled', 'visited', 'negotiating', 'reserved', 'sold', 'delivered'];
+            const stageLabels: Record<string, string> = {
+              'new': '🆕 Nuevo', 'contacted': '📞 Contactado', 'qualified': '✅ Calificado',
+              'visit_scheduled': '📅 Cita Agendada', 'visited': '🏠 Visitado', 'negotiating': '💰 Negociando',
+              'reserved': '📝 Reservado', 'sold': '✅ Vendido', 'delivered': '🏠 Entregado'
+            };
+
+            let currentStatus = lead.funnel_status || lead.stage || lead.status || 'new';
+            if (currentStatus === 'scheduled') currentStatus = 'visit_scheduled';
+            const currentIndex = FUNNEL_STAGES.indexOf(currentStatus);
+            const newIndex = direccion === 'next' ? currentIndex + 1 : currentIndex - 1;
+
+            if (newIndex < 0) {
+              return corsResponse(JSON.stringify({ ok: false, comando: cmd, error: `${lead.name} ya está en la primera etapa (${stageLabels[currentStatus] || currentStatus})` }));
+            }
+            if (newIndex >= FUNNEL_STAGES.length) {
+              return corsResponse(JSON.stringify({ ok: false, comando: cmd, error: `${lead.name} ya está en la última etapa (${stageLabels[currentStatus] || currentStatus})` }));
+            }
+
+            const newStage = FUNNEL_STAGES[newIndex];
+            const updateCol = lead.funnel_status !== undefined ? 'funnel_status' : (lead.stage !== undefined ? 'stage' : 'status');
+            await supabase.client.from('leads').update({ [updateCol]: newStage }).eq('id', lead.id);
+
+            return corsResponse(JSON.stringify({
+              ok: true,
+              comando: cmd,
+              handlerName: 'ceoMoverLead',
+              resultado: `✅ ${lead.name} movido: ${stageLabels[currentStatus] || currentStatus} → ${stageLabels[newStage] || newStage}`,
+              lead: { id: lead.id, name: lead.name, previousStatus: currentStatus, newStatus: newStage, column: updateCol }
+            }));
+          }
+
           return corsResponse(JSON.stringify({
             ok: true,
             comando: cmd,
