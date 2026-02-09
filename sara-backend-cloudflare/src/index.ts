@@ -989,6 +989,48 @@ export default {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // RETELL CALL STATUS - Ver status de llamadas recientes
+    // USO: /retell-status?call_id=XXX  o  /retell-status (lista recientes)
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/retell-status" && request.method === "GET") {
+      try {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+
+        if (!env.RETELL_API_KEY) {
+          return corsResponse(JSON.stringify({ error: 'RETELL_API_KEY no configurado' }));
+        }
+
+        const { createRetellService } = await import('./services/retellService');
+        const retell = createRetellService(env.RETELL_API_KEY, env.RETELL_AGENT_ID || '', env.RETELL_PHONE_NUMBER || '');
+
+        const callId = url.searchParams.get('call_id');
+
+        if (callId) {
+          // Detalle de una llamada específica
+          const details = await retell.getCallDetails(callId);
+          return corsResponse(JSON.stringify({ ok: !!details, call: details }));
+        } else {
+          // Lista de llamadas recientes
+          const calls = await retell.listRecentCalls(10);
+          const summary = calls.map((c: any) => ({
+            call_id: c.call_id,
+            status: c.call_status || c.status,
+            to: c.to_number,
+            from: c.from_number,
+            duration_sec: c.duration_ms ? Math.round(c.duration_ms / 1000) : null,
+            started: c.start_timestamp ? new Date(c.start_timestamp).toISOString() : null,
+            ended: c.end_timestamp ? new Date(c.end_timestamp).toISOString() : null,
+            disconnect_reason: c.disconnection_reason || c.disconnect_reason,
+          }));
+          return corsResponse(JSON.stringify({ ok: true, count: calls.length, calls: summary }));
+        }
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ ok: false, error: e.message }));
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // TEST COMANDO CEO - Probar comandos sin enviar WhatsApp
     // USO: /test-comando-ceo?cmd=ventas
     // ═══════════════════════════════════════════════════════════════════════
@@ -6022,6 +6064,67 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
       }
     }
 
+    // Crear template info_desarrollo (para enviar info post-llamada Retell cuando ventana 24h cerrada)
+    if (url.pathname === '/api/create-info-template' && request.method === 'POST') {
+      try {
+        const WABA_ID = '1227849769248437';
+
+        const templatePayload = {
+          name: 'info_desarrollo',
+          language: 'es_MX',
+          category: 'UTILITY',
+          components: [
+            {
+              type: 'BODY',
+              text: '¡Hola {{1}}! 🏠\n\nSoy Sara de Grupo Santa Rita. Gracias por tu interés en *{{2}}*.\n\n💰 Casas desde {{3}}\n\nTe comparto la información para que la revises. ¿Te gustaría agendar una visita? Responde *Sí* y con gusto te agendo. 😊',
+              example: {
+                body_text: [['María', 'Monte Verde', '$1.6M equipada']]
+              }
+            },
+            {
+              type: 'BUTTONS',
+              buttons: [
+                {
+                  type: 'URL',
+                  text: 'Ver brochure',
+                  url: 'https://brochures-santarita.pages.dev/{{1}}',
+                  example: ['monte_verde.html']
+                },
+                {
+                  type: 'URL',
+                  text: 'Ver ubicacion',
+                  url: 'https://maps.app.goo.gl/{{1}}',
+                  example: ['qR8vK3xYz9M']
+                }
+              ]
+            }
+          ]
+        };
+
+        const createUrl = `https://graph.facebook.com/v22.0/${WABA_ID}/message_templates`;
+        const response = await fetch(createUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${env.META_ACCESS_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(templatePayload)
+        });
+
+        const result = await response.json();
+
+        return corsResponse(JSON.stringify({
+          success: response.ok,
+          status: response.status,
+          template_name: 'info_desarrollo',
+          result
+        }, null, 2));
+
+      } catch (error: any) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+    }
+
     // Crear template individual (legacy)
     if (url.pathname === '/api/create-reengagement-template' && request.method === 'POST') {
       try {
@@ -7650,20 +7753,24 @@ Mensaje: ${mensaje}`;
               }
             }
 
-            await supabase.client.from('call_logs').insert({
-              call_id: call.call_id,
-              lead_id: lead?.id || null,
-              lead_phone: isInbound ? call.from_number : call.to_number,
-              vendor_id: lead?.assigned_to || call.metadata?.vendor_id || null,
-              duration_seconds: call.duration_ms ? Math.round(call.duration_ms / 1000) : null,
-              transcript: call.transcript || null,
-              summary: call.call_analysis?.summary || null,
-              sentiment: call.call_analysis?.sentiment || null,
-              outcome: call.call_analysis?.call_successful ? 'successful' : 'unknown',
-              created_at: new Date().toISOString()
-            });
-
-            console.log(`✅ Call log guardado: ${call.call_id}`);
+            // Guardar en call_logs (no bloquea si falla)
+            try {
+              await supabase.client.from('call_logs').insert({
+                call_id: call.call_id,
+                lead_id: lead?.id || null,
+                lead_phone: isInbound ? call.from_number : call.to_number,
+                vendor_id: lead?.assigned_to || call.metadata?.vendor_id || null,
+                duration_seconds: call.duration_ms ? Math.round(call.duration_ms / 1000) : null,
+                transcript: call.transcript || null,
+                summary: call.call_analysis?.summary || null,
+                sentiment: call.call_analysis?.sentiment || null,
+                outcome: call.call_analysis?.call_successful ? 'successful' : 'unknown',
+                created_at: new Date().toISOString()
+              });
+              console.log(`✅ Call log guardado: ${call.call_id}`);
+            } catch (clError) {
+              console.log(`⚠️ call_logs no disponible, continuando...`);
+            }
 
             // Agregar nota al lead
             if (lead) {
@@ -7695,7 +7802,51 @@ Mensaje: ${mensaje}`;
               });
               notesObj.notas = notasArray;
 
-              await supabase.client.from('leads').update({ notes: notesObj }).eq('id', lead.id);
+              // Actualizar property_interest si cambió durante la llamada
+              const nuevoDesarrollo = call.call_analysis?.custom_analysis?.desarrollo_interes ||
+                                      call.metadata?.desarrollo_interes ||
+                                      call.metadata?.desarrollo;
+
+              // Detectar desarrollo mencionado en el transcript
+              // Transcript puede ser string ("Agent: ...\nUser: ...") o array ([{role, content}])
+              let desarrolloDelTranscript = '';
+              const desarrollosConocidos = ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano'];
+              if (call.transcript) {
+                let userMessages: string[] = [];
+                if (typeof call.transcript === 'string') {
+                  // Parse string format: "Agent: ...\nUser: ..."
+                  const lines = call.transcript.split('\n');
+                  for (const line of lines) {
+                    if (line.startsWith('User:')) {
+                      userMessages.push(line.substring(5).trim().toLowerCase());
+                    }
+                  }
+                } else if (Array.isArray(call.transcript)) {
+                  for (const entry of call.transcript) {
+                    if (entry.role === 'user') {
+                      userMessages.push(entry.content.toLowerCase());
+                    }
+                  }
+                }
+                // Buscar el ÚLTIMO desarrollo mencionado por el usuario
+                for (let i = userMessages.length - 1; i >= 0; i--) {
+                  const encontrado = desarrollosConocidos.find(d => userMessages[i].includes(d));
+                  if (encontrado) {
+                    desarrolloDelTranscript = encontrado.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                    break;
+                  }
+                }
+              }
+
+              const desarrolloFinal = desarrolloDelTranscript || nuevoDesarrollo;
+
+              const updateData: any = { notes: notesObj };
+              if (desarrolloFinal) {
+                updateData.property_interest = desarrolloFinal;
+                console.log(`🏠 Actualizado property_interest: ${desarrolloFinal}`);
+              }
+
+              await supabase.client.from('leads').update(updateData).eq('id', lead.id);
               console.log(`📝 Nota de llamada agregada a lead ${lead.id}`);
             }
 
@@ -7722,69 +7873,212 @@ Mensaje: ${mensaje}`;
             // ═══════════════════════════════════════════════════════════════
             // SEGUIMIENTO AUTOMÁTICO POR WHATSAPP AL LEAD
             // Enviar mensaje + brochure + GPS después de la llamada
+            // RESPETA VENTANA 24H: si cerrada → usa template
             // ═══════════════════════════════════════════════════════════════
-            if (leadPhone && call.duration_ms && call.duration_ms > 30000) {
-              // Solo si la llamada duró más de 30 segundos (no fue colgada inmediatamente)
+            if (leadPhone && call.duration_ms && call.duration_ms > 15000) {
               try {
                 const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-                const desarrolloInteres = call.call_analysis?.custom_analysis?.desarrollo_interes ||
-                                          call.metadata?.desarrollo ||
-                                          lead?.property_interest;
 
-                // 1. Mensaje de agradecimiento
-                let mensajeFollowUp = `¡Hola${lead?.name ? ' ' + lead.name.split(' ')[0] : ''}! 👋\n\n`;
-                mensajeFollowUp += `Gracias por tu llamada con Grupo Santa Rita. `;
-
-                if (desarrolloInteres) {
-                  mensajeFollowUp += `Me da gusto que te interese ${desarrolloInteres}. `;
-                }
-
-                mensajeFollowUp += `\n\nTe comparto información por este medio para que la revises con calma. `;
-                mensajeFollowUp += `Si tienes dudas, aquí estoy para ayudarte. 🏠`;
-
-                await meta.sendWhatsAppMessage(leadPhone, mensajeFollowUp);
-                console.log(`📱 WhatsApp de seguimiento enviado a ${leadPhone}`);
-
-                // 2. Enviar brochure si hay desarrollo de interés
-                if (desarrolloInteres) {
-                  // Buscar el desarrollo en properties para obtener brochure y GPS
-                  const desarrolloNormalizado = desarrolloInteres.toLowerCase()
-                    .replace('priv.', 'privada')
-                    .replace('priv ', 'privada ')
-                    .trim();
-
-                  const { data: property } = await supabase.client
-                    .from('properties')
-                    .select('name, brochure_url, gps_url, price_min, price_max')
-                    .or(`name.ilike.%${desarrolloNormalizado}%,development.ilike.%${desarrolloNormalizado}%`)
-                    .limit(1)
-                    .maybeSingle();
-
-                  if (property) {
-                    // Enviar brochure si existe
-                    if (property.brochure_url) {
-                      await new Promise(resolve => setTimeout(resolve, 2000)); // Esperar 2s
-                      await meta.sendWhatsAppDocument(
-                        leadPhone,
-                        property.brochure_url,
-                        `📄 Brochure ${property.name || desarrolloInteres}`
-                      );
-                      console.log(`📄 Brochure enviado: ${property.name}`);
-                    }
-
-                    // Enviar GPS si existe
-                    if (property.gps_url) {
-                      await new Promise(resolve => setTimeout(resolve, 2000)); // Esperar 2s
-                      await meta.sendWhatsAppMessage(
-                        leadPhone,
-                        `📍 Aquí te dejo la ubicación de ${property.name || desarrolloInteres}:\n${property.gps_url}`
-                      );
-                      console.log(`📍 GPS enviado: ${property.name}`);
-                    }
+                // Verificar ventana de 24h
+                let ventanaAbierta = false;
+                if (lead?.id) {
+                  const { data: leadFresh } = await supabase.client
+                    .from('leads')
+                    .select('last_message_at')
+                    .eq('id', lead.id)
+                    .single();
+                  if (leadFresh?.last_message_at) {
+                    const hace24h = Date.now() - 24 * 60 * 60 * 1000;
+                    ventanaAbierta = new Date(leadFresh.last_message_at).getTime() > hace24h;
                   }
                 }
 
-                // 3. Actualizar lead para marcar que recibió seguimiento post-llamada
+                console.log(`📱 Ventana 24h para ${leadPhone}: ${ventanaAbierta ? 'ABIERTA' : 'CERRADA'}`);
+
+                const desarrolloInteres = desarrolloDelTranscript ||
+                                          call.call_analysis?.custom_analysis?.desarrollo_interes ||
+                                          call.metadata?.desarrollo_interes ||
+                                          call.metadata?.desarrollo ||
+                                          lead?.property_interest;
+
+                if (ventanaAbierta) {
+                  // VENTANA ABIERTA → enviar mensajes directos
+                  const primerNombre = lead?.name ? ' ' + lead.name.split(' ')[0] : '';
+                  let mensajeFollowUp = `¡Hola${primerNombre}! 👋\n\n`;
+                  mensajeFollowUp += `Soy Sara de Grupo Santa Rita. Gracias por la llamada. `;
+                  if (desarrolloInteres) {
+                    mensajeFollowUp += `Me da gusto que te interese *${desarrolloInteres}*. `;
+                  }
+                  mensajeFollowUp += `\n\nTe comparto información por aquí para que la revises con calma. `;
+                  mensajeFollowUp += `Si tienes cualquier duda, aquí estoy para ayudarte. 🏠`;
+
+                  await meta.sendWhatsAppMessage(leadPhone, mensajeFollowUp);
+                  console.log(`📱 WhatsApp directo enviado a ${leadPhone}`);
+
+                  // Enviar recursos
+                  if (desarrolloInteres) {
+                    const desarrolloNormalizado = desarrolloInteres.toLowerCase()
+                      .replace('priv.', 'privada').replace('priv ', 'privada ').trim();
+
+                    const { data: props } = await supabase.client
+                      .from('properties')
+                      .select('name, development, brochure_urls, gps_link, youtube_link, matterport_link, price, price_equipped')
+                      .or(`name.ilike.%${desarrolloNormalizado}%,development.ilike.%${desarrolloNormalizado}%`)
+                      .limit(3);
+
+                    if (props && props.length > 0) {
+                      const prop = props[0];
+                      await new Promise(resolve => setTimeout(resolve, 1500));
+
+                      let recursosMensaje = `📋 *Información de ${prop.development || prop.name || desarrolloInteres}:*\n\n`;
+                      const precioDesde = props.reduce((min, p) => {
+                        const precio = p.price_equipped || p.price || 0;
+                        return precio > 0 && precio < min ? precio : min;
+                      }, Infinity);
+                      if (precioDesde < Infinity) {
+                        recursosMensaje += `💰 Desde $${(precioDesde / 1000000).toFixed(1)}M equipada\n`;
+                      }
+                      if (prop.youtube_link) recursosMensaje += `🎬 Video: ${prop.youtube_link}\n`;
+                      if (prop.matterport_link) recursosMensaje += `🏠 Recorrido 3D: ${prop.matterport_link}\n`;
+                      if (prop.gps_link) recursosMensaje += `📍 Ubicación: ${prop.gps_link}\n`;
+                      const brochureRaw = prop.brochure_urls;
+                      if (brochureRaw) {
+                        const urls = Array.isArray(brochureRaw) ? brochureRaw : [brochureRaw];
+                        const htmlUrl = urls.find((u: string) => u.includes('.html') || u.includes('pages.dev'));
+                        if (htmlUrl) recursosMensaje += `📄 Brochure: ${htmlUrl}\n`;
+                      }
+                      recursosMensaje += `\n¿Te gustaría agendar una visita? 😊`;
+                      await meta.sendWhatsAppMessage(leadPhone, recursosMensaje);
+                      console.log(`📋 Recursos enviados para ${desarrolloInteres}`);
+                    }
+                  }
+                } else {
+                  // VENTANA CERRADA → enviar template info_desarrollo con datos REALES
+                  console.log(`📱 Ventana cerrada, enviando template con info real a ${leadPhone}`);
+                  const primerNombre = lead?.name ? lead.name.split(' ')[0] : 'cliente';
+
+                  let templateEnviado = false;
+
+                  // Intentar enviar template info_desarrollo con datos reales del desarrollo
+                  if (desarrolloInteres) {
+                    try {
+                      const desarrolloNorm = desarrolloInteres.toLowerCase()
+                        .replace('priv.', 'privada').replace('priv ', 'privada ').trim();
+
+                      const { data: props } = await supabase.client
+                        .from('properties')
+                        .select('name, development, brochure_urls, gps_link, price, price_equipped')
+                        .or(`name.ilike.%${desarrolloNorm}%,development.ilike.%${desarrolloNorm}%`)
+                        .limit(3);
+
+                      if (props && props.length > 0) {
+                        const prop = props[0];
+                        const precioDesde = props.reduce((min: number, p: any) => {
+                          const precio = p.price_equipped || p.price || 0;
+                          return precio > 0 && precio < min ? precio : min;
+                        }, Infinity);
+                        const precioStr = precioDesde < Infinity ? `$${(precioDesde / 1000000).toFixed(1)}M equipada` : 'consultar';
+
+                        // Obtener slug de brochure HTML
+                        const brochureRaw = prop.brochure_urls;
+                        let brochureSlug = '';
+                        if (brochureRaw) {
+                          const urls = Array.isArray(brochureRaw) ? brochureRaw : [brochureRaw];
+                          const htmlUrl = urls.find((u: string) => u.includes('.html') || u.includes('pages.dev'));
+                          if (htmlUrl) {
+                            // Extraer slug: "https://brochures-santarita.pages.dev/monte_verde.html" → "monte_verde.html"
+                            const parts = htmlUrl.split('/');
+                            brochureSlug = parts[parts.length - 1] || '';
+                          }
+                        }
+
+                        // Obtener código corto de GPS
+                        let gpsSlug = '';
+                        if (prop.gps_link) {
+                          // "https://maps.app.goo.gl/abc123" → "abc123"
+                          const gpsParts = prop.gps_link.split('/');
+                          gpsSlug = gpsParts[gpsParts.length - 1] || '';
+                        }
+
+                        const desarrolloNombre = prop.development || prop.name || desarrolloInteres;
+
+                        // Construir componentes del template
+                        const templateComponents: any[] = [
+                          {
+                            type: 'body',
+                            parameters: [
+                              { type: 'text', text: primerNombre },
+                              { type: 'text', text: desarrolloNombre },
+                              { type: 'text', text: precioStr }
+                            ]
+                          }
+                        ];
+
+                        // Agregar botones URL si tenemos datos
+                        if (brochureSlug) {
+                          templateComponents.push({
+                            type: 'button',
+                            sub_type: 'url',
+                            index: '0',
+                            parameters: [{ type: 'text', text: brochureSlug }]
+                          });
+                        }
+                        if (gpsSlug) {
+                          templateComponents.push({
+                            type: 'button',
+                            sub_type: 'url',
+                            index: '1',
+                            parameters: [{ type: 'text', text: gpsSlug }]
+                          });
+                        }
+
+                        await meta.sendTemplate(leadPhone, 'info_desarrollo', 'es_MX', templateComponents);
+                        console.log(`📱 Template info_desarrollo enviado a ${leadPhone} (${desarrolloNombre}, ${precioStr})`);
+                        templateEnviado = true;
+                      }
+                    } catch (infoErr: any) {
+                      console.log(`⚠️ Template info_desarrollo falló: ${infoErr.message}`);
+                    }
+                  }
+
+                  // Fallback: seguimiento_lead genérico si info_desarrollo no se pudo enviar
+                  if (!templateEnviado) {
+                    try {
+                      await meta.sendTemplate(leadPhone, 'seguimiento_lead', 'es_MX', [
+                        { type: 'body', parameters: [{ type: 'text', text: primerNombre }] }
+                      ]);
+                      console.log(`📱 Template seguimiento_lead (fallback) enviado a ${leadPhone}`);
+                    } catch (templateErr: any) {
+                      console.log(`⚠️ seguimiento_lead falló, intentando reactivar_equipo...`);
+                      try {
+                        await meta.sendTemplate(leadPhone, 'reactivar_equipo', 'es_MX', [
+                          { type: 'body', parameters: [{ type: 'text', text: primerNombre }] }
+                        ]);
+                      } catch (e2) {
+                        console.error(`❌ Todos los templates fallaron para ${leadPhone}`);
+                      }
+                    }
+                  }
+
+                  // Guardar recursos como pending para cuando responda (siempre, como backup)
+                  if (lead?.id && desarrolloInteres) {
+                    const { data: leadForPending } = await supabase.client
+                      .from('leads').select('notes').eq('id', lead.id).single();
+                    let pendingNotes = leadForPending?.notes || {};
+                    if (typeof pendingNotes === 'string') {
+                      try { pendingNotes = JSON.parse(pendingNotes); } catch { pendingNotes = {}; }
+                    }
+                    pendingNotes.pending_retell_resources = {
+                      desarrollo: desarrolloInteres,
+                      sent_at: new Date().toISOString(),
+                      call_id: call.call_id
+                    };
+                    await supabase.client.from('leads').update({ notes: pendingNotes }).eq('id', lead.id);
+                    console.log(`💾 Recursos pendientes guardados para ${lead.id} (${desarrolloInteres})`);
+                  }
+                }
+
+                // Actualizar lead
                 if (lead?.id) {
                   await supabase.client
                     .from('leads')
@@ -7797,15 +8091,10 @@ Mensaje: ${mensaje}`;
 
               } catch (whatsappError) {
                 console.error('Error enviando WhatsApp de seguimiento:', whatsappError);
-                // No fallar el webhook por error de WhatsApp
               }
             }
-          } catch (dbError: any) {
-            // Si la tabla call_logs no existe, solo loguear
-            console.log(`📞 Llamada ${call.call_id} procesada (tabla call_logs no existe, solo log)`);
-            if (!dbError.message?.includes('does not exist')) {
-              console.error('Error guardando call log:', dbError);
-            }
+          } catch (processError: any) {
+            console.error('Error procesando llamada:', processError?.message || processError);
           }
         }
 
