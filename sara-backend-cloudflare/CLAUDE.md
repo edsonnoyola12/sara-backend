@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-08 (Sesión 31)
+> Última actualización: 2026-02-09 (Sesión 32)
 
 ---
 
@@ -205,6 +205,10 @@ await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
 - `pending_recap` - Recap nocturno (7 PM, solo si no usó SARA)
 - `pending_reporte_diario` - Reporte 7 PM
 - `pending_resumen_semanal` - Resumen semanal (sábado)
+- `pending_mensaje` - Notificaciones genéricas (citas Retell, alertas)
+- `pending_alerta_lead` - Alertas prioritarias de leads
+
+**Fallback de templates:** Si un `templateOverride` falla (ej: template PENDING en Meta), se intenta `reactivar_equipo` como fallback antes de guardar solo como pending.
 
 **Aplica a:** Leads, Vendedores, Coordinadores, Asesores, Marketing
 
@@ -4147,3 +4151,73 @@ El push-to-cita hacía READ + WRITE de `conversation_history` justo después del
 **Commit:** `b45c7596`
 **Deploy:** Version ID `62c0fb3c`
 **Push:** origin/main
+
+---
+
+### 2026-02-09 (Sesión 32) - Fix Notificación al Vendedor desde Retell + Pending Messages
+
+**3 bugs corregidos en el flujo de notificación al vendedor después de llamada Retell:**
+
+#### Bug 1: No había fallback cuando templateOverride falla
+
+**Problema:** `enviarMensajeTeamMember()` usaba `templateOverride: { name: 'notificacion_cita_vendedor' }` pero si el template fallaba (ej: estaba PENDING en Meta), no intentaba el template genérico `reactivar_equipo`. Simplemente guardaba como pending y retornaba `failed`.
+
+**Fix (src/utils/teamMessaging.ts):** Cuando `templateOverride` falla, ahora intenta `reactivar_equipo` como fallback antes de dar up.
+
+#### Bug 2: `pending_mensaje` y `pending_alerta_lead` nunca se entregaban
+
+**Problema:** Los handlers de vendedor y CEO verificaban `pending_briefing`, `pending_recap`, `pending_reporte_diario`, `pending_resumen_semanal`, `pending_video_semanal`, `pending_audio`... pero **NO `pending_mensaje` ni `pending_alerta_lead`**. La notificación de cita del Retell se guardaba como `pending_mensaje` y nunca se entregaba cuando el vendedor respondía.
+
+**Fix (src/handlers/whatsapp.ts):** Agregados handlers para `pending_mensaje` y `pending_alerta_lead` en ambos:
+- `handleVendedorMessage` (antes de SELECCIÓN DE TEMPLATE)
+- `handleCEOMessage` (antes de BRIDGE)
+
+#### Bug 3: `vendedor_notified` nunca se marcaba como true
+
+**Problema:** La columna `vendedor_notified` en la tabla `appointments` existía pero el código nunca la actualizaba después de notificar al vendedor.
+
+**Fix (src/index.ts):** Después de `enviarMensajeTeamMember()` exitoso, se hace `UPDATE appointments SET vendedor_notified=true WHERE lead_id=X AND scheduled_date=Y AND scheduled_time=Z`.
+
+#### Mejora adicional: Parsing de horas en español (dateParser.ts)
+
+Soporte para horas en texto: "las cuatro de la tarde", "a las tres de la mañana", etc.
+- Mapa de números en texto a dígitos (una→1, dos→2, ..., doce→12)
+- Detección de periodo (tarde/noche → PM, mañana → AM)
+- Si no especifica periodo y hora ≤ 7 → asume PM
+
+#### Pruebas E2E ejecutadas:
+
+| Test | Resultado |
+|------|-----------|
+| Llamada Retell → cita creada | ✅ Feb 10 17:00 llamada Monte Verde |
+| `vendedor_notified` marcado | ✅ True (primera vez que funciona) |
+| Vendedor recibió notificación (ventana abierta) | ✅ Directo |
+| `pending_mensaje` se entrega al responder | ✅ Probado con Vendedor Test |
+| Fallback template override → reactivar_equipo | ✅ Implementado |
+| Template `notificacion_cita_vendedor` | ✅ APPROVED en Meta |
+
+**Pending keys ahora soportados en handlers:**
+
+| Key | Handler Vendedor | Handler CEO |
+|-----|-----------------|-------------|
+| `pending_briefing` | ✅ | ✅ |
+| `pending_recap` | ✅ | ✅ |
+| `pending_reporte_diario` | ✅ | ✅ |
+| `pending_resumen_semanal` | ✅ | ✅ |
+| `pending_reporte_semanal` | ✅ | ✅ |
+| `pending_video_semanal` | ✅ | ✅ |
+| `pending_audio` | ✅ | ✅ |
+| **`pending_mensaje`** | ✅ NEW | ✅ NEW |
+| **`pending_alerta_lead`** | ✅ NEW | ✅ NEW |
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/utils/teamMessaging.ts` | Fallback a `reactivar_equipo` si templateOverride falla |
+| `src/handlers/whatsapp.ts` | Handlers `pending_mensaje` + `pending_alerta_lead` en vendedor y CEO |
+| `src/index.ts` | `vendedor_notified=true` + mejoras notificaciones Retell |
+| `src/handlers/dateParser.ts` | Parsing de horas en español (texto → números) |
+
+**Tests:** 369/369 pasando
+**Deploy:** Version ID `c1c1cbd3`

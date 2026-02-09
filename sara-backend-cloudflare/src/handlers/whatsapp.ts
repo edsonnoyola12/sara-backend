@@ -1538,6 +1538,36 @@ export class WhatsAppHandler {
       }
     }
 
+    // PENDING MENSAJE GENÉRICO CEO (notificaciones de citas, alertas, etc.)
+    const pendingMensajeCEO = notasCEO?.pending_mensaje;
+    if (pendingMensajeCEO?.sent_at && pendingMensajeCEO?.mensaje_completo) {
+      if (!isPendingExpired(pendingMensajeCEO, 'notificacion')) {
+        console.log(`📬 [PENDING] CEO ${nombreCEO} respondió template - enviando mensaje pendiente`);
+        await this.meta.sendWhatsAppMessage(cleanPhone, pendingMensajeCEO.mensaje_completo);
+
+        const { pending_mensaje, ...notasSinPending } = notasCEO;
+        await this.supabase.client.from('team_members').update({
+          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString() }
+        }).eq('id', ceo.id);
+        return;
+      }
+    }
+
+    // PENDING ALERTA LEAD CEO (alertas prioritarias)
+    const pendingAlertaLeadCEO = notasCEO?.pending_alerta_lead;
+    if (pendingAlertaLeadCEO?.sent_at && pendingAlertaLeadCEO?.mensaje_completo) {
+      if (!isPendingExpired(pendingAlertaLeadCEO, 'notificacion')) {
+        console.log(`🔥 [PENDING] CEO ${nombreCEO} respondió template - enviando alerta de lead`);
+        await this.meta.sendWhatsAppMessage(cleanPhone, pendingAlertaLeadCEO.mensaje_completo);
+
+        const { pending_alerta_lead, ...notasSinPending } = notasCEO;
+        await this.supabase.client.from('team_members').update({
+          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString() }
+        }).eq('id', ceo.id);
+        return;
+      }
+    }
+
     // ╔════════════════════════════════════════════════════════════════════════╗
     // ║  CRÍTICO - NO MODIFICAR SIN CORRER TESTS: npm test                      ║
     // ║  Test file: src/tests/conversationLogic.test.ts                         ║
@@ -4034,6 +4064,42 @@ export class WhatsAppHandler {
         const { pending_audio, ...notasSinPendingAudioV } = notasVendedor;
         await this.supabase.client.from('team_members').update({
           notes: { ...notasSinPendingAudioV, last_sara_interaction: new Date().toISOString() }
+        }).eq('id', vendedor.id);
+        return;
+      }
+    }
+
+    // PENDING MENSAJE GENÉRICO (notificaciones de citas, alertas, etc.)
+    const pendingMensajeInicio = notasVendedor?.pending_mensaje;
+    if (pendingMensajeInicio?.sent_at && pendingMensajeInicio?.mensaje_completo) {
+      if (!isPendingExpired(pendingMensajeInicio, 'notificacion')) {
+        console.log(`📬 [PENDING] ${nombreVendedor} respondió template - enviando mensaje pendiente`);
+        await this.meta.sendWhatsAppMessage(from, pendingMensajeInicio.mensaje_completo);
+
+        const { pending_mensaje, ...notasSinPendingMensaje } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPendingMensaje,
+            last_sara_interaction: new Date().toISOString()
+          }
+        }).eq('id', vendedor.id);
+        return;
+      }
+    }
+
+    // PENDING ALERTA LEAD (alertas prioritarias)
+    const pendingAlertaLeadInicio = notasVendedor?.pending_alerta_lead;
+    if (pendingAlertaLeadInicio?.sent_at && pendingAlertaLeadInicio?.mensaje_completo) {
+      if (!isPendingExpired(pendingAlertaLeadInicio, 'notificacion')) {
+        console.log(`🔥 [PENDING] ${nombreVendedor} respondió template - enviando alerta de lead`);
+        await this.meta.sendWhatsAppMessage(from, pendingAlertaLeadInicio.mensaje_completo);
+
+        const { pending_alerta_lead, ...notasSinPendingAlerta } = notasVendedor;
+        await this.supabase.client.from('team_members').update({
+          notes: {
+            ...notasSinPendingAlerta,
+            last_sara_interaction: new Date().toISOString()
+          }
         }).eq('id', vendedor.id);
         return;
       }

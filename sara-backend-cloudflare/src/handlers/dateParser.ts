@@ -55,17 +55,40 @@ export function parseFechaEspanol(texto: string): ParsedFecha | null {
     tipo = 'llamada';
   }
 
-  // Parsear hora (10am, 10:00, 10 am, 2pm, 14:00, etc)
-  const horaMatch = textoLower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm|hrs?)?/i);
-  if (horaMatch) {
-    let horas = parseInt(horaMatch[1]);
-    const minutos = horaMatch[2] || '00';
-    const ampm = horaMatch[3]?.toLowerCase();
+  // Mapa de números en texto a dígitos
+  const numerosTexto: { [key: string]: number } = {
+    'una': 1, 'uno': 1, 'dos': 2, 'tres': 3, 'cuatro': 4, 'cinco': 5,
+    'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9, 'diez': 10,
+    'once': 11, 'doce': 12
+  };
 
-    if (ampm === 'pm' && horas < 12) horas += 12;
-    if (ampm === 'am' && horas === 12) horas = 0;
+  // Parsear hora en texto: "las cuatro de la tarde", "a las tres de la mañana"
+  const horaTextoMatch = textoLower.match(/(?:las?\s+)(una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\s*(?:de\s+la\s+)?(tarde|mañana|manana|noche)?/i);
+  if (horaTextoMatch) {
+    let horas = numerosTexto[horaTextoMatch[1]] || 0;
+    const periodo = horaTextoMatch[2]?.toLowerCase();
+    if ((periodo === 'tarde' || periodo === 'noche') && horas < 12) horas += 12;
+    if ((periodo === 'mañana' || periodo === 'manana') && horas === 12) horas = 0;
+    // Si no dice tarde/mañana y la hora es <= 7, asumir PM (nadie agenda llamadas a las 4am)
+    if (!periodo && horas >= 1 && horas <= 7) horas += 12;
+    hora = `${horas.toString().padStart(2, '0')}:00`;
+  }
 
-    hora = `${horas.toString().padStart(2, '0')}:${minutos}`;
+  // Parsear hora numérica (10am, 10:00, 10 am, 2pm, 14:00, etc)
+  if (!horaTextoMatch) {
+    const horaMatch = textoLower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm|hrs?)?/i);
+    if (horaMatch) {
+      let horas = parseInt(horaMatch[1]);
+      const minutos = horaMatch[2] || '00';
+      const ampm = horaMatch[3]?.toLowerCase();
+
+      if (ampm === 'pm' && horas < 12) horas += 12;
+      if (ampm === 'am' && horas === 12) horas = 0;
+      // Si no dice am/pm y la hora es <= 7, asumir PM
+      if (!ampm && horas >= 1 && horas <= 7) horas += 12;
+
+      hora = `${horas.toString().padStart(2, '0')}:${minutos}`;
+    }
   }
 
   // Días de la semana

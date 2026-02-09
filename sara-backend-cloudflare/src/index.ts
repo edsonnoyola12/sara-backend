@@ -66,6 +66,7 @@ import {
 
 // Utils
 import { enviarMensajeTeamMember, EnviarMensajeTeamResult, isPendingExpired, getPendingMessages, verificarPendingParaLlamar, verificarDeliveryTeamMessages, CALL_CONFIG } from './utils/teamMessaging';
+import { parseFechaEspanol, detectarIntencionCita, getMexicoNow } from './handlers/dateParser';
 
 // Briefings y Recaps
 import {
@@ -1027,6 +1028,183 @@ export default {
         }
       } catch (e: any) {
         return corsResponse(JSON.stringify({ ok: false, error: e.message }));
+      }
+    }
+
+    // Leer debug logs del webhook Retell desde KV
+    if (url.pathname === '/retell-debug-logs' && request.method === 'GET') {
+      try {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+        const keys = await env.SARA_CACHE.list({ prefix: 'retell_' });
+        const logs: any[] = [];
+        for (const key of keys.keys) {
+          const val = await env.SARA_CACHE.get(key.name, 'json');
+          logs.push({ key: key.name, data: val });
+        }
+        return corsResponse(JSON.stringify({ count: logs.length, logs }, null, 2));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // Debug: ejecutar follow-up de Retell manualmente para un call_id
+    if (url.pathname === '/test-retell-followup' && request.method === 'GET') {
+      try {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+        const callId = url.searchParams.get('call_id');
+        if (!callId) return corsResponse(JSON.stringify({ error: 'Falta ?call_id=XXX' }));
+
+        const debug: any = { steps: [] };
+
+        // 1. Obtener detalles de la llamada
+        const { createRetellService } = await import('./services/retellService');
+        const retell = createRetellService(env.RETELL_API_KEY, env.RETELL_AGENT_ID || '', env.RETELL_PHONE_NUMBER || '');
+        const callDetails = await retell.getCallDetails(callId);
+        if (!callDetails) return corsResponse(JSON.stringify({ error: 'Call not found', callId }));
+
+        const isInbound = callDetails.direction === 'inbound';
+        const leadPhone = isInbound
+          ? (callDetails as any).from_number?.replace('+', '')
+          : (callDetails as any).to_number?.replace('+', '');
+        debug.steps.push({ step: 'call_details', leadPhone, duration_ms: callDetails.duration_ms, direction: callDetails.direction });
+
+        // 2. Buscar lead
+        const { data: lead } = await supabase.client
+          .from('leads')
+          .select('id, assigned_to, name, property_interest, last_message_at')
+          .or(`phone.eq.${leadPhone},phone.like.%${leadPhone?.slice(-10)}`)
+          .maybeSingle();
+        debug.steps.push({ step: 'lead_lookup', found: !!lead, lead_id: lead?.id, name: lead?.name });
+
+        // 3. Ventana 24h
+        let ventanaAbierta = false;
+        if (lead?.last_message_at) {
+          const hace24h = Date.now() - 24 * 60 * 60 * 1000;
+          ventanaAbierta = new Date(lead.last_message_at).getTime() > hace24h;
+        }
+        debug.steps.push({ step: 'ventana_24h', abierta: ventanaAbierta, last_message_at: lead?.last_message_at });
+
+        // 4. Detectar desarrollo del transcript
+        let desarrolloDelTranscript = '';
+        const desarrollosConocidos = ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano'];
+        const transcript = callDetails.transcript;
+        if (transcript) {
+          let userMessages: string[] = [];
+          if (typeof transcript === 'string') {
+            const lines = transcript.split('\n');
+            for (const line of lines) {
+              if (line.startsWith('User:')) userMessages.push(line.substring(5).trim().toLowerCase());
+            }
+          } else if (Array.isArray(transcript)) {
+            for (const entry of transcript as any[]) {
+              if (entry.role === 'user') userMessages.push(entry.content.toLowerCase());
+            }
+          }
+          for (let i = userMessages.length - 1; i >= 0; i--) {
+            const encontrado = desarrollosConocidos.find(d => userMessages[i].includes(d));
+            if (encontrado) {
+              desarrolloDelTranscript = encontrado.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+              break;
+            }
+          }
+          debug.steps.push({ step: 'transcript_parse', userMessages, desarrolloDelTranscript });
+        }
+
+        const desarrolloInteres = desarrolloDelTranscript ||
+          (callDetails.call_analysis as any)?.custom_analysis_data?.desarrollo_interes ||
+          (callDetails.call_analysis as any)?.custom_analysis?.desarrollo_interes ||
+          (callDetails as any).metadata?.desarrollo_interes ||
+          lead?.property_interest;
+        debug.steps.push({ step: 'desarrollo_final', desarrollo: desarrolloInteres });
+
+        // 5. Enviar WhatsApp
+        if (leadPhone && callDetails.duration_ms && callDetails.duration_ms > 15000) {
+          const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+          const primerNombre = lead?.name ? ' ' + lead.name.split(' ')[0] : '';
+
+          if (ventanaAbierta) {
+            let msg = `¡Hola${primerNombre}! 👋\n\nSoy Sara de Grupo Santa Rita. Gracias por la llamada. `;
+            if (desarrolloInteres) msg += `Me da gusto que te interese *${desarrolloInteres}*. `;
+            msg += `\n\nTe comparto información por aquí. Si tienes dudas, aquí estoy. 🏠`;
+
+            try {
+              const result = await meta.sendWhatsAppMessage(leadPhone, msg);
+              debug.steps.push({ step: 'whatsapp_sent', success: true, result });
+            } catch (e: any) {
+              debug.steps.push({ step: 'whatsapp_sent', success: false, error: e.message });
+            }
+
+            // Enviar recursos
+            if (desarrolloInteres) {
+              const desarrolloNorm = desarrolloInteres.toLowerCase().replace('priv.', 'privada').replace('priv ', 'privada ').trim();
+              const { data: props } = await supabase.client
+                .from('properties')
+                .select('name, development, brochure_urls, gps_link, youtube_link, matterport_link, price, price_equipped')
+                .or(`name.ilike.%${desarrolloNorm}%,development.ilike.%${desarrolloNorm}%`)
+                .limit(3);
+              debug.steps.push({ step: 'properties_lookup', found: props?.length || 0, desarrollo: desarrolloNorm });
+
+              if (props && props.length > 0) {
+                const prop = props[0];
+                let recursosMensaje = `📋 *Información de ${prop.development || prop.name || desarrolloInteres}:*\n\n`;
+                const precioDesde = props.reduce((min: number, p: any) => {
+                  const precio = p.price_equipped || p.price || 0;
+                  return precio > 0 && precio < min ? precio : min;
+                }, Infinity);
+                if (precioDesde < Infinity) recursosMensaje += `💰 Desde $${(precioDesde / 1000000).toFixed(1)}M equipada\n`;
+                if (prop.youtube_link) recursosMensaje += `🎬 Video: ${prop.youtube_link}\n`;
+                if (prop.gps_link) recursosMensaje += `📍 Ubicación: ${prop.gps_link}\n`;
+                const brochureRaw = prop.brochure_urls;
+                if (brochureRaw) {
+                  const urls = Array.isArray(brochureRaw) ? brochureRaw : [brochureRaw];
+                  const htmlUrl = urls.find((u: string) => u.includes('.html') || u.includes('pages.dev'));
+                  if (htmlUrl) recursosMensaje += `📄 Brochure: ${htmlUrl}\n`;
+                }
+                recursosMensaje += `\n¿Te gustaría agendar una visita? 😊`;
+
+                try {
+                  const result2 = await meta.sendWhatsAppMessage(leadPhone, recursosMensaje);
+                  debug.steps.push({ step: 'recursos_sent', success: true, result: result2 });
+                } catch (e: any) {
+                  debug.steps.push({ step: 'recursos_sent', success: false, error: e.message });
+                }
+              }
+            }
+          } else {
+            debug.steps.push({ step: 'ventana_cerrada', msg: 'usaría template' });
+          }
+        } else {
+          debug.steps.push({ step: 'skip', reason: 'no leadPhone or duration < 15s' });
+        }
+
+        return corsResponse(JSON.stringify(debug, null, 2));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message, stack: e.stack?.substring(0, 500) }), 500);
+      }
+    }
+
+    // Verificar configuración del agente Retell (webhook URL)
+    if (url.pathname === '/retell-agent-config' && request.method === 'GET') {
+      try {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+        const agentId = env.RETELL_AGENT_ID || 'agent_3299a30fa8364c88d298df056e';
+        const resp = await fetch(`https://api.retellai.com/get-agent/${agentId}`, {
+          headers: { 'Authorization': `Bearer ${env.RETELL_API_KEY}` }
+        });
+        const agentData = await resp.json() as any;
+        return corsResponse(JSON.stringify({
+          agent_id: agentId,
+          agent_name: agentData.agent_name,
+          webhook_url: agentData.webhook_url || 'NOT SET',
+          post_call_analysis: agentData.post_call_analysis_data ? 'CONFIGURED' : 'NOT SET',
+          voice_id: agentData.voice_id,
+          language: agentData.language,
+        }, null, 2));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
     }
 
@@ -6125,6 +6303,50 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
       }
     }
 
+    // Crear template notificacion_cita_vendedor (para notificar al vendedor cuando ventana cerrada)
+    if (url.pathname === '/api/create-vendor-appointment-template' && request.method === 'POST') {
+      try {
+        const WABA_ID = '1227849769248437';
+
+        const templatePayload = {
+          name: 'notificacion_cita_vendedor',
+          language: 'es_MX',
+          category: 'UTILITY',
+          components: [
+            {
+              type: 'BODY',
+              text: '📅 *{{1}}*\n\n👤 Lead: {{2}}\n📱 Tel: {{3}}\n🏠 Desarrollo: {{4}}\n📅 Fecha: {{5}}\n\nLa cita ya está registrada. Responde para ver más detalles.',
+              example: {
+                body_text: [['VISITA PRESENCIAL AGENDADA', 'Roberto García', 'wa.me/5610016226', 'Monte Verde', 'domingo 15 de febrero a las 10:00 AM']]
+              }
+            }
+          ]
+        };
+
+        const createUrl = `https://graph.facebook.com/v22.0/${WABA_ID}/message_templates`;
+        const response = await fetch(createUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${env.META_ACCESS_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(templatePayload)
+        });
+
+        const result = await response.json();
+
+        return corsResponse(JSON.stringify({
+          success: response.ok,
+          status: response.status,
+          template_name: 'notificacion_cita_vendedor',
+          result
+        }, null, 2));
+
+      } catch (error: any) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+    }
+
     // Crear template individual (legacy)
     if (url.pathname === '/api/create-reengagement-template' && request.method === 'POST') {
       try {
@@ -7610,10 +7832,16 @@ Mensaje: ${mensaje}`;
         const body = await request.json() as any;
         console.log(`📞 RETELL WEBHOOK: Evento ${body.event} recibido`);
 
+        // Debug: guardar en KV para poder verificar que el webhook fue recibido
+        const debugLog: any[] = [];
+        debugLog.push({ t: Date.now(), step: 'webhook_received', event: body.event, call_id: body.call?.call_id });
+
         const { event, call } = body;
 
         if (!call || !call.call_id) {
           console.error('❌ Retell webhook: evento inválido (sin call_id)');
+          debugLog.push({ t: Date.now(), step: 'invalid_event' });
+          await env.SARA_CACHE.put(`retell_debug_${Date.now()}`, JSON.stringify(debugLog), { expirationTtl: 3600 });
           return new Response('OK', { status: 200 });
         }
 
@@ -7666,11 +7894,15 @@ Mensaje: ${mensaje}`;
               ? call.from_number?.replace('+', '')
               : call.to_number?.replace('+', '');
 
+            debugLog.push({ t: Date.now(), step: 'processing_call', event, leadPhone, duration_ms: call.duration_ms, has_transcript: !!call.transcript, has_analysis: !!call.call_analysis });
+
             let { data: lead } = await supabase.client
               .from('leads')
               .select('id, assigned_to, name')
               .or(`phone.eq.${leadPhone},phone.like.%${leadPhone?.slice(-10)}`)
               .maybeSingle();
+
+            debugLog.push({ t: Date.now(), step: 'lead_found', found: !!lead, lead_id: lead?.id, name: lead?.name });
 
             // Si es llamada ENTRANTE y NO existe el lead, CREARLO
             if (isInbound && !lead && leadPhone) {
@@ -7772,6 +8004,41 @@ Mensaje: ${mensaje}`;
               console.log(`⚠️ call_logs no disponible, continuando...`);
             }
 
+            // Detectar desarrollo mencionado en el transcript (antes de if(lead) para que esté en scope)
+            // Transcript puede ser string ("Agent: ...\nUser: ...") o array ([{role, content}])
+            let desarrolloDelTranscript = '';
+            const desarrollosConocidos = ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano'];
+            if (call.transcript) {
+              let userMessages: string[] = [];
+              if (typeof call.transcript === 'string') {
+                const lines = call.transcript.split('\n');
+                for (const line of lines) {
+                  if (line.startsWith('User:')) {
+                    userMessages.push(line.substring(5).trim().toLowerCase());
+                  }
+                }
+              } else if (Array.isArray(call.transcript)) {
+                for (const entry of call.transcript) {
+                  if (entry.role === 'user') {
+                    userMessages.push(entry.content.toLowerCase());
+                  }
+                }
+              }
+              for (let i = userMessages.length - 1; i >= 0; i--) {
+                const encontrado = desarrollosConocidos.find(d => userMessages[i].includes(d));
+                if (encontrado) {
+                  desarrolloDelTranscript = encontrado.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                  break;
+                }
+              }
+            }
+
+            const nuevoDesarrollo = call.call_analysis?.custom_analysis_data?.desarrollo_interes ||
+                                    call.call_analysis?.custom_analysis?.desarrollo_interes ||
+                                    call.metadata?.desarrollo_interes ||
+                                    call.metadata?.desarrollo;
+            const desarrolloFinal = desarrolloDelTranscript || nuevoDesarrollo;
+
             // Agregar nota al lead
             if (lead) {
               const durationMin = call.duration_ms ? Math.round(call.duration_ms / 60000) : 0;
@@ -7801,44 +8068,6 @@ Mensaje: ${mensaje}`;
                 type: 'call'
               });
               notesObj.notas = notasArray;
-
-              // Actualizar property_interest si cambió durante la llamada
-              const nuevoDesarrollo = call.call_analysis?.custom_analysis?.desarrollo_interes ||
-                                      call.metadata?.desarrollo_interes ||
-                                      call.metadata?.desarrollo;
-
-              // Detectar desarrollo mencionado en el transcript
-              // Transcript puede ser string ("Agent: ...\nUser: ...") o array ([{role, content}])
-              let desarrolloDelTranscript = '';
-              const desarrollosConocidos = ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano'];
-              if (call.transcript) {
-                let userMessages: string[] = [];
-                if (typeof call.transcript === 'string') {
-                  // Parse string format: "Agent: ...\nUser: ..."
-                  const lines = call.transcript.split('\n');
-                  for (const line of lines) {
-                    if (line.startsWith('User:')) {
-                      userMessages.push(line.substring(5).trim().toLowerCase());
-                    }
-                  }
-                } else if (Array.isArray(call.transcript)) {
-                  for (const entry of call.transcript) {
-                    if (entry.role === 'user') {
-                      userMessages.push(entry.content.toLowerCase());
-                    }
-                  }
-                }
-                // Buscar el ÚLTIMO desarrollo mencionado por el usuario
-                for (let i = userMessages.length - 1; i >= 0; i--) {
-                  const encontrado = desarrollosConocidos.find(d => userMessages[i].includes(d));
-                  if (encontrado) {
-                    desarrolloDelTranscript = encontrado.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                    break;
-                  }
-                }
-              }
-
-              const desarrolloFinal = desarrolloDelTranscript || nuevoDesarrollo;
 
               const updateData: any = { notes: notesObj };
               if (desarrolloFinal) {
@@ -7870,12 +8099,299 @@ Mensaje: ${mensaje}`;
               }
             }
 
+            // Variable para enviar confirmación de callback DESPUÉS de greeting/recursos
+            let callbackConfirmacionPendiente: { phone: string; msg: string; leadName: string; tipo: string; fecha: string; hora: string; desarrollo: string; gpsLink: string } | null = null;
+
+            // ═══════════════════════════════════════════════════════════════
+            // DETECTAR SOLICITUD DE CALLBACK / CITA EN EL TRANSCRIPT (con Claude)
+            // Analiza el transcript completo con IA para detectar cualquier formato:
+            // "márcame el viernes", "en 15 minutos", "la próxima semana", etc.
+            // → Crear appointment tipo 'llamada' + notificar vendedor + confirmar al lead
+            // ═══════════════════════════════════════════════════════════════
+            if (event === 'call_analyzed' && lead && call.transcript) {
+              try {
+                // Obtener transcript como texto plano
+                let transcriptText = '';
+                if (typeof call.transcript === 'string') {
+                  transcriptText = call.transcript;
+                } else if (Array.isArray(call.transcript)) {
+                  transcriptText = call.transcript.map((e: any) => `${e.role === 'agent' ? 'Agent' : 'User'}: ${e.content}`).join('\n');
+                }
+
+                // Usar Claude para analizar el transcript
+                const mexicoNow = getMexicoNow();
+                const fechaHoy = `${mexicoNow.getFullYear()}-${(mexicoNow.getMonth() + 1).toString().padStart(2, '0')}-${mexicoNow.getDate().toString().padStart(2, '0')}`;
+                const diasSemana = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+                const diaSemanaHoy = diasSemana[mexicoNow.getDay()];
+                const horaActual = `${mexicoNow.getHours().toString().padStart(2, '0')}:${mexicoNow.getMinutes().toString().padStart(2, '0')}`;
+
+                const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
+                const callbackPrompt = `Analiza este transcript de una llamada telefónica y determina si el lead (User) pidió que le volvieran a llamar/marcar, agendar una cita, o cualquier tipo de seguimiento con fecha/hora.
+
+FECHA DE HOY: ${fechaHoy} (${diaSemanaHoy})
+HORA ACTUAL: ${horaActual} (zona horaria México Central, UTC-6)
+
+TRANSCRIPT:
+${transcriptText}
+
+Responde SOLO con JSON válido, sin markdown ni texto adicional:
+{"callback_requested": true/false, "type": "llamada" | "visita" | "seguimiento" | "none", "date": "YYYY-MM-DD" o null, "time": "HH:MM" (24h) o null, "description": "breve descripción", "raw_text": "frase exacta del lead"}
+
+Tipos:
+- "visita" = el lead quiere IR PRESENCIALMENTE a ver casas/desarrollo
+- "llamada" = el lead pide que le VUELVAN A MARCAR/LLAMAR
+- "seguimiento" = acordaron dar seguimiento general (enviar info, WhatsApp, contactar después) SIN ser visita ni llamada específica
+
+Reglas:
+- "márcame el viernes" → callback_requested: true, type: "llamada", date: próximo viernes
+- "en 15 minutos" → callback_requested: true, type: "llamada", date: hoy, time: hora actual + 15 min
+- "la próxima semana" → callback_requested: true, type: "seguimiento", date: próximo lunes
+- "mañana por la tarde" → callback_requested: true, type: "llamada", date: mañana, time: "16:00"
+- "quiero visitar el sábado" → callback_requested: true, type: "visita", date: próximo sábado
+- "me mandan info por WhatsApp" → callback_requested: true, type: "seguimiento", date: hoy
+- Si NO pidió seguimiento → callback_requested: false
+- "a las cuatro de la tarde" → time: "16:00"
+- Si no especifica hora, default: "10:00"`;
+                const callbackAnalysis = await claude.chat([{ role: 'user', content: callbackPrompt }]);
+
+                // Parsear respuesta de Claude
+                let callbackData: any = null;
+                try {
+                  const jsonMatch = callbackAnalysis.match(/\{[\s\S]*\}/);
+                  if (jsonMatch) {
+                    callbackData = JSON.parse(jsonMatch[0]);
+                  }
+                } catch (parseErr) {
+                  console.log('⚠️ No se pudo parsear JSON de callback analysis');
+                }
+
+                debugLog.push({ t: Date.now(), step: 'callback_ai_analysis', data: callbackData });
+
+                if (callbackData?.callback_requested && callbackData.date) {
+                  console.log(`📅 Callback detectado por IA: ${callbackData.description} → ${callbackData.date} ${callbackData.time}`);
+                  debugLog.push({ t: Date.now(), step: 'callback_detected', date: callbackData.date, time: callbackData.time, type: callbackData.type });
+
+                  const citaFecha = callbackData.date;
+                  const citaHora = callbackData.time || '10:00';
+                  const citaTipo = callbackData.type === 'visita' ? 'visita' : callbackData.type === 'seguimiento' ? 'seguimiento' : 'llamada';
+
+                  // Calcular si es callback rápido (< 2 horas) o cita formal (>= 2 horas)
+                  const mexicoNowCb = getMexicoNow();
+                  const [cbHh, cbMm] = citaHora.split(':').map(Number);
+                  const citaDateTime = new Date(citaFecha);
+                  citaDateTime.setHours(cbHh, cbMm, 0, 0);
+                  const minutosHastaCita = (citaDateTime.getTime() - mexicoNowCb.getTime()) / (1000 * 60);
+                  const esCallbackRapido = minutosHastaCita < 120; // < 2 horas = callback rápido
+
+                  console.log(`📅 Callback en ${Math.round(minutosHastaCita)} min → ${esCallbackRapido ? 'RÁPIDO (solo notificar)' : 'FORMAL (crear cita)'}`);
+                  debugLog.push({ t: Date.now(), step: 'callback_type', minutos: Math.round(minutosHastaCita), rapido: esCallbackRapido });
+
+                  const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+                  if (esCallbackRapido) {
+                    // CALLBACK RÁPIDO: solo notificar al vendedor, NO crear cita formal
+                    if (lead.assigned_to) {
+                      const { data: vendedorCb } = await supabase.client
+                        .from('team_members')
+                        .select('*')
+                        .eq('id', lead.assigned_to)
+                        .single();
+
+                      if (vendedorCb?.phone) {
+                        const minutos = Math.max(1, Math.round(minutosHastaCita));
+                        const msgCallbackRapido =
+                          `📞⚡ *CALLBACK RÁPIDO*\n\n` +
+                          `👤 *Lead:* ${lead.name || 'Sin nombre'}\n` +
+                          `📱 *Teléfono:* wa.me/${leadPhone.replace(/\D/g, '')}\n` +
+                          `🏠 *Desarrollo:* ${desarrolloFinal || 'General'}\n` +
+                          `⏰ *Tiempo:* Pidió que le marquen en ~${minutos} minutos\n\n` +
+                          `💬 ${callbackData.description || 'El lead pidió que le volvieran a marcar pronto.'}`;
+                        await enviarMensajeTeamMember(supabase, meta, vendedorCb, msgCallbackRapido, {
+                          tipoMensaje: 'alerta_lead',
+                          guardarPending: true,
+                          pendingKey: 'pending_mensaje',
+                          templateOverride: {
+                            name: 'notificacion_cita_vendedor',
+                            params: [
+                              'CALLBACK RÁPIDO',
+                              lead.name || 'Sin nombre',
+                              `wa.me/${leadPhone.replace(/\D/g, '')}`,
+                              desarrolloFinal || 'General',
+                              `En ~${minutos} minutos`
+                            ]
+                          }
+                        });
+                      }
+                    }
+                    debugLog.push({ t: Date.now(), step: 'callback_rapido_notificado' });
+
+                  } else {
+                    // CALLBACK FORMAL (>= 2 horas): crear appointment + notificar + confirmar
+                    const { error: citaError } = await supabase.client
+                      .from('appointments')
+                      .insert([{
+                        lead_id: lead.id,
+                        lead_name: lead.name || null,
+                        lead_phone: leadPhone,
+                        vendedor_id: lead.assigned_to || null,
+                        scheduled_date: citaFecha,
+                        scheduled_time: citaHora,
+                        appointment_type: citaTipo,
+                        status: 'scheduled',
+                        property_name: desarrolloFinal || lead.property_interest || (citaTipo === 'visita' ? null : citaTipo === 'llamada' ? 'Llamada programada' : 'Seguimiento'),
+                        location: citaTipo === 'llamada' ? 'Llamada telefónica' : citaTipo === 'seguimiento' ? 'Seguimiento por WhatsApp' : null,
+                        duration_minutes: citaTipo === 'visita' ? 60 : 15,
+                        created_at: new Date().toISOString()
+                      }]);
+
+                    if (citaError) {
+                      console.error('❌ Error creando cita:', citaError);
+                      debugLog.push({ t: Date.now(), step: 'callback_db_error', error: citaError.message });
+                    } else {
+                      console.log(`✅ Cita creada: ${citaFecha} ${citaHora} (${citaTipo})`);
+
+                      // Formatear fecha bonita
+                      const fechaObj = new Date(citaFecha + 'T12:00:00');
+                      const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+                      const diaSemana = diasSemana[fechaObj.getDay()];
+                      const diaMes = fechaObj.getDate();
+                      const mes = meses[fechaObj.getMonth()];
+                      const horaNum = parseInt(citaHora.split(':')[0]);
+                      const minutosStr = citaHora.split(':')[1] || '00';
+                      const horaFormateada = horaNum >= 13 ? `${horaNum - 12}:${minutosStr} PM` : horaNum === 12 ? `12:${minutosStr} PM` : `${horaNum}:${minutosStr} AM`;
+                      const fechaBonita = `${diaSemana} ${diaMes} de ${mes} a las ${horaFormateada}`;
+
+                      // Buscar GPS del desarrollo para incluir en notificaciones
+                      let gpsLink = '';
+                      let desarrolloNombre = desarrolloFinal || 'General';
+                      if (desarrolloFinal && (citaTipo === 'visita' || citaTipo === 'seguimiento')) {
+                        try {
+                          const { data: propGps } = await supabase.client
+                            .from('properties')
+                            .select('gps_link, development')
+                            .ilike('development', `%${desarrolloFinal}%`)
+                            .not('gps_link', 'is', null)
+                            .limit(1);
+                          if (propGps?.[0]?.gps_link) {
+                            gpsLink = propGps[0].gps_link;
+                            desarrolloNombre = propGps[0].development || desarrolloFinal;
+                          }
+                        } catch (gpsErr: any) {
+                          console.log('No se encontró GPS para:', desarrolloFinal);
+                        }
+                      }
+
+                      // Notificar al vendedor con detalle completo (respeta ventana 24h)
+                      let vendedorNombre = '';
+                      if (lead.assigned_to) {
+                        const { data: vendedorCita } = await supabase.client
+                          .from('team_members')
+                          .select('*')
+                          .eq('id', lead.assigned_to)
+                          .single();
+
+                        if (vendedorCita?.name) vendedorNombre = vendedorCita.name;
+
+                        if (vendedorCita?.phone) {
+                          let msgVendedor = '';
+                          if (citaTipo === 'visita') {
+                            msgVendedor = `📅🏠 *VISITA PRESENCIAL AGENDADA*\n\n`;
+                          } else if (citaTipo === 'llamada') {
+                            msgVendedor = `📅📞 *LLAMADA TELEFÓNICA AGENDADA*\n\n`;
+                          } else {
+                            msgVendedor = `📅📋 *SEGUIMIENTO AGENDADO*\n\n`;
+                          }
+                          msgVendedor += `👤 *Lead:* ${lead.name || 'Sin nombre'}\n`;
+                          msgVendedor += `📱 *Teléfono:* wa.me/${leadPhone.replace(/\D/g, '')}\n`;
+                          msgVendedor += `🏠 *Desarrollo:* ${desarrolloNombre}\n`;
+                          msgVendedor += `📅 *Fecha:* ${fechaBonita}\n`;
+                          if (citaTipo === 'visita' && gpsLink) {
+                            msgVendedor += `📍 *Ubicación:* ${gpsLink}\n`;
+                          } else if (citaTipo === 'llamada') {
+                            msgVendedor += `📍 *Modalidad:* Llamada telefónica al lead\n`;
+                          } else if (citaTipo === 'seguimiento') {
+                            msgVendedor += `📍 *Modalidad:* Seguimiento por WhatsApp/info\n`;
+                          }
+                          msgVendedor += `\n💬 ${callbackData.description || 'El lead pidió seguimiento.'}`;
+                          msgVendedor += `\n\n✅ La cita ya está registrada en el sistema.`;
+
+                          // Template con datos reales para cuando ventana cerrada
+                          const tipoTituloVendedor = citaTipo === 'visita'
+                            ? 'VISITA PRESENCIAL AGENDADA'
+                            : citaTipo === 'llamada'
+                              ? 'LLAMADA TELEFÓNICA AGENDADA'
+                              : 'SEGUIMIENTO AGENDADO';
+                          const vendorNotifResult = await enviarMensajeTeamMember(supabase, meta, vendedorCita, msgVendedor, {
+                            tipoMensaje: 'alerta_lead',
+                            guardarPending: true,
+                            pendingKey: 'pending_mensaje',
+                            templateOverride: {
+                              name: 'notificacion_cita_vendedor',
+                              params: [
+                                tipoTituloVendedor,
+                                lead.name || 'Sin nombre',
+                                `wa.me/${leadPhone.replace(/\D/g, '')}`,
+                                desarrolloNombre,
+                                fechaBonita
+                              ]
+                            }
+                          });
+                          // Marcar cita como vendedor notificado si se envió algo
+                          if (vendorNotifResult.success) {
+                            await supabase.client.from('appointments').update({ vendedor_notified: true })
+                              .eq('lead_id', lead.id).eq('scheduled_date', citaFecha).eq('scheduled_time', citaHora);
+                            console.log(`✅ vendedor_notified=true para cita ${citaFecha} ${citaHora}`);
+                          }
+                        }
+                      }
+
+                      // Guardar confirmación para enviar DESPUÉS de greeting/recursos (orden correcto)
+                      const tipoTexto = citaTipo === 'visita' ? 'visita presencial' : citaTipo === 'llamada' ? 'llamada telefónica' : 'seguimiento';
+                      const primerNombreLead = lead.name?.split(' ')[0] || '';
+                      let msgLead = `📅 ¡Listo${primerNombreLead ? ', ' + primerNombreLead : ''}! Queda agendado tu *${tipoTexto}* para el *${fechaBonita}*.\n\n`;
+                      msgLead += `🏠 *Desarrollo:* ${desarrolloNombre}\n`;
+                      if (citaTipo === 'visita' && gpsLink) {
+                        msgLead += `📍 *Ubicación:* ${gpsLink}\n`;
+                      }
+                      if (vendedorNombre) {
+                        msgLead += `👤 *Te atiende:* ${vendedorNombre}\n`;
+                      }
+                      if (citaTipo === 'visita') {
+                        msgLead += `\n¡Te esperamos! 🏠 Si necesitas cambiar la fecha, solo responde aquí. 😊`;
+                      } else if (citaTipo === 'llamada') {
+                        msgLead += `\nTe marcaremos a este número. 📞 Si necesitas cambiar la fecha, solo responde aquí. 😊`;
+                      } else {
+                        msgLead += `\nTe contactaremos por aquí. 📋 Si necesitas cambiar algo, solo responde aquí. 😊`;
+                      }
+
+                      callbackConfirmacionPendiente = {
+                        phone: leadPhone,
+                        msg: msgLead,
+                        leadName: lead.name || '',
+                        tipo: citaTipo,
+                        fecha: fechaBonita,
+                        hora: citaHora,
+                        desarrollo: desarrolloNombre,
+                        gpsLink: gpsLink
+                      };
+
+                      debugLog.push({ t: Date.now(), step: 'callback_appointment_created', fecha: citaFecha, hora: citaHora, tipo: citaTipo });
+                    }
+                  }
+                }
+              } catch (callbackError: any) {
+                console.error('Error detectando callback:', callbackError?.message);
+                debugLog.push({ t: Date.now(), step: 'callback_error', error: callbackError?.message });
+              }
+            }
+
             // ═══════════════════════════════════════════════════════════════
             // SEGUIMIENTO AUTOMÁTICO POR WHATSAPP AL LEAD
             // Enviar mensaje + brochure + GPS después de la llamada
             // RESPETA VENTANA 24H: si cerrada → usa template
+            // SOLO en call_analyzed (no call_ended) para evitar mensajes dobles
             // ═══════════════════════════════════════════════════════════════
-            if (leadPhone && call.duration_ms && call.duration_ms > 15000) {
+            if (event === 'call_analyzed' && leadPhone && call.duration_ms && call.duration_ms > 15000) {
               try {
                 const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
 
@@ -7894,8 +8410,10 @@ Mensaje: ${mensaje}`;
                 }
 
                 console.log(`📱 Ventana 24h para ${leadPhone}: ${ventanaAbierta ? 'ABIERTA' : 'CERRADA'}`);
+                debugLog.push({ t: Date.now(), step: 'ventana_check', abierta: ventanaAbierta, leadPhone });
 
                 const desarrolloInteres = desarrolloDelTranscript ||
+                                          call.call_analysis?.custom_analysis_data?.desarrollo_interes ||
                                           call.call_analysis?.custom_analysis?.desarrollo_interes ||
                                           call.metadata?.desarrollo_interes ||
                                           call.metadata?.desarrollo ||
@@ -7912,7 +8430,9 @@ Mensaje: ${mensaje}`;
                   mensajeFollowUp += `\n\nTe comparto información por aquí para que la revises con calma. `;
                   mensajeFollowUp += `Si tienes cualquier duda, aquí estoy para ayudarte. 🏠`;
 
+                  debugLog.push({ t: Date.now(), step: 'sending_whatsapp', desarrollo: desarrolloInteres, ventana: 'abierta' });
                   await meta.sendWhatsAppMessage(leadPhone, mensajeFollowUp);
+                  debugLog.push({ t: Date.now(), step: 'whatsapp_sent_ok' });
                   console.log(`📱 WhatsApp directo enviado a ${leadPhone}`);
 
                   // Enviar recursos
@@ -8089,18 +8609,105 @@ Mensaje: ${mensaje}`;
                     .eq('id', lead.id);
                 }
 
-              } catch (whatsappError) {
+              } catch (whatsappError: any) {
+                debugLog.push({ t: Date.now(), step: 'whatsapp_error', error: whatsappError?.message });
                 console.error('Error enviando WhatsApp de seguimiento:', whatsappError);
               }
             }
+            // ═══════════════════════════════════════════════════════════════
+            // ENVIAR CONFIRMACIÓN DE CALLBACK/CITA (DESPUÉS de greeting y recursos)
+            // Respeta ventana 24h: si cerrada → intenta template
+            // ═══════════════════════════════════════════════════════════════
+            if (callbackConfirmacionPendiente) {
+              try {
+                const { data: leadCbWindow } = await supabase.client
+                  .from('leads')
+                  .select('last_message_at')
+                  .eq('id', lead?.id || '')
+                  .single();
+                const cbWindowOpen = leadCbWindow?.last_message_at &&
+                  (Date.now() - new Date(leadCbWindow.last_message_at).getTime()) < 24 * 60 * 60 * 1000;
+
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                const metaCb = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+                if (cbWindowOpen) {
+                  await metaCb.sendWhatsAppMessage(callbackConfirmacionPendiente.phone, callbackConfirmacionPendiente.msg);
+                  console.log('📅 Confirmación de callback enviada al lead (ventana abierta)');
+                } else {
+                  // Ventana cerrada → usar template appointment_confirmation_v2 con datos reales
+                  console.log('📅 Ventana cerrada para lead, enviando template con datos de cita...');
+                  try {
+                    const cbNombre = callbackConfirmacionPendiente.leadName?.split(' ')[0] || 'Hola';
+                    const cbTipoTexto = callbackConfirmacionPendiente.tipo === 'visita'
+                      ? `visita a ${callbackConfirmacionPendiente.desarrollo}`
+                      : callbackConfirmacionPendiente.tipo === 'llamada'
+                        ? 'llamada telefónica'
+                        : `seguimiento sobre ${callbackConfirmacionPendiente.desarrollo}`;
+                    // Extraer fecha y hora por separado del fechaBonita (ej: "domingo 15 de febrero a las 10:00 AM")
+                    const cbFechaParts = callbackConfirmacionPendiente.fecha.split(' a las ');
+                    const cbFechaStr = cbFechaParts[0] || callbackConfirmacionPendiente.fecha;
+                    const cbHoraStr = cbFechaParts[1] || callbackConfirmacionPendiente.hora;
+                    const cbGpsCode = callbackConfirmacionPendiente.gpsLink
+                      ? callbackConfirmacionPendiente.gpsLink.replace(/^https?:\/\/maps\.app\.goo\.gl\//, '')
+                      : 'qR8vK3xYz9M';
+
+                    await metaCb.sendTemplate(callbackConfirmacionPendiente.phone, 'appointment_confirmation_v2', 'es', [
+                      {
+                        type: 'body',
+                        parameters: [
+                          { type: 'text', text: cbNombre },              // {{1}} Nombre
+                          { type: 'text', text: 'Grupo Santa Rita' },    // {{2}} Empresa
+                          { type: 'text', text: cbTipoTexto },           // {{3}} Tipo (visita a Monte Verde / llamada telefónica)
+                          { type: 'text', text: cbFechaStr },            // {{4}} Fecha
+                          { type: 'text', text: cbHoraStr }              // {{5}} Hora
+                        ]
+                      },
+                      {
+                        type: 'button',
+                        sub_type: 'url',
+                        index: '0',
+                        parameters: [
+                          { type: 'text', text: cbGpsCode }              // GPS link suffix
+                        ]
+                      }
+                    ]);
+                    console.log('📅 Template appointment_confirmation_v2 enviado al lead (ventana cerrada)');
+                  } catch (templateCbErr: any) {
+                    console.log('⚠️ Template appointment_confirmation_v2 falló:', templateCbErr?.message);
+                    // Fallback: seguimiento_lead genérico
+                    try {
+                      await metaCb.sendTemplate(callbackConfirmacionPendiente.phone, 'seguimiento_lead', 'es_MX', [
+                        { type: 'body', parameters: [{ type: 'text', text: callbackConfirmacionPendiente.leadName?.split(' ')[0] || 'Hola' }] }
+                      ]);
+                    } catch (e2) {
+                      console.log('⚠️ Todos los templates fallaron para lead');
+                    }
+                  }
+                }
+              } catch (cbConfErr: any) {
+                console.error('Error enviando confirmación callback:', cbConfErr?.message);
+              }
+            }
+
           } catch (processError: any) {
+            debugLog.push({ t: Date.now(), step: 'process_error', error: processError?.message });
             console.error('Error procesando llamada:', processError?.message || processError);
           }
         }
 
+        // Guardar debug log en KV
+        try {
+          await env.SARA_CACHE.put(`retell_debug_${call?.call_id || Date.now()}`, JSON.stringify(debugLog), { expirationTtl: 3600 });
+        } catch (kvErr) { /* ignore */ }
+
         return new Response('OK', { status: 200 });
-      } catch (error) {
+      } catch (error: any) {
         console.error('Retell Webhook Error:', error);
+        // Guardar error en KV
+        try {
+          await env.SARA_CACHE.put(`retell_error_${Date.now()}`, JSON.stringify({ error: error?.message, stack: error?.stack?.substring(0, 500) }), { expirationTtl: 3600 });
+        } catch (kvErr) { /* ignore */ }
         return new Response('OK', { status: 200 });
       }
     }

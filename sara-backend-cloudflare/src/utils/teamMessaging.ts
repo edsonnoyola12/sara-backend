@@ -213,16 +213,33 @@ export async function enviarMensajeTeamMember(
       templateWamid = templateResult?.messages?.[0]?.id;
       console.log(`   ✅ Template ${templateName} enviado a ${teamMember.name} (wamid: ${templateWamid?.substring(0, 20)}...)`);
     } catch (templateError: any) {
-      console.error(`   ❌ Template falló: ${templateError?.message}`);
+      console.error(`   ❌ Template ${templateName} falló: ${templateError?.message}`);
 
-      // CRÍTICO: Guardar como pending aunque template falle
-      // Así se puede reintentar cuando la ventana se abra
-      if (guardarPending) {
-        await guardarMensajePending(supabase, teamMember.id, notasActuales, pendingKey, mensaje, expirationHours);
-        console.log(`   💾 Guardado como pending para reintento posterior`);
+      // Si falló un templateOverride, intentar el template genérico como fallback
+      if (opciones?.templateOverride && templateName !== REACTIVATION_TEMPLATE) {
+        console.log(`   🔄 Intentando fallback con template genérico ${REACTIVATION_TEMPLATE}...`);
+        try {
+          const fallbackComponents = [{ type: 'body', parameters: [{ type: 'text', text: nombreCorto }] }];
+          const fallbackResult = await meta.sendTemplate(teamMember.phone, REACTIVATION_TEMPLATE, 'es_MX', fallbackComponents);
+          templateWamid = fallbackResult?.messages?.[0]?.id;
+          console.log(`   ✅ Fallback ${REACTIVATION_TEMPLATE} enviado a ${teamMember.name} (wamid: ${templateWamid?.substring(0, 20)}...)`);
+        } catch (fallbackError: any) {
+          console.error(`   ❌ Fallback también falló: ${fallbackError?.message}`);
+          // Guardar como pending para reintento cuando la ventana se abra
+          if (guardarPending) {
+            await guardarMensajePending(supabase, teamMember.id, notasActuales, pendingKey, mensaje, expirationHours);
+            console.log(`   💾 Guardado como pending para reintento posterior`);
+          }
+          return { success: false, method: 'failed', ventanaAbierta: false };
+        }
+      } else {
+        // Template genérico también falló — guardar como pending
+        if (guardarPending) {
+          await guardarMensajePending(supabase, teamMember.id, notasActuales, pendingKey, mensaje, expirationHours);
+          console.log(`   💾 Guardado como pending para reintento posterior`);
+        }
+        return { success: false, method: 'failed', ventanaAbierta: false };
       }
-
-      return { success: false, method: 'failed', ventanaAbierta: false };
     }
 
     // 5. Template enviado exitosamente → Guardar mensaje como pending
