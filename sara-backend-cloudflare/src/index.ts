@@ -373,6 +373,9 @@ function requiresAuth(pathname: string): boolean {
 
   if (publicPaths.includes(pathname)) return false;
 
+  // Todos los webhooks son públicos (Meta, Retell, Facebook, etc.)
+  if (pathname.startsWith('/webhook')) return false;
+
   // Endpoints del CRM que no requieren auth (usados por el frontend)
   const crmPublicPatterns = [
     /^\/api\/appointments\/[^/]+\/cancel$/,  // Cancelar cita
@@ -1203,6 +1206,274 @@ export default {
           voice_id: agentData.voice_id,
           language: agentData.language,
         }, null, 2));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CONFIGURE RETELL INBOUND - Configurar número para llamadas entrantes
+    // USO: /configure-retell-inbound?api_key=XXX
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === '/configure-retell-inbound' && request.method === 'GET') {
+      try {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+
+        const { createRetellService } = await import('./services/retellService');
+        const retell = createRetellService(env.RETELL_API_KEY, env.RETELL_AGENT_ID || '', env.RETELL_PHONE_NUMBER || '');
+
+        // 1. Listar números de teléfono para encontrar el ID
+        const phoneNumbersRaw = await retell.listPhoneNumbers();
+        // Retell puede devolver un array directo o un objeto con key
+        const phoneNumbers = Array.isArray(phoneNumbersRaw) ? phoneNumbersRaw : (phoneNumbersRaw as any)?.phone_numbers || (phoneNumbersRaw as any)?.data || [];
+        if (!phoneNumbers || phoneNumbers.length === 0) {
+          return corsResponse(JSON.stringify({
+            error: 'No se encontraron números en Retell',
+            raw_response: phoneNumbersRaw,
+            retell_phone_number_env: env.RETELL_PHONE_NUMBER || 'NOT SET'
+          }), 400);
+        }
+
+        // Buscar el número de SARA (+524923860066)
+        const saraNumber = env.RETELL_PHONE_NUMBER || '+524923860066';
+        const saraNumberClean = saraNumber.replace('+', '');
+        const found = phoneNumbers.find((pn: any) =>
+          pn.phone_number?.replace('+', '') === saraNumberClean ||
+          pn.phone_number === saraNumber
+        );
+
+        if (!found) {
+          return corsResponse(JSON.stringify({
+            error: `Número ${saraNumber} no encontrado en Retell`,
+            available_numbers: phoneNumbers.map((pn: any) => ({
+              phone_number: pn.phone_number,
+              inbound_agent_id: pn.inbound_agent_id || 'NOT SET'
+            }))
+          }), 400);
+        }
+
+        const currentInboundAgent = found.inbound_agent_id;
+
+        // 2. Verificar si ya está configurado
+        if (currentInboundAgent === (env.RETELL_AGENT_ID || '')) {
+          return corsResponse(JSON.stringify({
+            success: true,
+            message: 'Inbound ya estaba configurado',
+            phone_number: found.phone_number,
+            inbound_agent_id: currentInboundAgent
+          }));
+        }
+
+        // 3. Configurar inbound_agent_id usando el phone_number en E.164
+        const result = await retell.configureInbound(found.phone_number);
+
+        if (result.success) {
+          return corsResponse(JSON.stringify({
+            success: true,
+            message: 'Inbound configurado exitosamente',
+            phone_number: found.phone_number,
+            agent_id: env.RETELL_AGENT_ID,
+            previous_inbound_agent: currentInboundAgent || 'NONE',
+            retell_response: result.data
+          }));
+        } else {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: result.error,
+            phone_number: found.phone_number
+          }), 500);
+        }
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CONFIGURE RETELL TOOLS - Registrar custom tools en el LLM de Retell
+    // USO: /configure-retell-tools?api_key=XXX
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === '/configure-retell-tools' && request.method === 'GET') {
+      try {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+
+        const { createRetellService } = await import('./services/retellService');
+        const retell = createRetellService(env.RETELL_API_KEY, env.RETELL_AGENT_ID || '', env.RETELL_PHONE_NUMBER || '');
+
+        // 1. Obtener agent para encontrar el llm_id
+        const agent = await retell.getAgent();
+        if (!agent) {
+          return corsResponse(JSON.stringify({ error: 'No se pudo obtener el agente de Retell' }), 500);
+        }
+
+        const llmId = agent.response_engine?.llm_id;
+        if (!llmId) {
+          return corsResponse(JSON.stringify({
+            error: 'El agente no tiene un Retell LLM configurado',
+            agent_id: agent.agent_id,
+            response_engine: agent.response_engine
+          }), 400);
+        }
+
+        // 2. Obtener LLM actual para ver tools existentes
+        const llm = await retell.getLlm(llmId);
+        const existingTools = llm?.general_tools || [];
+
+        // 3. Definir las custom tools de SARA
+        const baseUrl = 'https://sara-backend.edson-633.workers.dev';
+        const saraTools: any[] = [
+          {
+            type: 'end_call',
+            name: 'end_call',
+            description: 'Termina la llamada cuando el cliente se despide o no necesita nada más.'
+          },
+          {
+            type: 'custom',
+            name: 'buscar_info_desarrollo',
+            description: 'Busca información detallada de un desarrollo inmobiliario: modelos, precios, recámaras, metros cuadrados. Usa esta herramienta cuando el cliente pregunte por un desarrollo específico o quiera comparar opciones.',
+            url: `${baseUrl}/webhook/retell/tool/info-desarrollo`,
+            method: 'POST',
+            speak_during_execution: true,
+            execution_message_description: 'Dile que estás buscando la información del desarrollo.',
+            timeout_ms: 10000,
+            parameters: {
+              type: 'object',
+              properties: {
+                desarrollo: {
+                  type: 'string',
+                  description: 'Nombre del desarrollo. Opciones: Monte Verde, Los Encinos, Miravalle, Distrito Falco, Andes, Paseo Colorines, Citadella del Nogal, Villa Campelo, Villa Galiano'
+                }
+              },
+              required: ['desarrollo']
+            }
+          },
+          {
+            type: 'custom',
+            name: 'agendar_cita',
+            description: 'Agenda una cita de visita a un desarrollo. SOLO usa esta herramienta cuando tengas TODOS los datos: nombre del cliente, desarrollo, fecha y hora. Si falta algún dato, pregúntale al cliente primero.',
+            url: `${baseUrl}/webhook/retell/tool/agendar-cita`,
+            method: 'POST',
+            speak_during_execution: true,
+            execution_message_description: 'Dile que estás agendando su cita.',
+            timeout_ms: 15000,
+            parameters: {
+              type: 'object',
+              properties: {
+                nombre_cliente: { type: 'string', description: 'Nombre completo del cliente' },
+                desarrollo: { type: 'string', description: 'Nombre del desarrollo a visitar' },
+                fecha: { type: 'string', description: 'Fecha de la cita. Puede ser relativa (sábado, mañana, lunes) o absoluta (2026-02-15)' },
+                hora: { type: 'string', description: 'Hora de la cita (ejemplo: 11:00, 10 am, 4 de la tarde)' }
+              },
+              required: ['nombre_cliente', 'desarrollo', 'fecha', 'hora']
+            }
+          },
+          {
+            type: 'custom',
+            name: 'cancelar_cita',
+            description: 'Cancela la cita próxima del cliente. Usa cuando el cliente diga que quiere cancelar su cita.',
+            url: `${baseUrl}/webhook/retell/tool/cancelar-cita`,
+            method: 'POST',
+            speak_during_execution: true,
+            execution_message_description: 'Dile que estás cancelando su cita.',
+            timeout_ms: 10000,
+            parameters: {
+              type: 'object',
+              properties: {
+                razon: { type: 'string', description: 'Razón de la cancelación' }
+              },
+              required: []
+            }
+          },
+          {
+            type: 'custom',
+            name: 'cambiar_cita',
+            description: 'Reagenda la cita del cliente a una nueva fecha y hora. Usa cuando quiera cambiar su cita existente.',
+            url: `${baseUrl}/webhook/retell/tool/cambiar-cita`,
+            method: 'POST',
+            speak_during_execution: true,
+            execution_message_description: 'Dile que estás cambiando su cita.',
+            timeout_ms: 15000,
+            parameters: {
+              type: 'object',
+              properties: {
+                nueva_fecha: { type: 'string', description: 'Nueva fecha (sábado, mañana, 2026-02-15, etc.)' },
+                nueva_hora: { type: 'string', description: 'Nueva hora (11:00, 10 am, etc.)' }
+              },
+              required: ['nueva_fecha', 'nueva_hora']
+            }
+          },
+          {
+            type: 'custom',
+            name: 'enviar_info_whatsapp',
+            description: 'Envía información al cliente por WhatsApp: brochure, ubicación GPS, video, o info general de un desarrollo. Usa cuando el cliente pida que le mandes info.',
+            url: `${baseUrl}/webhook/retell/tool/enviar-whatsapp`,
+            method: 'POST',
+            speak_during_execution: true,
+            execution_message_description: 'Dile que le estás enviando la información por WhatsApp.',
+            timeout_ms: 10000,
+            parameters: {
+              type: 'object',
+              properties: {
+                tipo: { type: 'string', description: 'Tipo de info: brochure, ubicacion, video, info' },
+                desarrollo: { type: 'string', description: 'Nombre del desarrollo' }
+              },
+              required: ['tipo', 'desarrollo']
+            }
+          },
+          {
+            type: 'custom',
+            name: 'consultar_credito',
+            description: 'Consulta información sobre crédito hipotecario, INFONAVIT, FOVISSSTE, o bancario. Calcula capacidad de crédito aproximada basada en ingreso.',
+            url: `${baseUrl}/webhook/retell/tool/info-credito`,
+            method: 'POST',
+            speak_during_execution: true,
+            execution_message_description: 'Dile que estás calculando sus opciones de crédito.',
+            timeout_ms: 8000,
+            parameters: {
+              type: 'object',
+              properties: {
+                ingreso_mensual: { type: 'number', description: 'Ingreso mensual del cliente en pesos' },
+                tipo_credito: { type: 'string', description: 'Tipo de crédito: infonavit, fovissste, bancario, cofinavit' }
+              },
+              required: []
+            }
+          },
+          {
+            type: 'custom',
+            name: 'consultar_citas',
+            description: 'Consulta las citas próximas del cliente. Usa cuando pregunte por su cita o quiera verificar fecha/hora.',
+            url: `${baseUrl}/webhook/retell/tool/consultar-citas`,
+            method: 'POST',
+            speak_during_execution: false,
+            timeout_ms: 8000,
+            parameters: {
+              type: 'object',
+              properties: {},
+              required: []
+            }
+          }
+        ];
+
+        // 4. Actualizar el LLM con las nuevas tools
+        const updateResult = await retell.updateLlmTools(llmId, saraTools);
+
+        if (updateResult.success) {
+          return corsResponse(JSON.stringify({
+            success: true,
+            message: `${saraTools.length} tools configuradas en el LLM`,
+            agent_id: agent.agent_id,
+            llm_id: llmId,
+            tools: saraTools.map(t => ({ name: t.name, type: t.type })),
+            previous_tools_count: existingTools.length
+          }));
+        } else {
+          return corsResponse(JSON.stringify({
+            success: false,
+            error: updateResult.error,
+            llm_id: llmId
+          }), 500);
+        }
       } catch (e: any) {
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
@@ -7752,12 +8023,19 @@ Mensaje: ${mensaje}`;
         // Retell envía el número del que llama en from_number
         const callerPhone = body.from_number?.replace('+', '') || body.to_number?.replace('+', '');
 
+        const defaultGreeting = '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?';
+
         if (!callerPhone) {
           console.log('📞 RETELL LOOKUP: No se recibió número de teléfono');
           return new Response(JSON.stringify({
-            lead_name: '',
-            is_new_lead: 'true',
-            greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?'
+            dynamic_variables: {
+              lead_name: '',
+              is_new_lead: 'true',
+              greeting: defaultGreeting,
+              desarrollo_interes: '',
+              vendedor_nombre: 'un asesor',
+              precio_desde: '$1.5 millones'
+            }
           }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
@@ -7784,17 +8062,51 @@ Mensaje: ${mensaje}`;
             if (matchDesarrollo) desarrolloInteres = matchDesarrollo[1].trim();
           }
 
+          // Buscar vendedor asignado
+          let vendedorNombre = 'un asesor';
+          if (lead.assigned_to) {
+            const { data: vendorLookup } = await supabase.client
+              .from('team_members')
+              .select('name')
+              .eq('id', lead.assigned_to)
+              .maybeSingle();
+            if (vendorLookup?.name) vendedorNombre = vendorLookup.name.split(' ')[0];
+          }
+
+          // Buscar precio del desarrollo de interés
+          let precioDesde = '$1.5 millones';
+          if (desarrolloInteres) {
+            const { data: propPrecio } = await supabase.client
+              .from('properties')
+              .select('price_equipped, price')
+              .ilike('development', `%${desarrolloInteres}%`)
+              .limit(5);
+            if (propPrecio && propPrecio.length > 0) {
+              const minPrecio = propPrecio.reduce((min: number, p: any) => {
+                const precio = p.price_equipped || p.price || 0;
+                return precio > 0 && precio < min ? precio : min;
+              }, Infinity);
+              if (minPrecio < Infinity) {
+                precioDesde = `$${(minPrecio / 1000000).toFixed(1)} millones`;
+              }
+            }
+          }
+
           const greetingConDesarrollo = desarrolloInteres
-            ? `¡Hola ${nombre}! Qué gusto escucharte. Soy Sara de Grupo Santa Rita. Te llamo para apoyarte con tu interés en ${desarrolloInteres} y resolver cualquier duda que tengas. ¿En qué te puedo ayudar?`
+            ? `¡Hola ${nombre}! Qué gusto escucharte. Soy Sara de Grupo Santa Rita. Veo que te interesa ${desarrolloInteres}. ¿En qué te puedo ayudar?`
             : `¡Hola ${nombre}! Qué gusto escucharte. Soy Sara de Grupo Santa Rita. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿En qué te puedo ayudar?`;
 
           return new Response(JSON.stringify({
-            lead_name: nombre,
-            lead_full_name: lead.name,
-            lead_id: lead.id,
-            is_new_lead: 'false',
-            desarrollo_interes: desarrolloInteres,
-            greeting: greetingConDesarrollo
+            dynamic_variables: {
+              lead_name: nombre,
+              lead_full_name: lead.name,
+              lead_id: lead.id,
+              is_new_lead: 'false',
+              desarrollo_interes: desarrolloInteres,
+              greeting: greetingConDesarrollo,
+              vendedor_nombre: vendedorNombre,
+              precio_desde: precioDesde
+            }
           }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
@@ -7803,9 +8115,14 @@ Mensaje: ${mensaje}`;
           // Lead nuevo - pedir nombre PRIMERO para personalizar la llamada
           console.log(`📞 RETELL LOOKUP: Número nuevo - ${callerPhone}`);
           return new Response(JSON.stringify({
-            lead_name: '',
-            is_new_lead: 'true',
-            greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?'
+            dynamic_variables: {
+              lead_name: '',
+              is_new_lead: 'true',
+              greeting: defaultGreeting,
+              desarrollo_interes: '',
+              vendedor_nombre: 'un asesor',
+              precio_desde: '$1.5 millones'
+            }
           }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
@@ -7814,13 +8131,544 @@ Mensaje: ${mensaje}`;
       } catch (error) {
         console.error('❌ Retell Lookup Error:', error);
         return new Response(JSON.stringify({
-          lead_name: '',
-          is_new_lead: 'true',
-          greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?'
+          dynamic_variables: {
+            lead_name: '',
+            is_new_lead: 'true',
+            greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?',
+            desarrollo_interes: '',
+            vendedor_nombre: 'un asesor',
+            precio_desde: '$1.5 millones'
+          }
         }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
         });
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Retell Custom Tools - SARA ejecuta acciones durante la llamada
+    // ═══════════════════════════════════════════════════════════════
+
+    // TOOL: Buscar información de un desarrollo
+    if (url.pathname === '/webhook/retell/tool/info-desarrollo' && request.method === 'POST') {
+      try {
+        const body = await request.json() as any;
+        const args = body.args || body;
+        const desarrollo = args.desarrollo || '';
+        console.log(`🔧 RETELL TOOL info-desarrollo: ${desarrollo}`);
+
+        if (!desarrollo) {
+          return new Response(JSON.stringify({
+            result: 'No especificaste el desarrollo. Pregúntale al cliente cuál le interesa. Opciones: Monte Verde, Los Encinos, Miravalle, Distrito Falco, Andes, Paseo Colorines, Citadella del Nogal (terrenos).'
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        const { data: props } = await supabase.client
+          .from('properties')
+          .select('name, development, price, price_equipped, bedrooms, bathrooms, area_m2, land_size, gps_link, brochure_urls, youtube_link')
+          .ilike('development', `%${desarrollo}%`);
+
+        if (!props || props.length === 0) {
+          return new Response(JSON.stringify({
+            result: `No encontré información de "${desarrollo}". Los desarrollos disponibles son: Monte Verde (desde $1.6M), Los Encinos (desde $3M), Miravalle (desde $3M), Distrito Falco (desde $3.7M), Andes (desde $1.6M), Paseo Colorines (desde $3M), y terrenos en Citadella del Nogal.`
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        const modelos = props.map((p: any) => {
+          const precio = p.price_equipped || p.price || 0;
+          return `${p.name}: $${(precio/1000000).toFixed(2)}M, ${p.bedrooms || '?'} rec, ${p.area_m2 || '?'}m² construcción${p.land_size ? `, ${p.land_size}m² terreno` : ''}`;
+        }).join('. ');
+
+        const gps = props[0]?.gps_link || '';
+        const tieneAlberca = desarrollo.toLowerCase().includes('andes') ? ' Este desarrollo TIENE alberca.' : '';
+
+        return new Response(JSON.stringify({
+          result: `${desarrollo} tiene ${props.length} modelos: ${modelos}.${tieneAlberca} Todos incluyen closets y cocina integral (precio equipada).${gps ? ` Ubicación: ${gps}` : ''}`
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } catch (e: any) {
+        console.error('❌ Retell tool info-desarrollo error:', e);
+        return new Response(JSON.stringify({ result: 'Error buscando información. Dile al cliente que le mandas la info por WhatsApp.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+
+    // TOOL: Agendar una cita de visita
+    if (url.pathname === '/webhook/retell/tool/agendar-cita' && request.method === 'POST') {
+      try {
+        const body = await request.json() as any;
+        const args = body.args || body;
+        const callObj = body.call || {};
+        console.log(`🔧 RETELL TOOL agendar-cita:`, JSON.stringify(args));
+
+        const nombre = args.nombre_cliente || '';
+        const desarrollo = args.desarrollo || '';
+        const fecha = args.fecha || ''; // formato: YYYY-MM-DD o "sábado", "mañana"
+        const hora = args.hora || '';   // formato: HH:MM o "11 am"
+
+        if (!nombre || !desarrollo || !fecha || !hora) {
+          const faltantes = [];
+          if (!nombre) faltantes.push('nombre del cliente');
+          if (!desarrollo) faltantes.push('desarrollo a visitar');
+          if (!fecha) faltantes.push('fecha (día)');
+          if (!hora) faltantes.push('hora');
+          return new Response(JSON.stringify({
+            result: `Faltan datos para agendar: ${faltantes.join(', ')}. Pregúntale al cliente.`
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        // Parsear fecha y hora
+        const { parseFechaEspanol } = await import('./handlers/dateParser');
+        let fechaISO = fecha;
+        let horaISO = hora;
+
+        // Si la fecha es relativa (sábado, mañana, etc.), parsear
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+          const parsed = parseFechaEspanol(`${fecha} ${hora}`);
+          if (parsed) {
+            fechaISO = parsed.fecha; // DD/MM/YYYY
+            horaISO = parsed.hora;   // HH:MM
+          } else {
+            return new Response(JSON.stringify({
+              result: `No pude entender la fecha "${fecha}". Pide la fecha de nuevo en formato claro, como "sábado 15 de febrero" o "mañana".`
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+        } else {
+          // Convertir YYYY-MM-DD a DD/MM/YYYY
+          const [y, m, d] = fechaISO.split('-');
+          fechaISO = `${d}/${m}/${y}`;
+          // Normalizar hora
+          horaISO = hora.replace(/\s*(am|pm)/i, (m: string, p: string) => {
+            return p.toLowerCase() === 'pm' ? '' : '';
+          });
+          if (!/^\d{1,2}:\d{2}$/.test(horaISO)) {
+            const horaMatch = hora.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+            if (horaMatch) {
+              let h = parseInt(horaMatch[1]);
+              const min = horaMatch[2] || '00';
+              const period = horaMatch[3]?.toLowerCase();
+              if (period === 'pm' && h < 12) h += 12;
+              if (period === 'am' && h === 12) h = 0;
+              horaISO = `${h.toString().padStart(2, '0')}:${min}`;
+            }
+          }
+        }
+
+        // Buscar o crear lead por teléfono de la llamada
+        const callerPhone = callObj.to_number?.replace('+', '') || callObj.from_number?.replace('+', '') || '';
+        let leadPhone = callerPhone;
+        // Para inbound: from_number es el cliente, to_number es SARA
+        if (callObj.direction === 'inbound' || (callObj.from_number && callObj.from_number !== (env.RETELL_PHONE_NUMBER || ''))) {
+          leadPhone = callObj.from_number?.replace('+', '') || callerPhone;
+        }
+
+        const { data: lead } = await supabase.client
+          .from('leads')
+          .select('*')
+          .or(`phone.eq.${leadPhone},phone.like.%${leadPhone.slice(-10)}`)
+          .maybeSingle();
+
+        if (!lead) {
+          return new Response(JSON.stringify({
+            result: `No encontré al cliente en el sistema. La cita se registrará cuando termine la llamada. Confírmale: "${nombre}, tu cita queda el ${fecha} a las ${hora} en ${desarrollo}. Te mando confirmación por WhatsApp."`
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        // Buscar team members y properties para el appointment service
+        const { data: teamMembers } = await supabase.client.from('team_members').select('*').eq('active', true);
+        const { data: properties } = await supabase.client.from('properties').select('*');
+
+        const { AppointmentService } = await import('./services/appointmentService');
+        const { CalendarService } = await import('./services/calendarService');
+        const calendarService = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+        const appointmentService = new AppointmentService(supabase, calendarService, null as any);
+
+        const result = await appointmentService.crearCitaCompleta({
+          from: leadPhone,
+          cleanPhone: leadPhone,
+          lead,
+          desarrollo,
+          fecha: fechaISO,
+          hora: horaISO,
+          teamMembers: teamMembers || [],
+          analysis: { extracted_data: { client_name: nombre } },
+          properties: properties || [],
+          env
+        });
+
+        if (result.success) {
+          const vendedorMsg = result.vendedor ? ` Tu asesor será ${result.vendedor.name?.split(' ')[0]}.` : '';
+          return new Response(JSON.stringify({
+            result: `Cita agendada exitosamente para ${nombre} el ${fecha} a las ${hora} en ${desarrollo}.${vendedorMsg} Se envió confirmación por WhatsApp con la ubicación.`
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        } else {
+          const errorMsg = result.error || 'Error desconocido';
+          if (result.errorType === 'duplicate') {
+            return new Response(JSON.stringify({
+              result: `${nombre} ya tiene una cita agendada próximamente. ¿Quiere cambiarla o confirmar la existente?`
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+          return new Response(JSON.stringify({
+            result: `No pude agendar la cita: ${errorMsg}. Dile que le mandas confirmación por WhatsApp.`
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+      } catch (e: any) {
+        console.error('❌ Retell tool agendar-cita error:', e);
+        return new Response(JSON.stringify({ result: 'Error al agendar. Dile al cliente que le confirmas por WhatsApp.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+
+    // TOOL: Cancelar una cita existente
+    if (url.pathname === '/webhook/retell/tool/cancelar-cita' && request.method === 'POST') {
+      try {
+        const body = await request.json() as any;
+        const args = body.args || body;
+        const callObj = body.call || {};
+        console.log(`🔧 RETELL TOOL cancelar-cita:`, JSON.stringify(args));
+
+        const razon = args.razon || 'Cancelado por el cliente vía llamada';
+
+        // Buscar lead por teléfono de la llamada
+        const callerPhone = callObj.from_number?.replace('+', '') || callObj.to_number?.replace('+', '') || '';
+        const { data: lead } = await supabase.client
+          .from('leads')
+          .select('id, name')
+          .or(`phone.eq.${callerPhone},phone.like.%${callerPhone.slice(-10)}`)
+          .maybeSingle();
+
+        if (!lead) {
+          return new Response(JSON.stringify({
+            result: 'No encontré al cliente en el sistema. Pídele su nombre o teléfono para buscarlo.'
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        // Buscar cita activa del lead
+        const hoy = new Date().toISOString().split('T')[0];
+        const { data: cita } = await supabase.client
+          .from('appointments')
+          .select('id, scheduled_date, scheduled_time, property_name, vendedor_name')
+          .eq('lead_id', lead.id)
+          .in('status', ['scheduled', 'confirmed'])
+          .gte('scheduled_date', hoy)
+          .order('scheduled_date', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (!cita) {
+          return new Response(JSON.stringify({
+            result: `${lead.name || 'El cliente'} no tiene citas próximas activas. ¿Quiere agendar una nueva?`
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        const { AppointmentService } = await import('./services/appointmentService');
+        const { CalendarService } = await import('./services/calendarService');
+        const calendarService = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+        const appointmentService = new AppointmentService(supabase, calendarService, null as any);
+
+        const cancelado = await appointmentService.cancelAppointment(cita.id, razon);
+
+        if (cancelado) {
+          return new Response(JSON.stringify({
+            result: `Cita cancelada. ${lead.name || 'El cliente'} tenía cita el ${cita.scheduled_date} a las ${cita.scheduled_time} en ${cita.property_name || 'desarrollo'}. Se notificó al vendedor. ¿Quiere reagendar para otra fecha?`
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        } else {
+          return new Response(JSON.stringify({
+            result: 'No pude cancelar la cita en el sistema. Dile que lo gestiono y le confirmo por WhatsApp.'
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+      } catch (e: any) {
+        console.error('❌ Retell tool cancelar-cita error:', e);
+        return new Response(JSON.stringify({ result: 'Error cancelando cita. Le confirmo por WhatsApp.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+
+    // TOOL: Cambiar/reagendar una cita
+    if (url.pathname === '/webhook/retell/tool/cambiar-cita' && request.method === 'POST') {
+      try {
+        const body = await request.json() as any;
+        const args = body.args || body;
+        const callObj = body.call || {};
+        console.log(`🔧 RETELL TOOL cambiar-cita:`, JSON.stringify(args));
+
+        const nuevaFecha = args.nueva_fecha || '';
+        const nuevaHora = args.nueva_hora || '';
+
+        if (!nuevaFecha || !nuevaHora) {
+          return new Response(JSON.stringify({
+            result: 'Necesito la nueva fecha y hora. Pregúntale al cliente cuándo quiere reagendar.'
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        // Buscar lead
+        const callerPhone = callObj.from_number?.replace('+', '') || callObj.to_number?.replace('+', '') || '';
+        const { data: lead } = await supabase.client
+          .from('leads')
+          .select('*')
+          .or(`phone.eq.${callerPhone},phone.like.%${callerPhone.slice(-10)}`)
+          .maybeSingle();
+
+        if (!lead) {
+          return new Response(JSON.stringify({
+            result: 'No encontré al cliente. Dile que le confirmo por WhatsApp.'
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        // Buscar cita actual
+        const hoy = new Date().toISOString().split('T')[0];
+        const { data: citaActual } = await supabase.client
+          .from('appointments')
+          .select('id, scheduled_date, scheduled_time, property_name')
+          .eq('lead_id', lead.id)
+          .in('status', ['scheduled', 'confirmed'])
+          .gte('scheduled_date', hoy)
+          .order('scheduled_date', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (!citaActual) {
+          return new Response(JSON.stringify({
+            result: `${lead.name || 'El cliente'} no tiene citas activas. ¿Quiere agendar una nueva?`
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        // Cancelar la cita actual
+        await supabase.client.from('appointments').update({ status: 'rescheduled' }).eq('id', citaActual.id);
+
+        // Parsear nueva fecha/hora
+        const { parseFechaEspanol } = await import('./handlers/dateParser');
+        let fechaISO = nuevaFecha;
+        let horaISO = nuevaHora;
+
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(nuevaFecha)) {
+          const parsed = parseFechaEspanol(`${nuevaFecha} ${nuevaHora}`);
+          if (parsed) {
+            fechaISO = parsed.fecha;
+            horaISO = parsed.hora;
+          } else {
+            return new Response(JSON.stringify({
+              result: `No pude entender la fecha "${nuevaFecha}". Pide la fecha de nuevo.`
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+        } else {
+          const [y, m, d] = fechaISO.split('-');
+          fechaISO = `${d}/${m}/${y}`;
+          const horaMatch = nuevaHora.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+          if (horaMatch) {
+            let h = parseInt(horaMatch[1]);
+            const min = horaMatch[2] || '00';
+            const period = horaMatch[3]?.toLowerCase();
+            if (period === 'pm' && h < 12) h += 12;
+            if (period === 'am' && h === 12) h = 0;
+            horaISO = `${h.toString().padStart(2, '0')}:${min}`;
+          }
+        }
+
+        // Crear nueva cita
+        const { data: teamMembers } = await supabase.client.from('team_members').select('*').eq('active', true);
+        const { data: properties } = await supabase.client.from('properties').select('*');
+
+        const { AppointmentService } = await import('./services/appointmentService');
+        const { CalendarService } = await import('./services/calendarService');
+        const calendarService = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+        const appointmentService = new AppointmentService(supabase, calendarService, null as any);
+
+        const result = await appointmentService.crearCitaCompleta({
+          from: callerPhone,
+          cleanPhone: callerPhone,
+          lead,
+          desarrollo: citaActual.property_name || lead.property_interest || '',
+          fecha: fechaISO,
+          hora: horaISO,
+          teamMembers: teamMembers || [],
+          analysis: { extracted_data: { client_name: lead.name } },
+          properties: properties || [],
+          env,
+          isReschedule: true
+        });
+
+        if (result.success) {
+          return new Response(JSON.stringify({
+            result: `Cita reagendada. Antes: ${citaActual.scheduled_date} ${citaActual.scheduled_time}. Ahora: ${nuevaFecha} ${nuevaHora} en ${citaActual.property_name || 'el desarrollo'}. Se envió confirmación por WhatsApp.`
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        } else {
+          return new Response(JSON.stringify({
+            result: `No pude reagendar: ${result.error}. Dile que le confirmo por WhatsApp.`
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+      } catch (e: any) {
+        console.error('❌ Retell tool cambiar-cita error:', e);
+        return new Response(JSON.stringify({ result: 'Error reagendando. Le confirmo por WhatsApp.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+
+    // TOOL: Enviar información por WhatsApp al cliente
+    if (url.pathname === '/webhook/retell/tool/enviar-whatsapp' && request.method === 'POST') {
+      try {
+        const body = await request.json() as any;
+        const args = body.args || body;
+        const callObj = body.call || {};
+        console.log(`🔧 RETELL TOOL enviar-whatsapp:`, JSON.stringify(args));
+
+        const tipo = args.tipo || 'info'; // 'brochure', 'ubicacion', 'video', 'info'
+        const desarrollo = args.desarrollo || '';
+
+        const callerPhone = callObj.from_number?.replace('+', '') || callObj.to_number?.replace('+', '') || '';
+        if (!callerPhone) {
+          return new Response(JSON.stringify({ result: 'No tengo el teléfono del cliente.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        // Normalizar teléfono para WhatsApp (agregar 521 si necesario)
+        let whatsappPhone = callerPhone.replace('+', '');
+        if (whatsappPhone.startsWith('52') && whatsappPhone.length === 12) {
+          whatsappPhone = '521' + whatsappPhone.substring(2);
+        }
+
+        const { MetaWhatsAppService } = await import('./services/metaWhatsAppService');
+        const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+        if (tipo === 'ubicacion' || tipo === 'gps') {
+          const { data: prop } = await supabase.client
+            .from('properties')
+            .select('gps_link, development')
+            .ilike('development', `%${desarrollo}%`)
+            .limit(1)
+            .maybeSingle();
+
+          if (prop?.gps_link) {
+            await meta.sendWhatsAppMessage(whatsappPhone, `📍 Ubicación de ${desarrollo}:\n${prop.gps_link}`);
+            return new Response(JSON.stringify({ result: `Ubicación de ${desarrollo} enviada por WhatsApp.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+          return new Response(JSON.stringify({ result: `No encontré la ubicación de ${desarrollo}.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        if (tipo === 'brochure') {
+          const { data: prop } = await supabase.client
+            .from('properties')
+            .select('brochure_urls, development')
+            .ilike('development', `%${desarrollo}%`)
+            .limit(1)
+            .maybeSingle();
+
+          if (prop?.brochure_urls && prop.brochure_urls.length > 0) {
+            const brochureUrl = prop.brochure_urls[0];
+            await meta.sendWhatsAppMessage(whatsappPhone, `📋 Brochure de ${desarrollo}:\n${brochureUrl}`);
+            return new Response(JSON.stringify({ result: `Brochure de ${desarrollo} enviado por WhatsApp.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+          return new Response(JSON.stringify({ result: `No encontré brochure de ${desarrollo}.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        if (tipo === 'video') {
+          const { data: prop } = await supabase.client
+            .from('properties')
+            .select('youtube_link, development')
+            .ilike('development', `%${desarrollo}%`)
+            .limit(1)
+            .maybeSingle();
+
+          if (prop?.youtube_link) {
+            await meta.sendWhatsAppMessage(whatsappPhone, `🎬 Video de ${desarrollo}:\n${prop.youtube_link}`);
+            return new Response(JSON.stringify({ result: `Video de ${desarrollo} enviado por WhatsApp.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+          return new Response(JSON.stringify({ result: `No encontré video de ${desarrollo}.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        // Info general del desarrollo
+        if (desarrollo) {
+          const { data: props } = await supabase.client
+            .from('properties')
+            .select('name, development, price_equipped, price, bedrooms, area_m2')
+            .ilike('development', `%${desarrollo}%`);
+
+          if (props && props.length > 0) {
+            let msg = `🏡 *${desarrollo}*\n\n`;
+            for (const p of props) {
+              const precio = p.price_equipped || p.price || 0;
+              msg += `• ${p.name}: $${(precio/1000000).toFixed(2)}M - ${p.bedrooms || '?'} rec, ${p.area_m2 || '?'}m²\n`;
+            }
+            msg += `\nSoy Sara de Grupo Santa Rita. ¿Te agendo una visita? 😊`;
+            await meta.sendWhatsAppMessage(whatsappPhone, msg);
+            return new Response(JSON.stringify({ result: `Info de ${desarrollo} enviada por WhatsApp con ${props.length} modelos y precios.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+          return new Response(JSON.stringify({ result: `No encontré información de ${desarrollo}.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        return new Response(JSON.stringify({ result: 'Necesito saber qué desarrollo enviar. Pregúntale al cliente.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } catch (e: any) {
+        console.error('❌ Retell tool enviar-whatsapp error:', e);
+        return new Response(JSON.stringify({ result: 'Error enviando WhatsApp. Le mando la info después de la llamada.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+
+    // TOOL: Consultar información de crédito hipotecario
+    if (url.pathname === '/webhook/retell/tool/info-credito' && request.method === 'POST') {
+      try {
+        const body = await request.json() as any;
+        const args = body.args || body;
+        console.log(`🔧 RETELL TOOL info-credito:`, JSON.stringify(args));
+
+        const ingreso = args.ingreso_mensual || 0;
+        const tipoCredito = args.tipo_credito || ''; // infonavit, bancario, fovissste, cofinavit
+
+        let respuesta = '';
+
+        if (tipoCredito.toLowerCase().includes('infonavit')) {
+          respuesta = `Con INFONAVIT, el monto depende de tu subcuenta y salario. Con salario de $${ingreso ? (ingreso/1000).toFixed(0) + 'K' : '?'} mensual, podrías acceder a casas desde $1.6 millones usando INFONAVIT + crédito bancario (Cofinavit). Opciones: Monte Verde o Andes desde $1.6M. ¿Quieres que un asesor hipotecario te contacte para hacer la precalificación?`;
+        } else if (tipoCredito.toLowerCase().includes('fovissste')) {
+          respuesta = `FOVISSSTE es para trabajadores del gobierno. El monto depende de tu antigüedad y puntos. También se puede combinar con crédito bancario. Tenemos asesores hipotecarios que te pueden precalificar sin costo. ¿Quieres que te contacte un asesor?`;
+        } else {
+          if (ingreso && ingreso > 0) {
+            const capacidadAprox = ingreso * 0.33 * 240; // 33% de ingreso, 20 años
+            const capacidadM = (capacidadAprox / 1000000).toFixed(1);
+            respuesta = `Con un ingreso de $${(ingreso/1000).toFixed(0)}K mensuales, podrías obtener un crédito bancario de aproximadamente $${capacidadM}M (20 años, ~33% de ingreso). Bancos: BBVA, Banorte, Santander, HSBC. Las tasas van del 9% al 12% anual. ¿Quieres que un asesor hipotecario te contacte gratis?`;
+          } else {
+            respuesta = `Trabajamos con todos los bancos: BBVA, Banorte, Santander, HSBC, Scotiabank. También INFONAVIT, FOVISSSTE y Cofinavit. El enganche mínimo es 10% y con INFONAVIT puede ser 0%. Dime tu ingreso mensual aproximado y te digo para qué casas calificas.`;
+          }
+        }
+
+        return new Response(JSON.stringify({ result: respuesta }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } catch (e: any) {
+        console.error('❌ Retell tool info-credito error:', e);
+        return new Response(JSON.stringify({ result: 'Error consultando crédito. Dile que le mando info por WhatsApp.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+
+    // TOOL: Consultar citas existentes del cliente
+    if (url.pathname === '/webhook/retell/tool/consultar-citas' && request.method === 'POST') {
+      try {
+        const body = await request.json() as any;
+        const callObj = body.call || {};
+        console.log(`🔧 RETELL TOOL consultar-citas`);
+
+        const callerPhone = callObj.from_number?.replace('+', '') || callObj.to_number?.replace('+', '') || '';
+        const { data: lead } = await supabase.client
+          .from('leads')
+          .select('id, name')
+          .or(`phone.eq.${callerPhone},phone.like.%${callerPhone.slice(-10)}`)
+          .maybeSingle();
+
+        if (!lead) {
+          return new Response(JSON.stringify({ result: 'No encontré al cliente. No tiene citas registradas.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        const hoy = new Date().toISOString().split('T')[0];
+        const { data: citas } = await supabase.client
+          .from('appointments')
+          .select('scheduled_date, scheduled_time, property_name, status, vendedor_name')
+          .eq('lead_id', lead.id)
+          .gte('scheduled_date', hoy)
+          .in('status', ['scheduled', 'confirmed'])
+          .order('scheduled_date', { ascending: true });
+
+        if (!citas || citas.length === 0) {
+          return new Response(JSON.stringify({ result: `${lead.name || 'El cliente'} no tiene citas próximas. ¿Quiere agendar una visita?` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        const citasText = citas.map((c: any) => `${c.scheduled_date} a las ${c.scheduled_time} en ${c.property_name || 'desarrollo'}${c.vendedor_name ? ` con ${c.vendedor_name}` : ''}`).join('. ');
+        return new Response(JSON.stringify({
+          result: `${lead.name || 'El cliente'} tiene ${citas.length} cita(s): ${citasText}. ¿Quiere cambiar alguna?`
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } catch (e: any) {
+        console.error('❌ Retell tool consultar-citas error:', e);
+        return new Response(JSON.stringify({ result: 'Error consultando citas.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     }
 
@@ -8423,7 +9271,11 @@ Reglas:
                   // VENTANA ABIERTA → enviar mensajes directos
                   const primerNombre = lead?.name ? ' ' + lead.name.split(' ')[0] : '';
                   let mensajeFollowUp = `¡Hola${primerNombre}! 👋\n\n`;
-                  mensajeFollowUp += `Soy Sara de Grupo Santa Rita. Gracias por la llamada. `;
+                  if (isInbound) {
+                    mensajeFollowUp += `Soy Sara de Grupo Santa Rita. ¡Gracias por llamarnos! `;
+                  } else {
+                    mensajeFollowUp += `Soy Sara de Grupo Santa Rita. Gracias por la llamada. `;
+                  }
                   if (desarrolloInteres) {
                     mensajeFollowUp += `Me da gusto que te interese *${desarrolloInteres}*. `;
                   }

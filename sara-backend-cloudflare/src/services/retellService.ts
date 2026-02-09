@@ -343,6 +343,161 @@ export class RetellService {
   }
 
   /**
+   * Lista los números de teléfono configurados en Retell
+   */
+  async listPhoneNumbers(): Promise<any[]> {
+    if (!this.apiKey) {
+      console.error('❌ RETELL_API_KEY no configurado');
+      return [];
+    }
+
+    try {
+      const response = await fetch(`${this.baseUrl}/list-phone-numbers`, {
+        headers: { 'Authorization': `Bearer ${this.apiKey}` }
+      });
+
+      if (!response.ok) {
+        console.error('❌ Retell error listando teléfonos:', response.status);
+        return [];
+      }
+
+      return await response.json() as any[];
+    } catch (e) {
+      console.error('❌ Retell error:', e);
+      return [];
+    }
+  }
+
+  /**
+   * Obtiene detalles de un número de teléfono
+   * @param phoneNumber - E.164 format: +524923860066
+   */
+  async getPhoneNumber(phoneNumber: string): Promise<any> {
+    if (!this.apiKey) return null;
+
+    try {
+      const encoded = encodeURIComponent(phoneNumber);
+      const response = await fetch(`${this.baseUrl}/get-phone-number/${encoded}`, {
+        headers: { 'Authorization': `Bearer ${this.apiKey}` }
+      });
+
+      if (!response.ok) return null;
+      return await response.json();
+    } catch (e) {
+      console.error('❌ Retell error:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Configura un número de teléfono para recibir llamadas entrantes
+   * @param phoneNumber - E.164 format: +524923860066
+   */
+  async configureInbound(phoneNumber: string, agentId?: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    if (!this.apiKey) {
+      return { success: false, error: 'RETELL_API_KEY no configurado' };
+    }
+
+    try {
+      const encoded = encodeURIComponent(phoneNumber);
+      const response = await fetch(`${this.baseUrl}/update-phone-number/${encoded}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          inbound_agent_id: agentId || this.agentId
+        })
+      });
+
+      const data = await response.json() as any;
+
+      if (!response.ok) {
+        console.error('❌ Retell error configurando inbound:', JSON.stringify(data));
+        return { success: false, error: data.error?.message || data.message || `Error: ${response.status}` };
+      }
+
+      console.log(`✅ Retell: Inbound configurado para ${phoneNumber} con agente ${agentId || this.agentId}`);
+      return { success: true, data };
+    } catch (e) {
+      console.error('❌ Retell error:', e);
+      return { success: false, error: e instanceof Error ? e.message : 'Error desconocido' };
+    }
+  }
+
+  /**
+   * Obtiene detalles de un agente (incluye llm_id)
+   */
+  async getAgent(agentId?: string): Promise<any> {
+    if (!this.apiKey) return null;
+    try {
+      const id = agentId || this.agentId;
+      const response = await fetch(`${this.baseUrl}/get-agent/${id}`, {
+        headers: { 'Authorization': `Bearer ${this.apiKey}` }
+      });
+      if (!response.ok) {
+        console.error('❌ Retell error obteniendo agente:', response.status);
+        return null;
+      }
+      return await response.json();
+    } catch (e) {
+      console.error('❌ Retell error:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Obtiene detalles de un LLM (incluye general_tools)
+   */
+  async getLlm(llmId: string): Promise<any> {
+    if (!this.apiKey) return null;
+    try {
+      const response = await fetch(`${this.baseUrl}/get-retell-llm/${llmId}`, {
+        headers: { 'Authorization': `Bearer ${this.apiKey}` }
+      });
+      if (!response.ok) {
+        console.error('❌ Retell error obteniendo LLM:', response.status);
+        return null;
+      }
+      return await response.json();
+    } catch (e) {
+      console.error('❌ Retell error:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Actualiza las tools de un LLM
+   * IMPORTANTE: Reemplaza todo el array general_tools
+   */
+  async updateLlmTools(llmId: string, tools: any[]): Promise<{ success: boolean; data?: any; error?: string }> {
+    if (!this.apiKey) {
+      return { success: false, error: 'RETELL_API_KEY no configurado' };
+    }
+    try {
+      const response = await fetch(`${this.baseUrl}/update-retell-llm/${llmId}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ general_tools: tools })
+      });
+      const data = await response.json() as any;
+      if (!response.ok) {
+        console.error('❌ Retell error actualizando LLM tools:', JSON.stringify(data));
+        return { success: false, error: data.error?.message || data.message || `Error: ${response.status}` };
+      }
+      console.log(`✅ Retell: LLM ${llmId} actualizado con ${tools.length} tools`);
+      return { success: true, data };
+    } catch (e) {
+      console.error('❌ Retell error:', e);
+      return { success: false, error: e instanceof Error ? e.message : 'Error desconocido' };
+    }
+  }
+
+  /**
    * Verifica si el servicio está disponible
    */
   isAvailable(): boolean {
