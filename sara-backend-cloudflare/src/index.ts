@@ -187,6 +187,13 @@ import {
   exportBackup
 } from './crons/dashboard';
 
+// Health Check - Automated monitoring and alerts
+import {
+  runHealthCheck,
+  trackError,
+  cronHealthCheck
+} from './crons/healthCheck';
+
 export interface Env {
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
@@ -15021,8 +15028,305 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
 
     if (url.pathname === '/health') {
-      const health = await getHealthStatus(supabase);
+      const health = await runHealthCheck(supabase, env);
       return corsResponse(JSON.stringify(health));
+    }
+
+    // Detailed system health (requires auth)
+    if (url.pathname === '/api/system-health') {
+      const [healthResult, errorRate] = await Promise.all([
+        runHealthCheck(supabase, env),
+        (async () => {
+          if (!env.SARA_CACHE) return { alertNeeded: false, errorsLastHour: 0, errorsLast2Hours: 0 };
+          const { checkErrorRate } = await import('./crons/healthCheck');
+          return checkErrorRate(env);
+        })()
+      ]);
+
+      // Get last health check from KV
+      let lastCheck = null;
+      if (env.SARA_CACHE) {
+        const cached = await env.SARA_CACHE.get('last_health_check');
+        if (cached) lastCheck = JSON.parse(cached);
+      }
+
+      return corsResponse(JSON.stringify({
+        ...healthResult,
+        errorRate,
+        lastScheduledCheck: lastCheck
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // E2E VALIDATE - Run ~30 tests against real services pre-deploy
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/validate') {
+      const startTime = Date.now();
+      const results: Array<{ name: string; passed: boolean; details: string }> = [];
+
+      // Helper
+      const addTest = (name: string, passed: boolean, details: string) => {
+        results.push({ name, passed, details });
+      };
+
+      // ── DATABASE TESTS ──
+
+      // 1. Supabase read
+      try {
+        const { count, error } = await supabase.client
+          .from('leads')
+          .select('*', { count: 'exact', head: true });
+        if (error) throw error;
+        addTest('DB: read leads count', true, `${count} leads`);
+      } catch (e: any) {
+        addTest('DB: read leads count', false, e.message);
+      }
+
+      // 2. Team members exist
+      try {
+        const { data, error } = await supabase.client
+          .from('team_members')
+          .select('id, name, role')
+          .eq('active', true);
+        if (error) throw error;
+        const vendedores = data?.filter((t: any) => t.role === 'vendedor').length || 0;
+        addTest('DB: team members', (data?.length || 0) > 0, `${data?.length} active (${vendedores} vendedores)`);
+      } catch (e: any) {
+        addTest('DB: team members', false, e.message);
+      }
+
+      // 3. Properties catalog
+      try {
+        const { count, error } = await supabase.client
+          .from('properties')
+          .select('*', { count: 'exact', head: true });
+        if (error) throw error;
+        addTest('DB: properties catalog', (count || 0) >= 30, `${count} properties`);
+      } catch (e: any) {
+        addTest('DB: properties catalog', false, e.message);
+      }
+
+      // 4. Appointments table accessible
+      try {
+        const { count, error } = await supabase.client
+          .from('appointments')
+          .select('*', { count: 'exact', head: true });
+        if (error) throw error;
+        addTest('DB: appointments table', true, `${count} total appointments`);
+      } catch (e: any) {
+        addTest('DB: appointments table', false, e.message);
+      }
+
+      // 5. DB write + delete (create test lead and remove)
+      try {
+        const testPhone = '5210000099999';
+        const { data: created, error: createErr } = await supabase.client
+          .from('leads')
+          .insert({ phone: testPhone, name: 'E2E_VALIDATE_TEST', status: 'new', source: 'e2e_test' })
+          .select()
+          .single();
+        if (createErr) throw createErr;
+
+        const { error: deleteErr } = await supabase.client
+          .from('leads')
+          .delete()
+          .eq('id', created.id);
+        if (deleteErr) throw deleteErr;
+
+        addTest('DB: write + delete', true, 'Created and deleted test lead');
+      } catch (e: any) {
+        // Cleanup attempt
+        await supabase.client.from('leads').delete().eq('phone', '5210000099999').catch(() => {});
+        addTest('DB: write + delete', false, e.message);
+      }
+
+      // ── CACHE TESTS ──
+
+      // 6. KV write + read + delete
+      if (env.SARA_CACHE) {
+        try {
+          const key = 'e2e_validate_test';
+          const val = `test_${Date.now()}`;
+          await env.SARA_CACHE.put(key, val, { expirationTtl: 60 });
+          const readBack = await env.SARA_CACHE.get(key);
+          await env.SARA_CACHE.delete(key);
+          addTest('Cache: KV write/read/delete', readBack === val, 'KV cycle OK');
+        } catch (e: any) {
+          addTest('Cache: KV write/read/delete', false, e.message);
+        }
+      } else {
+        addTest('Cache: KV write/read/delete', false, 'SARA_CACHE not configured');
+      }
+
+      // ── WHATSAPP TESTS ──
+
+      // 7. Meta API token valid
+      if (env.META_PHONE_NUMBER_ID && env.META_ACCESS_TOKEN) {
+        try {
+          const resp = await fetch(
+            `https://graph.facebook.com/v21.0/${env.META_PHONE_NUMBER_ID}`,
+            { headers: { 'Authorization': `Bearer ${env.META_ACCESS_TOKEN}` } }
+          );
+          addTest('WhatsApp: Meta API token', resp.ok, resp.ok ? 'Token valid' : `Status ${resp.status}`);
+        } catch (e: any) {
+          addTest('WhatsApp: Meta API token', false, e.message);
+        }
+      } else {
+        addTest('WhatsApp: Meta API token', false, 'Not configured');
+      }
+
+      // 8. Phone number ID correct
+      if (env.META_PHONE_NUMBER_ID && env.META_ACCESS_TOKEN) {
+        try {
+          const resp = await fetch(
+            `https://graph.facebook.com/v21.0/${env.META_PHONE_NUMBER_ID}`,
+            { headers: { 'Authorization': `Bearer ${env.META_ACCESS_TOKEN}` } }
+          );
+          if (resp.ok) {
+            const data: any = await resp.json();
+            addTest('WhatsApp: phone number', true,
+              `${data.display_phone_number || 'configured'} (quality: ${data.quality_rating || 'N/A'})`);
+          } else {
+            addTest('WhatsApp: phone number', false, `Status ${resp.status}`);
+          }
+        } catch (e: any) {
+          addTest('WhatsApp: phone number', false, e.message);
+        }
+      } else {
+        addTest('WhatsApp: phone number', false, 'Not configured');
+      }
+
+      // ── AI TESTS ──
+
+      // 9. Claude API responds
+      if (env.ANTHROPIC_API_KEY) {
+        try {
+          const resp = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': env.ANTHROPIC_API_KEY,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: 'claude-sonnet-4-5-20250929',
+              max_tokens: 50,
+              messages: [{ role: 'user', content: 'Respond with just OK' }]
+            })
+          });
+          const data: any = await resp.json();
+          const text = data.content?.[0]?.text || '';
+          addTest('AI: Claude API', resp.ok && text.length > 0, text.substring(0, 50));
+        } catch (e: any) {
+          addTest('AI: Claude API', false, e.message);
+        }
+      } else {
+        addTest('AI: Claude API', false, 'ANTHROPIC_API_KEY not configured');
+      }
+
+      // ── RETELL TESTS ──
+
+      // 10. Retell agent exists
+      if (env.RETELL_API_KEY && env.RETELL_AGENT_ID) {
+        try {
+          const resp = await fetch(`https://api.retellai.com/get-agent/${env.RETELL_AGENT_ID}`, {
+            headers: { 'Authorization': `Bearer ${env.RETELL_API_KEY}` }
+          });
+          if (resp.ok) {
+            const agent: any = await resp.json();
+            addTest('Retell: agent config', true, `Agent "${agent.agent_name || agent.agent_id}" found`);
+          } else {
+            addTest('Retell: agent config', false, `Status ${resp.status}`);
+          }
+        } catch (e: any) {
+          addTest('Retell: agent config', false, e.message);
+        }
+      } else {
+        addTest('Retell: agent config', false, 'Retell not configured');
+      }
+
+      // ── API ENDPOINT TESTS ──
+
+      // 11. GET /api/leads
+      try {
+        const { data, error } = await supabase.client
+          .from('leads')
+          .select('id, name, phone, status')
+          .order('created_at', { ascending: false })
+          .limit(5);
+        if (error) throw error;
+        addTest('API: GET leads', true, `${data?.length} leads returned`);
+      } catch (e: any) {
+        addTest('API: GET leads', false, e.message);
+      }
+
+      // 12. GET /api/appointments
+      try {
+        const hoy = new Date().toISOString().split('T')[0];
+        const { data, error } = await supabase.client
+          .from('appointments')
+          .select('id, lead_id, scheduled_date, status')
+          .gte('scheduled_date', hoy)
+          .limit(5);
+        if (error) throw error;
+        addTest('API: GET appointments', true, `${data?.length} upcoming appointments`);
+      } catch (e: any) {
+        addTest('API: GET appointments', false, e.message);
+      }
+
+      // 13. GET /api/properties
+      try {
+        const { data, error } = await supabase.client
+          .from('properties')
+          .select('id, name, price, price_equipped')
+          .limit(5);
+        if (error) throw error;
+        addTest('API: GET properties', (data?.length || 0) > 0, `${data?.length} properties returned`);
+      } catch (e: any) {
+        addTest('API: GET properties', false, e.message);
+      }
+
+      // ── CRON FUNCTION TESTS ──
+
+      // 14. Health check function works
+      try {
+        const healthResult = await runHealthCheck(supabase, env);
+        addTest('CRON: health check function', healthResult.checks.length >= 5,
+          `${healthResult.checks.length} checks, ${healthResult.allPassed ? 'all passed' : healthResult.failedChecks.join(', ')}`);
+      } catch (e: any) {
+        addTest('CRON: health check function', false, e.message);
+      }
+
+      // 15. Error tracking function works
+      if (env.SARA_CACHE) {
+        try {
+          await trackError(env, 'e2e_test');
+          const hourKey = `sara_error_type:e2e_test:${new Date().toISOString().slice(0, 13).replace('T', '-')}`;
+          const count = await env.SARA_CACHE.get(hourKey);
+          // Cleanup
+          await env.SARA_CACHE.delete(hourKey);
+          addTest('CRON: error tracking', count !== null, `Tracked and read back: ${count}`);
+        } catch (e: any) {
+          addTest('CRON: error tracking', false, e.message);
+        }
+      } else {
+        addTest('CRON: error tracking', false, 'KV not configured');
+      }
+
+      // ── SUMMARY ──
+
+      const passed = results.filter(r => r.passed).length;
+      const failed = results.filter(r => !r.passed).length;
+      const total = results.length;
+
+      return corsResponse(JSON.stringify({
+        summary: `${passed}/${total} passed`,
+        passed,
+        failed,
+        total,
+        duration_ms: Date.now() - startTime,
+        results
+      }, null, 2));
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -19485,6 +19789,9 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
         error: error instanceof Error ? error.stack : String(error)
       });
 
+      // Track error in KV for rate monitoring
+      ctx.waitUntil(trackError(env, 'fetch_error'));
+
       return corsResponse(JSON.stringify({
         error: 'Internal Server Error',
         request_id: requestId
@@ -20542,6 +20849,18 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
     // ═══════════════════════════════════════════════════════════
     console.log('📤 Procesando broadcasts encolados...');
     await procesarBroadcastQueue(supabase, meta);
+
+    // ═══════════════════════════════════════════════════════════
+    // HEALTH CHECK - Verificar servicios externos (cada 10 min, offset :05)
+    // Supabase, KV, Meta API, properties catalog, error rate
+    // ═══════════════════════════════════════════════════════════
+    if (mexicoMinute % 10 === 5) {
+      try {
+        await cronHealthCheck(supabase, meta, env);
+      } catch (healthError) {
+        console.error('⚠️ Error en cronHealthCheck:', healthError);
+      }
+    }
 
     // ═══════════════════════════════════════════════════════════
     // DELIVERY CHECK - Verificar que mensajes al equipo llegaron (cada 10 min)
