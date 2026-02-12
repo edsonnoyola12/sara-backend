@@ -1533,6 +1533,8 @@ REGLA #4: No te cicles. Si ya tienes nombre, día y hora, agenda de una vez con 
 REGLA #5: NUNCA pidas el celular ni el teléfono del cliente. Ya estás hablando con él por teléfono, ya tienes su número.
 REGLA #6: SÍ puedes enviar info por WhatsApp. Usa la herramienta enviar_info_whatsapp. Dile "Te mando la info por WhatsApp ahorita mismo".
 REGLA #7: NUNCA sugieras un día específico (sábado, domingo, fin de semana, finde, mañana). SIEMPRE pregunta abierto: "¿Qué día te queda bien?" y espera a que EL CLIENTE diga el día.
+REGLA #8: Cuando el cliente dice su nombre, RECUÉRDALO. No lo vuelvas a preguntar. Si ya lo tienes, úsalo directamente al agendar.
+REGLA #9: Cuando el cliente da presupuesto, usa la herramienta buscar_por_presupuesto. Presenta TODAS las opciones que te devuelva, agrupadas por desarrollo y zona. No elijas solo una.
 
 Variables: {{call_direction}} (inbound/outbound), {{lead_name}}, {{is_new_lead}}, {{desarrollo_interes}}, {{vendedor_nombre}}
 
@@ -1542,14 +1544,9 @@ Si outbound: el saludo ya se envió. Menciona {{desarrollo_interes}} si tiene va
 FLUJO DE VENTA:
 1. "¿Buscas en Zacatecas o en Guadalupe?" (si dice las dos, está bien)
 2. "¿Y tienes un presupuesto en mente?"
-3. Con zona + presupuesto ya sabes qué recomendar:
-   - Zacatecas + menos de dos millones = Monte Verde
-   - Zacatecas + tres millones o más = Los Encinos, Miravalle o Paseo Colorines
-   - Guadalupe + menos de dos millones = Priv. Andes (el único con alberca)
-   - Guadalupe + tres millones setecientos o más = Distrito Falco
-   - Terrenos = Citadella del Nogal
-   - Las dos zonas = recomienda lo mejor según presupuesto de ambas
-   Recomienda UNA opción con precio y lo más atractivo. Corto y directo.
+3. Con presupuesto, usa la herramienta buscar_por_presupuesto. Menciona TODAS las opciones que devuelva:
+   "Con cinco millones hay varias opciones: en Colinas del Padre tienes Los Encinos, Miravalle y Paseo Colorines. En Guadalupe está Distrito Falco. Y las más económicas Monte Verde y Andes. ¿Cuál te llama más la atención?"
+   Si solo hay pocas opciones, menciónalas todas con precio.
 4. "¿Te gustaría conocerlo? ¿Qué día te queda para visitarlas?"
 5. Pide nombre, agenda con la herramienta. Listo.
 
@@ -8311,8 +8308,8 @@ Mensaje: ${mensaje}`;
           }
 
           const greetingConDesarrollo = desarrolloInteres
-            ? `¡Hola ${nombre}! Qué gusto escucharte. Soy Sara de Grupo Santa Rita. Veo que te interesa ${desarrolloInteres}. ¿En qué te puedo ayudar?`
-            : `¡Hola ${nombre}! Qué gusto escucharte. Soy Sara de Grupo Santa Rita. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿En qué te puedo ayudar?`;
+            ? `¡Hola de nuevo ${nombre}! Qué gusto que nos vuelvas a llamar. Soy Sara de Grupo Santa Rita. La vez pasada platicamos de ${desarrolloInteres}. ¿En qué te puedo ayudar?`
+            : `¡Hola de nuevo ${nombre}! Qué gusto que nos vuelvas a llamar. Soy Sara de Grupo Santa Rita. ¿En qué te puedo ayudar?`;
 
           return new Response(JSON.stringify({
             dynamic_variables: {
@@ -8678,18 +8675,25 @@ Mensaje: ${mensaje}`;
           }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         } else {
           const errorMsg = result.error || 'Error desconocido';
+          console.log(`❌ agendar-cita falló: type=${result.errorType}, error=${errorMsg}, fecha=${fechaISO}, hora=${horaISO}`);
           if (result.errorType === 'duplicate') {
             return new Response(JSON.stringify({
-              result: `${nombre} ya tiene una cita agendada próximamente. ¿Quiere cambiarla o confirmar la existente?`
+              result: `${nombre} ya tiene una cita agendada próximamente. Pregúntale si quiere cambiarla o confirmar la existente.`
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+          if (result.errorType === 'out_of_hours') {
+            const h = result.horaInvalida;
+            return new Response(JSON.stringify({
+              result: `Esa hora no está disponible. El horario de atención es de ${h?.horaInicio || 9} a ${h?.horaFin || 18} horas${h?.esSabado ? ' (sábado hasta las 14)' : ''}. Pregúntale otra hora.`
             }), { status: 200, headers: { 'Content-Type': 'application/json' } });
           }
           return new Response(JSON.stringify({
-            result: `No pude agendar la cita: ${errorMsg}. Dile que le mandas confirmación por WhatsApp.`
+            result: `Hubo un problema al agendar. Confírmale: "${nombre}, tu cita queda el ${fecha} a las ${hora} en ${desarrollo}. Te mando confirmación por WhatsApp."`
           }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
       } catch (e: any) {
-        console.error('❌ Retell tool agendar-cita error:', e);
-        return new Response(JSON.stringify({ result: 'Error al agendar. Dile al cliente que le confirmas por WhatsApp.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        console.error('❌ Retell tool agendar-cita error:', e.message, e.stack?.split('\n')[1]);
+        return new Response(JSON.stringify({ result: 'Hubo un problema técnico. Confírmale la cita verbalmente y dile que le mandas confirmación por WhatsApp.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     }
 
