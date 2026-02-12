@@ -1532,6 +1532,7 @@ REGLA #3: Precios SIEMPRE en palabras: "un millón seiscientos mil pesos", nunca
 REGLA #4: No te cicles. Si ya tienes nombre, día y hora, agenda de una vez con la herramienta.
 REGLA #5: NUNCA pidas el celular ni el teléfono del cliente. Ya estás hablando con él por teléfono, ya tienes su número.
 REGLA #6: SÍ puedes enviar info por WhatsApp. Usa la herramienta enviar_info_whatsapp. Dile "Te mando la info por WhatsApp ahorita mismo".
+REGLA #7: NUNCA sugieras un día específico (sábado, domingo, fin de semana, finde, mañana). SIEMPRE pregunta abierto: "¿Qué día te queda bien?" y espera a que EL CLIENTE diga el día.
 
 Variables: {{call_direction}} (inbound/outbound), {{lead_name}}, {{is_new_lead}}, {{desarrollo_interes}}, {{vendedor_nombre}}
 
@@ -1556,7 +1557,7 @@ CITAS:
 - Zacatecas (Monte Verde, Los Encinos, Miravalle, Paseo Colorines): "Te veo en las oficinas de Santa Rita en Colinas del Padre"
 - Guadalupe (Andes, Distrito Falco, Citadella): "Te veo directamente en el desarrollo"
 - Dos desarrollos: "Empezamos con uno y de ahí vamos al otro. ¿Qué día te queda para visitarlas?"
-- Si dice "el sábado" sin hora: "¿A las once de la mañana te funciona?"
+- Si dice un día sin hora, pregunta: "¿A qué hora te queda bien?"
 - Después de agendar: "¡Listo, te esperamos! Te mando la ubicación por WhatsApp"
 
 DESARROLLOS:
@@ -1576,7 +1577,7 @@ Terrenos Citadella del Nogal (Guadalupe):
 
 OBJECIONES (responde corto y cierra con pregunta):
 - Caro: "Tenemos desde un millón seiscientos mil. ¿Cuál es tu presupuesto?"
-- Pensar: "Con veinte mil de apartado congelas precio. ¿Te gustaría al menos conocerlo este finde?"
+- Pensar: "Con veinte mil de apartado congelas precio. ¿Te gustaría al menos conocerlo? ¿Qué día te queda bien?"
 - Lejos: "La plusvalía es del ocho al diez por ciento anual. ¿Te gustaría conocer la zona?"
 - Sin enganche: "INFONAVIT financia hasta el cien por ciento. ¿Ya tienes tu precalificación?"
 - Urge: "Tenemos entrega inmediata en Monte Verde, Encinos y Andes"
@@ -8472,15 +8473,62 @@ Mensaje: ${mensaje}`;
           leadPhone = callObj.from_number?.replace('+', '') || callerPhone;
         }
 
-        const { data: lead } = await supabase.client
+        let { data: lead } = await supabase.client
           .from('leads')
           .select('*')
           .or(`phone.eq.${leadPhone},phone.like.%${leadPhone.slice(-10)}`)
           .maybeSingle();
 
+        // Si no existe el lead, CREARLO con el nombre real (no esperar a call_ended)
+        if (!lead && leadPhone) {
+          console.log(`📞 agendar-cita: Lead no existe para ${leadPhone}, creándolo con nombre: ${nombre}`);
+
+          // Buscar vendedor disponible (round-robin)
+          const { data: vendedoresDisp } = await supabase.client
+            .from('team_members')
+            .select('id')
+            .eq('role', 'vendedor')
+            .eq('active', true)
+            .limit(5);
+          const vendedorIdAsign = vendedoresDisp && vendedoresDisp.length > 0
+            ? vendedoresDisp[Math.floor(Math.random() * vendedoresDisp.length)].id
+            : null;
+
+          const { data: nuevoLead, error: createErr } = await supabase.client
+            .from('leads')
+            .insert({
+              name: nombre || 'Lead Telefónico',
+              phone: leadPhone,
+              source: 'phone_inbound',
+              status: 'new',
+              assigned_to: vendedorIdAsign,
+              property_interest: desarrollo,
+              notes: {
+                notas: [{
+                  text: `📞 Lead creado desde herramienta agendar_cita durante llamada`,
+                  author: 'SARA (Retell)',
+                  timestamp: new Date().toISOString(),
+                  type: 'system'
+                }]
+              }
+            })
+            .select('*')
+            .single();
+
+          if (nuevoLead) {
+            lead = nuevoLead;
+            console.log(`✅ Lead creado desde agendar-cita: ${nuevoLead.id} - ${nombre}`);
+          } else {
+            console.error('❌ Error creando lead desde agendar-cita:', createErr);
+            return new Response(JSON.stringify({
+              result: `Hubo un problema registrando tu cita. Confírmale: "${nombre}, tu cita queda el ${fecha} a las ${hora} en ${desarrollo}. Te mando confirmación por WhatsApp."`
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+        }
+
         if (!lead) {
           return new Response(JSON.stringify({
-            result: `No encontré al cliente en el sistema. La cita se registrará cuando termine la llamada. Confírmale: "${nombre}, tu cita queda el ${fecha} a las ${hora} en ${desarrollo}. Te mando confirmación por WhatsApp."`
+            result: `No pude encontrar o crear al cliente. Confírmale: "${nombre}, tu cita queda el ${fecha} a las ${hora} en ${desarrollo}. Te mando confirmación por WhatsApp."`
           }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
 
@@ -8508,10 +8556,20 @@ Mensaje: ${mensaje}`;
 
         if (result.success) {
           // 1. Actualizar nombre del lead si dio uno real
-          if (nombre && nombre !== 'Lead Telefónico' && nombre !== 'Lead') {
-            await supabase.client.from('leads').update({ name: nombre }).eq('id', lead.id);
-            console.log(`📝 Lead nombre actualizado: ${lead.name} → ${nombre}`);
+          const nombreReal = nombre && nombre !== 'Lead Telefónico' && nombre !== 'Lead' ? nombre : '';
+          if (nombreReal) {
+            const { error: nameErr } = await supabase.client.from('leads').update({ name: nombreReal }).eq('id', lead.id);
+            if (nameErr) {
+              console.error(`❌ Error actualizando nombre del lead: ${nameErr.message}`);
+            } else {
+              console.log(`📝 Lead nombre actualizado: ${lead.name} → ${nombreReal}`);
+            }
+            // También actualizar lead_name en la cita
+            if (result.appointmentId) {
+              await supabase.client.from('appointments').update({ lead_name: nombreReal }).eq('id', result.appointmentId);
+            }
           }
+          const displayNombre = nombreReal || nombre || 'cliente';
 
           // 2. Enviar confirmación por WhatsApp al lead
           try {
@@ -8523,6 +8581,7 @@ Mensaje: ${mensaje}`;
             if (wpPhone.startsWith('52') && wpPhone.length === 12) {
               wpPhone = '521' + wpPhone.substring(2);
             }
+            console.log(`📱 Normalizando teléfono: ${leadPhone} → ${wpPhone}`);
 
             // Buscar GPS del desarrollo
             const { data: propGps } = await supabase.client
@@ -8536,16 +8595,33 @@ Mensaje: ${mensaje}`;
             const vendedorNombre = result.vendedor?.name?.split(' ')[0] || '';
             const vendedorInfo = vendedorNombre ? `\nTu asesor será ${vendedorNombre}.` : '';
 
+            // Formatear fecha para el mensaje (más legible)
+            let fechaDisplay = fecha;
+            try {
+              // Si fechaISO es DD/MM/YYYY, convertir a formato más legible
+              const dateMatch = fechaISO.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+              if (dateMatch) {
+                const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+                fechaDisplay = `${parseInt(dateMatch[1])} de ${meses[parseInt(dateMatch[2])-1]}`;
+              }
+            } catch (e) { /* usar fecha original */ }
+
             await meta.sendWhatsAppMessage(wpPhone,
-              `✅ ¡Cita confirmada!\n\n📅 ${fecha} a las ${hora}\n🏠 ${desarrollo}${vendedorInfo}${gpsLink}\n\n¡Te esperamos, ${nombre}!`
+              `✅ ¡Cita confirmada!\n\n📅 ${fechaDisplay} a las ${horaISO || hora}\n🏠 ${desarrollo}${vendedorInfo}${gpsLink}\n\n¡Te esperamos, ${displayNombre}!`
             );
             console.log(`📤 Confirmación WhatsApp enviada a lead ${wpPhone}`);
+
+            // Marcar lead_notified
+            if (result.appointmentId) {
+              await supabase.client.from('appointments').update({ lead_notified: true }).eq('id', result.appointmentId);
+            }
 
             // 3. Notificar al vendedor asignado
             if (result.vendedor?.phone) {
               const { enviarMensajeTeamMember } = await import('./utils/teamMessaging');
+              console.log(`📤 Notificando a vendedor: ${result.vendedor.name} (${result.vendedor.phone})`);
               await enviarMensajeTeamMember(supabase, meta, result.vendedor,
-                `📞 ¡Nueva cita desde llamada!\n\n👤 ${nombre}\n📅 ${fecha} a las ${hora}\n🏠 ${desarrollo}\n📱 ${leadPhone}`,
+                `📞 ¡Nueva cita desde llamada!\n\n👤 ${displayNombre}\n📅 ${fechaDisplay} a las ${horaISO || hora}\n🏠 ${desarrollo}\n📱 ${leadPhone}`,
                 { tipoMensaje: 'notificacion' }
               );
               console.log(`📤 Notificación enviada a vendedor ${result.vendedor.name}`);
@@ -8556,14 +8632,16 @@ Mensaje: ${mensaje}`;
                   .update({ vendedor_notified: true })
                   .eq('id', result.appointmentId);
               }
+            } else {
+              console.log(`⚠️ No hay vendedor asignado para notificar. result.vendedor:`, JSON.stringify(result.vendedor));
             }
           } catch (notifError: any) {
-            console.error('⚠️ Error enviando notificaciones (cita sí se creó):', notifError.message);
+            console.error('⚠️ Error enviando notificaciones (cita sí se creó):', notifError.message, notifError.stack?.split('\n')[1]);
           }
 
           const vendedorMsg = result.vendedor ? ` Tu asesor será ${result.vendedor.name?.split(' ')[0]}.` : '';
           return new Response(JSON.stringify({
-            result: `Cita agendada para ${nombre} el ${fecha} a las ${hora} en ${desarrollo}.${vendedorMsg} Ya le envié la confirmación y ubicación por WhatsApp.`
+            result: `Cita agendada para ${displayNombre} el ${fecha} a las ${hora} en ${desarrollo}.${vendedorMsg} Ya le envié la confirmación y ubicación por WhatsApp.`
           }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         } else {
           const errorMsg = result.error || 'Error desconocido';
@@ -9095,9 +9173,9 @@ Mensaje: ${mensaje}`;
 
             debugLog.push({ t: Date.now(), step: 'lead_found', found: !!lead, lead_id: lead?.id, name: lead?.name });
 
-            // Si es llamada ENTRANTE y NO existe el lead, CREARLO
+            // Si es llamada ENTRANTE y NO existe el lead, CREARLO (puede que agendar_cita ya lo creó)
             if (isInbound && !lead && leadPhone) {
-              console.log(`📞 Llamada entrante de número nuevo: ${leadPhone} - Creando lead...`);
+              console.log(`📞 call_ended: Lead no existe para ${leadPhone}, creándolo...`);
 
               // Extraer nombre del análisis de la llamada si está disponible
               const nombreFromCall = call.call_analysis?.custom_analysis?.lead_name ||
@@ -9270,8 +9348,13 @@ Mensaje: ${mensaje}`;
               console.log(`📝 Nota de llamada agregada a lead ${lead.id}`);
             }
 
-            // Notificar al vendedor
+            // Notificar al vendedor (re-leer lead para tener nombre fresco)
             if (lead?.assigned_to) {
+              const { data: freshLead } = await supabase.client.from('leads').select('name').eq('id', lead.id).single();
+              const leadDisplayName = (freshLead?.name && freshLead.name !== 'Lead Telefónico' && freshLead.name !== 'Lead')
+                ? freshLead.name
+                : (isInbound ? call.from_number : call.to_number);
+
               const { data: vendedor } = await supabase.client
                 .from('team_members')
                 .select('phone, name')
@@ -9281,7 +9364,7 @@ Mensaje: ${mensaje}`;
               if (vendedor?.phone) {
                 const durationMin = call.duration_ms ? Math.round(call.duration_ms / 60000) : 0;
                 const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-                let mensaje = `📞 Llamada IA completada con ${lead.name || (isInbound ? call.from_number : call.to_number)}\n`;
+                let mensaje = `📞 Llamada IA completada con ${leadDisplayName}\n`;
                 mensaje += `⏱️ Duración: ${durationMin} minutos\n`;
                 if (call.call_analysis?.summary) {
                   mensaje += `📝 Resumen: ${call.call_analysis.summary.substring(0, 300)}`;
