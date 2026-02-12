@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-09 (Sesión 32)
+> Última actualización: 2026-02-11 (Sesión 33)
 
 ---
 
@@ -604,6 +604,7 @@ Ver documentación en `docs/`:
 | `/test-envio-7pm` | Dry-run del reporte 7 PM (público) |
 | `/test-envio-7pm?enviar=true` | Envío real del reporte 7 PM |
 | `/test-envio-7pm?enviar=true&phone=XXXX` | Envío real a un vendedor específico |
+| `/test-retell-e2e?api_key=Y` | **E2E Retell: 25 tests** (prompt, lookup, cita, tools, WhatsApp) |
 
 ---
 
@@ -4221,3 +4222,40 @@ Soporte para horas en texto: "las cuatro de la tarde", "a las tres de la mañana
 
 **Tests:** 369/369 pasando
 **Deploy:** Version ID `c1c1cbd3`
+
+---
+
+### 2026-02-11 (Sesión 33) - Fix Flujo Retell Completo + Endpoint E2E Automatizado
+
+**Fixes aplicados al flujo de llamadas Retell:**
+
+| Fix | Descripción |
+|-----|-------------|
+| REGLA #5 | SARA nunca pide celular del cliente durante llamada (ya tiene su número) |
+| REGLA #6 | SARA sí puede enviar info por WhatsApp usando herramienta `enviar_info_whatsapp` |
+| Lookup webhook | Filtra nombres "Lead Telefónico"/"Lead" → SARA pregunta nombre real |
+| Agendar-cita | Actualiza nombre en BD + envía confirmación WhatsApp al lead con GPS + notifica vendedor |
+| Enviar-whatsapp | Extrae teléfono de múltiples ubicaciones del body + fallback sin pedir celular |
+
+**Nuevo endpoint `/test-retell-e2e` - 25 tests automáticos:**
+
+| Categoría | Tests | Qué verifica |
+|-----------|-------|-------------|
+| Prompt Retell | 11 | REGLA #1-6, zona, presupuesto, alberca, rentas, citas |
+| Lookup webhook | 2 | Lead nuevo sin nombre falso, filtro Lead Telefónico |
+| Agendar cita | 4 | Datos faltantes, nombre actualizado, cita en BD, vendedor_notified |
+| Enviar WhatsApp | 2 | Extracción teléfono (4 variantes), fallback sin teléfono |
+| Tools Retell | 5 | agendar_cita, buscar_info, presupuesto, enviar_whatsapp, end_call |
+| Agent config | 1 | Descripción de agendar_cita simplificada |
+
+**Uso:** `/test-retell-e2e?api_key=XXX` → JSON con resumen y detalle de cada test.
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/index.ts` | REGLA #5/#6, lookup filter, agendar-cita notifications, enviar-whatsapp phone extraction, `/test-retell-e2e` endpoint |
+
+**Tests:** 369/369 pasando
+**Commit:** `6454bafd`
+**Deploy:** Version ID `585ff89e`
