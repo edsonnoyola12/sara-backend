@@ -8230,6 +8230,15 @@ Mensaje: ${mensaje}`;
 
         // Retell envía el número del que llama en from_number
         const callerPhone = body.from_number?.replace('+', '') || body.to_number?.replace('+', '');
+        const callId = body.call_id || '';
+
+        // Guardar phone→call_id en KV para que los tools puedan resolver el teléfono
+        if (callerPhone && callId && env.SARA_CACHE) {
+          await env.SARA_CACHE.put(`retell_call_phone:${callId}`, callerPhone, { expirationTtl: 3600 });
+          // También guardar como "última llamada" para fallback
+          await env.SARA_CACHE.put('retell_last_caller_phone', callerPhone, { expirationTtl: 3600 });
+          console.log(`📞 RETELL LOOKUP: Guardado phone ${callerPhone} para call_id ${callId}`);
+        }
 
         const defaultGreeting = '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?';
 
@@ -8466,11 +8475,23 @@ Mensaje: ${mensaje}`;
         }
 
         // Buscar o crear lead por teléfono de la llamada
-        const callerPhone = callObj.to_number?.replace('+', '') || callObj.from_number?.replace('+', '') || '';
+        let callerPhone = callObj.to_number?.replace('+', '') || callObj.from_number?.replace('+', '') || '';
         let leadPhone = callerPhone;
         // Para inbound: from_number es el cliente, to_number es SARA
         if (callObj.direction === 'inbound' || (callObj.from_number && callObj.from_number !== (env.RETELL_PHONE_NUMBER || ''))) {
           leadPhone = callObj.from_number?.replace('+', '') || callerPhone;
+        }
+
+        // Fallback: si no tenemos phone del call object, buscar en KV
+        if (!leadPhone && env.SARA_CACHE) {
+          const callId = callObj.call_id || body.call_id || '';
+          if (callId) {
+            leadPhone = await env.SARA_CACHE.get(`retell_call_phone:${callId}`) || '';
+          }
+          if (!leadPhone) {
+            leadPhone = await env.SARA_CACHE.get('retell_last_caller_phone') || '';
+          }
+          if (leadPhone) console.log(`📞 agendar-cita: Phone recuperado de KV: ${leadPhone}`);
         }
 
         let { data: lead } = await supabase.client
@@ -8565,8 +8586,8 @@ Mensaje: ${mensaje}`;
               console.log(`📝 Lead nombre actualizado: ${lead.name} → ${nombreReal}`);
             }
             // También actualizar lead_name en la cita
-            if (result.appointmentId) {
-              await supabase.client.from('appointments').update({ lead_name: nombreReal }).eq('id', result.appointmentId);
+            if (result.appointment?.id) {
+              await supabase.client.from('appointments').update({ lead_name: nombreReal }).eq('id', result.appointment.id);
             }
           }
           const displayNombre = nombreReal || nombre || 'cliente';
@@ -8612,28 +8633,40 @@ Mensaje: ${mensaje}`;
             console.log(`📤 Confirmación WhatsApp enviada a lead ${wpPhone}`);
 
             // Marcar lead_notified
-            if (result.appointmentId) {
-              await supabase.client.from('appointments').update({ lead_notified: true }).eq('id', result.appointmentId);
+            if (result.appointment?.id) {
+              await supabase.client.from('appointments').update({ lead_notified: true }).eq('id', result.appointment.id);
             }
 
             // 3. Notificar al vendedor asignado
-            if (result.vendedor?.phone) {
+            let vendedorToNotify = result.vendedor;
+            // Fallback: si crearCitaCompleta no retornó vendedor, buscarlo directo
+            if (!vendedorToNotify?.phone && lead.assigned_to) {
+              console.log(`⚠️ result.vendedor sin phone, buscando vendedor por assigned_to: ${lead.assigned_to}`);
+              const { data: vendFallback } = await supabase.client
+                .from('team_members')
+                .select('*')
+                .eq('id', lead.assigned_to)
+                .maybeSingle();
+              if (vendFallback?.phone) vendedorToNotify = vendFallback;
+            }
+
+            if (vendedorToNotify?.phone) {
               const { enviarMensajeTeamMember } = await import('./utils/teamMessaging');
-              console.log(`📤 Notificando a vendedor: ${result.vendedor.name} (${result.vendedor.phone})`);
-              await enviarMensajeTeamMember(supabase, meta, result.vendedor,
+              console.log(`📤 Notificando a vendedor: ${vendedorToNotify.name} (${vendedorToNotify.phone})`);
+              await enviarMensajeTeamMember(supabase, meta, vendedorToNotify,
                 `📞 ¡Nueva cita desde llamada!\n\n👤 ${displayNombre}\n📅 ${fechaDisplay} a las ${horaISO || hora}\n🏠 ${desarrollo}\n📱 ${leadPhone}`,
                 { tipoMensaje: 'notificacion' }
               );
-              console.log(`📤 Notificación enviada a vendedor ${result.vendedor.name}`);
+              console.log(`📤 Notificación enviada a vendedor ${vendedorToNotify.name}`);
 
               // Marcar vendedor_notified
-              if (result.appointmentId) {
+              if (result.appointment?.id) {
                 await supabase.client.from('appointments')
                   .update({ vendedor_notified: true })
-                  .eq('id', result.appointmentId);
+                  .eq('id', result.appointment.id);
               }
             } else {
-              console.log(`⚠️ No hay vendedor asignado para notificar. result.vendedor:`, JSON.stringify(result.vendedor));
+              console.log(`⚠️ No hay vendedor asignado para notificar. result.vendedor:`, JSON.stringify(result.vendedor), `lead.assigned_to:`, lead.assigned_to);
             }
           } catch (notifError: any) {
             console.error('⚠️ Error enviando notificaciones (cita sí se creó):', notifError.message, notifError.stack?.split('\n')[1]);
@@ -8855,15 +8888,28 @@ Mensaje: ${mensaje}`;
         const desarrollo = args.desarrollo || '';
 
         // Extraer teléfono de múltiples posibles ubicaciones en el body de Retell
-        const callerPhone = callObj.from_number?.replace('+', '')
+        let callerPhone = callObj.from_number?.replace('+', '')
           || callObj.to_number?.replace('+', '')
           || body.from_number?.replace('+', '')
           || body.to_number?.replace('+', '')
           || body.metadata?.caller_phone?.replace('+', '')
           || '';
+
+        // Fallback: buscar en KV por call_id o última llamada
+        if (!callerPhone && env.SARA_CACHE) {
+          const callId = callObj.call_id || body.call_id || '';
+          if (callId) {
+            callerPhone = await env.SARA_CACHE.get(`retell_call_phone:${callId}`) || '';
+            if (callerPhone) console.log(`📞 Phone recuperado de KV por call_id: ${callerPhone}`);
+          }
+          if (!callerPhone) {
+            callerPhone = await env.SARA_CACHE.get('retell_last_caller_phone') || '';
+            if (callerPhone) console.log(`📞 Phone recuperado de KV (última llamada): ${callerPhone}`);
+          }
+        }
         console.log(`🔧 RETELL TOOL enviar-whatsapp callerPhone: ${callerPhone}`);
         if (!callerPhone) {
-          // Si no tenemos teléfono, decimos que se envía después (NO pedir celular)
+          // Si no tenemos teléfono, enviar la info cuando termine la llamada
           return new Response(JSON.stringify({ result: 'Listo, le envío la información por WhatsApp cuando termine la llamada.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
 
