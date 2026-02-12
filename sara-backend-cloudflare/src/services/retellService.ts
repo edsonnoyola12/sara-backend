@@ -118,6 +118,7 @@ export class RetellService {
           },
           // Variables dinámicas para el agente
           retell_llm_dynamic_variables: {
+            call_direction: 'outbound',
             lead_name: context.leadName || '',
             is_new_lead: (!context.leadName || context.leadName === 'Cliente' || context.leadName === 'Cliente Test') ? 'true' : 'false',
             greeting: this.buildGreeting(context),
@@ -407,7 +408,8 @@ export class RetellService {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          inbound_agent_id: agentId || this.agentId
+          inbound_agent_id: agentId || this.agentId,
+          inbound_webhook_url: 'https://sara-backend.edson-633.workers.dev/webhook/retell/lookup',
         })
       });
 
@@ -419,6 +421,35 @@ export class RetellService {
       }
 
       console.log(`✅ Retell: Inbound configurado para ${phoneNumber} con agente ${agentId || this.agentId}`);
+      return { success: true, data };
+    } catch (e) {
+      console.error('❌ Retell error:', e);
+      return { success: false, error: e instanceof Error ? e.message : 'Error desconocido' };
+    }
+  }
+
+  /**
+   * Actualiza configuración del agente (begin_message, voice, etc.)
+   */
+  async updateAgent(agentId: string, updates: Record<string, any>): Promise<{ success: boolean; data?: any; error?: string }> {
+    if (!this.apiKey) {
+      return { success: false, error: 'RETELL_API_KEY no configurado' };
+    }
+    try {
+      const response = await fetch(`${this.baseUrl}/update-agent/${agentId}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updates)
+      });
+      const data = await response.json() as any;
+      if (!response.ok) {
+        console.error('❌ Retell error actualizando agente:', JSON.stringify(data));
+        return { success: false, error: data.error?.message || data.message || `Error: ${response.status}` };
+      }
+      console.log(`✅ Retell: Agente ${agentId} actualizado`);
       return { success: true, data };
     } catch (e) {
       console.error('❌ Retell error:', e);
@@ -468,6 +499,36 @@ export class RetellService {
   }
 
   /**
+   * Actualiza un LLM (tools, prompt, etc.)
+   * IMPORTANTE: Cada campo enviado reemplaza el existente
+   */
+  async updateLlm(llmId: string, updates: Record<string, any>): Promise<{ success: boolean; data?: any; error?: string }> {
+    if (!this.apiKey) {
+      return { success: false, error: 'RETELL_API_KEY no configurado' };
+    }
+    try {
+      const response = await fetch(`${this.baseUrl}/update-retell-llm/${llmId}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updates)
+      });
+      const data = await response.json() as any;
+      if (!response.ok) {
+        console.error('❌ Retell error actualizando LLM:', JSON.stringify(data));
+        return { success: false, error: data.error?.message || data.message || `Error: ${response.status}` };
+      }
+      console.log(`✅ Retell: LLM ${llmId} actualizado`);
+      return { success: true, data };
+    } catch (e) {
+      console.error('❌ Retell error:', e);
+      return { success: false, error: e instanceof Error ? e.message : 'Error desconocido' };
+    }
+  }
+
+  /**
    * Actualiza las tools de un LLM
    * IMPORTANTE: Reemplaza todo el array general_tools
    */
@@ -494,6 +555,44 @@ export class RetellService {
     } catch (e) {
       console.error('❌ Retell error:', e);
       return { success: false, error: e instanceof Error ? e.message : 'Error desconocido' };
+    }
+  }
+
+  /**
+   * Obtiene info de concurrencia de la cuenta (límites de llamadas simultáneas)
+   */
+  async getConcurrency(): Promise<any> {
+    if (!this.apiKey) return null;
+    try {
+      const response = await fetch(`${this.baseUrl}/get-concurrency`, {
+        headers: { 'Authorization': `Bearer ${this.apiKey}` }
+      });
+      if (!response.ok) return { error: `HTTP ${response.status}` };
+      return await response.json();
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : 'Error' };
+    }
+  }
+
+  /**
+   * Publica la versión draft del agente (la hace inmutable y crea nueva draft)
+   */
+  async publishAgent(agentId?: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    if (!this.apiKey) return { success: false, error: 'No API key' };
+    try {
+      const id = agentId || this.agentId;
+      const response = await fetch(`${this.baseUrl}/publish-agent/${id}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${this.apiKey}` }
+      });
+      if (!response.ok) {
+        const data = await response.json() as any;
+        return { success: false, error: data.message || `HTTP ${response.status}` };
+      }
+      const data = await response.json() as any;
+      return { success: true, data };
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : 'Error' };
     }
   }
 

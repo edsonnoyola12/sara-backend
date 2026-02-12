@@ -1254,18 +1254,22 @@ export default {
         }
 
         const currentInboundAgent = found.inbound_agent_id;
+        const forceReconfigure = url.searchParams.get('force') === 'true';
 
-        // 2. Verificar si ya está configurado
-        if (currentInboundAgent === (env.RETELL_AGENT_ID || '')) {
+        // 2. Verificar si ya está configurado (skip si force=true)
+        if (!forceReconfigure && currentInboundAgent === (env.RETELL_AGENT_ID || '')) {
           return corsResponse(JSON.stringify({
             success: true,
             message: 'Inbound ya estaba configurado',
             phone_number: found.phone_number,
-            inbound_agent_id: currentInboundAgent
+            inbound_agent_id: currentInboundAgent,
+            inbound_agent_version: found.inbound_agent_version,
+            agent_current_version: found.version,
+            hint: 'Usa ?force=true para re-configurar'
           }));
         }
 
-        // 3. Configurar inbound_agent_id usando el phone_number en E.164
+        // 3. Configurar inbound_agent_id + webhook URL limpia
         const result = await retell.configureInbound(found.phone_number);
 
         if (result.success) {
@@ -1284,6 +1288,46 @@ export default {
             phone_number: found.phone_number
           }), 500);
         }
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // DEBUG RETELL CONFIG - Ver configuración completa del agente y LLM
+    // USO: /debug-retell?api_key=XXX
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === '/debug-retell' && request.method === 'GET') {
+      try {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+
+        const { createRetellService } = await import('./services/retellService');
+        const retell = createRetellService(env.RETELL_API_KEY, env.RETELL_AGENT_ID || '', env.RETELL_PHONE_NUMBER || '');
+
+        const agent = await retell.getAgent();
+        const llmId = agent?.response_engine?.llm_id;
+        let llm = null;
+        if (llmId) {
+          llm = await retell.getLlm(llmId);
+        }
+
+        // Also get phone number details and concurrency
+        const phoneNumbers = await retell.listPhoneNumbers();
+        const phoneDetails = Array.isArray(phoneNumbers) ? phoneNumbers : [];
+        const concurrency = await retell.getConcurrency();
+
+        return corsResponse(JSON.stringify({
+          agent,
+          llm,
+          concurrency,
+          phone_numbers: phoneDetails,
+          env_vars: {
+            RETELL_AGENT_ID: env.RETELL_AGENT_ID || 'NOT SET',
+            RETELL_PHONE_NUMBER: env.RETELL_PHONE_NUMBER || 'NOT SET',
+            RETELL_API_KEY: env.RETELL_API_KEY ? 'SET' : 'NOT SET'
+          }
+        }, null, 2));
       } catch (e: any) {
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
@@ -1331,7 +1375,7 @@ export default {
           {
             type: 'custom',
             name: 'buscar_info_desarrollo',
-            description: 'Busca información detallada de un desarrollo inmobiliario: modelos, precios, recámaras, metros cuadrados. Usa esta herramienta cuando el cliente pregunte por un desarrollo específico o quiera comparar opciones.',
+            description: 'Busca información detallada de un desarrollo inmobiliario específico: modelos, precios, recámaras, metros cuadrados. Usa SOLO cuando el cliente pregunte por un desarrollo específico por nombre.',
             url: `${baseUrl}/webhook/retell/tool/info-desarrollo`,
             method: 'POST',
             speak_during_execution: true,
@@ -1350,8 +1394,32 @@ export default {
           },
           {
             type: 'custom',
+            name: 'buscar_por_presupuesto',
+            description: 'Busca TODAS las casas de TODOS los desarrollos que se ajusten a un presupuesto. Usa esta herramienta cuando el cliente diga cuánto tiene para gastar o su presupuesto. Ejemplo: "tengo 5 millones", "mi presupuesto es 2 millones", "busco algo de 3 millones".',
+            url: `${baseUrl}/webhook/retell/tool/buscar-por-presupuesto`,
+            method: 'POST',
+            speak_during_execution: true,
+            execution_message_description: 'Dile que estás buscando las opciones que se ajustan a su presupuesto.',
+            timeout_ms: 10000,
+            parameters: {
+              type: 'object',
+              properties: {
+                presupuesto: {
+                  type: 'number',
+                  description: 'Presupuesto del cliente en pesos mexicanos. Ejemplo: 5000000 para 5 millones.'
+                },
+                recamaras: {
+                  type: 'number',
+                  description: 'Número mínimo de recámaras deseadas (opcional). Si no lo dice, dejar en 0.'
+                }
+              },
+              required: ['presupuesto']
+            }
+          },
+          {
+            type: 'custom',
             name: 'agendar_cita',
-            description: 'Agenda una cita de visita a un desarrollo. SOLO usa esta herramienta cuando tengas TODOS los datos: nombre del cliente, desarrollo, fecha y hora. Si falta algún dato, pregúntale al cliente primero.',
+            description: 'Agenda una cita de visita. Usa esta herramienta en cuanto tengas nombre, fecha y hora. Si no sabe qué desarrollo, usa "Oficinas Santa Rita" como punto de encuentro.',
             url: `${baseUrl}/webhook/retell/tool/agendar-cita`,
             method: 'POST',
             speak_during_execution: true,
@@ -1455,17 +1523,110 @@ export default {
           }
         ];
 
-        // 4. Actualizar el LLM con las nuevas tools
-        const updateResult = await retell.updateLlmTools(llmId, saraTools);
+        // 4. Definir el prompt de SARA para llamadas INBOUND
+        const saraPrompt = `Eres SARA, asistente virtual de ventas de Grupo Santa Rita, inmobiliaria en Zacatecas. Eres IA, no persona real.
+
+REGLA #1: Habla CORTO. Máximo una o dos oraciones por turno. Es llamada telefónica, no discurso.
+REGLA #2: UNA sola pregunta por turno. Nunca dos preguntas juntas.
+REGLA #3: Precios SIEMPRE en palabras: "un millón seiscientos mil pesos", nunca números ni abreviaciones.
+REGLA #4: No te cicles. Si ya tienes nombre, día y hora, agenda de una vez con la herramienta.
+
+Variables: {{call_direction}} (inbound/outbound), {{lead_name}}, {{is_new_lead}}, {{desarrollo_interes}}, {{vendedor_nombre}}
+
+Si inbound: el saludo ya se envió, NO lo repitas. Escucha y responde.
+Si outbound: el saludo ya se envió. Menciona {{desarrollo_interes}} si tiene valor.
+
+FLUJO DE VENTA:
+1. "¿Buscas en Zacatecas o en Guadalupe?" (si dice las dos, está bien)
+2. "¿Y tienes un presupuesto en mente?"
+3. Con zona + presupuesto ya sabes qué recomendar:
+   - Zacatecas + menos de dos millones = Monte Verde
+   - Zacatecas + tres millones o más = Los Encinos, Miravalle o Paseo Colorines
+   - Guadalupe + menos de dos millones = Priv. Andes (el único con alberca)
+   - Guadalupe + tres millones setecientos o más = Distrito Falco
+   - Terrenos = Citadella del Nogal
+   - Las dos zonas = recomienda lo mejor según presupuesto de ambas
+   Recomienda UNA opción con precio y lo más atractivo. Corto y directo.
+4. "¿Te gustaría conocerlo? ¿Qué día te queda para visitarlas?"
+5. Pide nombre, agenda con la herramienta. Listo.
+
+CITAS:
+- Zacatecas (Monte Verde, Los Encinos, Miravalle, Paseo Colorines): "Te veo en las oficinas de Santa Rita en Colinas del Padre"
+- Guadalupe (Andes, Distrito Falco, Citadella): "Te veo directamente en el desarrollo"
+- Dos desarrollos: "Empezamos con uno y de ahí vamos al otro. ¿Qué día te queda para visitarlas?"
+- Si dice "el sábado" sin hora: "¿A las once de la mañana te funciona?"
+- Después de agendar: "¡Listo, te esperamos! Te mando la ubicación por WhatsApp"
+
+DESARROLLOS:
+Zacatecas (Colinas del Padre) - SOLO CASAS:
+- Monte Verde: desde un millón seiscientos mil pesos
+- Los Encinos: desde tres millones
+- Miravalle: desde tres millones
+- Paseo Colorines: desde tres millones
+
+Guadalupe - CASAS:
+- Priv. Andes (Siglo Veintiuno): desde un millón seiscientos mil. ÚNICO CON ALBERCA, gym, asadores
+- Distrito Falco (Calzada Solidaridad): desde tres millones setecientos mil. Premium, domótica
+
+Terrenos Citadella del Nogal (Guadalupe):
+- Villa Campelo: ocho mil quinientos a nueve mil quinientos por metro cuadrado
+- Villa Galiano: seis mil cuatrocientos a seis mil setecientos por metro cuadrado
+
+OBJECIONES (responde corto y cierra con pregunta):
+- Caro: "Tenemos desde un millón seiscientos mil. ¿Cuál es tu presupuesto?"
+- Pensar: "Con veinte mil de apartado congelas precio. ¿Te gustaría al menos conocerlo este finde?"
+- Lejos: "La plusvalía es del ocho al diez por ciento anual. ¿Te gustaría conocer la zona?"
+- Sin enganche: "INFONAVIT financia hasta el cien por ciento. ¿Ya tienes tu precalificación?"
+- Urge: "Tenemos entrega inmediata en Monte Verde, Encinos y Andes"
+- 4 o 5 recámaras: "Tenemos de tres recámaras muy amplias, hasta doscientos quince metros. Se pueden adecuar espacios. ¿Te gustaría conocerlas?"
+- Competencia: no critiques. "Nosotros no cobramos cuota de mantenimiento"
+
+INFO RÁPIDA:
+- Apartado: veinte mil pesos reembolsable
+- Enganche: diez por ciento mínimo
+- Créditos: INFONAVIT, FOVISSSTE, BBVA, Banorte, HSBC, Banregio, Santander, Scotiabank
+- Entrega: tres a cuatro meses
+- Sin cuota de mantenimiento
+- Mascotas: sí excepto Distrito Falco
+- SOLO vendemos, NO rentamos
+- SOLO Andes tiene alberca
+- Precios equipados (closets y cocina) por default
+- No inventes tasas de interés
+
+CASOS ESPECIALES:
+- Renta: "Solo vendemos. Pero la mensualidad puede quedar similar a una renta. ¿Cuánto pagas?"
+- Ya compró: "¡Felicidades! Si algún familiar busca, con gusto lo atiendo"
+- Persona real: "Soy SARA, asistente virtual. Si prefieres, te comunico con un asesor"
+- No contacto: "Respeto tu decisión. ¡Excelente día!" y usa end_call
+- Inglés: responde en inglés, precios en pesos y dólares
+- Se despide: usa end_call
+- Pide humano: "Te comunico con tu asesor. También puedes escribirnos por WhatsApp"
+- No sabes algo: usa la herramienta adecuada`;
+
+        // 5. Actualizar el LLM con tools + prompt
+        const updateResult = await retell.updateLlm(llmId, {
+          general_tools: saraTools,
+          general_prompt: saraPrompt
+        });
+
+        // 6. Configurar begin_message en el agente para que SARA conteste inmediatamente
+        // Usa {{greeting}} que viene del lookup webhook
+        const agentUpdate = await retell.updateAgent(agent.agent_id, {
+          begin_message: '{{greeting}}',
+          webhook_url: 'https://sara-backend.edson-633.workers.dev/webhook/retell'
+        });
 
         if (updateResult.success) {
           return corsResponse(JSON.stringify({
             success: true,
-            message: `${saraTools.length} tools configuradas en el LLM`,
+            message: `${saraTools.length} tools + prompt inbound + begin_message configurados`,
             agent_id: agent.agent_id,
             llm_id: llmId,
             tools: saraTools.map(t => ({ name: t.name, type: t.type })),
-            previous_tools_count: existingTools.length
+            previous_tools_count: existingTools.length,
+            prompt_length: saraPrompt.length,
+            begin_message: '{{greeting}}',
+            agent_update: agentUpdate.success ? 'ok' : agentUpdate.error
           }));
         } else {
           return corsResponse(JSON.stringify({
@@ -2612,6 +2773,45 @@ export default {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // 🧹 DELETE-ALL-LEADS - Borra TODOS los leads y datos relacionados
+    // USO: /delete-all-leads?api_key=XXX&confirm=yes
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/delete-all-leads" && request.method === "GET") {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const confirm = url.searchParams.get('confirm');
+      if (confirm !== 'yes') {
+        return corsResponse(JSON.stringify({ ok: false, error: 'Agrega ?confirm=yes para confirmar' }), 400);
+      }
+
+      try {
+        const deletedFrom: Record<string, number> = {};
+        const childTables = ['surveys', 'appointments', 'mortgage_applications', 'messages', 'reservations', 'offers', 'conversation_history', 'follow_ups', 'activities', 'lead_activities', 'event_registrations', 'pending_videos', 'call_logs'];
+
+        for (const table of childTables) {
+          try {
+            const { data } = await supabase.client.from(table).delete().not('id', 'is', null).select('id');
+            if (data && data.length > 0) deletedFrom[table] = data.length;
+          } catch {}
+        }
+
+        // Delete all leads
+        const { data: deletedLeads } = await supabase.client.from('leads').delete().not('id', 'is', null).select('id, name, phone');
+        deletedFrom['leads'] = deletedLeads?.length || 0;
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          message: 'Todos los leads y datos relacionados han sido eliminados',
+          deleted_from: deletedFrom,
+          leads_deleted: deletedLeads?.map(l => ({ name: l.name, phone: l.phone })) || []
+        }, null, 2));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // 🧹 CLEANUP-TEST-LEADS - Elimina lead + todas las dependencias (surveys incluidas)
     // USO: /cleanup-test-leads?phone=5610016226&api_key=XXX
     // ═══════════════════════════════════════════════════════════════════════
@@ -2643,7 +2843,7 @@ export default {
 
         for (const lead of matchingLeads) {
           // Delete from all related tables
-          const tables = ['surveys', 'appointments', 'mortgage_applications', 'messages', 'reservations', 'offers'];
+          const tables = ['surveys', 'appointments', 'mortgage_applications', 'messages', 'reservations', 'offers', 'conversation_history', 'lead_activities', 'event_registrations', 'pending_videos', 'call_logs'];
           for (const table of tables) {
             try {
               const { data } = await supabase.client.from(table).delete().eq('lead_id', lead.id).select('id');
@@ -2659,8 +2859,13 @@ export default {
           try { await supabase.client.from('follow_ups').delete().eq('lead_id', lead.id); } catch {}
           try { await supabase.client.from('activities').delete().eq('lead_id', lead.id); } catch {}
           // Delete the lead itself
-          const { error } = await supabase.client.from('leads').delete().eq('id', lead.id);
-          if (!error) deletedFrom['leads'] = (deletedFrom['leads'] || 0) + 1;
+          const { error: leadDeleteError } = await supabase.client.from('leads').delete().eq('id', lead.id);
+          if (leadDeleteError) {
+            console.error('❌ Error borrando lead:', lead.id, leadDeleteError.message, leadDeleteError.details, leadDeleteError.hint);
+            deletedFrom['lead_delete_error'] = leadDeleteError.message as any;
+          } else {
+            deletedFrom['leads'] = (deletedFrom['leads'] || 0) + 1;
+          }
         }
 
         return corsResponse(JSON.stringify({
@@ -8029,6 +8234,7 @@ Mensaje: ${mensaje}`;
           console.log('📞 RETELL LOOKUP: No se recibió número de teléfono');
           return new Response(JSON.stringify({
             dynamic_variables: {
+              call_direction: 'inbound',
               lead_name: '',
               is_new_lead: 'true',
               greeting: defaultGreeting,
@@ -8098,6 +8304,7 @@ Mensaje: ${mensaje}`;
 
           return new Response(JSON.stringify({
             dynamic_variables: {
+              call_direction: 'inbound',
               lead_name: nombre,
               lead_full_name: lead.name,
               lead_id: lead.id,
@@ -8116,6 +8323,7 @@ Mensaje: ${mensaje}`;
           console.log(`📞 RETELL LOOKUP: Número nuevo - ${callerPhone}`);
           return new Response(JSON.stringify({
             dynamic_variables: {
+              call_direction: 'inbound',
               lead_name: '',
               is_new_lead: 'true',
               greeting: defaultGreeting,
@@ -8132,6 +8340,7 @@ Mensaje: ${mensaje}`;
         console.error('❌ Retell Lookup Error:', error);
         return new Response(JSON.stringify({
           dynamic_variables: {
+            call_direction: 'inbound',
             lead_name: '',
             is_new_lead: 'true',
             greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?',
@@ -8669,6 +8878,76 @@ Mensaje: ${mensaje}`;
       } catch (e: any) {
         console.error('❌ Retell tool consultar-citas error:', e);
         return new Response(JSON.stringify({ result: 'Error consultando citas.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+
+    // TOOL: Buscar casas por presupuesto (TODOS los desarrollos)
+    if (url.pathname === '/webhook/retell/tool/buscar-por-presupuesto' && request.method === 'POST') {
+      try {
+        const body = await request.json() as any;
+        const args = body.args || body;
+        const presupuesto = args.presupuesto || 0;
+        const recamaras = args.recamaras || 0;
+        console.log(`🔧 RETELL TOOL buscar-por-presupuesto: $${presupuesto}, ${recamaras} rec`);
+
+        if (!presupuesto || presupuesto <= 0) {
+          return new Response(JSON.stringify({
+            result: 'Pregúntale su presupuesto aproximado. Tenemos casas desde un millón seiscientos mil hasta cinco millones y medio. También terrenos desde seis mil cuatrocientos pesos por metro cuadrado.'
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        // Buscar TODAS las propiedades dentro del presupuesto
+        let query = supabase.client
+          .from('properties')
+          .select('name, development, price, price_equipped, bedrooms, area_m2, land_size, gps_link')
+          .lte('price_equipped', presupuesto * 1.1); // 10% de margen
+
+        if (recamaras && recamaras > 0) {
+          query = query.gte('bedrooms', recamaras);
+        }
+
+        const { data: props } = await query.order('price_equipped', { ascending: true });
+
+        if (!props || props.length === 0) {
+          if (presupuesto < 1500000) {
+            return new Response(JSON.stringify({
+              result: `Con ${(presupuesto/1000000).toFixed(1)} millones no tenemos casas disponibles. La más económica es Acacia en Monte Verde a un millón seiscientos mil. También tenemos terrenos en Citadella del Nogal desde seis mil cuatrocientos por metro cuadrado. ¿Le interesa alguna de estas opciones?`
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+          return new Response(JSON.stringify({
+            result: `No encontré opciones exactas para ${(presupuesto/1000000).toFixed(1)} millones. Nuestras casas van desde un millón seiscientos hasta cinco millones y medio. ¿Quiere que le muestre las más cercanas a su presupuesto?`
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+
+        // Agrupar por desarrollo
+        const porDesarrollo: Record<string, any[]> = {};
+        for (const p of props) {
+          const dev = p.development || 'Otro';
+          if (!porDesarrollo[dev]) porDesarrollo[dev] = [];
+          porDesarrollo[dev].push(p);
+        }
+
+        let resultado = `Con presupuesto de ${(presupuesto/1000000).toFixed(1)} millones${recamaras ? ` y ${recamaras}+ recámaras` : ''}, tienes estas opciones:\n`;
+
+        for (const [dev, modelos] of Object.entries(porDesarrollo)) {
+          const zona = ['Monte Verde', 'Los Encinos', 'Miravalle', 'Paseo Colorines'].includes(dev)
+            ? 'Colinas del Padre' : 'Guadalupe';
+          resultado += `\n${dev} (${zona}): `;
+          resultado += modelos.map((m: any) => {
+            const precio = m.price_equipped || m.price || 0;
+            return `${m.name} $${(precio/1000000).toFixed(2)}M ${m.bedrooms || '?'}rec ${m.area_m2 || '?'}m²`;
+          }).join(', ');
+        }
+
+        resultado += `\n\nTotal: ${props.length} opciones en ${Object.keys(porDesarrollo).length} desarrollos.`;
+        if (props.some((p: any) => p.development === 'Andes')) {
+          resultado += ' Andes es el único con alberca.';
+        }
+
+        return new Response(JSON.stringify({ result: resultado }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } catch (e: any) {
+        console.error('❌ Retell tool buscar-por-presupuesto error:', e);
+        return new Response(JSON.stringify({ result: 'Error buscando opciones. Dile que le mando info por WhatsApp.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     }
 
