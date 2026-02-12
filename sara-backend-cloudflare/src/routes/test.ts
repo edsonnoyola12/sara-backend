@@ -7482,6 +7482,312 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         addTest('CRON: error tracking', false, 'KV not configured');
       }
 
+      // ── AI QUALITY TESTS ──
+
+      // 16. AI response mentions desarrollo
+      if (env.ANTHROPIC_API_KEY) {
+        try {
+          const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
+          const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+          const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+          const aiService = new AIConversationService(supabase, null, meta, calendar, claude, env);
+
+          const { data: props } = await supabase.client.from('properties').select('*');
+          const leadTest = { id: 'e2e-test', phone: '5210000099998', name: 'Test E2E', status: 'new', score: 0, notes: {} };
+          const analysis = await aiService.analyzeWithAI('hola busco casa de 3 recamaras', leadTest as any, props || []);
+          const resp = (analysis.response || '').toLowerCase();
+          const mencionaDesarrollo = resp.includes('monte verde') || resp.includes('encinos') || resp.includes('andes') ||
+            resp.includes('falco') || resp.includes('miravalle') || resp.includes('colorines');
+          addTest('AI: response mentions desarrollo', mencionaDesarrollo, analysis.response?.substring(0, 80) || 'empty');
+        } catch (e: any) {
+          addTest('AI: response mentions desarrollo', false, e.message);
+        }
+      } else {
+        addTest('AI: response mentions desarrollo', false, 'API key not configured');
+      }
+
+      // 17. AI doesn't offer rentals
+      if (env.ANTHROPIC_API_KEY) {
+        try {
+          const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
+          const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+          const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+          const aiService = new AIConversationService(supabase, null, meta, calendar, claude, env);
+
+          const { data: props } = await supabase.client.from('properties').select('*');
+          const leadTest = { id: 'e2e-test2', phone: '5210000099997', name: 'Test E2E2', status: 'new', score: 0, notes: {} };
+          const analysis = await aiService.analyzeWithAI('tienen casas en renta', leadTest as any, props || []);
+          const resp = (analysis.response || '').toLowerCase();
+          const noOfreceRenta = resp.includes('solo vendemos') || resp.includes('no rentamos') || resp.includes('no manejamos renta') || resp.includes('venta');
+          addTest('AI: no ofrece rentas', noOfreceRenta, analysis.response?.substring(0, 80) || 'empty');
+        } catch (e: any) {
+          addTest('AI: no ofrece rentas', false, e.message);
+        }
+      } else {
+        addTest('AI: no ofrece rentas', false, 'API key not configured');
+      }
+
+      // ── RETELL EXTENDED TESTS ──
+
+      // 18. Retell prompt has REGLA rules
+      if (env.RETELL_API_KEY && env.RETELL_AGENT_ID) {
+        try {
+          const resp = await fetch(`https://api.retellai.com/get-agent/${env.RETELL_AGENT_ID}`, {
+            headers: { 'Authorization': `Bearer ${env.RETELL_API_KEY}` }
+          });
+          if (resp.ok) {
+            const agent: any = await resp.json();
+            const prompt = (agent.response_engine?.llm_model_config?.general_prompt || agent.general_prompt || '').toLowerCase();
+            const tieneReglas = prompt.includes('regla #1') || prompt.includes('regla #2');
+            addTest('Retell: prompt has REGLA rules', tieneReglas,
+              tieneReglas ? 'REGLA rules found in prompt' : 'No REGLA rules in prompt');
+          } else {
+            addTest('Retell: prompt has REGLA rules', false, `Status ${resp.status}`);
+          }
+        } catch (e: any) {
+          addTest('Retell: prompt has REGLA rules', false, e.message);
+        }
+      } else {
+        addTest('Retell: prompt has REGLA rules', false, 'Retell not configured');
+      }
+
+      // 19. Retell tools count
+      if (env.RETELL_API_KEY && env.RETELL_AGENT_ID) {
+        try {
+          const resp = await fetch(`https://api.retellai.com/get-agent/${env.RETELL_AGENT_ID}`, {
+            headers: { 'Authorization': `Bearer ${env.RETELL_API_KEY}` }
+          });
+          if (resp.ok) {
+            const agent: any = await resp.json();
+            const toolsCount = agent.response_engine?.llm_model_config?.tool_call_strict_mode !== undefined
+              ? (agent.response_engine?.llm_model_config?.general_tools?.length || 0)
+              : 0;
+            addTest('Retell: tools count', toolsCount >= 3, `${toolsCount} tools configured`);
+          } else {
+            addTest('Retell: tools count', false, `Status ${resp.status}`);
+          }
+        } catch (e: any) {
+          addTest('Retell: tools count', false, e.message);
+        }
+      } else {
+        addTest('Retell: tools count', false, 'Retell not configured');
+      }
+
+      // ── COMMAND DETECTION TESTS ──
+
+      // 20. CEO: detects 'leads' command
+      try {
+        const ceoService = new CEOCommandsService(supabase);
+        const detected = ceoService.detectCommand('leads');
+        addTest('Commands: CEO leads', detected !== null && detected !== undefined, `Detected: ${JSON.stringify(detected)?.substring(0, 60)}`);
+      } catch (e: any) {
+        addTest('Commands: CEO leads', false, e.message);
+      }
+
+      // 21. CEO: detects 'equipo' command
+      try {
+        const ceoService = new CEOCommandsService(supabase);
+        const detected = ceoService.detectCommand('equipo');
+        addTest('Commands: CEO equipo', detected !== null && detected !== undefined, `Detected: ${JSON.stringify(detected)?.substring(0, 60)}`);
+      } catch (e: any) {
+        addTest('Commands: CEO equipo', false, e.message);
+      }
+
+      // 22. Vendedor: detects 'citas' command
+      try {
+        const vendorService = new VendorCommandsService(supabase);
+        const detected = vendorService.detectRouteCommand('citas', 'citas');
+        addTest('Commands: Vendedor citas', detected !== null && detected !== undefined, `Detected: ${JSON.stringify(detected)?.substring(0, 60)}`);
+      } catch (e: any) {
+        addTest('Commands: Vendedor citas', false, e.message);
+      }
+
+      // 23. Vendedor: detects 'mis leads' command
+      try {
+        const vendorService = new VendorCommandsService(supabase);
+        const detected = vendorService.detectRouteCommand('mis leads', 'mis leads');
+        addTest('Commands: Vendedor mis leads', detected !== null && detected !== undefined, `Detected: ${JSON.stringify(detected)?.substring(0, 60)}`);
+      } catch (e: any) {
+        addTest('Commands: Vendedor mis leads', false, e.message);
+      }
+
+      // 24. Vendedor: detects 'cotizar' command
+      try {
+        const vendorService = new VendorCommandsService(supabase);
+        const detected = vendorService.detectRouteCommand('cotizar Roberto 2500000', 'cotizar Roberto 2500000');
+        addTest('Commands: Vendedor cotizar', detected !== null && detected !== undefined, `Detected: ${JSON.stringify(detected)?.substring(0, 60)}`);
+      } catch (e: any) {
+        addTest('Commands: Vendedor cotizar', false, e.message);
+      }
+
+      // ── TEMPLATE TESTS ──
+
+      // 25. Meta templates API accessible
+      const WABA_ID = (env as any).META_WHATSAPP_BUSINESS_ID;
+      if (WABA_ID && env.META_ACCESS_TOKEN) {
+        try {
+          const resp = await fetch(
+            `https://graph.facebook.com/v22.0/${WABA_ID}/message_templates?fields=name,status&limit=10`,
+            { headers: { 'Authorization': `Bearer ${env.META_ACCESS_TOKEN}` } }
+          );
+          if (resp.ok) {
+            const data: any = await resp.json();
+            const count = data.data?.length || 0;
+            addTest('Templates: Meta API accessible', count > 0, `${count} templates found`);
+          } else {
+            addTest('Templates: Meta API accessible', false, `Status ${resp.status}`);
+          }
+        } catch (e: any) {
+          addTest('Templates: Meta API accessible', false, e.message);
+        }
+
+        // 26. Critical templates exist
+        try {
+          const resp = await fetch(
+            `https://graph.facebook.com/v22.0/${WABA_ID}/message_templates?fields=name,status&limit=50`,
+            { headers: { 'Authorization': `Bearer ${env.META_ACCESS_TOKEN}` } }
+          );
+          if (resp.ok) {
+            const data: any = await resp.json();
+            const templates = data.data || [];
+            const required = ['briefing_matutino', 'reporte_vendedor', 'reporte_asesor', 'reactivar_equipo'];
+            const found = required.filter(r => templates.some((t: any) => t.name === r && t.status === 'APPROVED'));
+            const missing = required.filter(r => !found.includes(r));
+            addTest('Templates: critical templates exist', found.length === required.length,
+              found.length === required.length ? `All ${required.length} found APPROVED` : `Missing: ${missing.join(', ')}`);
+          } else {
+            addTest('Templates: critical templates exist', false, `Status ${resp.status}`);
+          }
+        } catch (e: any) {
+          addTest('Templates: critical templates exist', false, e.message);
+        }
+      } else {
+        addTest('Templates: Meta API accessible', false, 'WABA_ID not configured');
+        addTest('Templates: critical templates exist', false, 'WABA_ID not configured');
+      }
+
+      // ── CRON FUNCTION TESTS (extended) ──
+
+      // 27. Briefing function exists and is callable
+      try {
+        const fnType = typeof enviarBriefingMatutino;
+        addTest('CRON: briefing function', fnType === 'function', `Type: ${fnType}`);
+      } catch (e: any) {
+        addTest('CRON: briefing function', false, e.message);
+      }
+
+      // 28. Alertas function exists and is callable
+      try {
+        const fnType = typeof enviarAlertasProactivasCEO;
+        addTest('CRON: alertas CEO function', fnType === 'function', `Type: ${fnType}`);
+      } catch (e: any) {
+        addTest('CRON: alertas CEO function', false, e.message);
+      }
+
+      // ── END-TO-END TESTS ──
+
+      // 29. Properties have price_equipped
+      try {
+        const { data, error } = await supabase.client
+          .from('properties')
+          .select('id, name, price, price_equipped')
+          .not('price_equipped', 'is', null)
+          .limit(5);
+        if (error) throw error;
+        const withPrices = data?.length || 0;
+        addTest('E2E: properties have price_equipped', withPrices > 0, `${withPrices} properties with price_equipped`);
+      } catch (e: any) {
+        addTest('E2E: properties have price_equipped', false, e.message);
+      }
+
+      // 30. Team has vendedores with phones
+      try {
+        const { data, error } = await supabase.client
+          .from('team_members')
+          .select('id, name, phone, role')
+          .eq('role', 'vendedor')
+          .eq('active', true);
+        if (error) throw error;
+        const withPhone = data?.filter((t: any) => t.phone && t.phone.length > 8) || [];
+        addTest('E2E: vendedores have phones', withPhone.length >= 3,
+          `${withPhone.length} vendedores with valid phones`);
+      } catch (e: any) {
+        addTest('E2E: vendedores have phones', false, e.message);
+      }
+
+      // 31. Create appointment + delete
+      try {
+        const testLeadPhone = '5210000099998';
+        // Create test lead for appointment
+        const { data: tLead, error: tErr } = await supabase.client
+          .from('leads')
+          .insert({ phone: testLeadPhone, name: 'E2E_APPT_TEST', status: 'new', source: 'e2e_test' })
+          .select()
+          .single();
+        if (tErr) throw tErr;
+
+        const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+        const { data: appt, error: aErr } = await supabase.client
+          .from('appointments')
+          .insert({
+            lead_id: tLead.id,
+            scheduled_date: tomorrow,
+            scheduled_time: '10:00',
+            appointment_type: 'visit',
+            status: 'scheduled',
+            property_name: 'E2E_TEST'
+          })
+          .select()
+          .single();
+        if (aErr) throw aErr;
+
+        // Cleanup
+        await supabase.client.from('appointments').delete().eq('id', appt.id);
+        await supabase.client.from('leads').delete().eq('id', tLead.id);
+
+        addTest('E2E: create + delete appointment', true, 'Appointment lifecycle OK');
+      } catch (e: any) {
+        // Cleanup
+        await supabase.client.from('leads').delete().eq('phone', '5210000099998').catch(() => {});
+        addTest('E2E: create + delete appointment', false, e.message);
+      }
+
+      // 32. Mortgage applications table accessible
+      try {
+        const { count, error } = await supabase.client
+          .from('mortgage_applications')
+          .select('*', { count: 'exact', head: true });
+        if (error) throw error;
+        addTest('E2E: mortgage_applications table', true, `${count} applications`);
+      } catch (e: any) {
+        addTest('E2E: mortgage_applications table', false, e.message);
+      }
+
+      // 33. Google Calendar API accessible
+      try {
+        const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+        const hoyISO = new Date().toISOString();
+        const mananaISO = new Date(Date.now() + 86400000).toISOString();
+        const events = await calendar.getEvents(hoyISO, mananaISO, 5);
+        addTest('E2E: Google Calendar API', true, `${events?.length || 0} events today`);
+      } catch (e: any) {
+        addTest('E2E: Google Calendar API', false, e.message);
+      }
+
+      // 34. Leads have conversation_history structure
+      try {
+        const { data, error } = await supabase.client
+          .from('leads')
+          .select('id, name, conversation_history')
+          .not('conversation_history', 'is', null)
+          .limit(3);
+        if (error) throw error;
+        addTest('E2E: leads have conversation_history', (data?.length || 0) > 0,
+          `${data?.length} leads with history`);
+      } catch (e: any) {
+        addTest('E2E: leads have conversation_history', false, e.message);
+      }
+
       // ── SUMMARY ──
 
       const passed = results.filter(r => r.passed).length;
