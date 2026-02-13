@@ -60,6 +60,9 @@ import {
   followUpLeadsInactivos,
   reactivarLeadsPerdidos,
   recordatoriosPagoApartado,
+  tieneInteraccionPendiente,
+  felicitarCumpleañosLeads,
+  felicitarCumpleañosEquipo,
 } from '../crons/alerts';
 
 import {
@@ -809,37 +812,44 @@ export async function handleTestRoutes(
     // USO: /debug-cache
     // ═══════════════════════════════════════════════════════════════════════
     if (url.pathname === "/debug-cache" && request.method === "GET") {
-      const stats = cache.getStats();
-      const available = cache.isAvailable();
-
-      // Test de cache: escribir y leer
-      let testResult = { write: false, read: false, value: null as string | null };
-      if (available) {
-        try {
-          const testKey = '_debug_test_' + Date.now();
-          await (env.SARA_CACHE as KVNamespace).put(testKey, 'test_value', { expirationTtl: 60 });
-          testResult.write = true;
-          const readVal = await (env.SARA_CACHE as KVNamespace).get(testKey);
-          testResult.read = readVal === 'test_value';
-          testResult.value = readVal;
-          await (env.SARA_CACHE as KVNamespace).delete(testKey);
-        } catch (e: any) {
-          testResult.value = e.message;
+      try {
+        if (!cache) {
+          return corsResponse(JSON.stringify({ ok: true, cache_disponible: false, nota: 'CacheService no inicializado (SARA_CACHE KV no disponible)' }));
         }
-      }
+        const stats = cache.getStats();
+        const available = !!env.SARA_CACHE;
 
-      return corsResponse(JSON.stringify({
-        cache_disponible: available,
-        estadisticas: stats,
-        test_kv: testResult,
-        ttl_configurado: {
-          team_members: '5 min',
-          properties: '10 min',
-          developments: '10 min',
-          leads: '1 min'
-        },
-        nota: 'Estadísticas se resetean en cada request (Workers son stateless)'
-      }));
+        // Test de cache: escribir y leer
+        let testResult = { write: false, read: false, value: null as string | null };
+        if (available && env.SARA_CACHE) {
+          try {
+            const testKey = '_debug_test_' + Date.now();
+            await (env.SARA_CACHE as KVNamespace).put(testKey, 'test_value', { expirationTtl: 60 });
+            testResult.write = true;
+            const readVal = await (env.SARA_CACHE as KVNamespace).get(testKey);
+            testResult.read = readVal === 'test_value';
+            testResult.value = readVal;
+            await (env.SARA_CACHE as KVNamespace).delete(testKey);
+          } catch (e: any) {
+            testResult.value = e.message;
+          }
+        }
+
+        return corsResponse(JSON.stringify({
+          cache_disponible: available,
+          estadisticas: stats,
+          test_kv: testResult,
+          ttl_configurado: {
+            team_members: '5 min',
+            properties: '10 min',
+            developments: '10 min',
+            leads: '1 min'
+          },
+          nota: 'Estadísticas se resetean en cada request (Workers son stateless)'
+        }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ ok: false, error: e.message, stack: e.stack?.split('\n').slice(0, 3) }));
+      }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -850,11 +860,20 @@ export async function handleTestRoutes(
       const phone = url.searchParams.get('phone') || '';
       const phoneLimpio = phone.replace(/[-\s]/g, '');
 
-      const { data: lead } = await supabase.client
-        .from('leads')
-        .select('id, name, phone, notes, assigned_to')
-        .or(`phone.ilike.%${phoneLimpio}%,phone.ilike.%${phoneLimpio.slice(-10)}%`)
-        .single();
+      let lead: any = null;
+      if (phoneLimpio) {
+        const { data } = await supabase.client
+          .from('leads')
+          .select('id, name, phone, notes, assigned_to')
+          .or(`phone.ilike.%${phoneLimpio}%,phone.ilike.%${phoneLimpio.slice(-10)}%`)
+          .single();
+        lead = data;
+      }
+      // Fallback: lead más reciente
+      if (!lead) {
+        const { data } = await supabase.client.from('leads').select('id, name, phone, notes, assigned_to').order('created_at', { ascending: false }).limit(1).single();
+        lead = data;
+      }
 
       if (!lead) {
         return corsResponse(JSON.stringify({ error: 'Lead no encontrado', phone: phoneLimpio }), 404);
@@ -954,15 +973,36 @@ export async function handleTestRoutes(
       const phone = url.searchParams.get('phone') || '';
       const phoneLimpio = phone.replace(/[-\s]/g, '');
 
-      // Buscar lead
-      const { data: lead } = await supabase.client
-        .from('leads')
-        .select('id, name, phone, status, property_interest, conversation_history')
-        .or(`phone.ilike.%${phoneLimpio}%,phone.ilike.%${phoneLimpio.slice(-10)}%`)
-        .single();
+      let lead: any = null;
+      if (phoneLimpio) {
+        const { data } = await supabase.client
+          .from('leads')
+          .select('id, name, phone, status, property_interest, conversation_history')
+          .or(`phone.ilike.%${phoneLimpio}%,phone.ilike.%${phoneLimpio.slice(-10)}%`)
+          .single();
+        lead = data;
+      } else {
+        // Fallback: lead más reciente con cita
+        const { data } = await supabase.client
+          .from('appointments')
+          .select('lead_id')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        if (data?.lead_id) {
+          const { data: l } = await supabase.client.from('leads').select('id, name, phone, status, property_interest, conversation_history').eq('id', data.lead_id).single();
+          lead = l;
+        }
+      }
 
       if (!lead) {
-        return corsResponse(JSON.stringify({ error: 'Lead no encontrado' }), 404);
+        // Final fallback: any lead
+        const { data } = await supabase.client.from('leads').select('id, name, phone, status, property_interest, conversation_history').order('created_at', { ascending: false }).limit(1).single();
+        lead = data;
+      }
+
+      if (!lead) {
+        return corsResponse(JSON.stringify({ error: 'Lead no encontrado', hint: 'Usa ?phone=XXXX' }), 404);
       }
 
       // Buscar citas del lead
@@ -4294,16 +4334,23 @@ Mensaje: ${mensaje}`;
 
     // Debug: Ver notas actuales del vendedor
     if (url.pathname === '/debug-vendor-notes') {
-      const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6';
+      const vendedorId = url.searchParams.get('vendedor_id');
 
-      const { data: vendedorData, error } = await supabase.client
-        .from('team_members')
-        .select('id, name, notes')
-        .eq('id', vendedorId)
-        .single();
+      let vendedorData: any = null;
+      let error: any = null;
+      if (vendedorId) {
+        const res = await supabase.client.from('team_members').select('id, name, notes').eq('id', vendedorId).single();
+        vendedorData = res.data;
+        error = res.error;
+      } else {
+        // Fallback: primer vendedor activo
+        const res = await supabase.client.from('team_members').select('id, name, notes').eq('role', 'vendedor').eq('active', true).limit(1).single();
+        vendedorData = res.data;
+        error = res.error;
+      }
 
       return corsResponse(JSON.stringify({
-        vendedor_id: vendedorId,
+        vendedor_id: vendedorData?.id || vendedorId,
         vendedor_name: vendedorData?.name,
         notes: vendedorData?.notes,
         notes_type: typeof vendedorData?.notes,
@@ -5068,34 +5115,46 @@ Estoy aquí para ayudarte. 😊`;
     // Envía pregunta al vendedor: "¿Llegó el lead?"
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/test-post-visita' || url.pathname === '/test-full-confirmation-flow') {
-      const leadId = url.searchParams.get('lead_id') || '5c2d12bf-d1d1-4e09-ab9e-d93f5f38f701';
-      const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6';
+      let leadId = url.searchParams.get('lead_id');
+      let vendedorId = url.searchParams.get('vendedor_id');
       const vendedorPhoneOverride = url.searchParams.get('vendedor_phone');
 
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       const { PostVisitService } = await import('../services/postVisitService');
       const postVisitService = new PostVisitService(supabase);
 
-      // 1. Obtener lead
-      const { data: lead, error: leadError } = await supabase.client
-        .from('leads')
-        .select('*')
-        .eq('id', leadId)
-        .single();
-
-      if (leadError || !lead) {
-        return corsResponse(JSON.stringify({ error: 'Lead no encontrado', details: leadError }), 400);
+      // 1. Obtener lead (fallback: lead más reciente con vendedor)
+      let lead: any = null;
+      if (leadId) {
+        const { data, error } = await supabase.client.from('leads').select('*').eq('id', leadId).single();
+        lead = data;
+      }
+      if (!lead) {
+        const { data } = await supabase.client.from('leads').select('*').not('assigned_to', 'is', null).order('created_at', { ascending: false }).limit(1).single();
+        lead = data;
       }
 
-      // 2. Obtener vendedor
-      const { data: vendedor, error: vendedorError } = await supabase.client
-        .from('team_members')
-        .select('*')
-        .eq('id', vendedorId)
-        .single();
+      if (!lead) {
+        return corsResponse(JSON.stringify({ error: 'Lead no encontrado', hint: 'Usa ?lead_id=UUID' }), 400);
+      }
 
-      if (vendedorError || !vendedor) {
-        return corsResponse(JSON.stringify({ error: 'Vendedor no encontrado', details: vendedorError }), 400);
+      // 2. Obtener vendedor (fallback: vendedor asignado al lead o primer vendedor activo)
+      let vendedor: any = null;
+      if (vendedorId) {
+        const { data } = await supabase.client.from('team_members').select('*').eq('id', vendedorId).single();
+        vendedor = data;
+      }
+      if (!vendedor && lead.assigned_to) {
+        const { data } = await supabase.client.from('team_members').select('*').eq('id', lead.assigned_to).single();
+        vendedor = data;
+      }
+      if (!vendedor) {
+        const { data } = await supabase.client.from('team_members').select('*').eq('role', 'vendedor').eq('active', true).limit(1).single();
+        vendedor = data;
+      }
+
+      if (!vendedor) {
+        return corsResponse(JSON.stringify({ error: 'Vendedor no encontrado' }), 400);
       }
 
       // Override phone si se proporciona
