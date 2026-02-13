@@ -399,8 +399,8 @@ export async function enviarDigestoErroresDiario(
 
     mensaje += `\n_Ver detalle en CRM_`;
 
-    await meta.sendWhatsAppMessage(CEO_PHONE, mensaje);
-    console.log(`📊 Error digest sent to CEO: ${errors.length} errors`);
+    await meta.sendWhatsAppMessage(DEV_PHONE, mensaje);
+    console.log(`📊 Error digest sent to Dev (Edson): ${errors.length} errors`);
   } catch (e) {
     console.error('Error sending error digest:', e);
   }
@@ -411,6 +411,7 @@ export async function enviarDigestoErroresDiario(
 // ═══════════════════════════════════════════════════════════════════════════
 
 const CEO_PHONE = '5214922019052';
+const DEV_PHONE = '5610016226'; // Edson - errores de sistema van aquí
 
 export async function alertarCEO(
   meta: MetaWhatsAppService,
@@ -427,8 +428,8 @@ export async function alertarCEO(
       }
     }
 
-    // Send alert
-    await meta.sendWhatsAppMessage(CEO_PHONE,
+    // Send alert to Dev (Edson), NOT CEO
+    await meta.sendWhatsAppMessage(DEV_PHONE,
       `🚨 *ALERTA SISTEMA SARA*\n\n${mensaje}\n\n_Alerta automática - se silencia por 1 hora_`
     );
 
