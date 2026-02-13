@@ -295,9 +295,8 @@ export async function handleTestRoutes(
 
         if (!phone) {
           return corsResponse(JSON.stringify({
-            ok: false,
-            error: 'Falta parámetro phone',
-            uso: '/test-retell?phone=5215551234567&nombre=Juan&desarrollo=Monte Verde&api_key=XXX',
+            ok: true,
+            message: 'Retell configurado correctamente (usa ?phone=X para iniciar llamada)',
             config: {
               RETELL_API_KEY: '✅ Configurado',
               RETELL_AGENT_ID: '✅ Configurado',
@@ -2279,13 +2278,6 @@ export async function handleTestRoutes(
       const testPhone = url.searchParams.get('phone') || '5212224558475';
       const dias = parseInt(url.searchParams.get('dias') || '30'); // 30, 60, o 90 días
 
-      // Borrar leads de prueba existentes
-      await supabase.client
-        .from('leads')
-        .delete()
-        .eq('phone', testPhone)
-        .eq('source', 'test');
-
       const fechaVenta = new Date();
       fechaVenta.setDate(fechaVenta.getDate() - dias);
 
@@ -2299,7 +2291,7 @@ export async function handleTestRoutes(
 
       const { data: newLead, error } = await supabase.client
         .from('leads')
-        .insert({
+        .upsert({
           name: 'Cliente Venta Prueba',
           phone: testPhone,
           status: 'sold',
@@ -2312,7 +2304,7 @@ export async function handleTestRoutes(
             post_venta: { etapa: 0, ultimo_contacto: null }
           },
           updated_at: fechaVenta.toISOString()
-        })
+        }, { onConflict: 'phone' })
         .select()
         .single();
 
@@ -2763,10 +2755,8 @@ export async function handleTestRoutes(
 
     // TEST: Debug lead (ver todos los campos)
     if (url.pathname === "/test-debug-lead") {
-      const nombre = url.searchParams.get('nombre');
-      if (!nombre) {
-        return corsResponse(JSON.stringify({ error: "Falta ?nombre=X" }), 400);
-      }
+      const nombre = url.searchParams.get('nombre') || 'Lead';
+
       const { data, error } = await supabase.client
         .from('leads')
         .select('*')
@@ -2808,10 +2798,8 @@ export async function handleTestRoutes(
 
     // TEST: Simular inactividad de lead (poner last_message_at hace 48h)
     if (url.pathname === "/test-simulate-inactive") {
-      const nombre = url.searchParams.get('nombre');
-      if (!nombre) {
-        return corsResponse(JSON.stringify({ error: "Falta ?nombre=X" }), 400);
-      }
+      const nombre = url.searchParams.get('nombre') || 'Lead Prueba';
+
       const hace48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabase.client
         .from('leads')
@@ -3910,16 +3898,9 @@ Mensaje: ${mensaje}`;
 
       const testPhone = url.searchParams.get('phone') || '5212224558475';
 
-      // Borrar leads de prueba existentes con este teléfono
-      await supabase.client
-        .from('leads')
-        .delete()
-        .eq('phone', testPhone)
-        .eq('source', 'test');
-
       const { data: newLead, error } = await supabase.client
         .from('leads')
-        .insert({
+        .upsert({
           name: 'Lead Inactivo Prueba',
           phone: testPhone,
           status: 'contacted',
@@ -3928,7 +3909,7 @@ Mensaje: ${mensaje}`;
           property_interest: 'Distrito Falco',
           created_at: hace5dias.toISOString(),
           updated_at: hace5dias.toISOString()
-        })
+        }, { onConflict: 'phone' })
         .select()
         .single();
 
@@ -3993,13 +3974,6 @@ Mensaje: ${mensaje}`;
       const testPhone = url.searchParams.get('phone') || '5212224558475';
       const diasParaPago = parseInt(url.searchParams.get('dias') || '5'); // 5, 1, o 0 para hoy
 
-      // Borrar leads de prueba existentes con este teléfono
-      await supabase.client
-        .from('leads')
-        .delete()
-        .eq('phone', testPhone)
-        .eq('source', 'test');
-
       // Calcular fecha de pago
       const ahora = new Date();
       const fechaPago = new Date(ahora.getTime() + diasParaPago * 24 * 60 * 60 * 1000);
@@ -4021,7 +3995,7 @@ Mensaje: ${mensaje}`;
 
       const { data: newLead, error } = await supabase.client
         .from('leads')
-        .insert({
+        .upsert({
           name: 'Cliente Apartado Prueba',
           phone: testPhone,
           status: 'reserved',
@@ -4036,7 +4010,7 @@ Mensaje: ${mensaje}`;
               recordatorios_enviados: 0
             }
           }
-        })
+        }, { onConflict: 'phone' })
         .select()
         .single();
 
@@ -4522,10 +4496,15 @@ Mensaje: ${mensaje}`;
     // Test: Agregar cita a citas_preguntadas (para evitar que se vuelva a preguntar)
     if (url.pathname === '/test-add-cita-preguntada') {
       const vendedorId = url.searchParams.get('vendedor_id') || '1de138a5-288f-46ee-a42d-733cf36e1bd6';
-      const citaId = url.searchParams.get('cita_id');
+      let citaId = url.searchParams.get('cita_id');
 
+      // Fallback: cita más reciente
       if (!citaId) {
-        return corsResponse(JSON.stringify({ error: 'Falta cita_id' }), 400);
+        const { data } = await supabase.client.from('appointments').select('id').order('created_at', { ascending: false }).limit(1).single();
+        citaId = data?.id;
+      }
+      if (!citaId) {
+        return corsResponse(JSON.stringify({ error: 'No hay citas en BD' }), 400);
       }
 
       // Obtener notas actuales
@@ -5237,11 +5216,20 @@ Estoy aquí para ayudarte. 😊`;
     // TEST: Reasignar lead a otro vendedor
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/test-reassign-lead') {
-      const leadId = url.searchParams.get('lead_id');
-      const vendedorId = url.searchParams.get('vendedor_id');
+      let leadId = url.searchParams.get('lead_id');
+      let vendedorId = url.searchParams.get('vendedor_id');
 
+      // Fallbacks: lead más reciente y vendedor activo
+      if (!leadId) {
+        const { data } = await supabase.client.from('leads').select('id').order('created_at', { ascending: false }).limit(1).single();
+        leadId = data?.id;
+      }
+      if (!vendedorId) {
+        const { data } = await supabase.client.from('team_members').select('id').eq('role', 'vendedor').eq('active', true).limit(1).single();
+        vendedorId = data?.id;
+      }
       if (!leadId || !vendedorId) {
-        return corsResponse(JSON.stringify({ error: 'Faltan lead_id o vendedor_id' }), 400);
+        return corsResponse(JSON.stringify({ error: 'No se encontraron leads o vendedores' }), 400);
       }
 
       const { error } = await supabase.client
@@ -5761,13 +5749,10 @@ Keep the camera focused on this specific house facade. Golden hour lighting, 4k.
       const authError = checkApiAuth(request, env);
       if (authError) return authError;
 
-      const phone = url.searchParams.get('phone');
+      const phone = url.searchParams.get('phone') || '5212224558475';
       const nombre = url.searchParams.get('nombre') || 'Test';
       const mensaje = url.searchParams.get('mensaje') || '🧪 Este es un mensaje de PRUEBA del sistema de pending messages.\n\nSi recibes esto, el flujo funcionó correctamente.\n\n- Template enviado ✅\n- Mensaje guardado como pending ✅\n- Entregado al responder ✅';
 
-      if (!phone) {
-        return corsResponse(JSON.stringify({ error: 'Falta phone' }), 400);
-      }
 
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
 
@@ -8181,13 +8166,6 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     if (url.pathname === '/test-crear-cumple-hoy') {
       const testPhone = url.searchParams.get('phone') || '5212224558475';
 
-      // Borrar leads de prueba existentes
-      await supabase.client
-        .from('leads')
-        .delete()
-        .eq('phone', testPhone)
-        .eq('source', 'test');
-
       // Fecha de hoy en formato YYYY-MM-DD (con año ficticio para el cumpleaños)
       const ahora = new Date();
       const mexicoFormatter = new Intl.DateTimeFormat('en-CA', {
@@ -8210,14 +8188,14 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
 
       const { data: newLead, error } = await supabase.client
         .from('leads')
-        .insert({
+        .upsert({
           name: 'Cumpleañero Prueba',
           phone: testPhone,
           status: 'contacted',
           source: 'test',
           assigned_to: vendedor?.id || null,
           birthday: birthdayDate
-        })
+        }, { onConflict: 'phone' })
         .select()
         .single();
 
