@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-11 (Sesión 33)
+> Última actualización: 2026-02-12 (Sesión 34)
 
 ---
 
@@ -50,8 +50,14 @@ npm test
 
 | Archivo | Líneas | Función | Riesgo |
 |---------|--------|---------|--------|
-| `src/index.ts` | ~18,000 | Router principal + CRONs | ALTO |
-| `src/handlers/whatsapp.ts` | ~12,000 | Handler de mensajes | ALTO |
+| `src/index.ts` | ~3,000 | Router principal (modularizado) | MEDIO |
+| `src/handlers/whatsapp.ts` | ~2,167 | Dispatcher + lead flow (modularizado) | MEDIO |
+| `src/handlers/whatsapp-vendor.ts` | ~6,048 | Handlers vendedor (93 funciones) | ALTO |
+| `src/handlers/whatsapp-ceo.ts` | ~1,887 | Handlers CEO (14 funciones) | ALTO |
+| `src/handlers/whatsapp-utils.ts` | ~1,581 | Utilidades compartidas | MEDIO |
+| `src/handlers/whatsapp-agencia.ts` | ~652 | Handlers agencia/marketing | MEDIO |
+| `src/handlers/whatsapp-asesor.ts` | ~554 | Handlers asesor | MEDIO |
+| `src/handlers/whatsapp-types.ts` | ~13 | HandlerContext interface | BAJO |
 | `src/services/aiConversationService.ts` | ~7,850 | IA + prompts + phase-aware | ALTO |
 | `src/services/creditFlowService.ts` | ~1,400 | Flujo hipotecario | MEDIO |
 
@@ -470,9 +476,15 @@ sold/closed               delivered                      +1 año
 ```
 sara-backend-cloudflare/
 ├── src/
-│   ├── index.ts              # Router principal (~14K líneas)
+│   ├── index.ts              # Router principal (~3K líneas, modularizado)
 │   ├── handlers/
-│   │   └── whatsapp.ts       # Handler WhatsApp (11K líneas)
+│   │   ├── whatsapp.ts       # Dispatcher + lead flow (~2.2K líneas)
+│   │   ├── whatsapp-vendor.ts  # Handlers vendedor (~6K líneas, 93 funciones)
+│   │   ├── whatsapp-ceo.ts     # Handlers CEO (~1.9K líneas)
+│   │   ├── whatsapp-utils.ts   # Utilidades compartidas (~1.6K líneas)
+│   │   ├── whatsapp-agencia.ts # Handlers agencia (~650 líneas)
+│   │   ├── whatsapp-asesor.ts  # Handlers asesor (~550 líneas)
+│   │   └── whatsapp-types.ts   # HandlerContext interface
 │   ├── crons/                # Módulos CRON extraídos
 │   │   ├── reports.ts        # Reportes diarios/semanales
 │   │   ├── briefings.ts      # Briefings, logEvento
@@ -4259,3 +4271,43 @@ Soporte para horas en texto: "las cuatro de la tarde", "a las tres de la mañana
 **Tests:** 369/369 pasando
 **Commit:** `6454bafd`
 **Deploy:** Version ID `585ff89e`
+
+### 2026-02-12 (Sesión 34) - Modularizar whatsapp.ts (~12K → 7 archivos)
+
+**Refactor completo de `src/handlers/whatsapp.ts`:**
+
+Patrón: Context Object (`HandlerContext`) + funciones exportadas por módulo.
+
+| Archivo nuevo | Líneas | Contenido |
+|--------------|--------|-----------|
+| `whatsapp-types.ts` | 13 | Interface `HandlerContext` |
+| `whatsapp-utils.ts` | 1,581 | Helpers, getOrCreateLead, crearCitaCompleta, etc. |
+| `whatsapp-asesor.ts` | 554 | handleAsesorMessage, executeAsesorHandler |
+| `whatsapp-agencia.ts` | 652 | handleAgenciaMessage + 13 sub-handlers marketing |
+| `whatsapp-ceo.ts` | 1,887 | handleCEOMessage + 14 funciones CEO |
+| `whatsapp-vendor.ts` | 6,048 | handleVendedorMessage + 93 funciones vendedor |
+| `whatsapp.ts` (reducido) | 2,167 | Clase WhatsAppHandler, dispatcher, lead flow |
+
+**Resultado:** 12K líneas en 1 archivo → 12.9K en 7 archivos. Archivo principal -82%.
+
+**Patrón de extracción:**
+```typescript
+// whatsapp-types.ts
+export interface HandlerContext {
+  supabase: SupabaseService; meta: MetaWhatsAppService;
+  claude: ClaudeService; calendar: any; env: any;
+}
+
+// Cada módulo exporta funciones standalone:
+export async function handleCEOMessage(ctx: HandlerContext, ...) { ... }
+
+// whatsapp.ts mantiene thin wrappers:
+private get ctx(): HandlerContext { return { supabase: this.supabase, ... }; }
+```
+
+**Testing exhaustivo post-refactor:**
+- 369/369 unit tests ✅
+- 63/64 tests de producción ✅ (98.4%)
+- 25/25 tests Retell E2E ✅
+
+**Tests:** 369/369 pasando

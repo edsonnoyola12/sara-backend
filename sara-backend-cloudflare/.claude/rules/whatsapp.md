@@ -4,7 +4,13 @@
 
 | Archivo | Responsabilidad |
 |---------|-----------------|
-| `src/handlers/whatsapp.ts` | Handler de mensajes entrantes (~11K líneas) |
+| `src/handlers/whatsapp.ts` | Dispatcher + lead flow (~2.2K líneas) |
+| `src/handlers/whatsapp-vendor.ts` | Handlers vendedor (~6K líneas, 93 funciones) |
+| `src/handlers/whatsapp-ceo.ts` | Handlers CEO (~1.9K líneas) |
+| `src/handlers/whatsapp-utils.ts` | Utilidades compartidas (~1.6K líneas) |
+| `src/handlers/whatsapp-agencia.ts` | Handlers agencia/marketing (~650 líneas) |
+| `src/handlers/whatsapp-asesor.ts` | Handlers asesor (~550 líneas) |
+| `src/handlers/whatsapp-types.ts` | HandlerContext interface |
 | `src/services/metaWhatsAppService.ts` | Envío de mensajes a Meta API |
 | `src/services/aiConversationService.ts` | Generación de respuestas IA |
 
