@@ -2005,5 +2005,70 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
       }
     }
 
+  // ═══════════════════════════════════════════════════════════
+  // ERROR LOGS - View and manage system error logs
+  // ═══════════════════════════════════════════════════════════
+
+  if (url.pathname === '/api/error-logs' && request.method === 'GET') {
+    const authError = checkApiAuth(request, env);
+    if (authError) return authError;
+
+    const days = parseInt(url.searchParams.get('days') || '7');
+    const type = url.searchParams.get('type');
+    const severity = url.searchParams.get('severity');
+    const resolved = url.searchParams.get('resolved');
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
+
+    const desde = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+    let query = supabase.client
+      .from('error_logs')
+      .select('*')
+      .gte('created_at', desde)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (type) query = query.eq('error_type', type);
+    if (severity) query = query.eq('severity', severity);
+    if (resolved === 'true') query = query.eq('resolved', true);
+    if (resolved === 'false') query = query.eq('resolved', false);
+
+    const { data: errors, error } = await query;
+
+    if (error) {
+      return corsResponse(JSON.stringify({ error: error.message }), 500, 'application/json', request);
+    }
+
+    const stats = {
+      total: errors?.length || 0,
+      critical: errors?.filter((e: any) => e.severity === 'critical').length || 0,
+      unresolved: errors?.filter((e: any) => !e.resolved).length || 0,
+      by_type: {} as Record<string, number>
+    };
+    for (const err of (errors || [])) {
+      stats.by_type[err.error_type] = (stats.by_type[err.error_type] || 0) + 1;
+    }
+
+    return corsResponse(JSON.stringify({ stats, errors }), 200, 'application/json', request);
+  }
+
+  // Mark error as resolved
+  if (url.pathname.match(/^\/api\/error-logs\/[^/]+\/resolve$/) && request.method === 'POST') {
+    const authError = checkApiAuth(request, env);
+    if (authError) return authError;
+
+    const errorId = url.pathname.split('/')[3];
+    const { error } = await supabase.client
+      .from('error_logs')
+      .update({ resolved: true, resolved_at: new Date().toISOString(), resolved_by: 'admin' })
+      .eq('id', errorId);
+
+    if (error) {
+      return corsResponse(JSON.stringify({ error: error.message }), 500, 'application/json', request);
+    }
+
+    return corsResponse(JSON.stringify({ success: true }), 200, 'application/json', request);
+  }
+
   return null;
 }

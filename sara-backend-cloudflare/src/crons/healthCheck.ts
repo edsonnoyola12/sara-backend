@@ -310,6 +310,103 @@ export async function checkErrorRate(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// ERROR LOGGING - Persist errors to Supabase
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function logErrorToDB(
+  supabase: SupabaseService,
+  errorType: string,
+  message: string,
+  options?: {
+    severity?: 'warning' | 'error' | 'critical';
+    source?: string;
+    stack?: string;
+    context?: Record<string, any>;
+  }
+): Promise<void> {
+  try {
+    await supabase.client.from('error_logs').insert({
+      error_type: errorType,
+      severity: options?.severity || 'error',
+      source: options?.source || 'unknown',
+      message: message.slice(0, 500),
+      stack: options?.stack?.slice(0, 1000) || null,
+      context: options?.context || {}
+    });
+  } catch (e) {
+    // Fail silently - error logging must never cause more errors
+    console.error('Failed to log error to DB:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DAILY ERROR DIGEST - Send summary to CEO at 7 PM
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function enviarDigestoErroresDiario(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService
+): Promise<void> {
+  try {
+    const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: errors, error: queryError } = await supabase.client
+      .from('error_logs')
+      .select('error_type, severity, source')
+      .gte('created_at', hace24h);
+
+    if (queryError) {
+      console.error('Error querying error_logs for digest:', queryError);
+      return;
+    }
+
+    if (!errors || errors.length === 0) {
+      console.log('📊 No errors in last 24h, skipping digest');
+      return;
+    }
+
+    // Group by type and severity
+    const byType: Record<string, number> = {};
+    const bySeverity: Record<string, number> = { critical: 0, error: 0, warning: 0 };
+    const bySource: Record<string, number> = {};
+
+    for (const err of errors) {
+      byType[err.error_type] = (byType[err.error_type] || 0) + 1;
+      bySeverity[err.severity] = (bySeverity[err.severity] || 0) + 1;
+      const shortSource = err.source?.split(':').pop() || 'unknown';
+      bySource[shortSource] = (bySource[shortSource] || 0) + 1;
+    }
+
+    let mensaje = `📊 *RESUMEN ERRORES DIARIO*\n_Últimas 24 horas_\n\n`;
+    mensaje += `*Total:* ${errors.length} errores\n`;
+
+    if (bySeverity.critical > 0) mensaje += `🔴 Críticos: ${bySeverity.critical}\n`;
+    if (bySeverity.error > 0) mensaje += `🟠 Errores: ${bySeverity.error}\n`;
+    if (bySeverity.warning > 0) mensaje += `🟡 Warnings: ${bySeverity.warning}\n`;
+
+    mensaje += `\n*Por tipo:*\n`;
+    for (const [type, count] of Object.entries(byType).sort((a, b) => b[1] - a[1])) {
+      mensaje += `• ${type}: ${count}\n`;
+    }
+
+    const topSources = Object.entries(bySource).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    if (topSources.length > 0) {
+      mensaje += `\n*Top fuentes:*\n`;
+      for (const [source, count] of topSources) {
+        mensaje += `• ${source}: ${count}\n`;
+      }
+    }
+
+    mensaje += `\n_Ver detalle en CRM_`;
+
+    await meta.sendWhatsAppMessage(CEO_PHONE, mensaje);
+    console.log(`📊 Error digest sent to CEO: ${errors.length} errors`);
+  } catch (e) {
+    console.error('Error sending error digest:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ALERT CEO - Send WhatsApp alert with deduplication
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -375,6 +472,16 @@ export async function cronHealthCheck(
           .join('\n');
 
         await alertarCEO(meta, env, `Checks fallidos:\n${details}`);
+
+        // Persist to error_logs
+        await logErrorToDB(supabase, 'health_check_failure', `Failed: ${result.failedChecks.join(', ')}`, {
+          severity: 'critical',
+          source: 'cron:healthCheck',
+          context: {
+            failedChecks: result.failedChecks,
+            details: result.checks.filter(c => !c.passed).map(c => ({ name: c.name, details: c.details }))
+          }
+        });
       }
     } else {
       console.log(`✅ Health check passed (${result.checks.length} checks, ${result.duration_ms}ms)`);

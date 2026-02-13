@@ -164,7 +164,9 @@ import { exportBackup } from './crons/dashboard';
 import {
   runHealthCheck,
   trackError,
-  cronHealthCheck
+  cronHealthCheck,
+  logErrorToDB,
+  enviarDigestoErroresDiario
 } from './crons/healthCheck';
 
 export interface Env {
@@ -1423,6 +1425,15 @@ export default {
         return new Response('OK', { status: 200 });
       } catch (error) {
         console.error('❌ Meta Webhook Error:', error);
+
+        // Persist to error_logs
+        ctx.waitUntil(logErrorToDB(supabase, 'webhook_error', error instanceof Error ? error.message : String(error), {
+          severity: 'error',
+          source: 'webhook:meta',
+          stack: error instanceof Error ? error.stack : undefined,
+          context: { from: from || 'unknown' }
+        }));
+
         return new Response('OK', { status: 200 });
       }
     }
@@ -1892,6 +1903,14 @@ export default {
 
       // Track error in KV for rate monitoring
       ctx.waitUntil(trackError(env, 'fetch_error'));
+
+      // Persist to error_logs
+      ctx.waitUntil(logErrorToDB(supabase, 'fetch_error', error instanceof Error ? error.message : String(error), {
+        severity: 'critical',
+        source: `fetch:${url.pathname}`,
+        stack: error instanceof Error ? error.stack : undefined,
+        context: { request_id: requestId, path: url.pathname, method: request.method }
+      }));
 
       return corsResponse(JSON.stringify({
         error: 'Internal Server Error',
@@ -2516,6 +2535,16 @@ export default {
       await enviarReporteDiarioMarketing(supabase, meta);
     }
 
+    // 7pm diario: Digesto de errores al CEO
+    if (mexicoHour === 19 && isFirstRunOfHour) {
+      console.log('📊 Enviando digesto de errores al CEO...');
+      try {
+        await enviarDigestoErroresDiario(supabase, meta);
+      } catch (digestError) {
+        console.error('⚠️ Error en enviarDigestoErroresDiario:', digestError);
+      }
+    }
+
     // Sábado 2pm: Video semanal de logros con Veo 3 (solo primer ejecucion)
     if (mexicoHour === 14 && isFirstRunOfHour && dayOfWeek === 6) {
       console.log('🎬 Generando video semanal de logros...');
@@ -3009,6 +3038,17 @@ export default {
         scheduled_time: new Date(event.scheduledTime).toISOString()
       });
       console.error('❌ Error en cron job:', error);
+
+      // Persist to error_logs
+      try {
+        await logErrorToDB(supabase, 'cron_error', error instanceof Error ? error.message : String(error), {
+          severity: 'critical',
+          source: `cron:${event.cron}`,
+          stack: error instanceof Error ? error.stack : undefined,
+          context: { cron: event.cron, scheduled_time: new Date(event.scheduledTime).toISOString() }
+        });
+      } catch (_) { /* fail silently */ }
+
       throw error; // Re-throw para que Cloudflare lo registre
     }
   },
