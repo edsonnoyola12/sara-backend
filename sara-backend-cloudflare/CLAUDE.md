@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-12 (Sesión 34)
+> Última actualización: 2026-02-13 (Sesión 35)
 
 ---
 
@@ -4310,4 +4310,64 @@ private get ctx(): HandlerContext { return { supabase: this.supabase, ... }; }
 - 63/64 tests de producción ✅ (98.4%)
 - 25/25 tests Retell E2E ✅
 
+**Tests:** 369/369 pasando
+
+---
+
+### 2026-02-13 (Sesión 35) - Sistema Automatizado de Monitoreo de Errores
+
+**Problema:** 260+ `console.error` se perdían en logs de Cloudflare. `trackError()` solo guardaba contadores en KV con TTL 48h. No había forma de revisar errores históricos ni recibir alertas.
+
+**Solución implementada:**
+
+#### 1. Tabla `error_logs` en Supabase
+
+```sql
+error_logs: id, error_type, severity, source, message, stack, context (JSONB), resolved, created_at
+```
+Indexes: `created_at DESC`, `resolved WHERE false`, `error_type`
+
+#### 2. `logErrorToDB()` en healthCheck.ts
+
+Persiste errores a Supabase con tipo, severidad, fuente, mensaje (truncado 500 chars), stack (truncado 1000 chars), contexto JSONB. Falla silenciosamente.
+
+#### 3. Instrumentación de 3 catch blocks críticos en index.ts
+
+| Path | Tipo | Severidad | waitUntil? |
+|------|------|-----------|------------|
+| fetch catch | `fetch_error` | critical | Sí |
+| scheduled catch | `cron_error` | critical | No (await) |
+| webhook catch | `webhook_error` | error | Sí |
+
+#### 4. Digesto diario 7PM México
+
+`enviarDigestoErroresDiario()` - Resumen por WhatsApp con total, por severidad, por tipo, top fuentes. Solo envía si hay errores.
+
+#### 5. API endpoints
+
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/error-logs` | GET | Lista errores con filtros (days, type, severity, resolved, limit) |
+| `/api/error-logs/:id/resolve` | POST | Marcar como resuelto |
+
+Retorna: `{ stats: { total, critical, unresolved, by_type }, errors: [...] }`
+
+#### 6. Alertas van a Edson (dev), NO al CEO
+
+- `DEV_PHONE = '5610016226'` — Todas las alertas de sistema van a Edson
+- `CEO_PHONE = '5214922019052'` — Solo para reportes de negocio
+- Health check alerts (cada 10 min, dedup 1h) → Edson
+- Digesto diario 7PM → Edson
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `sql/error_logs_table.sql` | **NUEVO** - SQL para crear tabla |
+| `src/crons/healthCheck.ts` | `logErrorToDB()`, `enviarDigestoErroresDiario()`, `DEV_PHONE`, health check instrumented |
+| `src/index.ts` | 3 catch blocks instrumentados, CRON digest 7PM |
+| `src/routes/api-core.ts` | Endpoints `/api/error-logs` y `/api/error-logs/:id/resolve` |
+
+**Commits:** `ad6a0b03`, `68b11b78`
+**Deploy:** Version ID `456f4e11`
 **Tests:** 369/369 pasando
