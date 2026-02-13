@@ -19,7 +19,7 @@ import { NotificationService } from '../services/notificationService';
 import { CreditFlowService } from '../services/creditFlowService';
 import { PostVisitService } from '../services/postVisitService';
 import { PipelineService, formatPipelineForWhatsApp, formatCurrency } from '../services/pipelineService';
-import { enviarMensajeTeamMember, isPendingExpired, verificarPendingParaLlamar, CALL_CONFIG } from '../utils/teamMessaging';
+import { enviarMensajeTeamMember, isPendingExpired, getPendingMessages, verificarPendingParaLlamar, CALL_CONFIG } from '../utils/teamMessaging';
 import { parseFechaEspanol, getMexicoNow } from '../handlers/dateParser';
 
 // CRON imports
@@ -70,7 +70,7 @@ import {
   seguimientoHipotecas,
 } from '../crons/followups';
 
-import { actualizarLeadScores } from '../crons/leadScoring';
+import { actualizarLeadScores, detectarObjeciones } from '../crons/leadScoring';
 
 import {
   followUpPostVisita,
@@ -138,7 +138,13 @@ export async function handleTestRoutes(
 
     if (url.pathname === "/test-briefing" && request.method === "GET") {
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-      const { data: yo } = await supabase.client.from("team_members").select("*").eq("phone", "5215610016226").single();
+      const phone = url.searchParams.get('phone') || '5215610016226';
+      let { data: yo } = await supabase.client.from("team_members").select("*").eq("phone", phone).single();
+      // Fallback: buscar cualquier admin activo
+      if (!yo) {
+        const { data: admin } = await supabase.client.from("team_members").select("*").eq("role", "admin").eq("active", true).limit(1).single();
+        yo = admin;
+      }
       if (yo) {
         await enviarBriefingMatutino(supabase, meta, yo, { openaiApiKey: env.OPENAI_API_KEY });
         return corsResponse(JSON.stringify({ ok: true, message: "Briefing enviado a " + yo.name }));
@@ -876,12 +882,23 @@ export async function handleTestRoutes(
       const phone = url.searchParams.get('phone') || '5215610016226';
       const phoneLimpio = phone.replace(/\D/g, '');
 
-      // Buscar lead
-      const { data: lead } = await supabase.client
+      // Buscar lead por phone
+      let { data: lead } = await supabase.client
         .from('leads')
         .select('*')
         .or(`phone.ilike.%${phoneLimpio}%,phone.ilike.%${phoneLimpio.slice(-10)}%`)
         .single();
+
+      // Fallback: cualquier lead reciente
+      if (!lead) {
+        const { data: anyLead } = await supabase.client
+          .from('leads')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        lead = anyLead;
+      }
 
       if (!lead) {
         return corsResponse(JSON.stringify({ error: 'Lead no encontrado' }), 404);
