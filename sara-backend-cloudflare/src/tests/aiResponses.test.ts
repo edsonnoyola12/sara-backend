@@ -85,7 +85,9 @@ function validateSARAResponse(response: string, context: {
 
   // REGLA 5: Si cliente dice "no me interesa", no ofrecer cita directa
   if (context.clienteDiceNoInteresa) {
-    if (respLower.includes('sábado o domingo') || respLower.includes('sabado o domingo')) {
+    if (respLower.includes('sábado o domingo') || respLower.includes('sabado o domingo') ||
+        respLower.includes('qué día te gustaría') || respLower.includes('qué día puedes') ||
+        respLower.includes('qué día te funciona') || respLower.includes('qué día y hora')) {
       errors.push('Error: ofrece cita a cliente que dijo "no me interesa"');
     }
   }
@@ -250,7 +252,7 @@ describe('AI Response Validation', () => {
   describe('Objeciones - No me interesa', () => {
     it('detecta error si ofrece cita a quien dijo no interesa', () => {
       const result = validateSARAResponse(
-        '¿Te funciona el sábado o domingo para visitarnos?',
+        '¿Qué día te gustaría visitarnos?',
         { clienteDiceNoInteresa: true }
       );
       expect(result.valid).toBe(false);
@@ -339,7 +341,7 @@ describe('AI Response Validation', () => {
 
     it('acepta respuesta sin frases prohibidas', () => {
       const result = validateSARAResponse(
-        '¡Perfecto! ¿Te funciona el sábado o el domingo?',
+        '¡Perfecto! ¿Qué día te gustaría visitarnos?',
         {}
       );
       expect(result.valid).toBe(true);
@@ -378,7 +380,7 @@ describe('AI Response Integration (mock)', () => {
     saludo: '¡Hola! Soy SARA de Grupo Santa Rita 🏠 Tenemos casas increíbles desde $1.5M. ¿Buscas 2 o 3 recámaras?',
     monteVerde: 'Monte Verde tiene 5 modelos: Acacia ($1.5M), Eucalipto ($1.9M), Olivo ($2.0M), Fresno ($2.4M), Fresno 2 ($2.6M). ¿Cuál te interesa?',
     alberca: '¡Sí tenemos desarrollo con alberca! Priv. Andes es nuestro único fraccionamiento con ALBERCA. ¿Te gustaría visitarlo?',
-    nogal: 'Citadella del Nogal tiene Villa Campelo ($452,250) y Villa Galiano ($552,750). ¿Sábado o domingo para conocerlos?',
+    nogal: 'Citadella del Nogal tiene Villa Campelo ($452,250) y Villa Galiano ($552,750). ¿Qué día te gustaría visitarlos?',
     renta: 'En Santa Rita solo vendemos casas, no rentamos. Pero la mensualidad puede ser similar a una renta. ¿Cuál es tu presupuesto?',
     noInteresa: 'Entiendo. Solo una pregunta: ¿rentas o ya tienes casa? Muchos que rentaban ahora tienen su casa propia.',
     yaCompro: '¡Muchas felicidades por tu nueva casa! 🎉 Si algún familiar busca, con gusto lo atiendo.',

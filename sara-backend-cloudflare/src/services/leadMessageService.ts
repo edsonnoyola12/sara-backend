@@ -350,7 +350,7 @@ export class LeadMessageService {
         respuestaLead = `¡Excelente ${nombreLead}! 🎉\n\n` +
           `Me alegra que te interese *${propiedad}* en *${desarrollo}*.\n\n` +
           `Para avanzar con la compra, lo ideal es que conozcas la propiedad en persona.\n\n` +
-          `*¿Te funciona mejor el sábado o el domingo para visitarla?* 🏠`;
+          `*¿Qué día te gustaría visitarla?* 🏠`;
         notaVendedor = `🔥 *¡LEAD INTERESADO EN OFERTA!*\n\n` +
           `*${lead.name}* respondió *"${body}"* a la oferta de:\n` +
           `📦 ${propiedad} - ${desarrollo}\n` +
@@ -1086,7 +1086,7 @@ export class LeadMessageService {
         if (esPositiva) {
           respuesta = `¡Qué gusto ${nombreLead}! 😊\n\n` +
                       `Me encanta que sigas interesado en ${propiedad}.\n\n` +
-                      `Para que conozcas todos los detalles, *¿te funciona el sábado o el domingo para una visita?* 🏠`;
+                      `Para que conozcas todos los detalles, *¿qué día te funciona para una visita?* 🏠`;
           updateLead = { status: 'contacted', notes: { ...notasLead, reactivado: new Date().toISOString() } };
         } else if (esNegativa) {
           respuesta = `¡Claro ${nombreLead}! Solo una pregunta rápida: ¿rentas actualmente o ya tienes casa propia? 🏠\n\n` +
@@ -1136,7 +1136,7 @@ export class LeadMessageService {
         if (esPositiva) {
           respuesta = `¡Perfecto ${nombreLead}! 😊\n\n` +
                       `Para avanzar, lo ideal es que conozcas las opciones en persona.\n\n` +
-                      `*¿Te funciona mejor el sábado o el domingo?* 🏠`;
+                      `*¿Qué día y hora te funcionan para la visita?* 🏠`;
         } else if (esNegativa) {
           respuesta = `¡Claro ${nombreLead}! Solo una pregunta: ¿buscas casa para ti o para inversión? 🏠\n\n` +
                       `Tenemos opciones desde $1.5M con excelente plusvalía.`;

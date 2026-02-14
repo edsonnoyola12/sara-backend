@@ -21,6 +21,7 @@
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { CalendarService } from '../services/calendar';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 
 // ═══════════════════════════════════════════════════════════════
 // ALERTAS DE LEADS FRÍOS - Diario 10am L-V
@@ -39,7 +40,7 @@ export async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: M
     const { data: leadsActivos } = await supabase.client
       .from('leads')
       .select('*, team_members:assigned_to(id, name, phone, role)')
-      .not('status', 'in', '("closed","delivered","fallen")')
+      .not('status', 'in', '("closed","delivered","fallen","paused","lost")')
       .order('updated_at', { ascending: true });
 
     if (!leadsActivos || leadsActivos.length === 0) {
@@ -885,7 +886,7 @@ export async function alertaLeadsHotSinSeguimiento(supabase: SupabaseService, me
 
     msg += '\n\n⚡ _Estos leads están listos para cerrar. Dar seguimiento urgente._';
 
-    // Enviar a cada admin (evitar duplicados)
+    // Enviar a cada admin (evitar duplicados, respetando ventana 24h)
     const telefonosEnviados = new Set<string>();
     for (const admin of admins) {
       if (!admin.phone) continue;
@@ -894,7 +895,10 @@ export async function alertaLeadsHotSinSeguimiento(supabase: SupabaseService, me
       telefonosEnviados.add(tel);
 
       try {
-        await meta.sendWhatsAppMessage(admin.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, admin, msg, {
+          tipoMensaje: 'alerta_lead',
+          pendingKey: 'pending_alerta_lead'
+        });
         console.log(`🔥 Alerta HOT enviada a ${admin.name}`);
       } catch (e) {
         console.log(`Error enviando alerta HOT a ${admin.name}:`, e);
@@ -1258,7 +1262,7 @@ export async function remarketingLeadsFrios(supabase: SupabaseService, meta: Met
       .select('*')
       .lt('updated_at', hace30dias.toISOString())
       .gt('updated_at', hace90dias.toISOString())
-      .not('status', 'in', '("closed","lost","delivered")')
+      .not('status', 'in', '("closed","lost","delivered","paused","fallen")')
       .is('remarketing_sent', null)
       .limit(10);
 
@@ -2070,5 +2074,98 @@ export async function alertaCalidadRespuestas(
 
   } catch (error) {
     console.error('❌ Error en alerta de calidad:', error);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ALERTA: LEAD NO CONFIRMA CITA DESPUÉS DE RECORDATORIO
+// ═══════════════════════════════════════════════════════════
+
+export async function alertaCitaNoConfirmada(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const mañanaStr = new Date(ahora.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar citas de mañana que YA tienen recordatorio 24h enviado
+    const { data: citas } = await supabase.client
+      .from('appointments')
+      .select('id, lead_id, lead_name, lead_phone, scheduled_date, scheduled_time, property_name, vendedor_id, reminder_24h_sent')
+      .in('scheduled_date', [hoyStr, mañanaStr])
+      .eq('status', 'scheduled')
+      .eq('reminder_24h_sent', true);
+
+    if (!citas || citas.length === 0) return;
+
+    // Buscar leads de estas citas para ver last_message_at
+    const leadIds = [...new Set(citas.map(c => c.lead_id).filter(Boolean))];
+    if (leadIds.length === 0) return;
+
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, last_message_at, notes')
+      .in('id', leadIds);
+
+    if (!leads) return;
+
+    const leadsMap = new Map(leads.map(l => [l.id, l]));
+
+    // Buscar vendedores
+    const vendedorIds = [...new Set(citas.map(c => c.vendedor_id).filter(Boolean))];
+    const { data: vendedores } = await supabase.client
+      .from('team_members')
+      .select('id, phone, name')
+      .in('id', vendedorIds);
+
+    const vendedoresMap = new Map((vendedores || []).map(v => [v.id, v]));
+
+    let alertas = 0;
+
+    for (const cita of citas) {
+      const lead = leadsMap.get(cita.lead_id);
+      if (!lead) continue;
+
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      // Ya se envió esta alerta?
+      if ((notas as any)?.no_confirm_alert_sent) continue;
+
+      // Verificar si el lead NO ha respondido después del recordatorio (8+ horas)
+      const lastMsg = lead.last_message_at ? new Date(lead.last_message_at).getTime() : 0;
+      const hace8h = ahora.getTime() - 8 * 60 * 60 * 1000;
+
+      // Si el lead respondió en las últimas 8h, ya confirmó implícitamente
+      if (lastMsg > hace8h) continue;
+
+      // Enviar alerta al vendedor
+      const vendedor = vendedoresMap.get(cita.vendedor_id);
+      if (!vendedor?.phone) continue;
+
+      const hora = cita.scheduled_time?.slice(0, 5) || '??:??';
+      const msg = `⚠️ *${cita.lead_name || 'Lead'}* no ha confirmado su cita de ${cita.scheduled_date === hoyStr ? 'hoy' : 'mañana'} a las ${hora}.\n\nConsidera llamarle para confirmar.\n📞 ${cita.lead_phone || 'Sin teléfono'}`;
+
+      try {
+        await enviarMensajeTeamMember(supabase, meta, vendedor, msg, {
+          tipoMensaje: 'alerta_lead',
+          pendingKey: 'pending_alerta_lead'
+        });
+        alertas++;
+
+        // Marcar como enviada
+        await supabase.client
+          .from('leads')
+          .update({ notes: { ...notas, no_confirm_alert_sent: true } })
+          .eq('id', lead.id);
+
+        console.log(`⚠️ Alerta no-confirmación enviada a ${vendedor.name} por ${cita.lead_name}`);
+      } catch (e) {
+        console.error(`Error enviando alerta no-confirmación:`, e);
+      }
+    }
+
+    if (alertas > 0) {
+      console.log(`⚠️ Alertas de no-confirmación enviadas: ${alertas}`);
+    }
+  } catch (e) {
+    console.error('Error en alertaCitaNoConfirmada:', e);
   }
 }

@@ -21,8 +21,10 @@ import { VendorCommandsService } from './services/vendorCommandsService';
 import { initSentry } from './services/sentryService';
 import { AudioTranscriptionService, createAudioTranscription, isAudioMessage, extractAudioInfo } from './services/audioTranscriptionService';
 import { AIConversationService } from './services/aiConversationService';
+import { getAvailableVendor, TeamMemberAvailability } from './services/leadManagementService';
 import { createTTSTrackingService } from './services/ttsTrackingService';
 import { createMessageTrackingService } from './services/messageTrackingService';
+import { BusinessHoursService } from './services/businessHoursService';
 
 // CRON modules
 import {
@@ -85,7 +87,8 @@ import {
   reactivarLeadsPerdidos,
   felicitarCumpleañosLeads,
   procesarCumpleañosLeads,
-  felicitarCumpleañosEquipo
+  felicitarCumpleañosEquipo,
+  alertaCitaNoConfirmada
 } from './crons/alerts';
 
 // Follow-ups y Nurturing
@@ -138,7 +141,8 @@ import {
   procesarRespuestaSatisfaccionCasa,
   checkInMantenimiento,
   procesarRespuestaMantenimiento,
-  isLikelySurveyResponse
+  isLikelySurveyResponse,
+  checkIn60Dias
 } from './crons/nurturing';
 
 // Maintenance - Bridge, followups, stagnant leads, anniversaries
@@ -576,121 +580,7 @@ async function verifyMetaSignature(request: Request, body: string, secret: strin
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// HELPER: Asignación inteligente de vendedores
-// ═══════════════════════════════════════════════════════════════════════════
-interface TeamMemberAvailability {
-  id: string;
-  name: string;
-  phone: string;
-  role: string;
-  active: boolean;
-  sales_count: number;
-  vacation_start?: string;
-  vacation_end?: string;
-  is_on_duty?: boolean;
-  work_start?: string;
-  work_end?: string;
-  working_days?: number[];
-}
-
-function getAvailableVendor(vendedores: TeamMemberAvailability[]): TeamMemberAvailability | null {
-  const now = new Date();
-  const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
-  const currentDay = now.getDay(); // 0=Dom, 1=Lun, ... 6=Sab
-  const currentHour = now.getHours();
-  const currentMinute = now.getMinutes();
-  const currentTimeMinutes = currentHour * 60 + currentMinute;
-
-  // Filtrar vendedores activos
-  const activos = vendedores.filter(v => v.active && v.role === 'vendedor');
-
-  if (activos.length === 0) {
-    console.error('⚠️ No hay vendedores activos, buscando fallback...');
-
-    // FALLBACK 1: Buscar coordinadores o admins activos
-    const coordinadores = vendedores.filter(v =>
-      v.active && (v.role === 'coordinador' || v.role === 'admin' || v.role === 'ceo' || v.role === 'director')
-    );
-    if (coordinadores.length > 0) {
-      const elegido = coordinadores[0];
-      console.log(`🔄 FALLBACK: Asignando a coordinador/admin ${elegido.name} (no hay vendedores)`);
-      return elegido;
-    }
-
-    // FALLBACK 2: Cualquier team member activo
-    const cualquiera = vendedores.filter(v => v.active);
-    if (cualquiera.length > 0) {
-      const elegido = cualquiera[0];
-      console.log(`🚨 FALLBACK CRÍTICO: Asignando a ${elegido.name} (${elegido.role}) - NO HAY VENDEDORES`);
-      return elegido;
-    }
-
-    // FALLBACK 3: NADIE disponible - LOG CRÍTICO
-    console.error('🚨🚨🚨 CRÍTICO: NO HAY NINGÚN TEAM MEMBER ACTIVO - LEAD SE PERDERÁ');
-    return null;
-  }
-
-  // Función para verificar si está disponible
-  const estaDisponible = (v: TeamMemberAvailability): boolean => {
-    // 1. Verificar vacaciones
-    if (v.vacation_start && v.vacation_end) {
-      if (today >= v.vacation_start && today <= v.vacation_end) {
-        console.log(`🏖️ ${v.name} está de vacaciones`);
-        return false;
-      }
-    }
-
-    // 2. Verificar día laboral
-    const workingDays = v.working_days || [1, 2, 3, 4, 5]; // Default L-V
-    if (!workingDays.includes(currentDay)) {
-      console.log(`📅 ${v.name} no trabaja hoy (día ${currentDay})`);
-      return false;
-    }
-
-    // 3. Verificar horario (solo si está definido)
-    if (v.work_start && v.work_end) {
-      const [startH, startM] = v.work_start.split(':').map(Number);
-      const [endH, endM] = v.work_end.split(':').map(Number);
-      const startMinutes = startH * 60 + startM;
-      const endMinutes = endH * 60 + endM;
-
-      if (currentTimeMinutes < startMinutes || currentTimeMinutes > endMinutes) {
-        console.log(`⏰ ${v.name} fuera de horario (${v.work_start}-${v.work_end})`);
-        return false;
-      }
-    }
-
-    return true;
-  };
-
-  // Separar en disponibles y de guardia
-  const disponibles = activos.filter(estaDisponible);
-  const deGuardia = disponibles.filter(v => v.is_on_duty);
-
-  console.log(`📊 Asignación: ${activos.length} activos, ${disponibles.length} disponibles, ${deGuardia.length} de guardia`);
-
-  // 1. Priorizar vendedores de guardia
-  if (deGuardia.length > 0) {
-    // Entre los de guardia, elegir el de menor ventas (round-robin)
-    const elegido = deGuardia.sort((a, b) => (a.sales_count || 0) - (b.sales_count || 0))[0];
-    console.log(`🔥 Asignando a ${elegido.name} (de guardia, ${elegido.sales_count} ventas)`);
-    return elegido;
-  }
-
-  // 2. Si hay disponibles, elegir el de menor ventas
-  if (disponibles.length > 0) {
-    const elegido = disponibles.sort((a, b) => (a.sales_count || 0) - (b.sales_count || 0))[0];
-    console.log(`✅ Asignando a ${elegido.name} (disponible, ${elegido.sales_count} ventas)`);
-    return elegido;
-  }
-
-  // 3. Si nadie está disponible, asignar al de menor ventas de todos los activos (fallback)
-  console.error('⚠️ Nadie disponible, usando fallback a activos');
-  const fallback = activos.sort((a, b) => (a.sales_count || 0) - (b.sales_count || 0))[0];
-  console.error(`⚠️ Fallback: ${fallback.name} (${fallback.sales_count} ventas)`);
-  return fallback;
-}
+// getAvailableVendor importado de leadManagementService.ts (fuente única)
 
 // ═══════════════════════════════════════════════════════════════
 // LÍMITE DE MENSAJES AUTOMÁTICOS POR LEAD
@@ -1005,6 +895,44 @@ export default {
           const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
           const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
 
+          // ═══ AVISO FUERA DE HORARIO (solo leads, no team members) ═══
+          if (!teamMember) {
+            try {
+              const bhService = new BusinessHoursService();
+              const outsideMsg = bhService.getOutsideHoursMessage('es');
+              if (outsideMsg) {
+                // Verificar dedup: no enviar más de 1 vez cada 12h al mismo lead
+                const { data: leadBH } = await supabase.client
+                  .from('leads')
+                  .select('notes')
+                  .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`)
+                  .maybeSingle();
+                const bhNotes = leadBH?.notes || {};
+                const lastNotified = bhNotes.outside_hours_notified_at;
+                const hace12h = Date.now() - 12 * 60 * 60 * 1000;
+                const yaNotifico = lastNotified && new Date(lastNotified).getTime() > hace12h;
+
+                if (!yaNotifico) {
+                  console.log(`🕐 Lead escribe fuera de horario - enviando aviso`);
+                  await meta.sendWhatsAppMessage(from, outsideMsg);
+                  // Guardar flag de dedup
+                  if (leadBH) {
+                    await supabase.client
+                      .from('leads')
+                      .update({ notes: { ...bhNotes, outside_hours_notified_at: new Date().toISOString() } })
+                      .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`);
+                  }
+                } else {
+                  console.log(`🕐 Lead fuera de horario pero ya notificado en últimas 12h - skip aviso`);
+                }
+                // NO retornar - seguir procesando con IA normalmente
+              }
+            } catch (bhErr) {
+              console.error('Error en BusinessHoursService:', bhErr);
+            }
+          }
+          // ═══ FIN AVISO FUERA DE HORARIO ═══
+
           // ═══ MANEJO DE IMÁGENES PARA FLUJO DE CRÉDITO ═══
           if (messageType === 'image' || messageType === 'document') {
             console.log(`📸 Mensaje de tipo ${messageType} recibido`);
@@ -1045,20 +973,48 @@ export default {
                         // Si hay acción de conectar asesor
                         if (resultado.accion === 'conectar_asesor' && resultado.datos?.asesor) {
                           const asesor = resultado.datos.asesor;
+                          const vendedorOriginalId = resultado.datos.vendedorOriginalId;
 
                           // Enviar mensaje al cliente con datos del asesor
                           const msgCliente = creditService.generarMensajeAsesor(
                             asesor,
-                            resultado.context.lead_name.split(' ')[0],
-                            resultado.context.modalidad
+                            resultado.context
                           );
                           await meta.sendWhatsAppMessage(from, msgCliente);
 
-                          // Notificar al asesor (solo si está activo)
+                          // Notificar al asesor via enviarMensajeTeamMember (24h safe)
                           if (asesor.phone && asesor.is_active !== false) {
-                            const msgAsesor = creditService.generarNotificacionAsesor(lead, resultado.context);
-                            await meta.sendWhatsAppMessage(asesor.phone, msgAsesor);
-                            console.log(`📤 Asesor ${asesor.name} notificado`);
+                            const { data: asesorFull } = await supabase.client
+                              .from('team_members').select('*').eq('id', asesor.id).single();
+                            if (asesorFull) {
+                              const msgAsesor = creditService.generarNotificacionAsesor(lead, resultado.context);
+                              await enviarMensajeTeamMember(supabase, meta, asesorFull, msgAsesor, {
+                                tipoMensaje: 'alerta_lead',
+                                guardarPending: true,
+                                pendingKey: 'pending_alerta_lead'
+                              });
+                              console.log(`📤 Asesor ${asesor.name} notificado (enviarMensajeTeamMember)`);
+                            }
+                          }
+
+                          // Notificar al vendedor original que su lead entró a crédito
+                          if (vendedorOriginalId && vendedorOriginalId !== asesor?.id) {
+                            const { data: vendedorOriginal } = await supabase.client
+                              .from('team_members').select('*').eq('id', vendedorOriginalId).single();
+                            if (vendedorOriginal?.phone) {
+                              const msgVendedor = `🏦 *LEAD EN CRÉDITO HIPOTECARIO*\n\n` +
+                                `👤 *${resultado.context.lead_name}*\n` +
+                                `📱 ${lead.phone}\n\n` +
+                                `Tu lead fue asignado al asesor hipotecario *${asesor.name || 'N/A'}* para su trámite de crédito.\n\n` +
+                                `💡 Sigues siendo responsable de la venta. Cuando el crédito esté listo, coordina la visita.\n\n` +
+                                `Escribe *mis leads* para ver tu lista.`;
+                              await enviarMensajeTeamMember(supabase, meta, vendedorOriginal, msgVendedor, {
+                                tipoMensaje: 'alerta_lead',
+                                guardarPending: true,
+                                pendingKey: 'pending_alerta_lead'
+                              });
+                              console.log(`📤 Vendedor original ${vendedorOriginal.name} notificado del crédito`);
+                            }
                           }
                         }
                       }
@@ -2030,19 +1986,22 @@ export default {
               if (!updateError) {
                 console.log(`   ✅ REASIGNADO a ${vendedorDisponible.name}`);
 
-                // Notificar al vendedor
+                // Notificar al vendedor (respetando ventana 24h)
                 if (vendedorDisponible.phone) {
                   try {
-                    await meta.sendWhatsAppMessage(vendedorDisponible.phone,
-                      `🚨 *LEAD REASIGNADO*\n\n` +
+                    const msgReasignado = `🚨 *LEAD REASIGNADO*\n\n` +
                       `Se te asignó un lead que estaba sin vendedor:\n\n` +
                       `👤 *${lead.name || 'Sin nombre'}*\n` +
                       `📱 ${lead.phone}\n` +
                       `🏠 ${lead.property_interest || 'Sin desarrollo definido'}\n\n` +
                       `⚠️ Este lead estuvo sin atención, contáctalo lo antes posible.\n\n` +
-                      `Escribe *leads* para ver tu lista completa.`
-                    );
-                    console.log(`   📤 Notificación enviada a ${vendedorDisponible.name}`);
+                      `Escribe *leads* para ver tu lista completa.`;
+                    await enviarMensajeTeamMember(supabase, meta, vendedorDisponible, msgReasignado, {
+                      tipoMensaje: 'alerta_lead',
+                      guardarPending: true,
+                      pendingKey: 'pending_alerta_lead'
+                    });
+                    console.log(`   📤 Notificación enviada a ${vendedorDisponible.name} (via enviarMensajeTeamMember)`);
                   } catch (notifError) {
                     console.log(`   ⚠️ Error enviando notificación:`, notifError);
                   }
@@ -2437,6 +2396,12 @@ export default {
       if (!vendedores) console.log(`      - No hay vendedores cargados`);
     }
 
+    // 8am L-V: Recordatorio a vendedores/asesores sobre leads sin contactar
+    if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('💬 Enviando recordatorios a vendedores/asesores...');
+      await recordatorioAsesores(supabase, meta);
+    }
+
     // 8am L-V: Reporte diario consolidado CEO/Admin (incluye supervisión + métricas)
     // CONSOLIDADO: Antes se enviaban 2 mensajes separados, ahora es 1 solo
     if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
@@ -2527,6 +2492,8 @@ export default {
     if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
       console.log('🥶 Enviando alertas de leads fríos...');
       await enviarAlertasLeadsFrios(supabase, meta);
+      console.log('🔥 Verificando leads HOT sin seguimiento...');
+      await alertaLeadsHotSinSeguimiento(supabase, meta);
     }
 
     // 7pm L-V: Reporte diario marketing
@@ -2661,6 +2628,13 @@ export default {
       }
     } catch (preNoShowErr) {
       console.error('❌ Error verificando pre-no-shows:', preNoShowErr);
+    }
+
+    // ALERTA CITA NO CONFIRMADA - leads que no respondieron al recordatorio 24h
+    try {
+      await alertaCitaNoConfirmada(supabase, meta);
+    } catch (ancErr) {
+      console.error('❌ Error en alertaCitaNoConfirmada:', ancErr);
     }
 
     // TIMEOUT VENDEDOR - si no responde en 2hrs, enviar encuesta al lead
@@ -2900,6 +2874,12 @@ export default {
     if (mexicoHour === 11 && isFirstRunOfHour && (dayOfWeek === 2 || dayOfWeek === 4)) {
       console.log('📚 Enviando nurturing educativo...');
       await nurturingEducativo(supabase, meta);
+    }
+
+    // CHECK-IN 60 DÍAS POST-VENTA: Jueves 11am
+    if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek === 4) {
+      console.log('📅 Enviando check-in 60 días post-venta...');
+      await checkIn60Dias(supabase, meta);
     }
 
     // PROGRAMA DE REFERIDOS: Miércoles 11am

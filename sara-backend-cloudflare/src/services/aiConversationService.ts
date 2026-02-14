@@ -280,7 +280,7 @@ export class AIConversationService {
       case 'presentation':
         return `\n📍 FASE: PRESENTACIÓN - Comparte info detallada, responde preguntas. Sugiere visita de forma natural: "¿Te gustaría conocerlo en persona?"\n`;
       case 'closing':
-        return `\n📍 FASE: CIERRE - Usa urgencia y escasez. Cierre binario: "¿Sábado o domingo?" Empuja firmemente a la cita.\n`;
+        return `\n📍 FASE: CIERRE - Usa urgencia y escasez. Pregunta "¿Qué día te gustaría visitarnos?" Empuja firmemente a la cita.\n`;
       case 'closing-has-cita':
         return `\n📍 FASE: YA TIENE CITA - No empujes otra cita. Resuelve dudas, confirma detalles, genera emoción por la visita.\n`;
       case 'nurturing':
@@ -589,7 +589,7 @@ Es de los más solicitados por la vigilancia y ubicación.
 
 📌 Si dice "SÍ QUIERO VER" o "ME INTERESA":
 CIERRA INMEDIATAMENTE:
-"¡Perfecto! ¿Te funciona mejor el sábado o el domingo?"
+"¡Perfecto! ¿Qué día te gustaría visitarnos?"
 (NO preguntes más - CIERRA la cita)
 
 
@@ -754,7 +754,7 @@ Tiene dos secciones:
 Tiene dos secciones:
 • Villa Campelo - Terrenos desde $454,511
 • Villa Galiano - Terrenos desde $555,514
-¿Te gustaría visitarlo? ¿Sábado o domingo?"
+¿Te gustaría visitarlo? ¿Qué día puedes venir a conocerlo?"
 
 **COLINAS DEL PADRE (Zacatecas):**
 - SOLO tiene CASAS: Monte Verde, Monte Real, Los Encinos, Miravalle, Paseo Colorines
@@ -800,7 +800,7 @@ Tiene dos secciones:
 | "Lo voy a pensar" | "Con $20K apartado (reembolsable) congelas precio. ¿Te guardo uno?" |
 | "No tengo enganche" | "INFONAVIT/FOVISSSTE financian 100%. ¿Tienes INFONAVIT?" |
 | "Queda lejos" | "Plusvalía 8-10% anual. ¿Qué zona te queda mejor?" |
-| "Consultar pareja" | "¡Vengan juntos! ¿Sábado o domingo?" |
+| "Consultar pareja" | "¡Vengan juntos! ¿Qué día les funciona?" |
 | "Otra opción" | "50 años, sin cuotas mantenimiento. ¿Ya nos visitaste?" |
 | "Me urge" | "¡Entrega inmediata! Monte Verde, Encinos, Andes. ¿Cuándo vienes?" |
 
@@ -1072,7 +1072,7 @@ CRÉDITO - REGLAS:
 RESPUESTAS CORTAS ("SÍ", "OK", NÚMEROS)
 Interpreta según CONTEXTO:
 - "sí" a visitar → pide nombre (si falta) o día/hora
-- "sí" a crédito → redirige a visita: "¡Perfecto! En la visita te ayudamos con todo el crédito. ¿Sábado o domingo?"
+- "sí" a crédito → redirige a visita: "¡Perfecto! En la visita te ayudamos con todo el crédito. ¿Qué día te gustaría visitarnos?"
 - Número (8-20) después de "¿hora?" → ES LA HORA ("12" = 12:00 PM)
 
 
@@ -1244,10 +1244,10 @@ FLAGS:
 
 
 ⚠️ CHECKLIST: ✅ CORTA (2-4 líneas) ✅ Pregunta de cierre ✅ Urgencia/Escasez ✅ Rescatar si dice "no"
-📌 MODELO: Saludo→"¿2 o 3 recámaras?" | No interesa→"¿Rentas o tienes casa?" | Pensar→"Con $20K congelas precio" | Visitar→"¿Sábado o domingo?"
+📌 MODELO: Saludo→"¿2 o 3 recámaras?" | No interesa→"¿Rentas o tienes casa?" | Pensar→"Con $20K congelas precio" | Visitar→"¿Qué día te gustaría visitarnos?"
 
 
-⚠️ REGLA CRÍTICA: "quiero ver/visitar/conocer" = intent "solicitar_cita" + "¿Sábado o domingo?"
+⚠️ REGLA CRÍTICA: "quiero ver/visitar/conocer" = intent "solicitar_cita" + "¿Qué día te gustaría visitarnos?"
 🚫 NUNCA "Le aviso a vendedor" ni contactar_vendedor: true. TÚ CIERRAS LA CITA.
 
 
@@ -1675,15 +1675,18 @@ RECUERDA:
           parsed.response.includes('¿sábado o el domingo') ||
           parsed.response.includes('¿sábado o domingo') ||
           parsed.response.includes('¿qué día te funciona') ||
-          parsed.response.includes('¿cuándo te gustaría')
+          parsed.response.includes('¿qué día te gustaría') ||
+          parsed.response.includes('¿qué día puedes') ||
+          parsed.response.includes('¿cuándo te gustaría') ||
+          parsed.response.includes('¿cuándo puedes')
         );
 
         // Si NO termina con cierre, agregar cierre o reemplazar respuesta
         if (!yaTerminaConCierre) {
           if (desarrolloMencionado) {
-            parsed.response = `¡Perfecto! ${desarrolloMencionado} es excelente opción 🏡 ¿Te funciona el sábado o el domingo para conocerlo?`;
+            parsed.response = `¡Perfecto! ${desarrolloMencionado} es excelente opción 🏡 ¿Qué día te gustaría visitarnos para conocerlo?`;
           } else {
-            parsed.response = '¡Perfecto! 🏡 ¿Te funciona mejor el sábado o el domingo para la visita?';
+            parsed.response = '¡Perfecto! 🏡 ¿Qué día y hora te funcionan para la visita?';
           }
         }
       }
@@ -1703,7 +1706,7 @@ RECUERDA:
           console.log('⚠️ Respuesta tiene frase PROHIBIDA - CORRIGIENDO');
           // Si el cliente muestra interés, cerrar con cita
           if (quiereVisitar || msgLowerCallback.includes('si') || msgLowerCallback.includes('sí')) {
-            parsed.response = '¡Perfecto! 🏡 ¿Te funciona mejor el sábado o el domingo para la visita?';
+            parsed.response = '¡Perfecto! 🏡 ¿Qué día te queda bien para la visita?';
             parsed.intent = 'solicitar_cita';
           } else {
             // Rescatar con pregunta de venta
@@ -1735,7 +1738,7 @@ Tiene dos secciones:
 • *Villa Campelo* - Terrenos desde $454,511
 • *Villa Galiano* - Terrenos desde $555,514
 
-Excelente plusvalía y muy tranquilo. *¿Te gustaría visitarlo? ¿Te funciona el sábado o el domingo?*`;
+Excelente plusvalía y muy tranquilo. *¿Te gustaría visitarlo? ¿Qué día puedes venir a conocerlo?*`;
           parsed.intent = 'solicitar_cita';
         }
 
@@ -2172,7 +2175,11 @@ Por WhatsApp te atiendo 24/7 🙌
                  c.includes('cuál es tu nombre');
         }).length;
 
-      if (!nombreConfirmado && parsed.response && nameAskCount < 3) {
+      // Si Claude extrajo el nombre en ESTA respuesta, ya no pedir
+      const nombreExtraidoEnEsteMsg = parsed.extracted_data?.nombre ||
+        (parsed.response && /\b(listo|perfecto|mucho gusto|encantad[oa])\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+/i.test(parsed.response));
+
+      if (!nombreConfirmado && !nombreExtraidoEnEsteMsg && parsed.response && nameAskCount < 3) {
         const respLower = parsed.response.toLowerCase();
         const askingName = respLower.includes('nombre') ||
                            respLower.includes('cómo te llamas') ||
@@ -2186,7 +2193,10 @@ Por WhatsApp te atiendo 24/7 🙌
                             respLower.includes('respeto tu decisión') ||
                             respLower.includes('disculpa la confusión');
 
-        if (!askingName && !esDespedida) {
+        // Don't append if response already uses the person's name (Claude figured it out)
+        const yaUsaNombre = parsed.response.match(/¡?(Listo|Perfecto|Genial|Claro)\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+/);
+
+        if (!askingName && !esDespedida && !yaUsaNombre) {
           console.log(`⚠️ ENFORCEMENT: Claude no pidió nombre - agregando solicitud (intento ${nameAskCount + 1}/3)`);
           parsed.response += '\n\nPor cierto, ¿con quién tengo el gusto? 😊';
         }
@@ -2410,7 +2420,21 @@ En Guadalupe: *Andes* es excelente por ubicación y precio, modelos como Aconcag
           else if (msgLower.includes('andes')) desarrollo = 'Andes';
           else if (msgLower.includes('falco')) desarrollo = 'Distrito Falco';
 
-          fallbackResponse = `¡Claro ${lead.name}! Te envío el video de ${desarrollo} 🎬`;
+          // Generar lista de modelos con precios del catálogo
+          const propsDesarrollo = properties.filter((p: any) =>
+            (p.development || p.name || '').toLowerCase().includes(desarrollo.toLowerCase())
+          );
+          let listaModelos = '';
+          if (propsDesarrollo.length > 0) {
+            listaModelos = `\n\nEn *${desarrollo}* tenemos:\n`;
+            for (const p of propsDesarrollo.slice(0, 6)) {
+              const precio = p.price_equipped || p.price || 0;
+              const rec = p.bedrooms ? `${p.bedrooms} rec` : '';
+              listaModelos += `• *${p.name}* - $${(precio/1000000).toFixed(2)}M ${rec}\n`;
+            }
+            listaModelos += `\n¿Cuál te llama más la atención?`;
+          }
+          fallbackResponse = `¡Claro ${lead.name}!${listaModelos || ` Te cuento sobre ${desarrollo} 🏠`}`;
           fallbackIntent = 'interes_desarrollo';
           // IMPORTANTE: Retornar con send_video_desarrollo: true
           return {
@@ -2620,11 +2644,26 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
           else if (msgLower.includes('andes')) desarrollo = 'Andes';
           else if (msgLower.includes('falco')) desarrollo = 'Distrito Falco';
 
+          // Generar lista de modelos con precios del catálogo
+          const propsDesarrolloNoName = properties.filter((p: any) =>
+            (p.development || p.name || '').toLowerCase().includes(desarrollo.toLowerCase())
+          );
+          let listaModelosNoName = '';
+          if (propsDesarrolloNoName.length > 0) {
+            listaModelosNoName = `\n\nEn *${desarrollo}* tenemos:\n`;
+            for (const p of propsDesarrolloNoName.slice(0, 6)) {
+              const precio = p.price_equipped || p.price || 0;
+              const rec = p.bedrooms ? `${p.bedrooms} rec` : '';
+              listaModelosNoName += `• *${p.name}* - $${(precio/1000000).toFixed(2)}M ${rec}\n`;
+            }
+            listaModelosNoName += `\n¿Cuál te llama más la atención?`;
+          }
+
           return {
             intent: 'interes_desarrollo',
             secondary_intents: [],
             extracted_data: { ...fallbackData, desarrollo },
-            response: `¡Hola! Con gusto te envío el video de ${desarrollo} 🎬`,
+            response: `¡Hola! Soy SARA de Grupo Santa Rita 🏠${listaModelosNoName || `\n\nCon gusto te cuento sobre ${desarrollo}.`}\n\nPor cierto, ¿con quién tengo el gusto? 😊`,
             send_gps: false,
             send_video_desarrollo: true,
             send_contactos: false,
@@ -2632,14 +2671,11 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
           };
         }
         // Sin interés específico - saludo con opciones claras
-        fallbackResponse = `¡Hola! Soy SARA, tu asistente personal en Grupo Santa Rita.
+        fallbackResponse = `¡Hola! Soy SARA de Grupo Santa Rita 🏠
 
-¿Qué te trae por aquí hoy? Puedo ayudarte a:
-• Encontrar tu casa ideal
-• Darte seguimiento si ya estás en proceso
-• Orientarte con tu crédito hipotecario
+Tenemos casas increíbles desde $1.6 millones con financiamiento.
 
-Tú dime, ¿por dónde empezamos?`;
+¿Buscas casa de 2 o 3 recámaras? Y dime, ¿con quién tengo el gusto? 😊`;
         fallbackIntent = 'saludo';
       }
       
@@ -4757,8 +4793,8 @@ Tú dime, ¿por dónde empezamos?`;
                 if (phaseInfoPush.pushStyle === 'full') {
                   // Phase 4 closing: urgency + binary close
                   msgPush = tieneNombre
-                    ? `${primerNombre}, estos modelos se están vendiendo rápido 🔥 ¿Te agendo para el sábado o domingo para conocer *${desarrollosMencionados}*? 🏠`
-                    : `Estos modelos se están vendiendo rápido 🔥 ¿Sábado o domingo para conocer *${desarrollosMencionados}*? 🏠`;
+                    ? `${primerNombre}, estos modelos se están vendiendo rápido 🔥 ¿Qué día te gustaría venir a conocer *${desarrollosMencionados}*? 🏠`
+                    : `Estos modelos se están vendiendo rápido 🔥 ¿Qué día puedes visitarnos para conocer *${desarrollosMencionados}*? 🏠`;
                 } else if (phaseInfoPush.pushStyle === 'soft') {
                   // Phase 3 presentation: natural suggestion, no urgency
                   msgPush = tieneNombre
@@ -5407,7 +5443,7 @@ Tú dime, ¿por dónde empezamos?`;
 
 Lo mejor es que vengas a conocer las casas y en la visita te ayudamos con todo el proceso de crédito.
 
-¿Te funciona este sábado o domingo? 🏠`;
+¿Qué día te funcionaría para la visita? 🏠`;
     }
 
     // DESACTIVADO (Sesión 29): El flujo de modalidad→asesor ya no existe

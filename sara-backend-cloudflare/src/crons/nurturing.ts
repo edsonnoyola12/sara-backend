@@ -46,7 +46,7 @@ export async function recuperarAbandonosCredito(supabase: SupabaseService, meta:
       .select('id, name, phone, status, notes, property_interest, updated_at, assigned_to')
       .not('notes', 'is', null)
       .not('phone', 'is', null)
-      .not('status', 'in', '("credit_qualified","pre_approved","approved","sold","closed","delivered","lost","fallen")')
+      .not('status', 'in', '("credit_qualified","pre_approved","approved","sold","closed","delivered","lost","fallen","paused")')
       .lt('updated_at', hace7dias.toISOString())
       .gt('updated_at', hace30dias.toISOString())
       .limit(20);
@@ -1666,4 +1666,86 @@ Mensaje: "${mensaje}"
 
   console.log(`🔧 Respuesta mantenimiento procesada: ${lead.name} - ${necesitaProveedores ? 'NECESITA PROVEEDORES' : 'OK'}`);
   return true;
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHECK-IN 60 DÍAS POST-VENTA
+// ═══════════════════════════════════════════════════════════
+
+export async function checkIn60Dias(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    const ahora = new Date();
+    const hace55dias = new Date(ahora.getTime() - 55 * 24 * 60 * 60 * 1000);
+    const hace65dias = new Date(ahora.getTime() - 65 * 24 * 60 * 60 * 1000);
+
+    // Leads con purchase_date entre 55-65 días atrás
+    const { data: clientes } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, property_interest, purchase_date, assigned_to')
+      .eq('status', 'sold')
+      .not('phone', 'is', null)
+      .not('purchase_date', 'is', null)
+      .lte('purchase_date', hace55dias.toISOString().split('T')[0])
+      .gte('purchase_date', hace65dias.toISOString().split('T')[0])
+      .limit(10);
+
+    if (!clientes || clientes.length === 0) {
+      console.log('📅 No hay clientes para check-in 60 días');
+      return;
+    }
+
+    // Filtrar los que ya recibieron el check-in
+    const elegibles = clientes.filter(c => {
+      const notas = typeof c.notes === 'object' ? c.notes : {};
+      return !(notas as any)?.checkin_60d_sent;
+    });
+
+    if (elegibles.length === 0) {
+      console.log('📅 Todos los clientes de 60 días ya tienen check-in');
+      return;
+    }
+
+    console.log(`📅 Clientes para check-in 60 días: ${elegibles.length}`);
+    let enviados = 0;
+
+    for (const cliente of elegibles) {
+      if (enviados >= 5) break;
+
+      const nombre = cliente.name?.split(' ')[0] || 'amigo';
+      const desarrollo = cliente.property_interest || 'Grupo Santa Rita';
+
+      const mensaje = `¡Hola ${nombre}! 🏡
+
+Han pasado 2 meses desde tu compra en *${desarrollo}* y queríamos saber cómo va todo.
+
+¿Cómo te has sentido con tu nuevo hogar? ¿Necesitas algo de nuestra parte?
+
+Estamos aquí para lo que necesites 😊`;
+
+      try {
+        if (puedeEnviarMensajeAutomatico(cliente)) {
+          await meta.sendWhatsAppMessage(cliente.phone!, mensaje);
+          registrarMensajeAutomatico(cliente);
+          enviados++;
+
+          // Marcar como enviado
+          const notas = typeof cliente.notes === 'object' ? cliente.notes : {};
+          await supabase.client
+            .from('leads')
+            .update({
+              notes: { ...notas, checkin_60d_sent: true, checkin_60d_date: ahora.toISOString() }
+            })
+            .eq('id', cliente.id);
+
+          console.log(`📅 Check-in 60 días enviado a: ${cliente.name}`);
+        }
+      } catch (e) {
+        console.error(`Error enviando check-in 60d a ${cliente.name}:`, e);
+      }
+    }
+
+    console.log(`📅 Check-in 60 días completado: ${enviados} enviados`);
+  } catch (e) {
+    console.error('Error en checkIn60Dias:', e);
+  }
 }

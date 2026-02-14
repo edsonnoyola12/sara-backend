@@ -161,10 +161,15 @@ new → contacted → qualified → visit_scheduled → visited → negotiating 
 ### 3. Crédito Hipotecario
 ```
 Lead pregunta por crédito → SARA hace preguntas de calificación →
-Si califica → Asigna asesor → Asesor contacta
+Si califica → Asigna asesor + notifica vendedor original + asesor (enviarMensajeTeamMember)
 ```
-- El asesor se busca por `asesor_banco_id` en el lead
+- El asesor se busca por banco preferido o round-robin
+- **Vendedor original** se guarda en `notes.vendedor_original_id` del lead
+- **AMBOS** (asesor + vendedor) reciben notificación cuando se asigna crédito
+- **AMBOS** reciben recordatorios de citas de crédito (24h y 2h)
+- **AMBOS** reciben alertas de hipotecas estancadas (+7 días en banco)
 - Si no hay asesor activo, el CEO puede usar comandos de asesor
+- Citas de crédito tienen `appointment_type: 'mortgage_consultation'`
 
 ### 4. Videos Veo 3
 ```
@@ -1103,12 +1108,15 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 
 | Flujo | Estado |
 |-------|--------|
-| Lead → CRM → Vendedor (notificación automática) | ✅ |
+| Lead → CRM → Vendedor (notificación automática, round-robin) | ✅ (Fixed Sesión 35) |
+| Vendedor notificado en: nuevo lead, recordatorio cita, re-engagement | ✅ (Fixed Sesión 35) |
+| Todas las notificaciones al equipo usan enviarMensajeTeamMember (24h safe) | ✅ (Fixed Sesión 35) |
 | Ventana 24h WhatsApp (templates con datos reales si cerrada) | ✅ |
 | Templates con datos: briefing_matutino, reporte_vendedor, reporte_asesor | ✅ |
 | Llamadas Retell.ai si no responden en 2h | ✅ |
 | Bridge chat directo (6 min, #cerrar, #mas) | ✅ |
-| Crédito hipotecario (calificación + asesor) | ✅ |
+| Crédito hipotecario (calificación + asesor + vendedor notificado) | ✅ (Fixed Sesión 36) |
+| Recordatorios cita crédito a AMBOS (asesor + vendedor) | ✅ (Fixed Sesión 36) |
 | Videos Veo 3 personalizados | ✅ |
 | Ofertas/Cotizaciones ciclo completo | ✅ |
 | Funnel de ventas (new → delivered) | ✅ |

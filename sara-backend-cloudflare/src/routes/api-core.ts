@@ -7,6 +7,8 @@ import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { CalendarService } from '../services/calendar';
 import { createLeadDeduplication } from '../services/leadDeduplicationService';
+import { getAvailableVendor } from '../services/leadManagementService';
+import { logErrorToDB, enviarDigestoErroresDiario } from '../crons/healthCheck';
 
 interface Env {
   SUPABASE_URL: string;
@@ -1260,6 +1262,17 @@ ${body.nota || 'Sin nota'}
           console.log('📤 Notificación de reasignación enviada a:', body.vendedor_name);
         }
 
+        // Notificar al CLIENTE sobre su nuevo asesor (solo si ha interactuado antes)
+        if (body.lead_phone && body.lead_has_interacted !== false) {
+          try {
+            const msgCliente = `¡Hola ${body.lead_name?.split(' ')[0] || ''}! A partir de ahora tu asesor será *${body.vendedor_name}*.\n\nCualquier duda, él/ella te atenderá con gusto. 😊`;
+            await meta.sendWhatsAppMessage(body.lead_phone, msgCliente);
+            console.log('📤 Notificación de reasignación enviada al cliente:', body.lead_name);
+          } catch (clientErr) {
+            console.error('Error notificando cliente de reasignación:', clientErr);
+          }
+        }
+
         return corsResponse(JSON.stringify({ success: true }));
       } catch (e: any) {
         console.error('❌ Error notificando reasignación:', e);
@@ -2008,6 +2021,47 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
   // ═══════════════════════════════════════════════════════════
   // ERROR LOGS - View and manage system error logs
   // ═══════════════════════════════════════════════════════════
+
+  // Test endpoint: write a test error and read it back
+  if (url.pathname === '/api/test-error-log' && request.method === 'GET') {
+    const authError = checkApiAuth(request, env);
+    if (authError) return authError;
+
+    const testId = `test-${Date.now()}`;
+    await logErrorToDB(supabase, 'test_error', `Test error monitoring (${testId})`, {
+      severity: 'warning',
+      source: 'test:manual',
+      stack: 'No stack - manual test',
+      context: { test_id: testId, triggered_by: 'api' }
+    });
+
+    // Read back to verify
+    const { data: errors, error } = await supabase.client
+      .from('error_logs')
+      .select('*')
+      .eq('error_type', 'test_error')
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    return corsResponse(JSON.stringify({
+      success: !error,
+      test_id: testId,
+      written: !error,
+      read_back: errors?.length || 0,
+      latest: errors?.[0] || null,
+      error: error?.message || null
+    }), 200, 'application/json', request);
+  }
+
+  // Trigger error digest manually (sends WhatsApp to dev)
+  if (url.pathname === '/api/test-error-digest' && request.method === 'GET') {
+    const authError = checkApiAuth(request, env);
+    if (authError) return authError;
+
+    const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+    await enviarDigestoErroresDiario(supabase, meta);
+    return corsResponse(JSON.stringify({ success: true, message: 'Digest triggered - check WhatsApp' }), 200, 'application/json', request);
+  }
 
   if (url.pathname === '/api/error-logs' && request.method === 'GET') {
     const authError = checkApiAuth(request, env);
