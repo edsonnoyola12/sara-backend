@@ -1717,6 +1717,32 @@ export class VendorCommandsService {
     }
   }
 
+  async registrarLlamada(leadId: string, vendedorId: string): Promise<void> {
+    try {
+      await this.supabase.client.from('lead_activities').insert({
+        lead_id: leadId,
+        team_member_id: vendedorId,
+        activity_type: 'call_lookup',
+        description: 'Vendedor consultó teléfono para llamar'
+      });
+    } catch (e) {
+      console.log('Error registrando llamada:', e);
+    }
+  }
+
+  formatLlamarLead(result: { found: boolean; lead?: any; error?: string }, nombreLead: string): string {
+    if (!result.found) {
+      return result.error || `❌ No encontré a "${nombreLead}" en tus leads.`;
+    }
+    const lead = result.lead;
+    const phone = lead.phone || 'No disponible';
+    return `📞 *${lead.name}*\n\n` +
+      `📱 Teléfono: ${phone}\n` +
+      `📌 Etapa: ${lead.status || 'Sin etapa'}\n` +
+      (lead.property_interest ? `🏠 Interés: ${lead.property_interest}\n` : '') +
+      `\n💡 _Toca el número para llamar directamente_`;
+  }
+
   formatNotaAgregada(nombreLead: string, textoNota: string, totalNotas: number): string {
     return `✅ *Nota guardada para ${nombreLead}*\n\n` +
       `📝 "${textoNota}"\n\n` +

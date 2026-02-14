@@ -1862,9 +1862,24 @@ export async function routeVendorCommand(ctx: HandlerContext, handler: any,
   const vendorService = new VendorCommandsService(ctx.supabase);
   const result = vendorService.detectRouteCommand(body, mensaje);
 
+  // ═══ DEFENSIVE: Keyword whitelist para evitar que comandos sean forwarded como mensajes ═══
+  const COMMAND_KEYWORDS = [
+    'notas', 'nota', 'llamar', 'quien', 'quién', 'citas', 'cita', 'mis', 'hoy',
+    'briefing', 'hot', 'pendientes', 'meta', 'ayuda', 'help', 'bridge',
+    'brochure', 'ubicacion', 'ubicación', 'video', 'credito', 'crédito',
+    'agendar', 'reagendar', 'cancelar', 'contactar', 'pausar', 'reanudar',
+    'coaching', 'coach', 'ver', 'historial', 'cotizar', 'ofertas', 'oferta',
+    'enviar', 'cerrar', 'apartado', 'aparto', 'nuevo', 'ok', 'perdido',
+    'recordar', 'programar', 'propiedades', 'inventario', 'asignar',
+    'adelante', 'atras', 'atrás', '#cerrar', '#mas', '#más', 'apunte',
+    'registrar', 'referido', 'cumple', 'email', 'correo'
+  ];
+  const firstWord = mensaje.split(/\s+/)[0];
+  const looksLikeCommand = COMMAND_KEYWORDS.includes(firstWord);
+
   // Si hay sugerencia pendiente y el mensaje NO es un comando conocido,
   // tratarlo como mensaje personalizado para enviar al lead
-  if (leadPendiente?.notes?.sugerencia_pendiente && !result.matched) {
+  if (leadPendiente?.notes?.sugerencia_pendiente && !result.matched && !looksLikeCommand) {
     const notasActuales = leadPendiente.notes || {};
 
     // Enviar el mensaje personalizado del vendedor al lead
