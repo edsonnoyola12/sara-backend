@@ -9,6 +9,7 @@ import { AsesorCommandsService } from '../services/asesorCommandsService';
 import { AppointmentSchedulingService } from '../services/appointmentSchedulingService';
 import { VendorCommandsService } from '../services/vendorCommandsService';
 import { sanitizeNotes } from '../services/vendorCommandsService';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 
 // ═══════════════════════════════════════════════════════════════
 // HANDLE ASESOR MESSAGE
@@ -167,90 +168,30 @@ export async function executeAsesorHandler(ctx: HandlerContext, handler: any, fr
       console.log(`📤 Mensaje enviado a lead ${handlerResult.leadPhone}`);
     }
 
-    // Notificar vendedor si es necesario
+    // Notificar vendedor si es necesario (usa enviarMensajeTeamMember para respetar 24h + pending correcto)
     if (handlerResult.vendedorPhone && handlerResult.vendedorMessage) {
       const vendedorPhoneClean = handlerResult.vendedorPhone.replace(/\D/g, '');
       const phoneSuffix = vendedorPhoneClean.slice(-10);
 
-      // Si el handler ya verificó la ventana 24h, usar ese valor
-      // Si no, hacer el lookup
-      let dentroVentana24h = handlerResult.vendedorDentro24h;
-      let nombreVendedor = 'Equipo';
-      let vendedorId: string | undefined;
+      // Buscar vendedor completo para enviarMensajeTeamMember
+      const { data: vendedorData } = await ctx.supabase.client
+        .from('team_members')
+        .select('*')
+        .like('phone', `%${phoneSuffix}`)
+        .single();
 
-      if (dentroVentana24h === undefined) {
-        // Buscar vendedor por teléfono para verificar ventana 24h
-        const { data: vendedorData } = await ctx.supabase.client
-          .from('team_members')
-          .select('id, name, last_sara_interaction')
-          .like('phone', `%${phoneSuffix}`)
-          .single();
-
-        vendedorId = vendedorData?.id;
-        nombreVendedor = vendedorData?.name?.split(' ')[0] || 'Equipo';
-        const lastInteraction = vendedorData?.last_sara_interaction;
-        const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        dentroVentana24h = lastInteraction && lastInteraction > hace24h;
-        console.log(`🔍 Vendedor ${nombreVendedor}: last_interaction=${lastInteraction}, dentro24h=${dentroVentana24h}`);
-      } else {
-        console.log(`🔍 Vendedor: usando ventana24h del handler = ${dentroVentana24h}`);
-        // Obtener ID para guardar pending_notification si es necesario
-        const { data: vendedorData } = await ctx.supabase.client
-          .from('team_members')
-          .select('id, name')
-          .like('phone', `%${phoneSuffix}`)
-          .single();
-        vendedorId = vendedorData?.id;
-        nombreVendedor = vendedorData?.name?.split(' ')[0] || 'Equipo';
-      }
-
-      if (dentroVentana24h) {
-        // Dentro de ventana 24h: enviar mensaje normal
-        await ctx.meta.sendWhatsAppMessage(vendedorPhoneClean, handlerResult.vendedorMessage);
-        console.log(`📤 Mensaje enviado a vendedor ${handlerResult.vendedorPhone}`);
-      } else {
-        // Fuera de ventana 24h: guardar notificación pendiente y enviar template de reactivación
-        console.error(`⚠️ Vendedor ${vendedorPhoneClean} fuera de ventana 24h, guardando notificación pendiente`);
+      if (vendedorData) {
         try {
-          // Guardar la notificación pendiente en notes del vendedor
-          if (vendedorId) {
-            const { data: vendedorFull } = await ctx.supabase.client
-              .from('team_members')
-              .select('notes')
-              .eq('id', vendedorId)
-              .single();
-
-            if (vendedorFull) {
-              const currentNotes = typeof vendedorFull.notes === 'object' ? vendedorFull.notes : {};
-              await ctx.supabase.client
-                .from('team_members')
-                .update({
-                  notes: {
-                    ...currentNotes,
-                    pending_notification: {
-                      message: handlerResult.vendedorMessage,
-                      created_at: new Date().toISOString()
-                    }
-                  }
-                })
-                .eq('id', vendedorId);
-              console.log(`📝 Notificación pendiente guardada para ${nombreVendedor}`);
-            }
-          }
-
-          // Enviar template de reactivación
-          await ctx.meta.sendTemplate(vendedorPhoneClean, 'reactivar_equipo', 'es_MX', [
-            {
-              type: 'body',
-              parameters: [
-                { type: 'text', text: nombreVendedor }
-              ]
-            }
-          ], true); // bypassRateLimit=true para notificaciones
-          console.log(`📤 Template reactivar_equipo enviado a vendedor ${vendedorPhoneClean}`);
-        } catch (templateErr) {
-          console.error('❌ Error enviando template a vendedor:', templateErr);
+          await enviarMensajeTeamMember(ctx.supabase, ctx.meta, vendedorData, handlerResult.vendedorMessage, {
+            tipoMensaje: 'alerta_lead',
+            pendingKey: 'pending_alerta_lead'
+          });
+          console.log(`📤 Notificación enviada a vendedor ${vendedorData.name} via enviarMensajeTeamMember`);
+        } catch (notifErr) {
+          console.error('❌ Error notificando vendedor:', notifErr);
         }
+      } else {
+        console.error(`⚠️ No se encontró vendedor con teléfono ${vendedorPhoneClean}`);
       }
     }
 

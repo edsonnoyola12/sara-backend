@@ -529,12 +529,24 @@ ${statusAnterior} → ${statusNuevo}
             .single();
 
           if (vendedor?.phone) {
+            // Extraer resumen de notas (evitar [object Object])
+            let notasResumen = 'Sin notas';
+            if (data.notes) {
+              const n = typeof data.notes === 'string' ? (() => { try { return JSON.parse(data.notes); } catch { return null; } })() : data.notes;
+              if (n) {
+                const partes: string[] = [];
+                if (n.credit_flow_context?.banco_preferido) partes.push(`Banco: ${n.credit_flow_context.banco_preferido}`);
+                if (n.desarrollos_interes?.length) partes.push(`Interés: ${n.desarrollos_interes.join(', ')}`);
+                if (n.notas_vendedor?.length) partes.push(`${n.notas_vendedor.length} nota(s)`);
+                notasResumen = partes.length > 0 ? partes.join(' | ') : 'Sin notas relevantes';
+              }
+            }
             const mensaje = `📋 *Lead Reasignado*
 ━━━━━━━━━━━━━━━━━━
 👤 *Nombre:* ${data.name || 'Sin nombre'}
 📱 *Tel:* ${data.phone || 'Sin teléfono'}
 🏠 *Interés:* ${data.property_interest || 'No especificado'}
-📍 *Notas:* ${data.notes || 'Sin notas'}
+📝 *Notas:* ${notasResumen}
 ━━━━━━━━━━━━━━━━━━
 ⚡ *¡Contactar pronto!*`;
 
