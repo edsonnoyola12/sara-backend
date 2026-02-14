@@ -119,6 +119,12 @@ export class NotificationService {
       for (const cita of citas24h || []) {
         if (cita.lead_phone) {
           try {
+            // ⚡ MARK-BEFORE-SEND: Marcar ANTES de enviar para evitar duplicados por race condition del CRON cada 2 min
+            await this.supabase.client
+              .from('appointments')
+              .update({ reminder_24h_sent: true })
+              .eq('id', cita.id);
+
             const nombreCorto = cita.lead_name?.split(' ')[0] || 'Hola';
             const desarrollo = cita.property_name || 'nuestro desarrollo';
             const horaFormateada = (cita.scheduled_time || '').substring(0, 5);
@@ -169,10 +175,6 @@ export class NotificationService {
               }
             }
 
-            await this.supabase.client
-              .from('appointments')
-              .update({ reminder_24h_sent: true })
-              .eq('id', cita.id);
             enviados++;
             console.log(`📅 Recordatorio 24h enviado a ${cita.lead_name}`);
           } catch (e) {
@@ -207,6 +209,12 @@ export class NotificationService {
             .single();
 
           if (vendedor?.phone) {
+            // ⚡ MARK-BEFORE-SEND: Evitar duplicados por race condition
+            await this.supabase.client
+              .from('appointments')
+              .update({ reminder_vendor_24h_sent: true })
+              .eq('id', cita.id);
+
             const nombreLead = cita.lead_name || 'Cliente';
             const desarrollo = cita.property_name || 'oficina';
             const hora = (cita.scheduled_time || '').substring(0, 5);
@@ -232,11 +240,6 @@ export class NotificationService {
               guardarPending: true,
               pendingKey: 'pending_mensaje'
             });
-
-            await this.supabase.client
-              .from('appointments')
-              .update({ reminder_vendor_24h_sent: true })
-              .eq('id', cita.id);
 
             enviados++;
             console.log(`👔 Recordatorio 24h enviado a vendedor ${vendedor.name} para cita con ${nombreLead}`);
@@ -338,6 +341,12 @@ export class NotificationService {
       for (const cita of citas2h || []) {
         if (cita.lead_phone) {
           try {
+            // ⚡ MARK-BEFORE-SEND: Evitar duplicados por race condition
+            await this.supabase.client
+              .from('appointments')
+              .update({ reminder_2h_sent: true })
+              .eq('id', cita.id);
+
             const nombreCorto = cita.lead_name?.split(' ')[0] || 'Hola';
             const desarrollo = cita.property_name || 'nuestro desarrollo';
             const horaFormateada = (cita.scheduled_time || '').substring(0, 5);
@@ -388,10 +397,6 @@ export class NotificationService {
               }
             }
 
-            await this.supabase.client
-              .from('appointments')
-              .update({ reminder_2h_sent: true })
-              .eq('id', cita.id);
             enviados++;
             console.log(`📅 Recordatorio 2h enviado a ${cita.lead_name}`);
           } catch (e) {
@@ -427,6 +432,12 @@ export class NotificationService {
             .single();
 
           if (vendedor?.phone) {
+            // ⚡ MARK-BEFORE-SEND: Evitar duplicados por race condition
+            await this.supabase.client
+              .from('appointments')
+              .update({ reminder_vendor_2h_sent: true })
+              .eq('id', cita.id);
+
             const nombreLead = cita.lead_name || 'Cliente';
             const desarrollo = cita.property_name || 'oficina';
             const hora = (cita.scheduled_time || '').substring(0, 5);
@@ -454,12 +465,6 @@ export class NotificationService {
               guardarPending: true,
               pendingKey: 'pending_mensaje'
             });
-
-            // Marcar como enviado
-            await this.supabase.client
-              .from('appointments')
-              .update({ reminder_vendor_2h_sent: true })
-              .eq('id', cita.id);
 
             enviados++;
             console.log(`👔 Recordatorio 2h enviado a vendedor ${vendedor.name} para cita con ${nombreLead}`);
