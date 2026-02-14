@@ -145,7 +145,7 @@ export class AsesorCommandsService {
     }
 
     // ━━━ DOCS PENDIENTES - Ver leads esperando documentos ━━━
-    if (msg === 'docs pendientes' || msg === 'documentos pendientes' || msg === 'pendientes' || msg === 'esperando docs') {
+    if (msg === 'docs pendientes' || msg === 'documentos pendientes' || msg === 'pendientes' || msg === 'esperando docs' || msg === 'pendientes docs' || msg === 'pendientes documentos') {
       return { action: 'call_handler', handlerName: 'asesorDocsPendientes' };
     }
 
@@ -244,13 +244,18 @@ export class AsesorCommandsService {
       return { action: 'call_handler', handlerName: 'asesorCitasHoy' };
     }
 
+    // ━━━ MAÑANA ━━━
+    if (msg === 'mañana' || msg === 'manana' || msg === 'citas mañana' || msg === 'citas manana' || msg === 'agenda mañana') {
+      return { action: 'call_handler', handlerName: 'asesorCitasMañana' };
+    }
+
     // ━━━ SEMANA ━━━
     if (msg === 'semana' || msg === 'esta semana' || msg === 'citas semana') {
       return { action: 'call_handler', handlerName: 'asesorCitasSemana' };
     }
 
     // ━━━ REPORTE ━━━
-    if (msg === 'reporte' || msg === 'mi reporte' || msg === 'stats' || msg === 'estadisticas') {
+    if (msg === 'reporte' || msg === 'mi reporte' || msg === 'stats' || msg === 'estadisticas' || msg === 'reporte semana' || msg === 'reporte semanal' || msg === 'reporte mes' || msg === 'reporte mensual') {
       return { action: 'call_handler', handlerName: 'asesorReporte' };
     }
 
@@ -333,6 +338,9 @@ export class AsesorCommandsService {
 
       case 'asesorCitasHoy':
         return await this.getCitasHoy(asesor.id, nombreAsesor);
+
+      case 'asesorCitasMañana':
+        return await this.getCitasMañana(asesor.id, nombreAsesor);
 
       case 'asesorCitasSemana':
         return await this.getCitasSemana(asesor.id, nombreAsesor);
@@ -813,6 +821,37 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
   }
 
   // ═══════════════════════════════════════════════════════════════════
+  // CITAS MAÑANA
+  // ═══════════════════════════════════════════════════════════════════
+  private async getCitasMañana(asesorId: string, nombreAsesor: string): Promise<HandlerResult> {
+    const mañana = new Date();
+    mañana.setDate(mañana.getDate() + 1);
+    const mañanaStr = mañana.toISOString().split('T')[0];
+
+    const { data: citas } = await this.supabase.client
+      .from('appointments')
+      .select('*, leads(name, phone)')
+      .eq('team_member_id', asesorId)
+      .gte('date', mañanaStr)
+      .lt('date', mañanaStr + 'T23:59:59')
+      .order('date', { ascending: true });
+
+    if (!citas || citas.length === 0) {
+      return { message: `📅 *Citas de mañana, ${nombreAsesor}*\n\nNo tienes citas programadas para mañana.` };
+    }
+
+    let msg = `📅 *Citas de mañana, ${nombreAsesor}*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+    citas.forEach((c, i) => {
+      const hora = new Date(c.date).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+      msg += `${i + 1}. ⏰ *${hora}*\n`;
+      msg += `   👤 ${c.leads?.name || 'Sin nombre'}\n`;
+      msg += `   📍 ${c.location || 'Por definir'}\n\n`;
+    });
+
+    return { message: msg };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // CITAS SEMANA
   // ═══════════════════════════════════════════════════════════════════
   private async getCitasSemana(asesorId: string, nombreAsesor: string): Promise<HandlerResult> {
@@ -1205,6 +1244,7 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
 
 📅 *Agenda:*
 • *HOY* - Ver citas de hoy
+• *MAÑANA* - Ver citas de mañana
 • *SEMANA* - Ver citas de la semana
 
 📊 *Reportes:*

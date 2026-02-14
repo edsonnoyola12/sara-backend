@@ -12,6 +12,7 @@ import { CalendarService } from '../services/calendar';
 import { WhatsAppHandler } from '../handlers/whatsapp';
 import { CEOCommandsService } from '../services/ceoCommandsService';
 import { VendorCommandsService } from '../services/vendorCommandsService';
+import { AsesorCommandsService } from '../services/asesorCommandsService';
 import { AIConversationService } from '../services/aiConversationService';
 import { FollowupService } from '../services/followupService';
 import { FollowupApprovalService } from '../services/followupApprovalService';
@@ -714,6 +715,92 @@ export async function handleTestRoutes(
         handlerName: detected.handlerName,
         params: detected.handlerParams,
         nota: 'Para ejecutar completamente, usa WhatsApp'
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // TEST COMANDO ASESOR - Probar comandos de asesor sin enviar WhatsApp
+    // USO: /test-comando-asesor?cmd=mis%20leads&phone=5210000000001
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/test-comando-asesor" && request.method === "GET") {
+      const cmd = url.searchParams.get('cmd') || 'ayuda';
+      const phone = url.searchParams.get('phone') || '5210000000001';
+      const asesorService = new AsesorCommandsService(supabase);
+
+      // Find asesor by phone
+      const phoneLimpio = phone.replace(/\D/g, '');
+      const { data: asesor } = await supabase.client
+        .from('team_members')
+        .select('*')
+        .or(`phone.ilike.%${phoneLimpio}%,phone.ilike.%${phoneLimpio.slice(-10)}%`)
+        .single();
+
+      if (!asesor || asesor.role !== 'asesor') {
+        return corsResponse(JSON.stringify({
+          ok: false,
+          error: 'Teléfono no pertenece a un asesor',
+          phone: phoneLimpio
+        }), 400);
+      }
+
+      const nombreAsesor = asesor.name?.split(' ')[0] || 'Asesor';
+
+      // Detect command
+      const detected = asesorService.detectCommand(cmd.toLowerCase().trim(), cmd, nombreAsesor);
+
+      if (detected.action === 'not_recognized') {
+        return corsResponse(JSON.stringify({
+          ok: false,
+          comando: cmd,
+          error: 'Comando no reconocido por asesor',
+          detected
+        }));
+      }
+
+      // If it's a direct message (ayuda), return it
+      if (detected.action === 'send_message') {
+        return corsResponse(JSON.stringify({
+          ok: true,
+          comando: cmd,
+          action: 'send_message',
+          respuesta: detected.message?.substring(0, 500)
+        }));
+      }
+
+      // If it's a handler, execute it
+      if (detected.action === 'call_handler' && detected.handlerName) {
+        try {
+          const result = await asesorService.executeHandler(
+            detected.handlerName,
+            asesor,
+            nombreAsesor,
+            { body: cmd, match: detected.handlerParams?.match, ...detected.handlerParams }
+          );
+
+          return corsResponse(JSON.stringify({
+            ok: !result.error,
+            comando: cmd,
+            handlerName: detected.handlerName,
+            params: detected.handlerParams,
+            respuesta: (result.message || result.error || '')?.substring(0, 500),
+            needsExternalHandler: result.needsExternalHandler || false,
+            leadNotification: result.leadMessage ? { phone: result.leadPhone, message: result.leadMessage?.substring(0, 200) } : undefined,
+            vendedorNotification: result.vendedorMessage ? { phone: result.vendedorPhone, message: result.vendedorMessage?.substring(0, 200) } : undefined,
+          }));
+        } catch (e: any) {
+          return corsResponse(JSON.stringify({
+            ok: false,
+            comando: cmd,
+            handlerName: detected.handlerName,
+            error: e.message
+          }));
+        }
+      }
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        comando: cmd,
+        detected
       }));
     }
 
