@@ -14,6 +14,7 @@ import * as agenciaHandlers from './whatsapp-agencia';
 import * as ceoHandlers from './whatsapp-ceo';
 import * as vendorHandlers from './whatsapp-vendor';
 import { HandlerContext } from './whatsapp-types';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MÓDULOS REFACTORIZADOS
@@ -216,11 +217,77 @@ export class WhatsAppHandler {
         // El código de vendedor está más abajo, así que continuamos pero marcamos que NO es lead
       }
 
+      // Si es team member PERO tiene encuesta pendiente como lead, procesar encuesta PRIMERO
+      if (esTeamMember && leadResult.lead) {
+        const surveyNotes = typeof leadResult.lead.notes === 'object' ? leadResult.lead.notes : {};
+        if (surveyNotes.pending_satisfaction_survey) {
+          const respuesta = trimmedBody.trim();
+          const surveyRatings: Record<string, { label: string; emoji: string }> = {
+            '1': { label: 'Excelente', emoji: '🌟' },
+            '2': { label: 'Buena', emoji: '👍' },
+            '3': { label: 'Regular', emoji: '😐' },
+            '4': { label: 'Mala', emoji: '😔' }
+          };
+          const rating = surveyRatings[respuesta];
+          if (rating) {
+            console.log(`📋 Team member respondiendo a encuesta de satisfacción como lead: ${respuesta}`);
+            const nombreCliente = leadResult.lead.name?.split(' ')[0] || '';
+            const propiedad = surveyNotes.pending_satisfaction_survey.property || 'la propiedad';
+            try {
+              await this.supabase.client.from('surveys').insert({
+                lead_id: leadResult.lead.id,
+                survey_type: 'satisfaction',
+                rating: parseInt(respuesta),
+                rating_label: rating.label,
+                property: propiedad,
+                created_at: new Date().toISOString()
+              });
+            } catch (err) { console.error('⚠️ Error guardando encuesta:', err); }
+            delete surveyNotes.pending_satisfaction_survey;
+            await this.supabase.client.from('leads').update({ notes: surveyNotes }).eq('id', leadResult.lead.id);
+            const msg = (respuesta === '1' || respuesta === '2')
+              ? `¡Gracias por tu feedback, ${nombreCliente}! ${rating.emoji}\n\nNos alegra que hayas tenido una experiencia *${rating.label.toLowerCase()}*.\n\nSi tienes alguna pregunta sobre *${propiedad}*, ¡aquí estamos! 🏠`
+              : `Gracias por tu feedback, ${nombreCliente}. ${rating.emoji}\n\nLamentamos que tu experiencia no haya sido la mejor.\n¿Hay algo específico que podamos hacer para mejorar? 🙏`;
+            await this.meta.sendWhatsAppMessage(cleanPhone, msg);
+            return;
+          }
+        }
+        // Check CRON survey flags (NPS, entrega, satisfacción casa, mantenimiento)
+        const hasCronSurvey = surveyNotes.esperando_respuesta_nps || surveyNotes.esperando_respuesta_entrega ||
+          surveyNotes.esperando_respuesta_satisfaccion_casa || surveyNotes.esperando_respuesta_mantenimiento;
+        if (hasCronSurvey) {
+          // Let index.ts survey handlers process this (they run before handleIncomingMessage)
+          // If we're here, they didn't match - continue as team member
+          console.log('📋 Team member tiene flag de encuesta CRON pero no matcheó - continuando como team member');
+        }
+      }
       const lead = esTeamMember ? null : leadResult.lead;  // Si es team member, no tratar como lead
       const isNewLead = esTeamMember ? false : leadResult.isNew;
 
       if (isNewLead) {
         console.log('🆕 LEAD NUEVO detectado - se generará video de bienvenida cuando tenga nombre + desarrollo');
+
+        // Notificar al vendedor asignado sobre el nuevo lead
+        if (leadResult.assignedVendedorId) {
+          const vendedorAsignado = teamMembers.find((tm: any) => tm.id === leadResult.assignedVendedorId);
+          if (vendedorAsignado) {
+            const notifMsg = `🆕 *NUEVO LEAD ASIGNADO*\n\n` +
+              `📱 ${cleanPhone}\n` +
+              `💬 "${trimmedBody.substring(0, 100)}"\n\n` +
+              `Este lead te fue asignado automáticamente. ¡Responde pronto!\n\n` +
+              `Escribe *mis leads* para ver tu lista.`;
+            try {
+              await enviarMensajeTeamMember(this.supabase, this.meta, vendedorAsignado, notifMsg, {
+                tipoMensaje: 'alerta_lead',
+                guardarPending: true,
+                pendingKey: 'pending_alerta_lead'
+              });
+              console.log(`📤 Vendedor ${vendedorAsignado.name} notificado del nuevo lead`);
+            } catch (e) {
+              console.error('Error notificando vendedor de nuevo lead:', e);
+            }
+          }
+        }
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

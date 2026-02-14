@@ -7,6 +7,7 @@ import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { BroadcastQueueService } from '../services/broadcastQueueService';
 import { logEvento } from './briefings';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LÍMITE DE MENSAJES AUTOMÁTICOS POR DÍA
@@ -99,7 +100,7 @@ export async function seguimientoHipotecas(supabase: SupabaseService, meta: Meta
       return;
     }
 
-    // Notificar a asesores (solo si están activos)
+    // Notificar a asesores Y vendedores originales
     for (const hip of hipotecasEstancadas) {
       const asesor = hip.team_members;
       const lead = hip.leads;
@@ -115,17 +116,44 @@ export async function seguimientoHipotecas(supabase: SupabaseService, meta: Meta
         `_Por favor da seguimiento y actualiza el estatus_`;
 
       try {
-        await meta.sendWhatsAppMessage(asesor.phone, msg);
-        console.log(`📢 Alerta hipoteca enviada a ${asesor.name}`);
+        await enviarMensajeTeamMember(supabase, meta, asesor, msg, {
+          tipoMensaje: 'notificacion',
+          guardarPending: true
+        });
+        console.log(`📢 Alerta hipoteca enviada a ${asesor.name} (via enviarMensajeTeamMember)`);
       } catch (e) {
         console.log(`Error notificando asesor:`, e);
+      }
+
+      // Notificar al vendedor original (si existe en notes del lead)
+      try {
+        const { data: leadFull } = await supabase.client
+          .from('leads').select('notes').eq('id', hip.lead_id).single();
+        const notas = typeof leadFull?.notes === 'string' ? JSON.parse(leadFull?.notes || '{}') : (leadFull?.notes || {});
+        const vendedorOrigId = notas.vendedor_original_id;
+        if (vendedorOrigId && vendedorOrigId !== asesor.id) {
+          const { data: vendedorOrig } = await supabase.client
+            .from('team_members').select('*').eq('id', vendedorOrigId).single();
+          if (vendedorOrig?.phone) {
+            const msgVendedor = `🏦 *ACTUALIZACIÓN CRÉDITO*\n\n` +
+              `Tu lead *${lead?.name || 'Sin nombre'}* tiene una hipoteca estancada en *${hip.bank || 'banco'}* (${diasEnBanco} días).\n\n` +
+              `El asesor hipotecario ya fue notificado. Si puedes, coordina con el cliente.`;
+            await enviarMensajeTeamMember(supabase, meta, vendedorOrig, msgVendedor, {
+              tipoMensaje: 'notificacion',
+              guardarPending: true
+            });
+            console.log(`📢 Alerta hipoteca también enviada a vendedor ${vendedorOrig.name}`);
+          }
+        }
+      } catch (e) {
+        console.log(`Error notificando vendedor original de hipoteca estancada:`, e);
       }
     }
 
     // Enviar resumen a admins (no CEOs)
     const { data: admins } = await supabase.client
       .from('team_members')
-      .select('name, phone')
+      .select('*')
       .in('role', ['admin', 'coordinador'])
       .eq('active', true);
 
@@ -153,8 +181,11 @@ export async function seguimientoHipotecas(supabase: SupabaseService, meta: Meta
         telefonosEnviados.add(tel);
 
         try {
-          await meta.sendWhatsAppMessage(admin.phone, resumenAdmin);
-          console.log(`📊 Resumen hipotecas enviado a admin ${admin.name}`);
+          await enviarMensajeTeamMember(supabase, meta, admin, resumenAdmin, {
+            tipoMensaje: 'notificacion',
+            guardarPending: true
+          });
+          console.log(`📊 Resumen hipotecas enviado a admin ${admin.name} (via enviarMensajeTeamMember)`);
         } catch (e) {
           console.log(`Error enviando resumen a admin:`, e);
         }
@@ -681,12 +712,15 @@ export async function enviarBriefingSupervision(supabase: SupabaseService, meta:
       mensaje += `✅ Todo en orden - buen trabajo!\n`;
     }
 
-    // Enviar a cada admin
+    // Enviar a cada admin (respetando ventana 24h)
     for (const admin of admins) {
       if (!admin.phone) continue;
       try {
-        await meta.sendWhatsAppMessage(admin.phone, mensaje);
-        console.log(`✅ Briefing supervisión enviado a ${admin.name}`);
+        await enviarMensajeTeamMember(supabase, meta, admin, mensaje, {
+          tipoMensaje: 'notificacion',
+          guardarPending: true
+        });
+        console.log(`✅ Briefing supervisión enviado a ${admin.name} (via enviarMensajeTeamMember)`);
       } catch (err) {
         console.error(`❌ Error enviando briefing a ${admin.name}:`, err);
       }
@@ -1089,8 +1123,12 @@ export async function verificarReengagement(supabase: SupabaseService, meta: Met
       mensaje += `• Marcarlos como "no interesado"\n`;
 
       try {
-        await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
-        console.log(`   ✅ Alerta enviada a ${vendedor.name}: ${leadsVendedor.length} leads`);
+        await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
+          tipoMensaje: 'alerta_lead',
+          guardarPending: true,
+          pendingKey: 'pending_alerta_lead'
+        });
+        console.log(`   ✅ Alerta enviada a ${vendedor.name}: ${leadsVendedor.length} leads (via enviarMensajeTeamMember)`);
 
         // Marcar que ya se alertó hoy para estos leads
         const hoyStr = ahora.toISOString().split('T')[0];
@@ -1272,6 +1310,33 @@ export async function reengagementDirectoLeads(supabase: SupabaseService, meta: 
             created_at: ahora.toISOString()
           });
 
+          // Notificar al vendedor que su lead está siendo reactivado
+          if (lead.assigned_to) {
+            try {
+              const { data: vendedor } = await supabase.client
+                .from('team_members')
+                .select('*')
+                .eq('id', lead.assigned_to)
+                .single();
+              if (vendedor?.phone) {
+                const alertaVendedor = `⚠️ *LEAD FRÍO - RE-ENGAGEMENT*\n\n` +
+                  `👤 *${lead.name || 'Sin nombre'}*\n` +
+                  `📱 ${lead.phone}\n` +
+                  `🏠 ${desarrollo}\n` +
+                  `📅 ${diasSinRespuesta} días sin respuesta\n\n` +
+                  `SARA le envió seguimiento automático (${pasoActual}).\n` +
+                  `💡 Si responde, dale atención inmediata.`;
+                await enviarMensajeTeamMember(supabase, meta, vendedor, alertaVendedor, {
+                  tipoMensaje: 'alerta_lead',
+                  guardarPending: true,
+                  pendingKey: 'pending_alerta_lead'
+                });
+              }
+            } catch (e) {
+              console.error(`Error notificando vendedor de re-engagement:`, e);
+            }
+          }
+
           mensajesEnviados++;
 
           // Limitar a 10 mensajes por ejecución para no saturar
@@ -1381,12 +1446,23 @@ export async function seguimientoPostVenta(supabase: SupabaseService, meta: Meta
           await supabase.client.from('leads').update({ notes: nuevasNotas }).eq('id', cliente.id);
           enviados++;
 
-          // Notificar al vendedor
-          const vendedor = vendedorMap.get(cliente.assigned_to);
-          if (vendedor?.phone) {
-            await meta.sendWhatsAppMessage(vendedor.phone,
-              `🎯 *Oportunidad de referidos*\n\nSe envió mensaje pidiendo referidos a *${cliente.name}*.\n\nSi responde con contactos, dale seguimiento rápido.`
-            );
+          // Notificar al vendedor (respetando ventana 24h)
+          if (cliente.assigned_to) {
+            try {
+              const { data: vendedorRef } = await supabase.client
+                .from('team_members')
+                .select('*')
+                .eq('id', cliente.assigned_to)
+                .single();
+              if (vendedorRef?.phone) {
+                await enviarMensajeTeamMember(supabase, meta, vendedorRef,
+                  `🎯 *Oportunidad de referidos*\n\nSe envió mensaje pidiendo referidos a *${cliente.name}*.\n\nSi responde con contactos, dale seguimiento rápido.`,
+                  { tipoMensaje: 'notificacion', guardarPending: true }
+                );
+              }
+            } catch (e) {
+              console.error('Error notificando vendedor de referidos:', e);
+            }
           }
         } catch (templateErr) {
           console.error(`⚠️ Template referidos falló para ${cliente.name}:`, templateErr);
@@ -1649,7 +1725,7 @@ export async function seguimientoCredito(supabase: SupabaseService, meta: MetaWh
       .from('leads')
       .select('id, name, phone, notes, property_interest, updated_at, needs_mortgage')
       .eq('needs_mortgage', true)
-      .not('status', 'in', '("lost","fallen","cold","closed")')
+      .not('status', 'in', '("lost","fallen","cold","closed","paused")')
       .lt('updated_at', hace5dias.toISOString())
       .not('phone', 'is', null)
       .limit(20);

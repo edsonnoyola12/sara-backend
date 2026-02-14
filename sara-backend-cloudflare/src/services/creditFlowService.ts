@@ -18,6 +18,7 @@ export interface CreditFlowContext {
   asesor_name?: string;
   asesor_phone?: string;
   desarrollo_interes?: string;
+  vendedor_original_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -609,6 +610,14 @@ Atendemos de Lunes a Viernes 9am-6pm y Sábados 9am-2pm 😊`,
             context.asesor_phone = asesor.phone;
           }
 
+          // Obtener vendedor original ANTES de reasignar
+          const { data: leadActual } = await this.supabase.client
+            .from('leads')
+            .select('assigned_to')
+            .eq('id', leadId)
+            .single();
+          const vendedorOriginalId = leadActual?.assigned_to || null;
+
           // Marcar lead como calificado Y asignar al asesor
           const updateData: any = {
             status: 'credit_qualified',
@@ -619,6 +628,11 @@ Atendemos de Lunes a Viernes 9am-6pm y Sábados 9am-2pm 😊`,
           if (asesor?.id) {
             updateData.assigned_to = asesor.id;
             console.log(`✅ Lead asignado a asesor: ${asesor.name} (${asesor.id})`);
+          }
+
+          // Guardar vendedor original en notes para mantener visibilidad
+          if (vendedorOriginalId && vendedorOriginalId !== asesor?.id) {
+            context.vendedor_original_id = vendedorOriginalId;
           }
 
           await this.supabase.client
@@ -645,6 +659,23 @@ Atendemos de Lunes a Viernes 9am-6pm y Sábados 9am-2pm 😊`,
             console.log(`📊 Mortgage application creada para lead ${leadId}`);
           }
 
+          // Guardar vendedor original en notes del lead (para recordatorios y visibilidad)
+          if (vendedorOriginalId) {
+            try {
+              const { data: leadNotes } = await this.supabase.client
+                .from('leads').select('notes').eq('id', leadId).single();
+              let notas: any = {};
+              if (leadNotes?.notes) {
+                notas = typeof leadNotes.notes === 'string' ? JSON.parse(leadNotes.notes) : leadNotes.notes;
+              }
+              notas.vendedor_original_id = vendedorOriginalId;
+              await this.supabase.client.from('leads').update({ notes: notas }).eq('id', leadId);
+              console.log(`📝 Vendedor original ${vendedorOriginalId} guardado en notes del lead`);
+            } catch (e) {
+              console.error('Error guardando vendedor original en notes:', e);
+            }
+          }
+
           // IMPORTANTE: Transicionar a esperando cita (NO completado)
           // Porque el mensaje de asesor incluye push para visita
           context.state = 'esperando_cita_presencial';
@@ -655,7 +686,7 @@ Atendemos de Lunes a Viernes 9am-6pm y Sábados 9am-2pm 😊`,
             respuesta: `¡Perfecto! 🎉`,
             context,
             accion: 'conectar_asesor',
-            datos: { asesor }
+            datos: { asesor, vendedorOriginalId }
           };
         }
 
@@ -710,12 +741,10 @@ Responde 1, 2 o 3.`,
             };
           }
 
-          // Crear la cita en appointments
+          // Crear la cita en appointments (con vendedor_id del vendedor original para recordatorios)
           const fechaStr = fechaReal.toISOString().split('T')[0];
           try {
-            await this.supabase.client
-              .from('appointments')
-              .insert({
+            const citaData: any = {
                 lead_id: leadId,
                 lead_name: context.lead_name,
                 lead_phone: context.lead_phone,
@@ -723,10 +752,18 @@ Responde 1, 2 o 3.`,
                 scheduled_time: fechaHoraCita.hora,
                 property_name: desarrollo,
                 status: 'scheduled',
-                notes: `Cita post-crédito. Presupuesto: $${((context.capacidad_credito || 0) / 1000000).toFixed(1)}M`,
+                appointment_type: 'mortgage_consultation',
+                notes: `Cita post-crédito. Presupuesto: $${((context.capacidad_credito || 0) / 1000000).toFixed(1)}M. Asesor: ${context.asesor_name || 'N/A'}`,
                 created_at: new Date().toISOString()
-              });
-            console.log(`✅ Cita creada: ${fechaStr} ${fechaHoraCita.hora} en ${desarrollo}`);
+            };
+            // Poner vendedor original para que reciba recordatorios
+            if (context.vendedor_original_id) {
+              citaData.vendedor_id = context.vendedor_original_id;
+            }
+            await this.supabase.client
+              .from('appointments')
+              .insert(citaData);
+            console.log(`✅ Cita crédito creada: ${fechaStr} ${fechaHoraCita.hora} en ${desarrollo}`);
           } catch (e) {
             console.error('Error creando cita:', e);
           }

@@ -1957,6 +1957,12 @@ export async function routeVendorCommand(ctx: HandlerContext, handler: any,
     case 'vendedorCancelarLead':
       await vendedorCancelarLeadConParams(ctx, handler, from, params.nombreLead, vendedor, nombreVendedor);
       break;
+    case 'vendedorPausarLead':
+      await vendedorPausarLead(ctx, from, params.nombreLead, vendedor);
+      break;
+    case 'vendedorReanudarLead':
+      await vendedorReanudarLead(ctx, from, params.nombreLead, vendedor);
+      break;
 
     // ━━━ HIPOTECA Y ASESORES (interactúan con externos) ━━━
     case 'vendedorEnviarABanco':
@@ -3147,6 +3153,40 @@ export async function vendedorCerrarVenta(ctx: HandlerContext, handler: any, fro
   }
 
   await ctx.twilio.sendWhatsAppMessage(from, ventasService.formatCerrarVentaExito(result.lead!, nombre));
+
+  // Enviar celebración al CLIENTE
+  const leadVenta = result.lead!;
+  if (leadVenta.phone) {
+    try {
+      const desarrolloNombre = leadVenta.property_interest || 'tu nuevo hogar';
+      const msgCliente = `🎉 *¡Felicidades ${leadVenta.name || ''}!*\n\n¡Tu nuevo hogar en *${desarrolloNombre}* te espera!\n\nTu asesor *${nombre}* te dará seguimiento con los próximos pasos.\n\n¡Bienvenido a la familia Grupo Santa Rita! 🏡`;
+      await ctx.twilio.sendWhatsAppMessage(leadVenta.phone, msgCliente);
+      console.log(`🎉 Celebración enviada al cliente ${leadVenta.name}`);
+    } catch (e) {
+      console.error('Error enviando celebración al cliente:', e);
+    }
+  }
+
+  // Notificar al CEO
+  try {
+    const { data: ceo } = await ctx.supabase.client
+      .from('team_members')
+      .select('*')
+      .eq('role', 'admin')
+      .eq('active', true)
+      .limit(1)
+      .single();
+    if (ceo?.phone) {
+      const msgCEO = `🏆 *¡VENTA CERRADA!*\n\n👤 Cliente: ${leadVenta.name || 'N/A'}\n🏠 Desarrollo: ${leadVenta.property_interest || 'N/A'}\n💼 Vendedor: ${nombre}\n📅 Fecha: ${new Date().toLocaleDateString('es-MX')}\n\n¡Felicidades al equipo! 🎉`;
+      const { enviarMensajeTeamMember } = await import('../utils/teamMessaging');
+      await enviarMensajeTeamMember(ctx.supabase, ctx.twilio, ceo, msgCEO, {
+        tipoMensaje: 'notificacion',
+        pendingKey: 'pending_mensaje'
+      });
+    }
+  } catch (e) {
+    console.error('Error notificando CEO de venta:', e);
+  }
 }
 export async function vendedorCancelarLead(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, nombre: string): Promise<void> {
   const ventasService = new VentasService(ctx.supabase);
@@ -3195,6 +3235,93 @@ export async function vendedorCancelarLeadConParams(ctx: HandlerContext, handler
 
   await ctx.twilio.sendWhatsAppMessage(from, ventasService.formatCancelarLeadExito(result.lead!));
 }
+
+// ═══ PAUSAR LEAD ═══
+export async function vendedorPausarLead(ctx: HandlerContext, from: string, nombreLead: string, vendedor: any): Promise<void> {
+  if (!nombreLead) {
+    await ctx.twilio.sendWhatsAppMessage(from, '❌ Escribe: *pausar [nombre del lead]*');
+    return;
+  }
+
+  const { data: leads } = await ctx.supabase.client
+    .from('leads')
+    .select('id, name, status, notes')
+    .eq('assigned_to', vendedor.id)
+    .ilike('name', `%${nombreLead}%`)
+    .limit(5);
+
+  if (!leads || leads.length === 0) {
+    await ctx.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
+    return;
+  }
+  if (leads.length > 1) {
+    const lista = leads.map(l => `• ${l.name} (${l.status})`).join('\n');
+    await ctx.twilio.sendWhatsAppMessage(from, `⚠️ Encontré varios leads:\n${lista}\n\nSé más específico con el nombre.`);
+    return;
+  }
+
+  const lead = leads[0];
+  if (lead.status === 'paused') {
+    await ctx.twilio.sendWhatsAppMessage(from, `⚠️ *${lead.name}* ya está pausado. Usa *reanudar ${lead.name}* para reactivar.`);
+    return;
+  }
+
+  const notes = typeof lead.notes === 'object' && lead.notes ? lead.notes : {};
+  await ctx.supabase.client
+    .from('leads')
+    .update({
+      status: 'paused',
+      notes: { ...notes, status_before_pause: lead.status, paused_at: new Date().toISOString() }
+    })
+    .eq('id', lead.id);
+
+  await ctx.twilio.sendWhatsAppMessage(from, `⏸️ *${lead.name}* ha sido pausado.\nEstaba en: *${lead.status}*\n\nNo recibirá follow-ups ni nurturing automático.\nUsa *reanudar ${lead.name}* para reactivar.`);
+}
+
+// ═══ REANUDAR LEAD ═══
+export async function vendedorReanudarLead(ctx: HandlerContext, from: string, nombreLead: string, vendedor: any): Promise<void> {
+  if (!nombreLead) {
+    await ctx.twilio.sendWhatsAppMessage(from, '❌ Escribe: *reanudar [nombre del lead]*');
+    return;
+  }
+
+  const { data: leads } = await ctx.supabase.client
+    .from('leads')
+    .select('id, name, status, notes')
+    .eq('assigned_to', vendedor.id)
+    .ilike('name', `%${nombreLead}%`)
+    .limit(5);
+
+  if (!leads || leads.length === 0) {
+    await ctx.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
+    return;
+  }
+  if (leads.length > 1) {
+    const lista = leads.map(l => `• ${l.name} (${l.status})`).join('\n');
+    await ctx.twilio.sendWhatsAppMessage(from, `⚠️ Encontré varios leads:\n${lista}\n\nSé más específico con el nombre.`);
+    return;
+  }
+
+  const lead = leads[0];
+  if (lead.status !== 'paused') {
+    await ctx.twilio.sendWhatsAppMessage(from, `⚠️ *${lead.name}* no está pausado (status: *${lead.status}*).`);
+    return;
+  }
+
+  const notes = typeof lead.notes === 'object' && lead.notes ? lead.notes : {};
+  const previousStatus = notes.status_before_pause || 'contacted';
+
+  await ctx.supabase.client
+    .from('leads')
+    .update({
+      status: previousStatus,
+      notes: { ...notes, status_before_pause: undefined, paused_at: undefined, resumed_at: new Date().toISOString() }
+    })
+    .eq('id', lead.id);
+
+  await ctx.twilio.sendWhatsAppMessage(from, `▶️ *${lead.name}* ha sido reactivado.\nRestaurado a: *${previousStatus}*\n\nVolverá a recibir follow-ups automáticos.`);
+}
+
 export async function vendedorAgendarCita(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, nombre: string): Promise<void> {
   // Extraer: agendar cita con [nombre] [fecha/día] [hora]
   const match = body.match(/agendar?.*(?:con|a)\s+([a-záéíóúñ\s]+?)(?:\s+(?:para\s+)?(?:el\s+)?)?(?:mañana|hoy|lunes|martes|miércoles|jueves|viernes|sábado|domingo)?/i);

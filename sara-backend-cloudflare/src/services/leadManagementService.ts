@@ -1,18 +1,116 @@
 import { SupabaseService } from './supabase';
 
-// ID del vendedor por defecto para nuevos leads (CEO Test para simulaciones)
-const DEFAULT_VENDEDOR_ID = '7bb05214-826c-4d1b-a418-228b8d77bd64'; // CEO Test
+// Fallback ID si no hay vendedores disponibles
+const FALLBACK_VENDEDOR_ID = '7bb05214-826c-4d1b-a418-228b8d77bd64'; // Vendedor Test
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Asignación inteligente de vendedores (round-robin por ventas)
+// ═══════════════════════════════════════════════════════════════════════════
+export interface TeamMemberAvailability {
+  id: string;
+  name: string;
+  phone: string;
+  role: string;
+  active: boolean;
+  sales_count: number;
+  vacation_start?: string;
+  vacation_end?: string;
+  is_on_duty?: boolean;
+  work_start?: string;
+  work_end?: string;
+  working_days?: number[];
+}
+
+export function getAvailableVendor(vendedores: TeamMemberAvailability[]): TeamMemberAvailability | null {
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  const currentDay = now.getDay();
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+  const currentTimeMinutes = currentHour * 60 + currentMinute;
+
+  const activos = vendedores.filter(v => v.active && v.role === 'vendedor');
+
+  if (activos.length === 0) {
+    // FALLBACK 1: Coordinadores o admins
+    const coordinadores = vendedores.filter(v =>
+      v.active && (v.role === 'coordinador' || v.role === 'admin' || v.role === 'ceo' || v.role === 'director')
+    );
+    if (coordinadores.length > 0) {
+      console.log(`🔄 FALLBACK: Asignando a coordinador/admin ${coordinadores[0].name}`);
+      return coordinadores[0];
+    }
+    // FALLBACK 2: Cualquier activo
+    const cualquiera = vendedores.filter(v => v.active);
+    if (cualquiera.length > 0) {
+      console.log(`🚨 FALLBACK: Asignando a ${cualquiera[0].name} (${cualquiera[0].role})`);
+      return cualquiera[0];
+    }
+    console.error('🚨 CRÍTICO: NO HAY NINGÚN TEAM MEMBER ACTIVO');
+    return null;
+  }
+
+  const estaDisponible = (v: TeamMemberAvailability): boolean => {
+    if (v.vacation_start && v.vacation_end) {
+      if (today >= v.vacation_start && today <= v.vacation_end) return false;
+    }
+    const workingDays = v.working_days || [1, 2, 3, 4, 5];
+    if (!workingDays.includes(currentDay)) return false;
+    if (v.work_start && v.work_end) {
+      const [startH, startM] = v.work_start.split(':').map(Number);
+      const [endH, endM] = v.work_end.split(':').map(Number);
+      if (currentTimeMinutes < startH * 60 + startM || currentTimeMinutes > endH * 60 + endM) return false;
+    }
+    return true;
+  };
+
+  const disponibles = activos.filter(estaDisponible);
+  const deGuardia = disponibles.filter(v => v.is_on_duty);
+
+  // 1. Priorizar de guardia
+  if (deGuardia.length > 0) {
+    const elegido = deGuardia.sort((a, b) => (a.sales_count || 0) - (b.sales_count || 0))[0];
+    console.log(`🔥 Asignando a ${elegido.name} (guardia, ${elegido.sales_count} ventas)`);
+    return elegido;
+  }
+
+  // 2. Disponibles por menor ventas
+  if (disponibles.length > 0) {
+    const elegido = disponibles.sort((a, b) => (a.sales_count || 0) - (b.sales_count || 0))[0];
+    console.log(`✅ Asignando a ${elegido.name} (disponible, ${elegido.sales_count} ventas)`);
+    return elegido;
+  }
+
+  // 3. Fallback: cualquier activo
+  const fallback = activos.sort((a, b) => (a.sales_count || 0) - (b.sales_count || 0))[0];
+  console.log(`⚠️ Fallback: ${fallback.name} (nadie disponible ahora)`);
+  return fallback;
+}
 
 export class LeadManagementService {
   constructor(private supabase: SupabaseService) {}
 
-  async getOrCreateLead(phone: string, skipTeamCheck = false): Promise<{ lead: any; isNew: boolean; isTeamMember?: boolean }> {
+  /**
+   * Obtiene vendedores para asignación round-robin.
+   * Si se pasan cachedTeamMembers, los usa (ahorra 1 subrequest).
+   */
+  private async getVendedorRoundRobin(cachedTeamMembers?: any[]): Promise<string> {
+    let vendedores = cachedTeamMembers;
+    if (!vendedores) {
+      const { data } = await this.supabase.client
+        .from('team_members')
+        .select('*')
+        .eq('active', true);
+      vendedores = data || [];
+    }
+
+    const elegido = getAvailableVendor(vendedores as TeamMemberAvailability[]);
+    return elegido?.id || FALLBACK_VENDEDOR_ID;
+  }
+
+  async getOrCreateLead(phone: string, skipTeamCheck = false, cachedTeamMembers?: any[]): Promise<{ lead: any; isNew: boolean; isTeamMember?: boolean; assignedVendedorId?: string }> {
     const digits = phone.replace(/\D/g, '').slice(-10);
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // VALIDACIÓN: No crear leads para team members
-    // skipTeamCheck=true when caller already verified this (saves 1 subrequest)
-    // ═══════════════════════════════════════════════════════════════════════
     if (!skipTeamCheck) {
       const { data: teamMember } = await this.supabase.client
         .from('team_members')
@@ -25,7 +123,6 @@ export class LeadManagementService {
         return { lead: null, isNew: false, isTeamMember: true };
       }
     }
-    // ═══════════════════════════════════════════════════════════════════════
 
     const { data } = await this.supabase.client
       .from('leads')
@@ -34,19 +131,21 @@ export class LeadManagementService {
       .limit(1);
     if (data && data.length > 0) return { lead: data[0], isNew: false };
 
-    // Crear nuevo lead asignado al vendedor por defecto
-    console.log('📝 Creando nuevo lead asignado a CEO Test');
+    // Asignar vendedor con round-robin
+    const vendedorId = await this.getVendedorRoundRobin(cachedTeamMembers);
+    console.log(`📝 Nuevo lead → vendedor ${vendedorId} (round-robin)`);
+
     const { data: newLead } = await this.supabase.client
       .from('leads')
       .insert({
         phone,
         status: 'new',
         score: 0,
-        assigned_to: DEFAULT_VENDEDOR_ID
+        assigned_to: vendedorId
       })
       .select()
       .single();
-    return { lead: newLead, isNew: true };
+    return { lead: newLead, isNew: true, assignedVendedorId: vendedorId };
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -63,31 +162,19 @@ export class LeadManagementService {
     existenteNombre?: string;
     vendedorAsignado?: any;
   }> {
-    // Detectar patrón de referido: "mi amigo Juan 4921234567" o "refiero a María 492..."
-    const msgLower = mensaje.toLowerCase();
     const patronReferido = /(?:refiero|recomiendo|mi\s+(?:amigo|amiga|hermano|hermana|primo|prima|compadre|comadre|vecino|vecina|conocido|conocida))\s+([a-záéíóúñ]+)[\s,]+(\d{10,})/i;
     const match = mensaje.match(patronReferido);
 
-    if (!match) {
-      return { detected: false };
-    }
+    if (!match) return { detected: false };
 
     const nombreReferido = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
     let telefonoReferido = match[2].replace(/\D/g, '');
+    if (telefonoReferido.length === 10) telefonoReferido = '521' + telefonoReferido;
 
-    // Normalizar teléfono
-    if (telefonoReferido.length === 10) {
-      telefonoReferido = '521' + telefonoReferido;
-    }
-
-    // Verificar que no sea su propio número
     const clienteDigits = clientePhone.replace(/\D/g, '').slice(-10);
     const referidoDigits = telefonoReferido.slice(-10);
-    if (clienteDigits === referidoDigits) {
-      return { detected: true, action: 'own_number' };
-    }
+    if (clienteDigits === referidoDigits) return { detected: true, action: 'own_number' };
 
-    // Verificar si ya existe
     const { data: existente } = await this.supabase.client
       .from('leads')
       .select('id, name')
@@ -98,17 +185,19 @@ export class LeadManagementService {
       return { detected: true, action: 'already_exists', existenteNombre: existente[0].name };
     }
 
-    // Crear nuevo lead referido
     try {
+      // Referidos se asignan al mismo vendedor del referidor
+      const vendedorId = clienteReferidor.assigned_to || await this.getVendedorRoundRobin();
+
       const { data: nuevoLead, error } = await this.supabase.client
         .from('leads')
         .insert({
           name: nombreReferido,
           phone: telefonoReferido,
           status: 'new',
-          score: 20, // Score inicial alto por ser referido
+          score: 20,
           source: 'referido',
-          assigned_to: clienteReferidor.assigned_to || DEFAULT_VENDEDOR_ID,
+          assigned_to: vendedorId,
           notes: {
             referido_por: clienteReferidor.name || 'Cliente',
             referido_por_phone: clientePhone,
@@ -123,7 +212,6 @@ export class LeadManagementService {
         return { detected: true, action: 'error' };
       }
 
-      // Obtener vendedor asignado
       const { data: vendedor } = await this.supabase.client
         .from('team_members')
         .select('id, name, phone')

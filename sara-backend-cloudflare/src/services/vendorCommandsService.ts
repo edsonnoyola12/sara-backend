@@ -260,6 +260,17 @@ export class VendorCommandsService {
       };
     }
 
+    // ═══ PAUSAR / REANUDAR LEAD ═══
+    // Formato: "pausar Juan", "reanudar María"
+    const pausarMatch = msg.match(/^pausar\s+(.+)$/i);
+    if (pausarMatch) {
+      return { matched: true, handlerName: 'vendedorPausarLead', handlerParams: { nombreLead: pausarMatch[1].trim() } };
+    }
+    const reanudarMatch = msg.match(/^reanudar\s+(.+)$/i);
+    if (reanudarMatch) {
+      return { matched: true, handlerName: 'vendedorReanudarLead', handlerParams: { nombreLead: reanudarMatch[1].trim() } };
+    }
+
     // ═══ NOTA / APUNTE - Agregar nota a un lead ═══
     // Formato flexible: "nota rodrigo hablé por tel", "nota Juan: le interesa", "apunte María presupuesto 2M"
     const notaMatch = msg.match(/^(?:nota|apunte|registrar)\s+([a-záéíóúñü]+)[\s:]+(.+)$/i);
@@ -1152,8 +1163,10 @@ export class VendorCommandsService {
     let msg = `👥 *TUS LEADS* (${leads.length})\n\n`;
 
     const porEtapa: { [key: string]: any[] } = {};
+    // Normalizar 'scheduled' → 'visit_scheduled' para agrupación
     leads.forEach(l => {
-      const etapa = l.status || 'new';
+      let etapa = l.status || 'new';
+      if (etapa === 'scheduled') etapa = 'visit_scheduled';
       if (!porEtapa[etapa]) porEtapa[etapa] = [];
       porEtapa[etapa].push(l);
     });
@@ -1164,14 +1177,17 @@ export class VendorCommandsService {
       'qualified': '✅ Calificados',
       'visit_scheduled': '📅 Cita agendada',
       'visited': '🏠 Visitados',
-      'negotiating': '💰 Negociando'
+      'negotiating': '💰 Negociando',
+      'reserved': '🔒 Apartados',
+      'sold': '🏆 Vendidos',
+      'closed': '🏆 Cerrados'
     };
 
     Object.entries(etapas).forEach(([key, label]) => {
       if (porEtapa[key]?.length) {
         msg += `*${label}* (${porEtapa[key].length}):\n`;
         porEtapa[key].slice(0, 3).forEach(l => {
-          msg += `  • ${l.name}\n`;
+          msg += `  • ${l.name || 'Sin nombre'}\n`;
         });
         msg += '\n';
       }

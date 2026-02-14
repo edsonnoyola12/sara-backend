@@ -361,7 +361,7 @@ export async function actualizarLeadScores(supabase: SupabaseService): Promise<v
     const { data: leads } = await supabase.client
       .from('leads')
       .select('id, name, status, notes, updated_at, created_at, property_interest, needs_mortgage, credit_status, score, lead_score')
-      .not('status', 'in', '("closed","delivered","lost","fallen")')
+      .not('status', 'in', '("closed","delivered","lost","fallen","paused")')
       .order('updated_at', { ascending: false })
       .limit(100);
 
