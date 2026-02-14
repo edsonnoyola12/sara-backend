@@ -34,7 +34,10 @@ export async function enviarFelicitaciones(supabase: SupabaseService, meta: Meta
   for (const persona of cumples || []) {
     if (!persona.phone) continue;
     const mensaje = `🎂 *¡Feliz Cumpleaños ${persona.name}!* 🎉\n\nTodo el equipo de Santa Rita te desea un día increíble. ¡Que se cumplan todos tus sueños! 🌟`;
-    await meta.sendWhatsAppMessage(persona.phone, mensaje);
+    await enviarMensajeTeamMember(supabase, meta, persona, mensaje, {
+      tipoMensaje: 'notificacion',
+      pendingKey: 'pending_mensaje'
+    });
     await logEvento(supabase, 'cumpleanos', `Felicitación enviada a ${persona.name}`, { phone: persona.phone });
   }
 }
@@ -635,7 +638,10 @@ ${v.name}, tienes ${leadsSinContactar.length} lead(s) nuevos sin contactar.
 
 Revísalos en el CRM y márcalos como contactados.`;
 
-      await meta.sendWhatsAppMessage(v.phone, mensaje);
+      await enviarMensajeTeamMember(supabase, meta, v, mensaje, {
+        tipoMensaje: 'notificacion',
+        pendingKey: 'pending_mensaje'
+      });
     }
   }
 
@@ -680,7 +686,10 @@ ${asesor.name}, tienes ${hipotecasSinMover.length} solicitud(es) sin actualizar 
       mensaje += `
 ⚡ Actualiza el status en el CRM`;
 
-      await meta.sendWhatsAppMessage(asesor.phone, mensaje);
+      await enviarMensajeTeamMember(supabase, meta, asesor, mensaje, {
+        tipoMensaje: 'notificacion',
+        pendingKey: 'pending_mensaje'
+      });
       console.log('📤 Recordatorio enviado a asesor:', asesor.name, '-', hipotecasSinMover.length, 'hipotecas');
     }
   }

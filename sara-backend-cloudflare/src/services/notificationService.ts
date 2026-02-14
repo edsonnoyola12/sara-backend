@@ -6,6 +6,7 @@ import { SupabaseService } from './supabase';
 import { MetaWhatsAppService } from './meta-whatsapp';
 import { createTTSService } from './ttsService';
 import { createTTSTrackingService } from './ttsTrackingService';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 
 export class NotificationService {
   private openaiApiKey?: string;
@@ -22,13 +23,16 @@ export class NotificationService {
     try {
       const { data: vendedor } = await this.supabase.client
         .from('team_members')
-        .select('phone, name')
+        .select('*')
         .eq('id', vendedorId)
         .single();
 
       if (vendedor?.phone) {
-        await this.meta.sendWhatsAppMessage(vendedor.phone, mensaje);
-        console.log(`📤 Notificación enviada a ${vendedor.name}`);
+        await enviarMensajeTeamMember(this.supabase, this.meta, vendedor, mensaje, {
+          tipoMensaje: 'notificacion',
+          guardarPending: true
+        });
+        console.log(`📤 Notificación enviada a ${vendedor.name} (via enviarMensajeTeamMember)`);
         return true;
       }
       return false;
@@ -75,7 +79,7 @@ export class NotificationService {
       // Traer todas y filtrar en JS (porque .or() con filtros previos no funciona bien)
       const { data: allCitas24h, error: error24h } = await this.supabase.client
         .from('appointments')
-        .select('id, lead_id, lead_name, lead_phone, scheduled_date, scheduled_time, property_name, reminder_24h_sent, appointment_type')
+        .select('id, lead_id, lead_name, lead_phone, scheduled_date, scheduled_time, property_name, reminder_24h_sent, reminder_vendor_24h_sent, vendedor_id, appointment_type')
         .gte('scheduled_date', hoyStr)
         .lte('scheduled_date', en24hStr)
         .eq('status', 'scheduled');
@@ -177,6 +181,114 @@ export class NotificationService {
           }
         } else {
           console.error(`⚠️ Cita ${cita.id?.slice(0,8)} sin teléfono de lead`);
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // RECORDATORIO 24H AL VENDEDOR
+      // ═══════════════════════════════════════════════════════════════════════
+      const citasVendedor24h = (allCitas24h || []).filter(c => {
+        if (c.reminder_vendor_24h_sent === true) return false;
+        if (!(c as any).vendedor_id) return false;
+        // Misma ventana temporal que el lead (20h-28h)
+        const citaDateTime = new Date(`${c.scheduled_date}T${c.scheduled_time || '12:00:00'}`);
+        if (citaDateTime <= ahoraMexico24h) return false;
+        const en20h = new Date(ahoraMexico24h.getTime() + 20 * 60 * 60 * 1000);
+        const en28h = new Date(ahoraMexico24h.getTime() + 28 * 60 * 60 * 1000);
+        return citaDateTime >= en20h && citaDateTime <= en28h;
+      });
+
+      for (const cita of citasVendedor24h) {
+        try {
+          const { data: vendedor } = await this.supabase.client
+            .from('team_members')
+            .select('*')
+            .eq('id', (cita as any).vendedor_id)
+            .single();
+
+          if (vendedor?.phone) {
+            const nombreLead = cita.lead_name || 'Cliente';
+            const desarrollo = cita.property_name || 'oficina';
+            const hora = (cita.scheduled_time || '').substring(0, 5);
+            const telefonoLead = cita.lead_phone || 'No disponible';
+            const esLlamada = (cita as any).appointment_type === 'llamada';
+
+            const mensaje = esLlamada
+              ? `📞 *RECORDATORIO - LLAMADA MAÑANA*\n\n` +
+                `👤 *Lead:* ${nombreLead}\n` +
+                `📱 *Tel:* ${telefonoLead}\n` +
+                `🏠 *Tema:* ${desarrollo}\n` +
+                `🕐 *Hora:* ${hora}\n\n` +
+                `💡 Prepara la info del desarrollo para la llamada.`
+              : `📅 *RECORDATORIO - CITA MAÑANA*\n\n` +
+                `👤 *Lead:* ${nombreLead}\n` +
+                `📱 *Tel:* ${telefonoLead}\n` +
+                `🏠 *Lugar:* ${desarrollo}\n` +
+                `🕐 *Hora:* ${hora}\n\n` +
+                `💡 Confirma con el cliente que asistirá.`;
+
+            await enviarMensajeTeamMember(this.supabase, this.meta, vendedor, mensaje, {
+              tipoMensaje: 'recordatorio_cita',
+              guardarPending: true,
+              pendingKey: 'pending_mensaje'
+            });
+
+            await this.supabase.client
+              .from('appointments')
+              .update({ reminder_vendor_24h_sent: true })
+              .eq('id', cita.id);
+
+            enviados++;
+            console.log(`👔 Recordatorio 24h enviado a vendedor ${vendedor.name} para cita con ${nombreLead}`);
+          }
+        } catch (e) {
+          errores++;
+          console.error(`❌ Error enviando recordatorio 24h a vendedor:`, e);
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // RECORDATORIO 24H AL ASESOR HIPOTECARIO (para citas de crédito)
+      // ═══════════════════════════════════════════════════════════════════════
+      const citasCredito24h = (allCitas24h || []).filter(c => {
+        if (c.reminder_vendor_24h_sent === true) return false; // reusa flag para no duplicar
+        if ((c as any).appointment_type !== 'mortgage_consultation') return false;
+        const citaDateTime = new Date(`${c.scheduled_date}T${c.scheduled_time || '12:00:00'}`);
+        if (citaDateTime <= ahoraMexico24h) return false;
+        const en20h = new Date(ahoraMexico24h.getTime() + 20 * 60 * 60 * 1000);
+        const en28h = new Date(ahoraMexico24h.getTime() + 28 * 60 * 60 * 1000);
+        return citaDateTime >= en20h && citaDateTime <= en28h;
+      });
+
+      for (const cita of citasCredito24h) {
+        try {
+          // Buscar el asesor asignado al lead (assigned_to apunta al asesor en crédito)
+          const { data: leadCredito } = await this.supabase.client
+            .from('leads').select('assigned_to').eq('id', cita.lead_id).single();
+          if (leadCredito?.assigned_to && leadCredito.assigned_to !== (cita as any).vendedor_id) {
+            const { data: asesorHip } = await this.supabase.client
+              .from('team_members').select('*').eq('id', leadCredito.assigned_to).single();
+            if (asesorHip?.phone) {
+              const nombreLead = cita.lead_name || 'Cliente';
+              const hora = (cita.scheduled_time || '').substring(0, 5);
+              const mensaje = `🏦 *RECORDATORIO - CITA CRÉDITO MAÑANA*\n\n` +
+                `👤 *Lead:* ${nombreLead}\n` +
+                `📱 *Tel:* ${cita.lead_phone || 'No disponible'}\n` +
+                `🏠 *Lugar:* ${cita.property_name || 'oficina'}\n` +
+                `🕐 *Hora:* ${hora}\n\n` +
+                `💡 Coordina con el vendedor asignado para la visita.`;
+              await enviarMensajeTeamMember(this.supabase, this.meta, asesorHip, mensaje, {
+                tipoMensaje: 'recordatorio_cita',
+                guardarPending: true,
+                pendingKey: 'pending_mensaje'
+              });
+              enviados++;
+              console.log(`🏦 Recordatorio 24h enviado a asesor ${asesorHip.name} para cita crédito con ${nombreLead}`);
+            }
+          }
+        } catch (e) {
+          errores++;
+          console.error(`❌ Error enviando recordatorio 24h a asesor:`, e);
         }
       }
 
@@ -294,15 +406,23 @@ export class NotificationService {
       // ═══════════════════════════════════════════════════════════════════════
       // RECORDATORIO 2H AL VENDEDOR (NUEVO)
       // ═══════════════════════════════════════════════════════════════════════
-      const citasVendedor2h = allCitas2h?.filter(c => c.reminder_vendor_2h_sent !== true && c.vendedor_id) || [];
-      console.log(`👔 DEBUG: Citas para recordatorio vendedor: ${citasVendedor2h.length}`);
+      // Filtrar con misma ventana temporal que el lead (1.5h-2.5h)
+      const citasVendedor2h = (allCitas2h || []).filter(c => {
+        if (c.reminder_vendor_2h_sent === true) return false;
+        if (!c.vendedor_id) return false;
+        const citaDateTime = new Date(`${c.scheduled_date}T${c.scheduled_time || '00:00:00'}`);
+        if (citaDateTime <= ahoraMexico) return false;
+        const en1h30 = new Date(ahoraMexico.getTime() + 1.5 * 60 * 60 * 1000);
+        return citaDateTime >= en1h30 && citaDateTime <= en2h30Mexico;
+      });
+      console.log(`👔 DEBUG: Citas para recordatorio vendedor 2h: ${citasVendedor2h.length}`);
 
       for (const cita of citasVendedor2h) {
         try {
-          // Obtener datos del vendedor
+          // Obtener datos del vendedor (select * para enviarMensajeTeamMember)
           const { data: vendedor } = await this.supabase.client
             .from('team_members')
-            .select('id, name, phone')
+            .select('*')
             .eq('id', cita.vendedor_id)
             .single();
 
@@ -329,7 +449,11 @@ export class NotificationService {
                 `🕐 *Hora:* ${hora}\n\n` +
                 `💡 Tip: Confirma que el cliente viene en camino`;
 
-            await this.meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+            await enviarMensajeTeamMember(this.supabase, this.meta, vendedor, mensaje, {
+              tipoMensaje: 'recordatorio_cita',
+              guardarPending: true,
+              pendingKey: 'pending_mensaje'
+            });
 
             // Marcar como enviado
             await this.supabase.client
@@ -343,6 +467,50 @@ export class NotificationService {
         } catch (e) {
           errores++;
           console.error(`❌ Error enviando recordatorio 2h a vendedor:`, e);
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════════════
+      // RECORDATORIO 2H AL ASESOR HIPOTECARIO (para citas de crédito)
+      // ═══════════════════════════════════════════════════════════════════════
+      const citasCredito2h = (allCitas2h || []).filter(c => {
+        if (c.reminder_vendor_2h_sent === true) return false;
+        if (c.appointment_type !== 'mortgage_consultation') return false;
+        const citaDateTime = new Date(`${c.scheduled_date}T${c.scheduled_time || '00:00:00'}`);
+        if (citaDateTime <= ahoraMexico) return false;
+        const en1h30 = new Date(ahoraMexico.getTime() + 1.5 * 60 * 60 * 1000);
+        return citaDateTime >= en1h30 && citaDateTime <= en2h30Mexico;
+      });
+
+      for (const cita of citasCredito2h) {
+        try {
+          const { data: leadCredito } = await this.supabase.client
+            .from('leads').select('assigned_to').eq('id', cita.lead_id).single();
+          if (leadCredito?.assigned_to && leadCredito.assigned_to !== cita.vendedor_id) {
+            const { data: asesorHip } = await this.supabase.client
+              .from('team_members').select('*').eq('id', leadCredito.assigned_to).single();
+            if (asesorHip?.phone) {
+              const nombreLead = cita.lead_name || 'Cliente';
+              const hora = (cita.scheduled_time || '').substring(0, 5);
+              const mensaje = `🏦 *RECORDATORIO CITA CRÉDITO - 2 HORAS*\n\n` +
+                `Tu cita es en ~2 horas:\n\n` +
+                `👤 *Lead:* ${nombreLead}\n` +
+                `📱 *Tel:* ${cita.lead_phone || 'No disponible'}\n` +
+                `🏠 *Lugar:* ${cita.property_name || 'oficina'}\n` +
+                `🕐 *Hora:* ${hora}\n\n` +
+                `💡 Confirma con el cliente que asistirá.`;
+              await enviarMensajeTeamMember(this.supabase, this.meta, asesorHip, mensaje, {
+                tipoMensaje: 'recordatorio_cita',
+                guardarPending: true,
+                pendingKey: 'pending_mensaje'
+              });
+              enviados++;
+              console.log(`🏦 Recordatorio 2h enviado a asesor ${asesorHip.name} para cita crédito con ${nombreLead}`);
+            }
+          }
+        } catch (e) {
+          errores++;
+          console.error(`❌ Error enviando recordatorio 2h a asesor:`, e);
         }
       }
 
