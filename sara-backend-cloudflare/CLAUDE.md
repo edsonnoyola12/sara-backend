@@ -452,6 +452,8 @@ sold/closed               delivered                      +1 año
 | `cerrar venta [nombre] [propiedad]` | Registrar venta |
 | `apartado [nombre] [propiedad]` | Registrar apartado |
 | `coaching [nombre]` | Consejos IA |
+| `pausar [nombre]` | Pausar lead (sin follow-ups/nurturing) |
+| `reanudar [nombre]` | Reactivar lead pausado |
 
 ### Asesor Hipotecario
 | Comando | Función |
@@ -4378,4 +4380,69 @@ Retorna: `{ stats: { total, critical, unresolved, by_type }, errors: [...] }`
 
 **Commits:** `ad6a0b03`, `68b11b78`
 **Deploy:** Version ID `456f4e11`
+**Tests:** 369/369 pasando
+
+---
+
+### 2026-02-13 (Sesión 36) - Fortalecimiento SARA: Bug Fixes + Features (3 Fases)
+
+**Auditoría completa del CRM reveló bugs y gaps. Se implementaron 3 fases de mejoras.**
+
+#### Fase 1: Bug Fixes (raw sends → enviarMensajeTeamMember)
+
+| Fix | Archivo | Cambio |
+|-----|---------|--------|
+| `enviarFelicitaciones()` | `briefings.ts` | Raw send → `enviarMensajeTeamMember()` (respeta ventana 24h) |
+| `recordatorioAsesores()` | `briefings.ts` | Raw send → `enviarMensajeTeamMember()` + activada en CRON 8 AM |
+| `alertaLeadsHotSinSeguimiento()` | `alerts.ts` | Raw send → `enviarMensajeTeamMember()` + activada en CRON 10 AM |
+| `notificarVendedor()` | `notificationService.ts` | Raw send → `enviarMensajeTeamMember()` + recordatorio 24h vendedor |
+
+#### Fase 2: Integrar Código Existente
+
+| Feature | Archivos | Descripción |
+|---------|----------|-------------|
+| **BusinessHoursService en webhook** | `index.ts` | Aviso fuera de horario a leads (dedup 12h), SARA sigue respondiendo |
+| **Filtro paused en CRONs** | `alerts.ts`, `nurturing.ts`, `leadScoring.ts`, `followups.ts` | Leads pausados excluidos de CRONs automáticos |
+| **Comando pausar/reanudar** | `vendorCommandsService.ts`, `whatsapp-vendor.ts` | Vendedor puede pausar lead (guarda `status_before_pause`) y reanudar |
+| **Round-robin mejorado** | `leadManagementService.ts` | Asignación con disponibilidad, fallback a coordinadores |
+| **Notificación nuevo lead** | `whatsapp.ts` | Vendedor recibe alerta cuando le asignan un nuevo lead |
+| **Vendedor original en crédito** | `creditFlowService.ts` | Guarda `vendedor_original_id` al pasar lead a asesor |
+
+#### Fase 3: Features Nuevos
+
+| Feature | Archivos | Descripción |
+|---------|----------|-------------|
+| **Celebración al cerrar venta** | `whatsapp-vendor.ts` | Mensaje al CLIENTE + notificación al CEO |
+| **Check-in 60 días post-venta** | `nurturing.ts`, `index.ts` | CRON jueves 11am, pregunta cómo va todo |
+| **Notif. reasignación al cliente** | `api-core.ts` | Lead recibe aviso cuando cambia vendedor |
+| **Alerta cita no confirmada** | `alerts.ts`, `index.ts` | Si lead no responde en 8h al recordatorio → alerta al vendedor |
+
+#### Comandos Nuevos de Vendedor
+
+| Comando | Acción |
+|---------|--------|
+| `pausar [nombre]` | Pausa lead - no recibe follow-ups ni nurturing. Guarda status anterior |
+| `reanudar [nombre]` | Reactiva lead - restaura status anterior (o `contacted` por defecto) |
+
+#### CRONs Nuevos/Activados
+
+| CRON | Horario | Función |
+|------|---------|---------|
+| `recordatorioAsesores()` | 8 AM L-V | Recuerda a vendedores de leads sin contactar |
+| `alertaLeadsHotSinSeguimiento()` | 10 AM L-V | Alerta de leads HOT sin seguimiento hoy |
+| `checkIn60Dias()` | Jueves 11am | Check-in 60 días post-venta |
+| `alertaCitaNoConfirmada()` | Cada 2 min | Alerta si lead no confirma cita (8h threshold) |
+
+#### Pruebas en Producción
+
+| Test | Resultado |
+|------|-----------|
+| Health check | ✅ allPassed, 18 team members, Meta OK |
+| AI response (lead) | ✅ Lista desarrollos, precios, cierre con pregunta |
+| Comando `mis leads` | ✅ 5 leads listados |
+| Comando `pausar Edson` | ✅ Pausado (guardó status `scheduled`) |
+| Comando `reanudar Edson` | ✅ Restaurado a `scheduled` |
+
+**Commits:** `84b871d4` (Phase 1), `32e2e2c9` (Phase 2), `a7038cf6` (Phase 3)
+**Deploy:** Version ID `8ed7405f`
 **Tests:** 369/369 pasando
