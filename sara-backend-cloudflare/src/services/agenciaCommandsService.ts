@@ -54,6 +54,75 @@ export class AgenciaCommandsService {
       return { action: 'call_handler', handlerName: 'iniciarBroadcast' };
     }
 
+    // Preview de segmento
+    if (msg.startsWith('preview ') || msg.startsWith('ver ')) {
+      return { action: 'call_handler', handlerName: 'previewSegmento' };
+    }
+
+    // Eventos
+    if (msg === 'eventos' || msg === 'mis eventos' || msg === 'proximos eventos') {
+      return { action: 'call_handler', handlerName: 'verEventos' };
+    }
+
+    if (msg.startsWith('crear evento ')) {
+      return { action: 'call_handler', handlerName: 'crearEvento' };
+    }
+
+    if (msg.startsWith('invitar ')) {
+      return { action: 'call_handler', handlerName: 'invitarEvento' };
+    }
+
+    if (msg.startsWith('registrados')) {
+      return { action: 'call_handler', handlerName: 'verRegistrados' };
+    }
+
+    // Promociones
+    if (msg === 'promociones' || msg === 'promos' || msg === 'mis promos') {
+      return { action: 'call_handler', handlerName: 'verPromociones' };
+    }
+
+    if (msg.startsWith('crear promo ') || msg.startsWith('nueva promo ')) {
+      return { action: 'call_handler', handlerName: 'crearPromocion' };
+    }
+
+    if (msg.startsWith('pausar promo ')) {
+      return { action: 'call_handler', handlerName: 'pausarPromocion' };
+    }
+
+    if (msg.startsWith('activar promo ')) {
+      return { action: 'call_handler', handlerName: 'activarPromocion' };
+    }
+
+    // Reportes avanzados
+    if (msg === 'roi' || msg === 'retorno') {
+      return { action: 'call_handler', handlerName: 'agenciaROI' };
+    }
+
+    if (msg === 'mejor' || msg === 'mejor campaña' || msg === 'mejor campana') {
+      return { action: 'call_handler', handlerName: 'agenciaMejorCampana' };
+    }
+
+    if (msg === 'peor' || msg === 'peor campaña' || msg === 'peor campana') {
+      return { action: 'call_handler', handlerName: 'agenciaPeorCampana' };
+    }
+
+    if (msg === 'gasto' || msg === 'presupuesto') {
+      return { action: 'call_handler', handlerName: 'agenciaGasto' };
+    }
+
+    if (msg === 'cpl' || msg === 'costo por lead') {
+      return { action: 'call_handler', handlerName: 'agenciaCPL' };
+    }
+
+    if (msg === 'resumen' || msg === 'dashboard') {
+      return { action: 'call_handler', handlerName: 'agenciaResumen' };
+    }
+
+    // Fuentes
+    if (msg === 'fuentes' || msg === 'sources') {
+      return { action: 'call_handler', handlerName: 'agenciaLeads' };
+    }
+
     return {
       action: 'not_recognized',
       message: `No entendí "${mensaje}".\n\nEscribe *ayuda* para ver comandos disponibles.`
@@ -69,13 +138,26 @@ export class AgenciaCommandsService {
   private getMensajeAyuda(nombre: string): string {
     return `*COMANDOS AGENCIA/MARKETING*\n${nombre}\n\n` +
       `📊 *Reportes:*\n` +
-      `• *campañas* - Ver campañas activas\n` +
-      `• *metricas* - Ver métricas y CPL\n` +
-      `• *leads* - Ver leads recientes\n\n` +
+      `• *campañas* - Campañas activas\n` +
+      `• *metricas* - Métricas del mes\n` +
+      `• *leads* / *fuentes* - Leads por fuente\n` +
+      `• *resumen* - Dashboard general\n` +
+      `• *roi* - Retorno de inversión\n` +
+      `• *cpl* - Costo por lead\n` +
+      `• *gasto* - Gasto vs presupuesto\n` +
+      `• *mejor* / *peor* - Mejor/peor campaña\n\n` +
       `📤 *Envíos:*\n` +
-      `• *segmentos* - Ver segmentos disponibles\n` +
-      `• *broadcast* - Enviar mensaje masivo\n` +
-      `• *enviar a [segmento]: [mensaje]* - Enviar a segmento\n\n` +
-      `💡 Ejemplo: enviar a hot: Hola {nombre}, tenemos promoción!`;
+      `• *segmentos* - Ver segmentos\n` +
+      `• *preview [segmento]* - Ver leads del segmento\n` +
+      `• *broadcast* - Ayuda envío masivo\n` +
+      `• *enviar a [segmento]: [msg]* - Enviar\n\n` +
+      `🎉 *Eventos:*\n` +
+      `• *eventos* - Ver próximos eventos\n` +
+      `• *crear evento [datos]* - Crear evento\n` +
+      `• *registrados [evento]* - Ver registrados\n\n` +
+      `🏷️ *Promociones:*\n` +
+      `• *promociones* - Ver promos activas\n` +
+      `• *crear promo [datos]* - Crear promoción\n` +
+      `• *pausar/activar promo [nombre]* - Control`;
   }
 }

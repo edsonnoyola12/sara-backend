@@ -56,6 +56,37 @@ export async function executeAgenciaHandler(ctx: HandlerContext, handler: any, f
 
   // ━━━ FALLBACK: Handlers que requieren lógica externa ━━━
   switch (handlerName) {
+    // ━━━ REPORTES BÁSICOS ━━━
+    case 'agenciaCampanas':
+      await agenciaCampanas(ctx, from, nombreAgencia);
+      break;
+    case 'agenciaMetricas':
+      await agenciaMetricas(ctx, from, nombreAgencia);
+      break;
+    case 'agenciaLeads':
+      await agenciaLeads(ctx, from, nombreAgencia);
+      break;
+
+    // ━━━ REPORTES AVANZADOS ━━━
+    case 'agenciaROI':
+      await agenciaROI(ctx, from);
+      break;
+    case 'agenciaMejorCampana':
+      await agenciaMejorCampana(ctx, from);
+      break;
+    case 'agenciaPeorCampana':
+      await agenciaPeorCampana(ctx, from);
+      break;
+    case 'agenciaGasto':
+      await agenciaGasto(ctx, from);
+      break;
+    case 'agenciaCPL':
+      await agenciaCPL(ctx, from);
+      break;
+    case 'agenciaResumen':
+      await agenciaResumen(ctx, from, nombreAgencia);
+      break;
+
     // ━━━ CITAS ━━━
     case 'vendedorCancelarCita':
       await handler.vendedorCancelarCita(from, body, agencia, nombreAgencia);
@@ -68,6 +99,12 @@ export async function executeAgenciaHandler(ctx: HandlerContext, handler: any, f
       break;
 
     // ━━━ SEGMENTOS / BROADCAST ━━━
+    case 'verSegmentos':
+      await verSegmentos(ctx, from, nombreAgencia);
+      break;
+    case 'iniciarBroadcast':
+      await iniciarBroadcast(ctx, from, nombreAgencia);
+      break;
     case 'enviarASegmento':
       await enviarASegmento(ctx, from, body, agencia);
       break;
@@ -95,6 +132,12 @@ export async function executeAgenciaHandler(ctx: HandlerContext, handler: any, f
       break;
     case 'crearPromocion':
       await crearPromocion(ctx, from, body, agencia);
+      break;
+    case 'pausarPromocion':
+      await pausarPromocion(ctx, from, body);
+      break;
+    case 'activarPromocion':
+      await activarPromocion(ctx, from, body);
       break;
 
     default:
@@ -145,6 +188,54 @@ export async function executeAgenciaHandlerForCEO(ctx: HandlerContext, handler: 
     case 'enviarASegmento':
       await enviarASegmentoForCEO(ctx, cleanPhone, body, ceo);
       break;
+
+    // ━━━ REPORTES AVANZADOS ━━━
+    case 'agenciaROI': {
+      const r = new AgenciaReportingService(ctx.supabase);
+      await ctx.meta.sendWhatsAppMessage(cleanPhone, await r.getROI());
+      break;
+    }
+    case 'agenciaMejorCampana': {
+      const r = new AgenciaReportingService(ctx.supabase);
+      const { mensaje } = await r.getMejorCampana();
+      await ctx.meta.sendWhatsAppMessage(cleanPhone, mensaje);
+      break;
+    }
+    case 'agenciaPeorCampana': {
+      const r = new AgenciaReportingService(ctx.supabase);
+      const { mensaje } = await r.getPeorCampana();
+      await ctx.meta.sendWhatsAppMessage(cleanPhone, mensaje);
+      break;
+    }
+    case 'agenciaGasto': {
+      const r = new AgenciaReportingService(ctx.supabase);
+      await ctx.meta.sendWhatsAppMessage(cleanPhone, await r.getGastoVsPresupuesto());
+      break;
+    }
+    case 'agenciaCPL': {
+      const r = new AgenciaReportingService(ctx.supabase);
+      const { mensaje } = await r.getCPLPorPlataforma();
+      await ctx.meta.sendWhatsAppMessage(cleanPhone, mensaje);
+      break;
+    }
+    case 'agenciaResumen': {
+      const r = new AgenciaReportingService(ctx.supabase);
+      const data = await r.getResumenMarketing();
+      await ctx.meta.sendWhatsAppMessage(cleanPhone, r.formatResumenMarketing(data, nombreCEO));
+      break;
+    }
+    case 'previewSegmento': {
+      const match = body.match(/(?:preview|ver)\s+(\w+)/i);
+      if (match) {
+        const r = new AgenciaReportingService(ctx.supabase);
+        const { mensaje, error } = await r.previewSegmento(match[1]);
+        await ctx.meta.sendWhatsAppMessage(cleanPhone, error || mensaje);
+      } else {
+        await ctx.meta.sendWhatsAppMessage(cleanPhone, 'Formato: *preview [segmento]*');
+      }
+      break;
+    }
+
     default:
       console.log('Handler Agencia (CEO) no reconocido:', handlerName);
       await ctx.meta.sendWhatsAppMessage(cleanPhone, '❓ Comando de marketing no reconocido.');
@@ -158,7 +249,7 @@ export async function executeAgenciaHandlerForCEO(ctx: HandlerContext, handler: 
 export async function agenciaCampanasForCEO(ctx: HandlerContext, phone: string, nombre: string): Promise<void> {
   try {
     const agenciaService = new AgenciaReportingService(ctx.supabase);
-    const mensaje = await agenciaService.getMensajeCampanas(nombre);
+    const { mensaje } = await agenciaService.getCampanasActivas();
     await ctx.meta.sendWhatsAppMessage(phone, mensaje);
   } catch (e) {
     console.error('Error en agenciaCampanas:', e);
@@ -169,7 +260,7 @@ export async function agenciaCampanasForCEO(ctx: HandlerContext, phone: string, 
 export async function agenciaMetricasForCEO(ctx: HandlerContext, phone: string, nombre: string): Promise<void> {
   try {
     const agenciaService = new AgenciaReportingService(ctx.supabase);
-    const mensaje = await agenciaService.getMensajeMetricas(nombre);
+    const mensaje = await agenciaService.getMetricasMes();
     await ctx.meta.sendWhatsAppMessage(phone, mensaje);
   } catch (e) {
     console.error('Error en agenciaMetricas:', e);
@@ -180,7 +271,7 @@ export async function agenciaMetricasForCEO(ctx: HandlerContext, phone: string, 
 export async function agenciaLeadsForCEO(ctx: HandlerContext, phone: string, nombre: string): Promise<void> {
   try {
     const agenciaService = new AgenciaReportingService(ctx.supabase);
-    const mensaje = await agenciaService.getMensajeLeadsRecientes(nombre);
+    const { mensaje } = await agenciaService.getLeadsPorFuente();
     await ctx.meta.sendWhatsAppMessage(phone, mensaje);
   } catch (e) {
     console.error('Error en agenciaLeads:', e);
@@ -239,6 +330,114 @@ export async function enviarASegmentoForCEO(ctx: HandlerContext, phone: string, 
   } catch (e) {
     console.error('Error en enviarASegmento:', e);
     await ctx.meta.sendWhatsAppMessage(phone, '❌ Error al programar broadcast.');
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FUNCIONES DE REPORTES BÁSICOS (Twilio-based)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export async function agenciaCampanas(ctx: HandlerContext, from: string, nombre: string): Promise<void> {
+  try {
+    const reporting = new AgenciaReportingService(ctx.supabase);
+    const { mensaje } = await reporting.getCampanasActivas();
+    await ctx.twilio.sendWhatsAppMessage(from, mensaje);
+  } catch (e) {
+    console.error('Error en agenciaCampanas:', e);
+    await ctx.twilio.sendWhatsAppMessage(from, 'Error al obtener campañas.');
+  }
+}
+
+export async function agenciaMetricas(ctx: HandlerContext, from: string, nombre: string): Promise<void> {
+  try {
+    const reporting = new AgenciaReportingService(ctx.supabase);
+    const mensaje = await reporting.getMetricasMes();
+    await ctx.twilio.sendWhatsAppMessage(from, mensaje);
+  } catch (e) {
+    console.error('Error en agenciaMetricas:', e);
+    await ctx.twilio.sendWhatsAppMessage(from, 'Error al obtener métricas.');
+  }
+}
+
+export async function agenciaLeads(ctx: HandlerContext, from: string, nombre: string): Promise<void> {
+  try {
+    const reporting = new AgenciaReportingService(ctx.supabase);
+    const { mensaje } = await reporting.getLeadsPorFuente();
+    await ctx.twilio.sendWhatsAppMessage(from, mensaje);
+  } catch (e) {
+    console.error('Error en agenciaLeads:', e);
+    await ctx.twilio.sendWhatsAppMessage(from, 'Error al obtener leads.');
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FUNCIONES DE REPORTES AVANZADOS (Twilio-based)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export async function agenciaROI(ctx: HandlerContext, from: string): Promise<void> {
+  try {
+    const reporting = new AgenciaReportingService(ctx.supabase);
+    const mensaje = await reporting.getROI();
+    await ctx.twilio.sendWhatsAppMessage(from, mensaje);
+  } catch (e) {
+    console.error('Error en agenciaROI:', e);
+    await ctx.twilio.sendWhatsAppMessage(from, 'Error al obtener ROI.');
+  }
+}
+
+export async function agenciaMejorCampana(ctx: HandlerContext, from: string): Promise<void> {
+  try {
+    const reporting = new AgenciaReportingService(ctx.supabase);
+    const { mensaje } = await reporting.getMejorCampana();
+    await ctx.twilio.sendWhatsAppMessage(from, mensaje);
+  } catch (e) {
+    console.error('Error en agenciaMejorCampana:', e);
+    await ctx.twilio.sendWhatsAppMessage(from, 'Error al obtener mejor campaña.');
+  }
+}
+
+export async function agenciaPeorCampana(ctx: HandlerContext, from: string): Promise<void> {
+  try {
+    const reporting = new AgenciaReportingService(ctx.supabase);
+    const { mensaje } = await reporting.getPeorCampana();
+    await ctx.twilio.sendWhatsAppMessage(from, mensaje);
+  } catch (e) {
+    console.error('Error en agenciaPeorCampana:', e);
+    await ctx.twilio.sendWhatsAppMessage(from, 'Error al obtener peor campaña.');
+  }
+}
+
+export async function agenciaGasto(ctx: HandlerContext, from: string): Promise<void> {
+  try {
+    const reporting = new AgenciaReportingService(ctx.supabase);
+    const mensaje = await reporting.getGastoVsPresupuesto();
+    await ctx.twilio.sendWhatsAppMessage(from, mensaje);
+  } catch (e) {
+    console.error('Error en agenciaGasto:', e);
+    await ctx.twilio.sendWhatsAppMessage(from, 'Error al obtener gasto.');
+  }
+}
+
+export async function agenciaCPL(ctx: HandlerContext, from: string): Promise<void> {
+  try {
+    const reporting = new AgenciaReportingService(ctx.supabase);
+    const { mensaje } = await reporting.getCPLPorPlataforma();
+    await ctx.twilio.sendWhatsAppMessage(from, mensaje);
+  } catch (e) {
+    console.error('Error en agenciaCPL:', e);
+    await ctx.twilio.sendWhatsAppMessage(from, 'Error al obtener CPL.');
+  }
+}
+
+export async function agenciaResumen(ctx: HandlerContext, from: string, nombre: string): Promise<void> {
+  try {
+    const reporting = new AgenciaReportingService(ctx.supabase);
+    const data = await reporting.getResumenMarketing();
+    const mensaje = reporting.formatResumenMarketing(data, nombre);
+    await ctx.twilio.sendWhatsAppMessage(from, mensaje);
+  } catch (e) {
+    console.error('Error en agenciaResumen:', e);
+    await ctx.twilio.sendWhatsAppMessage(from, 'Error al obtener resumen.');
   }
 }
 

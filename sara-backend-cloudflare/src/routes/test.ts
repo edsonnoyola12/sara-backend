@@ -13,6 +13,10 @@ import { WhatsAppHandler } from '../handlers/whatsapp';
 import { CEOCommandsService } from '../services/ceoCommandsService';
 import { VendorCommandsService } from '../services/vendorCommandsService';
 import { AsesorCommandsService } from '../services/asesorCommandsService';
+import { AgenciaCommandsService } from '../services/agenciaCommandsService';
+import { AgenciaReportingService } from '../services/agenciaReportingService';
+import { EventosService } from '../services/eventosService';
+import { PromocionesService } from '../services/promocionesService';
 import { AIConversationService } from '../services/aiConversationService';
 import { FollowupService } from '../services/followupService';
 import { FollowupApprovalService } from '../services/followupApprovalService';
@@ -715,6 +719,221 @@ export async function handleTestRoutes(
         handlerName: detected.handlerName,
         params: detected.handlerParams,
         nota: 'Para ejecutar completamente, usa WhatsApp'
+      }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // TEST COMANDO AGENCIA - Probar comandos de marketing sin enviar WhatsApp
+    // USO: /test-comando-agencia?cmd=campañas&api_key=XXX
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === "/test-comando-agencia" && request.method === "GET") {
+      const cmd = url.searchParams.get('cmd') || 'ayuda';
+      const agenciaService = new AgenciaCommandsService(supabase);
+      const reportingService = new AgenciaReportingService(supabase);
+      const nombreAgencia = 'Marketing';
+
+      // Detect command
+      const detected = agenciaService.detectCommand(cmd.toLowerCase().trim(), cmd, nombreAgencia);
+
+      if (detected.action === 'not_recognized') {
+        return corsResponse(JSON.stringify({
+          ok: false,
+          comando: cmd,
+          error: 'Comando no reconocido por agencia',
+          detected
+        }));
+      }
+
+      // If it's a direct message (ayuda), return it
+      if (detected.action === 'send_message') {
+        return corsResponse(JSON.stringify({
+          ok: true,
+          comando: cmd,
+          action: 'send_message',
+          respuesta: detected.message?.substring(0, 500)
+        }));
+      }
+
+      // If it's a handler, execute using reporting service
+      if (detected.action === 'call_handler' && detected.handlerName) {
+        try {
+          let respuesta = '';
+          let needsExternalHandler = false;
+
+          switch (detected.handlerName) {
+            case 'agenciaCampanas': {
+              const { mensaje } = await reportingService.getCampanasActivas();
+              respuesta = mensaje;
+              break;
+            }
+            case 'agenciaMetricas': {
+              respuesta = await reportingService.getMetricasMes();
+              break;
+            }
+            case 'agenciaLeads': {
+              const { mensaje } = await reportingService.getLeadsPorFuente();
+              respuesta = mensaje;
+              break;
+            }
+            case 'verSegmentos': {
+              respuesta = await reportingService.getMensajeSegmentos(nombreAgencia);
+              break;
+            }
+            case 'iniciarBroadcast': {
+              respuesta = reportingService.getMensajeAyudaBroadcast(nombreAgencia);
+              break;
+            }
+            case 'enviarASegmento': {
+              // Parse the command but don't actually send
+              const parsed = reportingService.parseEnvioSegmento(cmd);
+              if (!parsed.mensajeTemplate) {
+                respuesta = reportingService.getMensajeFormatosEnvio();
+              } else {
+                const resultado = await reportingService.getLeadsParaEnvio({
+                  segmento: parsed.segmento,
+                  desarrollo: parsed.desarrollo,
+                  vendedorNombre: parsed.vendedorNombre,
+                  fechaDesde: parsed.fechaDesde,
+                  fechaHasta: parsed.fechaHasta
+                });
+                if (resultado.error) {
+                  respuesta = resultado.error;
+                } else {
+                  respuesta = `[DRY RUN] Enviaría a ${resultado.leads.length} leads (total: ${resultado.totalCount || resultado.leads.length})\nFiltro: ${resultado.filtroDescripcion}\nMensaje: ${parsed.mensajeTemplate.substring(0, 100)}`;
+                }
+              }
+              break;
+            }
+            case 'previewSegmento': {
+              const match = cmd.match(/(?:preview|ver)\s+(\w+)/i);
+              if (match) {
+                const { mensaje, error } = await reportingService.previewSegmento(match[1]);
+                respuesta = error || mensaje;
+              } else {
+                respuesta = 'Formato: preview [segmento]';
+              }
+              break;
+            }
+            case 'verEventos': {
+              const eventosService = new EventosService(supabase);
+              const eventos = await eventosService.getProximosEventos();
+              respuesta = eventosService.formatEventosLista(eventos, nombreAgencia);
+              break;
+            }
+            case 'crearEvento': {
+              needsExternalHandler = true;
+              respuesta = 'Requiere handler externo (parsing de evento)';
+              break;
+            }
+            case 'invitarEvento': {
+              needsExternalHandler = true;
+              respuesta = 'Requiere handler externo (envío de invitaciones)';
+              break;
+            }
+            case 'verRegistrados': {
+              const eventosService2 = new EventosService(supabase);
+              const match2 = cmd.match(/registrados\s+(.+)/i);
+              if (match2) {
+                const evento = await eventosService2.buscarEventoPorNombre(match2[1].trim());
+                if (evento) {
+                  const registros = await eventosService2.getRegistrados(evento.id);
+                  respuesta = eventosService2.formatRegistrados(evento, registros);
+                } else {
+                  respuesta = `No encontré el evento "${match2[1].trim()}"`;
+                }
+              } else {
+                const eventos = await eventosService2.getEventosConRegistrados();
+                respuesta = eventosService2.formatListaEventosConRegistrados(eventos);
+              }
+              break;
+            }
+            case 'verPromociones': {
+              const promosService = new PromocionesService(supabase);
+              const promos = await promosService.getPromocionesActivas();
+              respuesta = promosService.formatPromocionesLista(promos, nombreAgencia);
+              break;
+            }
+            case 'crearPromocion': {
+              needsExternalHandler = true;
+              respuesta = 'Requiere handler externo (parsing de promoción)';
+              break;
+            }
+            case 'pausarPromocion': {
+              const promosService2 = new PromocionesService(supabase);
+              const nombrePromo = promosService2.parseNombrePromocion(cmd, 'pausar');
+              if (!nombrePromo) {
+                respuesta = 'Formato: pausar promo [nombre]';
+              } else {
+                const { promo, error } = await promosService2.pausarPromocion(nombrePromo);
+                respuesta = error || promosService2.formatPromoPausada(promo!);
+              }
+              break;
+            }
+            case 'activarPromocion': {
+              const promosService3 = new PromocionesService(supabase);
+              const nombrePromo2 = promosService3.parseNombrePromocion(cmd, 'activar');
+              if (!nombrePromo2) {
+                respuesta = 'Formato: activar promo [nombre]';
+              } else {
+                const { promo, error } = await promosService3.activarPromocion(nombrePromo2);
+                respuesta = error || promosService3.formatPromoActivada(promo!);
+              }
+              break;
+            }
+            case 'agenciaROI': {
+              respuesta = await reportingService.getROI();
+              break;
+            }
+            case 'agenciaMejorCampana': {
+              const { mensaje } = await reportingService.getMejorCampana();
+              respuesta = mensaje;
+              break;
+            }
+            case 'agenciaPeorCampana': {
+              const { mensaje } = await reportingService.getPeorCampana();
+              respuesta = mensaje;
+              break;
+            }
+            case 'agenciaGasto': {
+              respuesta = await reportingService.getGastoVsPresupuesto();
+              break;
+            }
+            case 'agenciaCPL': {
+              const { mensaje } = await reportingService.getCPLPorPlataforma();
+              respuesta = mensaje;
+              break;
+            }
+            case 'agenciaResumen': {
+              const data = await reportingService.getResumenMarketing();
+              respuesta = reportingService.formatResumenMarketing(data, nombreAgencia);
+              break;
+            }
+            default:
+              needsExternalHandler = true;
+              respuesta = `Handler "${detected.handlerName}" no ejecutable desde test`;
+          }
+
+          return corsResponse(JSON.stringify({
+            ok: !needsExternalHandler,
+            comando: cmd,
+            handlerName: detected.handlerName,
+            respuesta: respuesta?.substring(0, 500),
+            needsExternalHandler
+          }));
+        } catch (e: any) {
+          return corsResponse(JSON.stringify({
+            ok: false,
+            comando: cmd,
+            handlerName: detected.handlerName,
+            error: e.message
+          }));
+        }
+      }
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        comando: cmd,
+        detected
       }));
     }
 
