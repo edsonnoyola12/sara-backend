@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-13 (Sesión 37)
+> Última actualización: 2026-02-13 (Sesión 37 Parte 3)
 
 ---
 
@@ -4549,3 +4549,33 @@ new → contacted → qualified → scheduled → visited → negotiation → re
 - Bridge controls (#cerrar, #mas) manejados en WhatsApp handler (no en ceoCommandsService)
 - Asesor/Marketing commands detectados via fallback chain en WhatsApp handler
 - Todos los aliases (funnel=pipeline, cotizaciones=ofertas, etc.) funcionan
+
+### 2026-02-13 (Sesión 37 - Parte 3) - Fix 4 Vendor Bugs Adicionales + QA Completo
+
+**4 bugs adicionales del screenshot de WhatsApp corregidos:**
+
+| Bug | Causa | Fix |
+|-----|-------|-----|
+| `oferta aceptada edson` → "No encontré a aceptada edson" | Regex genérico `oferta [nombre]` matcheaba antes que `oferta aceptada [nombre]` | Reordenar regexes: específicos antes de genérico |
+| `asignar asesor edson` → "Error al asignar" | Handler leía `params.nombre` pero detectRouteCommand retornaba `params.nombreLead` | Cambiar a `params.nombreLead \|\| params.nombre` |
+| `propiedades` → "Error al obtener propiedades" | `getPropiedadesDisponibles()` y `formatPropiedadesDisponibles()` no existían | Agregados ambos métodos en VendorCommandsService |
+| `cerrar venta edson` → parsing issues | Handler re-parseaba body en vez de usar `params.nombreLead` pre-parseado | Agregar `nombreLeadParam?` al handler |
+
+**También corregido:** `vendedorConsultarCredito` params.nombre → params.nombreLead
+
+**Edge cases investigados (NO son bugs):**
+
+| Comando | Resultado | Explicación |
+|---------|-----------|-------------|
+| `coaching edson` | Correcto | Filtra por `assigned_to = vendedor.id` (diseño correcto) |
+| `recordar llamar edson` (sin fecha) | No matchea | Regex requiere fecha/hora (uso: `recordar llamar edson mañana 3pm`) |
+| `agendar cita edson` (sin fecha) | Help message | Retorna mensaje de ayuda pidiendo fecha/hora |
+| `adelante` con status no-funnel | Safety net | Mapea a `contacted`/`new` por defecto |
+
+**Archivos modificados:**
+- `src/services/vendorCommandsService.ts` - Reorden oferta regexes + 2 nuevos métodos
+- `src/handlers/whatsapp-vendor.ts` - Fix params en 3 handlers + signature cerrar venta
+
+**Tests:** 369/369 pasando
+**Commit:** `e941e80c`
+**Deploy:** Version ID `132ebcb4`
