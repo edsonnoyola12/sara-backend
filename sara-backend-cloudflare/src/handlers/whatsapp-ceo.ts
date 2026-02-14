@@ -1286,17 +1286,26 @@ export async function ceoMoverLead(ctx: HandlerContext, handler: any, from: stri
         console.log(`📌 Búsqueda manual: ${leads.length} resultados`);
       }
 
-      const FUNNEL_STAGES = ['new', 'contacted', 'qualified', 'visit_scheduled', 'visited', 'negotiating', 'reserved', 'sold', 'delivered'];
+      const FUNNEL_STAGES = ['new', 'contacted', 'qualified', 'scheduled', 'visited', 'negotiation', 'reserved', 'closed', 'delivered'];
+      const STATUS_ALIASES: Record<string, string> = {
+        'visit_scheduled': 'scheduled',
+        'negotiating': 'negotiation',
+        'sold': 'closed',
+      };
       const stageLabels: Record<string, string> = {
         'new': '🆕 Nuevo',
         'contacted': '📞 Contactado',
         'qualified': '✅ Calificado',
-        'visit_scheduled': '📅 Cita Agendada',
+        'scheduled': '📅 Cita Agendada',
         'visited': '🏠 Visitado',
-        'negotiating': '💰 Negociando',
+        'negotiation': '💰 Negociando',
         'reserved': '📝 Reservado',
+        'closed': '✅ Vendido',
+        'delivered': '🏠 Entregado',
+        // Aliases
+        'visit_scheduled': '📅 Cita Agendada',
+        'negotiating': '💰 Negociando',
         'sold': '✅ Vendido',
-        'delivered': '🏠 Entregado'
       };
 
       if (!leads || leads.length === 0) {
@@ -1329,7 +1338,8 @@ export async function ceoMoverLead(ctx: HandlerContext, handler: any, from: stri
       console.log(`📌 Lead keys: ${Object.keys(lead).join(', ')}`);
       console.log(`📌 Lead status fields: funnel_status=${lead.funnel_status}, stage=${lead.stage}, status=${lead.status}`);
       let currentStatus = lead.funnel_status || lead.stage || lead.status || 'new';
-      if (currentStatus === 'scheduled') currentStatus = 'visit_scheduled';
+      // Normalizar aliases al canónico
+      if (STATUS_ALIASES[currentStatus]) currentStatus = STATUS_ALIASES[currentStatus];
       const currentIndex = FUNNEL_STAGES.indexOf(currentStatus);
       let newIndex = direccion === 'next' ? currentIndex + 1 : currentIndex - 1;
 

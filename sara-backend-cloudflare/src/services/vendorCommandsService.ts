@@ -1163,10 +1163,13 @@ export class VendorCommandsService {
     let msg = `👥 *TUS LEADS* (${leads.length})\n\n`;
 
     const porEtapa: { [key: string]: any[] } = {};
-    // Normalizar 'scheduled' → 'visit_scheduled' para agrupación
+    // Normalizar status aliases para agrupación
     leads.forEach(l => {
       let etapa = l.status || 'new';
-      if (etapa === 'scheduled') etapa = 'visit_scheduled';
+      // Normalizar aliases viejos
+      if (etapa === 'visit_scheduled' || etapa === 'scheduled') etapa = 'scheduled';
+      if (etapa === 'negotiating') etapa = 'negotiation';
+      if (etapa === 'sold') etapa = 'closed';
       if (!porEtapa[etapa]) porEtapa[etapa] = [];
       porEtapa[etapa].push(l);
     });
@@ -1175,11 +1178,10 @@ export class VendorCommandsService {
       'new': '🆕 Nuevos',
       'contacted': '📞 Contactados',
       'qualified': '✅ Calificados',
-      'visit_scheduled': '📅 Cita agendada',
+      'scheduled': '📅 Cita agendada',
       'visited': '🏠 Visitados',
-      'negotiating': '💰 Negociando',
+      'negotiation': '💰 Negociando',
       'reserved': '🔒 Apartados',
-      'sold': '🏆 Vendidos',
       'closed': '🏆 Cerrados'
     };
 
@@ -1204,24 +1206,35 @@ export class VendorCommandsService {
     'new',
     'contacted',
     'qualified',
-    'visit_scheduled',
+    'scheduled',
     'visited',
-    'negotiating',
+    'negotiation',
     'reserved',
-    'sold',
+    'closed',
     'delivered'
   ];
+
+  // Aliases: el backend puede recibir variantes, se mapean al canónico
+  private readonly STATUS_ALIASES: Record<string, string> = {
+    'visit_scheduled': 'scheduled',
+    'negotiating': 'negotiation',
+    'sold': 'closed',
+  };
 
   private readonly STAGE_LABELS: Record<string, string> = {
     'new': '🆕 NUEVO',
     'contacted': '📞 CONTACTADO',
     'qualified': '✅ CALIFICADO',
-    'visit_scheduled': '📅 CITA AGENDADA',
+    'scheduled': '📅 CITA AGENDADA',
     'visited': '🏠 VISITÓ',
-    'negotiating': '💰 NEGOCIANDO',
+    'negotiation': '💰 NEGOCIANDO',
     'reserved': '📝 RESERVADO',
+    'closed': '✅ VENDIDO',
+    'delivered': '🏠 ENTREGADO',
+    // Aliases para labels
+    'visit_scheduled': '📅 CITA AGENDADA',
+    'negotiating': '💰 NEGOCIANDO',
     'sold': '✅ VENDIDO',
-    'delivered': '🏠 ENTREGADO'
   };
 
   getFunnelStageLabel(stage: string): string {
@@ -1378,8 +1391,11 @@ export class VendorCommandsService {
       }
 
       const lead = leads[0];
+      // Normalizar status: mapear aliases viejos al canónico
       let effectiveStatus = lead.status;
-      if (effectiveStatus === 'scheduled') effectiveStatus = 'visit_scheduled';
+      if (this.STATUS_ALIASES[effectiveStatus]) {
+        effectiveStatus = this.STATUS_ALIASES[effectiveStatus];
+      }
       const currentIndex = this.FUNNEL_STAGES.indexOf(effectiveStatus);
 
       if (currentIndex === -1) {

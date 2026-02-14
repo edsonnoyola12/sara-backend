@@ -633,15 +633,17 @@ export async function handleTestRoutes(
             }
 
             const lead = leads[0] as any;
-            const FUNNEL_STAGES = ['new', 'contacted', 'qualified', 'visit_scheduled', 'visited', 'negotiating', 'reserved', 'sold', 'delivered'];
+            const FUNNEL_STAGES = ['new', 'contacted', 'qualified', 'scheduled', 'visited', 'negotiation', 'reserved', 'closed', 'delivered'];
+            const STATUS_ALIASES: Record<string, string> = { 'visit_scheduled': 'scheduled', 'negotiating': 'negotiation', 'sold': 'closed' };
             const stageLabels: Record<string, string> = {
               'new': '🆕 Nuevo', 'contacted': '📞 Contactado', 'qualified': '✅ Calificado',
-              'visit_scheduled': '📅 Cita Agendada', 'visited': '🏠 Visitado', 'negotiating': '💰 Negociando',
-              'reserved': '📝 Reservado', 'sold': '✅ Vendido', 'delivered': '🏠 Entregado'
+              'scheduled': '📅 Cita Agendada', 'visited': '🏠 Visitado', 'negotiation': '💰 Negociando',
+              'reserved': '📝 Reservado', 'closed': '✅ Vendido', 'delivered': '🏠 Entregado',
+              'visit_scheduled': '📅 Cita Agendada', 'negotiating': '💰 Negociando', 'sold': '✅ Vendido'
             };
 
             let currentStatus = lead.funnel_status || lead.stage || lead.status || 'new';
-            if (currentStatus === 'scheduled') currentStatus = 'visit_scheduled';
+            if (STATUS_ALIASES[currentStatus]) currentStatus = STATUS_ALIASES[currentStatus];
             const currentIndex = FUNNEL_STAGES.indexOf(currentStatus);
             const newIndex = direccion === 'next' ? currentIndex + 1 : currentIndex - 1;
 
