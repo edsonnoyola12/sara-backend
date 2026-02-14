@@ -4446,3 +4446,43 @@ Retorna: `{ stats: { total, critical, unresolved, by_type }, errors: [...] }`
 **Commits:** `84b871d4` (Phase 1), `32e2e2c9` (Phase 2), `a7038cf6` (Phase 3)
 **Deploy:** Version ID `8ed7405f`
 **Tests:** 369/369 pasando
+
+---
+
+### 2026-02-13 (Sesión 36 - Parte 2) - Fix Mismatch Status Funnel Backend ↔ CRM
+
+**Problema:** Los comandos `adelante`/`atrás` movían leads correctamente en BD pero NO aparecían en el funnel del CRM. El backend escribía `negotiating`, `visit_scheduled`, `sold` pero el CRM filtraba por `negotiation`, `scheduled`, `closed`.
+
+**Causa raíz:** 3 copias de FUNNEL_STAGES (vendorCommandsService, whatsapp-ceo, test.ts) usaban nombres distintos al CRM frontend.
+
+**Fix:** Alinear FUNNEL_STAGES al CRM + agregar STATUS_ALIASES para datos legacy.
+
+| Status canónico (nuevo) | Alias legacy (aceptado) | CRM columna |
+|------------------------|------------------------|-------------|
+| `scheduled` | `visit_scheduled` | Cita |
+| `negotiation` | `negotiating` | Negociación |
+| `closed` | `sold` | Cerrado |
+
+**Funnel canónico:**
+```
+new → contacted → qualified → scheduled → visited → negotiation → reserved → closed → delivered
+```
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `vendorCommandsService.ts` | FUNNEL_STAGES + STATUS_ALIASES + pipeline display normalizado |
+| `whatsapp-ceo.ts` | FUNNEL_STAGES + STATUS_ALIASES + normalización en ceoMoverLead |
+| `routes/test.ts` | FUNNEL_STAGES en test-comando-ceo |
+
+**Pruebas en producción:**
+
+| Test | Status antes | Status después | CRM visible |
+|------|-------------|----------------|-------------|
+| `adelante Edson` | negotiation | reserved | ✅ Reservado |
+| `atrás Edson` | reserved | negotiation | ✅ Negociación |
+
+**Commit:** `031c2fe7`
+**Deploy:** Version ID `e46251a9`
+**Tests:** 369/369 pasando
