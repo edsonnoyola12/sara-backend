@@ -75,7 +75,17 @@ export class CEOCommandsService {
       return { action: 'call_handler', handlerName: 'vendedorCitasManana' };
     }
 
-    // ═══ REPORTE ═══
+    // ═══ REPORTES ESPECÍFICOS (antes del genérico startsWith) ═══
+    if (msgLower === 'reporte semanal' || msgLower === 'reporte semana' ||
+        msgLower === 'weekly report') {
+      return { action: 'call_handler', handlerName: 'reporteSemanal' };
+    }
+    if (msgLower === 'reporte mensual' || msgLower === 'reporte mes' ||
+        msgLower === 'monthly report') {
+      return { action: 'call_handler', handlerName: 'reporteMensual' };
+    }
+
+    // ═══ REPORTE GENÉRICO ═══
     if (msgLower.startsWith('reporte') || msgLower.startsWith('report') || msgLower === 'stats') {
       return { action: 'call_handler', handlerName: 'generarReporte', handlerParams: { tipo: msgLower.replace(/^reporte\s*|^report\s*/, '') } };
     }
@@ -192,16 +202,6 @@ export class CEOCommandsService {
         msgLower === 'referidos' || msgLower === 'programa referidos' ||
         msgLower === 'clientes vip' || msgLower === 'top clientes') {
       return { action: 'call_handler', handlerName: 'valorCliente' };
-    }
-
-    // ═══ REPORTES PDF ═══
-    if (msgLower === 'reporte semanal' || msgLower === 'reporte semana' ||
-        msgLower === 'weekly report') {
-      return { action: 'call_handler', handlerName: 'reporteSemanal' };
-    }
-    if (msgLower === 'reporte mensual' || msgLower === 'reporte mes' ||
-        msgLower === 'monthly report') {
-      return { action: 'call_handler', handlerName: 'reporteMensual' };
     }
 
     // ═══ HOY (resumen del día) ═══

@@ -584,11 +584,20 @@ export async function handleTestRoutes(
 
       // Detectar comando
       const detected = ceoService.detectCommand(cmd);
-      if (!detected.action || detected.action === 'unknown') {
+      if (!detected.action || detected.action === 'unknown' || detected.action === 'not_recognized') {
         return corsResponse(JSON.stringify({
           ok: false,
           comando: cmd,
           error: 'Comando no reconocido',
+          detected
+        }));
+      }
+
+      // send_message (ayuda, etc.) - retorna directamente
+      if (detected.action === 'send_message') {
+        return corsResponse(JSON.stringify({
+          ok: true,
+          comando: cmd,
           detected
         }));
       }
@@ -620,7 +629,7 @@ export async function handleTestRoutes(
             }
 
             if (!leads || leads.length === 0) {
-              return corsResponse(JSON.stringify({ ok: false, comando: cmd, error: `No encontré a "${nombreLead}"` }));
+              return corsResponse(JSON.stringify({ ok: false, comando: cmd, error: `No encontre a "${nombreLead}"` }));
             }
 
             if (leads.length > 1) {
@@ -632,7 +641,7 @@ export async function handleTestRoutes(
                 if (nombresUnicos.size === 1) {
                   leads = [leads[0]];
                 } else {
-                  return corsResponse(JSON.stringify({ ok: false, comando: cmd, error: `Múltiples leads: ${leads.map(l => l.name).join(', ')}` }));
+                  return corsResponse(JSON.stringify({ ok: false, comando: cmd, error: `Multiples leads: ${leads.map(l => l.name).join(', ')}` }));
                 }
               }
             }
@@ -641,10 +650,10 @@ export async function handleTestRoutes(
             const FUNNEL_STAGES = ['new', 'contacted', 'qualified', 'scheduled', 'visited', 'negotiation', 'reserved', 'closed', 'delivered'];
             const STATUS_ALIASES: Record<string, string> = { 'visit_scheduled': 'scheduled', 'negotiating': 'negotiation', 'sold': 'closed' };
             const stageLabels: Record<string, string> = {
-              'new': '🆕 Nuevo', 'contacted': '📞 Contactado', 'qualified': '✅ Calificado',
-              'scheduled': '📅 Cita Agendada', 'visited': '🏠 Visitado', 'negotiation': '💰 Negociando',
-              'reserved': '📝 Reservado', 'closed': '✅ Vendido', 'delivered': '🏠 Entregado',
-              'visit_scheduled': '📅 Cita Agendada', 'negotiating': '💰 Negociando', 'sold': '✅ Vendido'
+              'new': 'Nuevo', 'contacted': 'Contactado', 'qualified': 'Calificado',
+              'scheduled': 'Cita Agendada', 'visited': 'Visitado', 'negotiation': 'Negociando',
+              'reserved': 'Reservado', 'closed': 'Vendido', 'delivered': 'Entregado',
+              'visit_scheduled': 'Cita Agendada', 'negotiating': 'Negociando', 'sold': 'Vendido'
             };
 
             let currentStatus = lead.funnel_status || lead.stage || lead.status || 'new';
@@ -653,10 +662,10 @@ export async function handleTestRoutes(
             const newIndex = direccion === 'next' ? currentIndex + 1 : currentIndex - 1;
 
             if (newIndex < 0) {
-              return corsResponse(JSON.stringify({ ok: false, comando: cmd, error: `${lead.name} ya está en la primera etapa (${stageLabels[currentStatus] || currentStatus})` }));
+              return corsResponse(JSON.stringify({ ok: false, comando: cmd, error: `${lead.name} ya esta en la primera etapa (${stageLabels[currentStatus] || currentStatus})` }));
             }
             if (newIndex >= FUNNEL_STAGES.length) {
-              return corsResponse(JSON.stringify({ ok: false, comando: cmd, error: `${lead.name} ya está en la última etapa (${stageLabels[currentStatus] || currentStatus})` }));
+              return corsResponse(JSON.stringify({ ok: false, comando: cmd, error: `${lead.name} ya esta en la ultima etapa (${stageLabels[currentStatus] || currentStatus})` }));
             }
 
             const newStage = FUNNEL_STAGES[newIndex];
@@ -667,21 +676,39 @@ export async function handleTestRoutes(
               ok: true,
               comando: cmd,
               handlerName: 'ceoMoverLead',
-              resultado: `✅ ${lead.name} movido: ${stageLabels[currentStatus] || currentStatus} → ${stageLabels[newStage] || newStage}`,
+              resultado: `${lead.name} movido: ${stageLabels[currentStatus] || currentStatus} -> ${stageLabels[newStage] || newStage}`,
               lead: { id: lead.id, name: lead.name, previousStatus: currentStatus, newStatus: newStage, column: updateCol }
             }));
           }
+
+          // Handle needsExternalHandler - return ok with handler info
+          if (result.needsExternalHandler) {
+            const params = detected.handlerParams || {};
+            return corsResponse(JSON.stringify({
+              ok: true,
+              comando: cmd,
+              handlerName: detected.handlerName,
+              resultado: `Handler ${detected.handlerName} detectado correctamente (requiere WhatsApp para ejecutar)`,
+              params
+            }));
+          }
+
+          // Serialize resultado as string to avoid nested objects breaking parsers
+          const resultadoStr = typeof result === 'string' ? result :
+            (typeof result.message === 'string' ? result.message :
+            JSON.stringify(result.message || result));
 
           return corsResponse(JSON.stringify({
             ok: true,
             comando: cmd,
             handlerName: detected.handlerName,
-            resultado: result.message || result
+            resultado: resultadoStr
           }));
         } catch (e: any) {
           return corsResponse(JSON.stringify({
             ok: false,
             comando: cmd,
+            handlerName: detected.handlerName,
             error: e.message
           }));
         }
