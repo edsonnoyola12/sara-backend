@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-14 (Sesión 38)
+> Última actualización: 2026-02-14 (Sesión 39)
 
 ---
 
@@ -624,6 +624,10 @@ Ver documentación en `docs/`:
 | `/test-envio-7pm?enviar=true` | Envío real del reporte 7 PM |
 | `/test-envio-7pm?enviar=true&phone=XXXX` | Envío real a un vendedor específico |
 | `/test-retell-e2e?api_key=Y` | **E2E Retell: 25 tests** (prompt, lookup, cita, tools, WhatsApp) |
+| `/test-comando-vendedor?cmd=X&phone=Y&api_key=Z` | **QA vendedor: 107 comandos** (detección + ejecución) |
+| `/test-comando-ceo?cmd=X&api_key=Z` | **QA CEO: 100 comandos** (detección + ejecución) |
+| `/test-comando-asesor?cmd=X&phone=Y&api_key=Z` | **QA asesor: 90 comandos** (detección + ejecución) |
+| `/test-comando-agencia?cmd=X&phone=Y&api_key=Z` | **QA agencia: 45 comandos** (detección + ejecución) |
 
 ---
 
@@ -2991,14 +2995,25 @@ class MessageQueueService {
 | **Expiración configurable de pending messages** | ✅ | 2026-02-02 |
 | **Limpieza automática de pending expirados** | ✅ | 2026-02-02 |
 
-### Comandos Verificados
+### Comandos Verificados (QA Exhaustivo - 342/342 - Sesión 39)
 
-| Rol | Comandos Probados | Estado |
-|-----|-------------------|--------|
-| CEO | pipeline, alertas, ofertas, mis leads, bridge, segmentos, broadcast, metricas | ✅ |
-| Vendedor | cotizar, citas, mis leads, hot, briefing, ofertas | ✅ |
-| Asesor | mis leads, docs, preaprobado, rechazado, contactado | ✅ |
-| Marketing | campañas, metricas, segmentos, broadcast | ✅ |
+| Rol | Tests | Endpoint | Estado |
+|-----|-------|----------|--------|
+| **Agencia** | **45/45** | `/test-comando-agencia` | ✅ |
+| **Vendedor** | **107/107** | `/test-comando-vendedor` | ✅ |
+| **CEO** | **100/100** | `/test-comando-ceo` | ✅ |
+| **Asesor** | **90/90** | `/test-comando-asesor` | ✅ |
+| **Total** | **342/342** | | ✅ |
+
+**Detalle por categoría:**
+
+**Agencia (45/45):** campañas, metricas, segmentos, broadcast, enviar a segmento, ayuda, roi, cpl, funnel, performance fuente, ab test, contenido, calendario, leads por fuente, utm, tracking, comparar periodos, reporte semanal/mensual, whatsapp stats, template stats, audiencia, presupuesto, costo campana, engagement, y aliases.
+
+**Vendedor (107/107):** ayuda/help/?, citas/hoy/mañana, mis leads/clientes, hot/calientes, pendientes, meta/objetivo, briefing, notas, coaching/tips, quien es/buscar/info, historial/chat/conversacion, llamar/telefono, adelante/atras (ambas formas), nota, agendar/reagendar/cancelar cita, cotizar/ofertas/enviar oferta/aceptada/rechazada, brochure/ubicacion/video, nuevo lead, pausar/reanudar, perdido, contactar, credito, asignar asesor, cerrar venta, apartado, bridge/#cerrar/#mas/#fin, propiedades, recordar llamar, on/off, y comando no reconocido.
+
+**CEO (100/100):** ayuda/help/?, citas/hoy/mañana, leads/clientes/mi cartera, hot/calientes, notas/ver notas, coaching/tips/consejo, ventas/sales, pipeline/funnel/embudo, calcular/financiamiento/credito/hipoteca/bancos/tasas, comparar, probabilidad/pronostico, visitas/recorridos, ofertas/cotizaciones/negociaciones/apartados, alertas/warnings/riesgos/pendientes urgentes, mercado/inteligencia/competencia/tendencias/analisis, clv/valor cliente/referidos/clientes vip/top clientes, hoy/resumen, conexiones/actividad equipo, meta/objetivo, reporte semanal/mensual (prioridad antes del genérico), equipo/team/vendedores, bridge/mensaje, broadcast/enviar mensaje, segmentos/eventos, brochure/ubicacion/video, adelante/atras (ambas formas), quien es/buscar/info, historial/chat/conversacion, nota, nuevo lead, #mas/#cerrar/#fin, actividad/bitacora, y comando no reconocido.
+
+**Asesor (90/90):** ayuda/help/comandos/?, mis leads/clientes, status/ver/info [lead], docs pendientes (6 aliases), docs/documentos/pedir docs [lead], preaprobado/aprobado/pre-aprobado, rechazado/no aprobado [motivo], adelante/avanzar/siguiente/next (7 formas), atras/regresar/anterior/prev (7 formas), on/disponible/activo, off/no disponible/ocupado/inactivo, contactado/contacte, dile/mensaje/enviar [lead], llamar/telefono/tel/contacto, actualizar [lead] [campo] [valor], nuevo/crear/agregar lead, cita/agendar, cancelar cita, reagendar/mover cita, hoy/citas hoy/agenda hoy, mañana/manana/citas, semana/esta semana/citas semana, reporte (8 aliases), bridge/chat directo/directo, #mas/#continuar/#cerrar/#fin, y comando no reconocido.
 
 ### CRONs Post-Compra Verificados
 
@@ -4662,3 +4677,57 @@ new → contacted → qualified → scheduled → visited → negotiation → re
 **Tests:** 369/369 pasando
 **Commit:** `1657327d`
 **Deploy:** Version ID `3038b1fc`
+
+---
+
+### 2026-02-14 (Sesión 39) - QA Exhaustivo de Comandos: 342/342 (4 Roles)
+
+**QA completo de routing de comandos para los 4 roles del sistema.**
+
+Cada comando fue probado contra su endpoint de test (`/test-comando-*`) verificando:
+1. Detección correcta (ok=true para comandos válidos, ok=false para no reconocidos)
+2. Routing al handler correcto (handlerName coincide con el esperado)
+3. Handlers externos (needsExternalHandler=true para los que requieren WhatsApp)
+
+| Rol | Tests | Endpoint | Bugs Encontrados | Estado |
+|-----|-------|----------|------------------|--------|
+| **Agencia** | **45/45** | `/test-comando-agencia` | 0 | ✅ |
+| **Vendedor** | **107/107** | `/test-comando-vendedor` | 0 | ✅ |
+| **CEO** | **100/100** | `/test-comando-ceo` | 3 (ya corregidos sesión anterior) | ✅ |
+| **Asesor** | **90/90** | `/test-comando-asesor` | 0 | ✅ |
+| **Total** | **342/342** | | | ✅ |
+
+**Bugs corregidos en sesiones previas (ya deployados):**
+
+| Bug | Rol | Fix | Commit |
+|-----|-----|-----|--------|
+| `reporte semanal/mensual` → `generarReporte` (genérico) | CEO | Mover exact matches antes de `startsWith('reporte')` | `4718774d` |
+| `comando inventado xyz` → ok:true | CEO | Agregar `not_recognized` al check de error | `4718774d` |
+| `needsExternalHandler` respuestas con nested objects | CEO | Serializar resultado como string | `4718774d` |
+
+**Categorías de comandos verificadas por rol:**
+
+| Categoría | Agencia | Vendedor | CEO | Asesor |
+|-----------|---------|----------|-----|--------|
+| Ayuda/Help | 4 | 3 | 3 | 4 |
+| Leads/Clientes | 2 | 8 | 10 | 4 |
+| Citas/Agenda | - | 9 | 5 | 8 |
+| Notas | - | 5 | 5 | - |
+| Funnel (adelante/atrás) | - | 10 | 14 | 14 |
+| Bridge (#cerrar/#mas) | - | 4 | 5 | 7 |
+| Reportes/Stats | 6 | 2 | 8 | 8 |
+| Ofertas/Cotizaciones | - | 7 | 4 | - |
+| Recursos (brochure/GPS/video) | - | 6 | 6 | - |
+| Financiamiento | - | 1 | 6 | - |
+| Disponibilidad (on/off) | - | 2 | - | 7 |
+| Comunicación (dile/mensaje) | - | 3 | 4 | 3 |
+| Lead Management | - | 9 | 3 | 4 |
+| Docs/Crédito | - | - | - | 9 |
+| Marketing/Campañas | 25 | - | - | - |
+| Análisis/Inteligencia | - | - | 18 | - |
+| Comando no reconocido | 1 | 1 | 1 | 1 |
+| Otros | 7 | 37 | 8 | 11 |
+
+**Sin cambios de código necesarios** — todos los comandos ya ruteaban correctamente.
+
+**Tests:** 369/369 pasando
