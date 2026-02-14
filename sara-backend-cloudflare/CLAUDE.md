@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-13 (Sesión 37 Parte 3)
+> Última actualización: 2026-02-14 (Sesión 38)
 
 ---
 
@@ -4579,3 +4579,64 @@ new → contacted → qualified → scheduled → visited → negotiation → re
 **Tests:** 369/369 pasando
 **Commit:** `e941e80c`
 **Deploy:** Version ID `132ebcb4`
+
+### 2026-02-14 (Sesión 38) - QA Asesor Completo (30/30 comandos) + Fix 3 Bugs
+
+**30 comandos de asesor probados via `/test-comando-asesor` en producción.**
+
+**Nuevo endpoint `/test-comando-asesor`:**
+- Ejecuta handlers completos y retorna respuesta JSON (sin enviar WhatsApp)
+- Uso: `/test-comando-asesor?cmd=mis%20leads&phone=5210000000001&api_key=XXX`
+
+**3 bugs corregidos:**
+
+| Bug | Causa | Fix |
+|-----|-------|-----|
+| `mañana` / `citas mañana` no reconocido | No existía handler ni detección para mañana | Nuevo `getCitasMañana()` + 5 aliases (`mañana`, `manana`, `citas mañana`, `citas manana`, `agenda mañana`) |
+| `pendientes docs` no reconocido | Solo detectaba `docs pendientes` (orden inverso ignorado) | Agregado `pendientes docs` y `pendientes documentos` como aliases |
+| `reporte semana` / `reporte mes` no reconocido | Solo detectaba `reporte`, `mi reporte`, `stats`, `estadisticas` | Agregados 4 aliases: `reporte semana`, `reporte semanal`, `reporte mes`, `reporte mensual` |
+
+**Ayuda actualizada:** Agregado `MAÑANA` a la sección de Agenda del mensaje de ayuda.
+
+**30/30 comandos verificados:**
+
+| # | Comando | Handler | Status |
+|---|---------|---------|--------|
+| 1 | `ayuda` | send_message | ✅ |
+| 2 | `mis leads` | asesorMisLeads | ✅ |
+| 3 | `mis clientes` | asesorMisLeads | ✅ |
+| 4 | `on` / `disponible` | asesorDisponibilidad | ✅ |
+| 5 | `off` | asesorDisponibilidad | ✅ |
+| 6 | `on banco X` | asesorOnBanco | ✅ |
+| 7 | `off banco X` | asesorOffBanco | ✅ |
+| 8 | `status [nombre]` | asesorStatusLead | ✅ |
+| 9 | `docs pendientes` / `pendientes docs` | asesorDocsPendientes | ✅ |
+| 10 | `docs [nombre]` | asesorPedirDocs | ✅ |
+| 11 | `llamar [nombre]` | asesorTelefonoLead | ✅ |
+| 12 | `reporte` / `reporte semana` / `reporte mes` | asesorReporte | ✅ |
+| 13 | `contactado [nombre]` / `contacte a [nombre]` | asesorMarcarContactado | ✅ |
+| 14 | `preaprobado [nombre]` | asesorPreaprobado | ✅ |
+| 15 | `rechazado [nombre] [motivo]` | asesorRechazado | ✅ |
+| 16 | `adelante [nombre]` | asesorMoverLead | ✅ |
+| 17 | `atras [nombre]` | asesorMoverLead | ✅ |
+| 18 | `dile [nombre] que [msg]` | asesorEnviarMensaje | ✅ |
+| 19 | `hoy` / `citas hoy` | asesorCitasHoy | ✅ |
+| 20 | `mañana` / `citas mañana` | asesorCitasMañana | ✅ (NEW) |
+| 21 | `semana` / `citas semana` | asesorCitasSemana | ✅ |
+| 22 | `agendar [nombre] [fecha]` | asesorAgendarCita | ✅ (external) |
+| 23 | `nuevo [nombre] [tel] para [vendedor]` | asesorCrearLeadHipoteca | ✅ (external) |
+| 24 | `bridge [nombre]` | bridgeLead | ✅ (external) |
+| 25 | `bridge [nombre] "msg"` | bridgeLead | ✅ (external) |
+| 26 | `pendientes` | asesorDocsPendientes | ✅ |
+| 27 | `recordar llamar [nombre] [fecha]` | needsExternalHandler | ✅ (external) |
+| 28 | `#cerrar` | cerrarBridge | ✅ |
+| 29 | `#mas` | extenderBridge | ✅ |
+| 30 | Comando no reconocido | not_recognized | ✅ |
+
+**Archivos modificados:**
+- `src/services/asesorCommandsService.ts` - 3 fixes + nuevo método `getCitasMañana()` + ayuda actualizada
+- `src/routes/test.ts` - Nuevo endpoint `/test-comando-asesor`
+
+**Tests:** 369/369 pasando
+**Commit:** `43e62110`
+**Deploy:** Version ID `03c44afc`
