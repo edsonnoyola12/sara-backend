@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-13 (Sesión 35)
+> Última actualización: 2026-02-13 (Sesión 37)
 
 ---
 
@@ -4486,3 +4486,66 @@ new → contacted → qualified → scheduled → visited → negotiation → re
 **Commit:** `031c2fe7`
 **Deploy:** Version ID `e46251a9`
 **Tests:** 369/369 pasando
+
+---
+
+### 2026-02-13 (Sesión 37) - QA Vendedor Completo + Fix 3 Bugs
+
+**42/42 comandos de vendedor probados via `/test-vendedor-msg` en producción.**
+
+| Lote | Comandos | Estado |
+|------|----------|--------|
+| Info | ayuda, mis leads, hoy, citas, hot, pendientes, meta, briefing | ✅ |
+| Lead info | quien es, historial, notas, llamar, citas mañana | ✅ |
+| Notas + funnel | nota, adelante, atrás | ✅ |
+| Citas | agendar cita, reagendar, cancelar cita | ✅ |
+| Ofertas | cotizar, ofertas, oferta detalle, enviar oferta, aceptada, rechazada | ✅ |
+| Recursos | brochure, ubicación, video | ✅ |
+| Lead mgmt | nuevo lead, pausar, reanudar, perdido, contactar, crédito | ✅ |
+| Bridge + otros | bridge, #cerrar, coaching, cerrar venta, apartado | ✅ |
+| Restantes | recordar llamar, asignar asesor, propiedades | ✅ |
+
+**3 bugs encontrados en screenshot de WhatsApp y corregidos:**
+
+| Bug | Causa | Fix |
+|-----|-------|-----|
+| `llamar edson` → "Error al procesar llamada" | `registrarLlamada()` y `formatLlamarLead()` no existían en VendorCommandsService | Agregados ambos métodos |
+| `notas edson` → forwarded como mensaje a lead | `sugerencia_pendiente` interceptaba antes de command routing | Whitelist de 45+ keywords de comandos antes del check |
+| `quien es edson` → "No encontré" | Transient (búsqueda `.ilike()` es correcta) | Verificado, código OK |
+
+**Fix asesor (sesión anterior):**
+
+| Bug | Fix |
+|-----|-----|
+| Asesor notificaciones usaban wrong pending key | Reemplazado con `enviarMensajeTeamMember()` + `pendingKey: 'pending_alerta_lead'` |
+| `[object Object]` en notif Lead Reasignado | Extraer banco, desarrollos, notas count del JSONB |
+
+**Commits:** `d690cedc` (asesor fixes), `11f4d465` (vendedor fixes)
+**Deploy:** Version ID `67cdf2be`
+**Tests:** 369/369 pasando
+
+### 2026-02-13 (Sesión 37 - Parte 2) - QA CEO Completo (57/57 comandos)
+
+**57 comandos de CEO probados via `/test-comando-ceo` + `/test-comando-vendedor` en producción.**
+
+| # | Categoría | Comandos | Estado |
+|---|-----------|----------|--------|
+| 1 | Reportes | ayuda, hoy, leads, equipo, ventas, conexiones, meta | 7/7 ✅ |
+| 2 | Análisis | pipeline, probabilidad, visitas, ofertas, alertas, mercado, clv, pendientes | 8/8 ✅ |
+| 3 | Finanzas | calcular 2500000, bancos, comparar monte verde vs andes | 3/3 ✅ |
+| 4 | Lead Mgmt | quien es, historial, notas, adelante, atras | 5/5 ✅ |
+| 5 | Comunicación | bridge, segmentos, broadcast, enviar a hot | 4/4 ✅ |
+| 6 | Recursos | brochure, ubicacion, video, reporte semanal/mensual, eventos | 6/6 ✅ |
+| 7 | Aliases | funnel, embudo, cotizaciones, riesgos, competencia, tendencias, referidos, objetivo | 8/8 ✅ |
+| 8 | Vendedor fallback | propiedades, mis leads, hot, citas, briefing, coaching, llamar, nota | 8/8 ✅ |
+| 9 | Asesor fallback | preaprobado, rechazado, contactado, docs, status | 5/5 ✅ |
+| 10 | Marketing fallback | campañas, metricas, enviar a segmento | 3/3 ✅ |
+
+**Funnel adelante/atrás verificado:**
+- `adelante edson`: negotiation → reserved ✅
+- `atrás edson`: reserved → negotiation ✅
+
+**Notas:**
+- Bridge controls (#cerrar, #mas) manejados en WhatsApp handler (no en ceoCommandsService)
+- Asesor/Marketing commands detectados via fallback chain en WhatsApp handler
+- Todos los aliases (funnel=pipeline, cotizaciones=ofertas, etc.) funcionan
