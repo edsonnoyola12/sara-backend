@@ -658,16 +658,6 @@ export class VendorCommandsService {
       return { matched: true, handlerName: 'vendedorMisOfertas' };
     }
 
-    // ═══ OFERTA [nombre] - Ver detalle de oferta de un lead ═══
-    const ofertaDetalleMatch = msg.match(/^oferta\s+([a-záéíóúñü][a-záéíóúñü\s]*)$/i);
-    if (ofertaDetalleMatch) {
-      return {
-        matched: true,
-        handlerName: 'vendedorVerOferta',
-        handlerParams: { nombreLead: ofertaDetalleMatch[1].trim() }
-      };
-    }
-
     // ═══ ENVIAR OFERTA [nombre] - Enviar oferta al cliente ═══
     const enviarOfertaMatch = msg.match(/^enviar\s+oferta\s+([a-záéíóúñü][a-záéíóúñü\s]*)$/i);
     if (enviarOfertaMatch) {
@@ -679,6 +669,7 @@ export class VendorCommandsService {
     }
 
     // ═══ OFERTA ACEPTADA / RECHAZADA [nombre] - Cambiar status de oferta ═══
+    // IMPORTANTE: Deben ir ANTES de "oferta [nombre]" genérico para no ser capturados
     const ofertaAceptadaMatch = msg.match(/^oferta\s+(?:aceptada|acepto|acepta)\s+([a-záéíóúñü][a-záéíóúñü\s]*)$/i);
     if (ofertaAceptadaMatch) {
       return {
@@ -697,6 +688,17 @@ export class VendorCommandsService {
           nombreLead: ofertaRechazadaMatch[1].trim(),
           razon: ofertaRechazadaMatch[2]?.trim() || null
         }
+      };
+    }
+
+    // ═══ OFERTA [nombre] - Ver detalle de oferta de un lead ═══
+    // NOTA: Va DESPUÉS de oferta aceptada/rechazada para no capturarlos
+    const ofertaDetalleMatch = msg.match(/^oferta\s+([a-záéíóúñü][a-záéíóúñü\s]*)$/i);
+    if (ofertaDetalleMatch) {
+      return {
+        matched: true,
+        handlerName: 'vendedorVerOferta',
+        handlerParams: { nombreLead: ofertaDetalleMatch[1].trim() }
       };
     }
 
@@ -1696,6 +1698,54 @@ export class VendorCommandsService {
     } catch (e) {
       return { success: false, error: 'Error al buscar notas' };
     }
+  }
+
+  async getPropiedadesDisponibles(): Promise<any[]> {
+    try {
+      const { data: props, error } = await this.supabase.client
+        .from('properties')
+        .select('id, name, development, price, price_equipped, bedrooms, bathrooms, construction_size, land_size')
+        .order('development')
+        .order('price', { ascending: true });
+
+      if (error) {
+        console.error('Error obteniendo propiedades:', error);
+        return [];
+      }
+      return props || [];
+    } catch (e) {
+      console.error('Error en getPropiedadesDisponibles:', e);
+      return [];
+    }
+  }
+
+  formatPropiedadesDisponibles(props: any[]): string {
+    if (!props || props.length === 0) {
+      return '📋 No hay propiedades registradas.';
+    }
+
+    // Agrupar por desarrollo
+    const porDesarrollo: Record<string, any[]> = {};
+    for (const p of props) {
+      const dev = p.development || 'Sin desarrollo';
+      if (!porDesarrollo[dev]) porDesarrollo[dev] = [];
+      porDesarrollo[dev].push(p);
+    }
+
+    let msg = `🏘️ *PROPIEDADES DISPONIBLES* (${props.length})\n\n`;
+    for (const [dev, modelos] of Object.entries(porDesarrollo)) {
+      msg += `*${dev}* (${modelos.length} modelos)\n`;
+      for (const m of modelos) {
+        const precio = m.price_equipped || m.price;
+        const precioFmt = precio ? `$${Number(precio).toLocaleString('es-MX')}` : 'Consultar';
+        const recs = m.bedrooms ? `${m.bedrooms} rec` : '';
+        const area = m.construction_size ? `${m.construction_size}m²` : '';
+        const detalles = [recs, area].filter(Boolean).join(', ');
+        msg += `  • ${m.name} - ${precioFmt}${detalles ? ` (${detalles})` : ''}\n`;
+      }
+      msg += '\n';
+    }
+    return msg.trim();
   }
 
   async getLlamarLead(nombreLead: string, vendedorId: string): Promise<{ found: boolean; lead?: any; error?: string }> {

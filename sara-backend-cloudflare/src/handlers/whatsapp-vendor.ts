@@ -1964,7 +1964,7 @@ export async function routeVendorCommand(ctx: HandlerContext, handler: any,
       await vendedorCambiarEtapa(ctx, handler, from, body, vendedor, params.etapa, params.texto);
       break;
     case 'vendedorCerrarVenta':
-      await vendedorCerrarVenta(ctx, handler, from, body, vendedor, nombreVendedor);
+      await vendedorCerrarVenta(ctx, handler, from, body, vendedor, nombreVendedor, params.nombreLead);
       break;
     case 'vendedorMoverEtapa':
       await vendedorMoverEtapa(ctx, handler, from, body, mensaje, vendedor, nombreVendedor);
@@ -1987,13 +1987,13 @@ export async function routeVendorCommand(ctx: HandlerContext, handler: any,
       await vendedorConfirmarEnvioABanco(ctx, handler, from, body, vendedor);
       break;
     case 'vendedorConsultarCredito':
-      await vendedorConsultarCredito(ctx, handler, from, params.nombre || body, vendedor);
+      await vendedorConsultarCredito(ctx, handler, from, params.nombreLead || params.nombre || body, vendedor);
       break;
     case 'vendedorPreguntarAsesor':
       await vendedorPreguntarAsesor(ctx, handler, from, params.nombre, vendedor, teamMembers);
       break;
     case 'vendedorAsignarAsesor':
-      await vendedorAsignarAsesor(ctx, handler, from, params.nombre, vendedor, teamMembers, params.telefono);
+      await vendedorAsignarAsesor(ctx, handler, from, params.nombreLead || params.nombre, vendedor, teamMembers, params.telefono);
       break;
 
     // ━━━ CITAS (flujos complejos) ━━━
@@ -3151,10 +3151,11 @@ export async function vendedorRegistrarApartado(ctx: HandlerContext, handler: an
     await ctx.twilio.sendWhatsAppMessage(from, '❌ Error registrando apartado. Intenta de nuevo.');
   }
 }
-export async function vendedorCerrarVenta(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, nombre: string): Promise<void> {
+export async function vendedorCerrarVenta(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, nombre: string, nombreLeadParam?: string): Promise<void> {
   const ventasService = new VentasService(ctx.supabase);
 
-  const nombreLead = ventasService.parseCerrarVenta(body);
+  // Usar nombre pre-parseado de detectRouteCommand si disponible
+  const nombreLead = nombreLeadParam || ventasService.parseCerrarVenta(body);
   if (!nombreLead) {
     await ctx.twilio.sendWhatsAppMessage(from, ventasService.getMensajeAyudaCerrarVenta());
     return;
