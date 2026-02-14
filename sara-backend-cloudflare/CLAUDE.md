@@ -4640,3 +4640,25 @@ new → contacted → qualified → scheduled → visited → negotiation → re
 **Tests:** 369/369 pasando
 **Commit:** `43e62110`
 **Deploy:** Version ID `03c44afc`
+
+### 2026-02-14 (Sesión 38 Parte 2) - Fix Recordatorios Duplicados (Race Condition)
+
+**Bug:** Lead recibió 7 recordatorios de cita duplicados en ~30 minutos.
+
+**Causa raíz:** Race condition en CRON cada 2 min. El flag `reminder_24h_sent` se actualizaba DESPUÉS de enviar el mensaje. Múltiples ejecuciones del CRON leían la misma cita antes de que el flag se guardara.
+
+**Fix: Mark-before-send pattern** — Actualizar el flag ANTES de enviar el mensaje en los 4 tipos de recordatorio:
+
+| Recordatorio | Flag | Línea original | Fix |
+|-------------|------|---------------|-----|
+| 24h lead | `reminder_24h_sent` | Después de sendWhatsAppMessage + TTS | Antes de sendWhatsAppMessage |
+| 24h vendedor | `reminder_vendor_24h_sent` | Después de enviarMensajeTeamMember | Antes de enviarMensajeTeamMember |
+| 2h lead | `reminder_2h_sent` | Después de sendWhatsAppMessage + TTS | Antes de sendWhatsAppMessage |
+| 2h vendedor | `reminder_vendor_2h_sent` | Después de enviarMensajeTeamMember | Antes de enviarMensajeTeamMember |
+
+**Trade-off:** Si el envío falla después de marcar, el recordatorio no se reenvía. Esto es preferible a enviar 7 duplicados.
+
+**Archivo:** `src/services/notificationService.ts`
+**Tests:** 369/369 pasando
+**Commit:** `1657327d`
+**Deploy:** Version ID `3038b1fc`
