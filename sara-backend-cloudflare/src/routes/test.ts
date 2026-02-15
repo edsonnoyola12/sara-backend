@@ -9645,6 +9645,23 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // UPDATE PROPERTY - Actualizar campo de una propiedad
+    // USO: /update-property?id=XXX&field=gps_link&value=https://...&api_key=XXX
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/update-property') {
+      const propId = url.searchParams.get('id');
+      const field = url.searchParams.get('field');
+      const value = url.searchParams.get('value');
+      if (!propId || !field || !value) return corsResponse(JSON.stringify({ error: 'Falta id, field o value' }), 400);
+      const allowed = ['gps_link', 'photo_url', 'youtube_link', 'price_equipped', 'price', 'description'];
+      if (!allowed.includes(field)) return corsResponse(JSON.stringify({ error: `Campo no permitido. Usar: ${allowed.join(', ')}` }), 400);
+      const { error } = await supabase.client.from('properties').update({ [field]: value }).eq('id', propId);
+      if (error) return corsResponse(JSON.stringify({ error: error.message }), 500);
+      const { data: updated } = await supabase.client.from('properties').select('name, ' + field).eq('id', propId).single();
+      return corsResponse(JSON.stringify({ ok: true, updated }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // ACTIVATE TEAM MEMBERS - Activar/desactivar miembros
     // USO: /activate-team?exclude=Vendedor Test,Asesor Crédito Test&api_key=XXX
     // ═══════════════════════════════════════════════════════════════
