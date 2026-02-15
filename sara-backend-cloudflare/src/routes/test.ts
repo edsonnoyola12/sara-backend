@@ -9662,6 +9662,64 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // CHECK FACEBOOK LEADS - Verificar suscripción de Facebook Lead Ads
+    // USO: /check-fb-leads?api_key=XXX
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/check-fb-leads') {
+      const token = env.META_ACCESS_TOKEN;
+      const results: any = {};
+
+      // 1. Check app subscriptions
+      try {
+        const appResp = await fetch(`https://graph.facebook.com/v21.0/1552990676007903/subscriptions?access_token=${token}`);
+        const appData: any = await appResp.json();
+        results.app_subscriptions = appData.data || appData;
+      } catch (e: any) { results.app_subscriptions_error = e.message; }
+
+      // 2. Get WABA ID and check for pages
+      try {
+        const wabaResp = await fetch(`https://graph.facebook.com/v21.0/${env.META_WHATSAPP_BUSINESS_ID}?fields=name,id&access_token=${token}`);
+        const wabaData: any = await wabaResp.json();
+        results.whatsapp_business = wabaData;
+      } catch (e: any) { results.waba_error = e.message; }
+
+      // 3. Try to get pages associated with the business
+      try {
+        const bizResp = await fetch(`https://graph.facebook.com/v21.0/me/accounts?access_token=${token}`);
+        const bizData: any = await bizResp.json();
+        results.pages = bizData.data || bizData;
+
+        // 4. For each page, check leadgen subscriptions
+        if (Array.isArray(results.pages)) {
+          for (const page of results.pages) {
+            try {
+              const subResp = await fetch(`https://graph.facebook.com/v21.0/${page.id}/subscribed_apps?access_token=${page.access_token || token}`);
+              const subData: any = await subResp.json();
+              page.subscribed_apps = subData.data || subData;
+            } catch (e: any) { page.subscription_error = e.message; }
+          }
+        }
+      } catch (e: any) { results.pages_error = e.message; }
+
+      // 5. Check webhook config on the WhatsApp side
+      results.webhook_url_expected = 'https://sara-backend.edson-633.workers.dev/webhook/facebook-leads';
+      results.webhook_verify_token = 'sara_fb_leads_token';
+
+      // 6. Check scopes
+      try {
+        const debugResp = await fetch(`https://graph.facebook.com/v21.0/debug_token?input_token=${token}&access_token=${token}`);
+        const debugData: any = await debugResp.json();
+        const scopes = debugData.data?.scopes || [];
+        results.token_scopes = scopes;
+        results.has_leads_retrieval = scopes.includes('leads_retrieval');
+        results.has_pages_manage = scopes.includes('pages_manage_metadata');
+        results.has_pages_read = scopes.includes('pages_read_engagement') || scopes.includes('pages_show_list');
+      } catch (e: any) { results.scopes_error = e.message; }
+
+      return corsResponse(JSON.stringify(results, null, 2));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // CHECK TOKEN - Verificar tipo y expiración del token de Meta
     // USO: /check-token?api_key=XXX
     // ═══════════════════════════════════════════════════════════════

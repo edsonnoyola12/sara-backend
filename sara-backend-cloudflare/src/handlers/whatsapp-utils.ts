@@ -1359,18 +1359,15 @@ export async function buscarYProcesarPostVisitaPorPhone(ctx: HandlerContext, pho
 
     const postVisitService = new (await import('../services/postVisitService')).PostVisitService(ctx.supabase);
 
-    let teamMembers: any[];
-    if (cachedTeamMembers && cachedTeamMembers.length > 0) {
-      teamMembers = cachedTeamMembers;
-      console.log(`📋 POST-VISITA SEARCH: Usando ${teamMembers.length} team_members del cache`);
-    } else {
-      const { data, error } = await ctx.supabase.client
-        .from('team_members')
-        .select('id, name, notes');
-      console.log(`📋 POST-VISITA SEARCH: team_members encontrados=${data?.length || 0}, error=${error?.message || 'ninguno'}`);
-      if (!data) return null;
-      teamMembers = data;
-    }
+    // SIEMPRE query fresh de DB - NO usar cachedTeamMembers
+    // El KV cache (5 min TTL) puede tener notas stale sin post_visit_context
+    // porque el CRON actualiza notes en DB pero el cache no se invalida
+    const { data, error } = await ctx.supabase.client
+      .from('team_members')
+      .select('id, name, notes');
+    console.log(`📋 POST-VISITA SEARCH: team_members encontrados=${data?.length || 0}, error=${error?.message || 'ninguno'}`);
+    if (!data) return null;
+    const teamMembers = data;
 
     let foundAnyContext = false;
     for (const tm of teamMembers) {

@@ -1079,17 +1079,18 @@ export async function iniciarFlujosPostVisita(supabase: SupabaseService, meta: M
       }
 
       try {
+        // MARK-BEFORE-SEND: Marcar cita como iniciada ANTES de enviar
+        // (Previene race condition: CRON cada 2 min puede procesar la misma cita)
+        await supabase.client
+          .from('appointments')
+          .update({ post_visit_initiated: true })
+          .eq('id', cita.id);
+
         // Iniciar flujo post-visita
         const { mensaje, context } = await postVisitService.iniciarFlujoPostVisita(cita, lead, vendedor);
 
         // Enviar pregunta al vendedor
         await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
-
-        // Marcar cita como iniciada
-        await supabase.client
-          .from('appointments')
-          .update({ post_visit_initiated: true })
-          .eq('id', cita.id);
 
         console.log(`📋 POST-VISITA: Pregunta enviada a ${vendedor.name} sobre ${lead.name}`);
 
