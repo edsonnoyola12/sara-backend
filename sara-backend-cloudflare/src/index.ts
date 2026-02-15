@@ -59,6 +59,7 @@ import {
   logEvento,
   ejecutarTareaOneTime,
   enviarBriefingMatutino,
+  prefetchBriefingData,
   enviarRecapDiario,
   enviarRecapSemanal,
   enviarRecordatoriosCitas,
@@ -151,7 +152,8 @@ import {
   verificarBridgesPorExpirar,
   procesarFollowupsPendientes,
   verificarLeadsEstancados,
-  felicitarAniversarioCompra
+  felicitarAniversarioCompra,
+  archivarConversationHistory
 } from './crons/maintenance';
 
 // Videos - Veo 3 video generation and processing
@@ -2234,6 +2236,18 @@ export default {
     // (Cumpleaños movido más abajo para incluir leads + equipo)
 
     // ═══════════════════════════════════════════════════════════
+    // ARCHIVAL: Recortar conversation_history >90 días (diario, 7 PM MX)
+    // ═══════════════════════════════════════════════════════════
+    if (event.cron === '0 1 * * *') {
+      try {
+        console.log('🗄️ Iniciando archival de conversation_history...');
+        await archivarConversationHistory(supabase);
+      } catch (e) {
+        console.error('❌ Error en archival:', e);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // 🎓 ONE-TIME: Reset onboarding 23-ene-2026 7:56am (antes del briefing)
     // Para que todos los vendedores vean el tutorial de SARA
     // ═══════════════════════════════════════════════════════════
@@ -2364,6 +2378,11 @@ export default {
       if (pendientes.length > 0) {
         console.log(`\n   📤 ${pendientes.length} VENDEDORES ELEGIBLES para briefing`);
 
+        // Pre-cargar datos en batch (6 queries en vez de 5-6 POR vendedor)
+        console.log(`   📦 Pre-cargando datos en batch...`);
+        const prefetchedData = await prefetchBriefingData(supabase);
+        console.log(`   ✅ Datos pre-cargados: ${prefetchedData.allCitasHoy.length} citas, ${prefetchedData.allLeadsNew.length} leads nuevos`);
+
         // Procesar máximo 5 por CRON para evitar timeout
         const BATCH_SIZE = 5;
         const lote = pendientes.slice(0, BATCH_SIZE);
@@ -2374,7 +2393,7 @@ export default {
         for (const v of lote) {
           console.log(`\n   ═══ PROCESANDO: ${v.name} ═══`);
           try {
-            await enviarBriefingMatutino(supabase, meta, v, { openaiApiKey: env.OPENAI_API_KEY });
+            await enviarBriefingMatutino(supabase, meta, v, { openaiApiKey: env.OPENAI_API_KEY, prefetchedData });
             enviados++;
           } catch (err) {
             console.error(`   ❌ Error enviando briefing a ${v.name}:`, err);

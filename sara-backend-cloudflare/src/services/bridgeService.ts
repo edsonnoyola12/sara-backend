@@ -13,6 +13,28 @@ export class BridgeService {
     leadPhone: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
+      // ═══ LOCK: Verificar que el lead NO tenga bridge activo con otro vendedor ═══
+      const { data: leadCheck } = await this.supabase.client
+        .from('leads')
+        .select('notes')
+        .eq('id', leadId)
+        .single();
+
+      const leadCheckNotes: any = safeJsonParse(leadCheck?.notes);
+      const existingBridge = leadCheckNotes.active_bridge_to_vendedor;
+
+      if (existingBridge && existingBridge.vendedor_id !== teamMemberId) {
+        const expiresAt = new Date(existingBridge.expires_at);
+        if (expiresAt > new Date()) {
+          // Bridge activo con OTRO vendedor - rechazar
+          console.log(`🔒 Bridge RECHAZADO: ${leadName} ya tiene bridge con ${existingBridge.vendedor_name} (expira: ${existingBridge.expires_at})`);
+          return {
+            success: false,
+            error: `${leadName} ya tiene chat directo con ${existingBridge.vendedor_name}. Espera a que termine o pide que escriba #cerrar.`
+          };
+        }
+      }
+
       // Obtener notas actuales del team member
       const { data: member } = await this.supabase.client
         .from('team_members')

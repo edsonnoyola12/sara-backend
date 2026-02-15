@@ -103,9 +103,77 @@ export async function ejecutarTareaOneTime(
 }
 
 // ═══════════════════════════════════════════════════════════
+// PREFETCH: Cargar datos en batch para todos los vendedores
+// Evita N queries por vendedor (45+ → 6 queries totales)
+// ═══════════════════════════════════════════════════════════
+export interface BriefingPrefetchData {
+  allCitasHoy: any[];
+  allLeadsNew: any[];
+  allLeadsEstancados: any[];
+  allHipotecasEstancadas: any[];
+  allCumpleaneros: any[];
+  promos: any[];
+}
+
+export async function prefetchBriefingData(supabase: SupabaseService): Promise<BriefingPrefetchData> {
+  const hoy = new Date();
+  const hoyStr = hoy.toISOString().split('T')[0];
+  const hace3dias = new Date();
+  hace3dias.setDate(hace3dias.getDate() - 3);
+  const hace7dias = new Date();
+  hace7dias.setDate(hace7dias.getDate() - 7);
+  const mesActual = String(hoy.getMonth() + 1).padStart(2, '0');
+  const diaActual = String(hoy.getDate()).padStart(2, '0');
+
+  // 6 queries en paralelo en vez de 5-6 POR vendedor
+  const [citasRes, leadsNewRes, leadsStaleRes, hipsRes, cumplesRes, promosRes] = await Promise.all([
+    supabase.client
+      .from('appointments')
+      .select('*, leads(name, phone)')
+      .eq('scheduled_date', hoyStr)
+      .eq('status', 'scheduled')
+      .order('scheduled_time', { ascending: true }),
+    supabase.client
+      .from('leads')
+      .select('name, phone, created_at, assigned_to')
+      .eq('status', 'new'),
+    supabase.client
+      .from('leads')
+      .select('name, phone, status, updated_at, assigned_to')
+      .in('status', ['contacted', 'appointment_scheduled'])
+      .lt('updated_at', hace3dias.toISOString()),
+    supabase.client
+      .from('mortgage_applications')
+      .select('lead_name, bank, status, updated_at, assigned_advisor_id')
+      .in('status', ['pending', 'in_review', 'documents', 'sent_to_bank'])
+      .lt('updated_at', hace7dias.toISOString()),
+    supabase.client
+      .from('leads')
+      .select('name, phone, assigned_to')
+      .ilike('birthday', `%-${mesActual}-${diaActual}`),
+    supabase.client
+      .from('promotions')
+      .select('name, development, discount_percent, end_date')
+      .lte('start_date', hoyStr)
+      .gte('end_date', hoyStr)
+      .eq('status', 'active')
+      .limit(3),
+  ]);
+
+  return {
+    allCitasHoy: citasRes.data || [],
+    allLeadsNew: leadsNewRes.data || [],
+    allLeadsEstancados: leadsStaleRes.data || [],
+    allHipotecasEstancadas: hipsRes.data || [],
+    allCumpleaneros: cumplesRes.data || [],
+    promos: promosRes.data || [],
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
 // BRIEFING MATUTINO - 8 AM L-V
 // ═══════════════════════════════════════════════════════════
-export async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhatsAppService, vendedor: any, options?: { openaiApiKey?: string }): Promise<void> {
+export async function enviarBriefingMatutino(supabase: SupabaseService, meta: MetaWhatsAppService, vendedor: any, options?: { openaiApiKey?: string; prefetchedData?: BriefingPrefetchData }): Promise<void> {
   console.log(`\n═══════════════════════════════════════════════════════════`);
   console.log(`📋 BRIEFING MATUTINO - Iniciando para: ${vendedor.name}`);
   console.log(`   📱 Teléfono: ${vendedor.phone}`);
@@ -147,77 +215,76 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
   console.log(`   ✅ No hay duplicado, continuando...`);
 
   // ═══════════════════════════════════════════════════════════
-  // 1. CITAS DEL DÍA
+  // DATOS: Usar prefetch si disponible, sino queries individuales
   // ═══════════════════════════════════════════════════════════
-  console.log(`\n   📊 CONSULTANDO DATOS...`);
-  const { data: citasHoy, error: errorCitas } = await supabase.client
-    .from('appointments')
-    .select('*, leads(name, phone)')
-    .eq('team_member_id', vendedor.id)
-    .eq('scheduled_date', hoyStr)
-    .eq('status', 'scheduled')
-    .order('scheduled_time', { ascending: true });
-  console.log(`   🗓️ Citas hoy: ${citasHoy?.length || 0}${errorCitas ? ` (ERROR: ${errorCitas.message})` : ''}`);
+  console.log(`\n   📊 ${options?.prefetchedData ? 'USANDO DATOS PRE-CARGADOS' : 'CONSULTANDO DATOS'}...`);
 
-  // ═══════════════════════════════════════════════════════════
-  // 2. LEADS QUE REQUIEREN ACCIÓN
-  // ═══════════════════════════════════════════════════════════
-  // 2a. Leads nuevos sin contactar
-  const { data: leadsSinContactar, error: errorLeadsNew } = await supabase.client
-    .from('leads')
-    .select('name, phone, created_at')
-    .eq('assigned_to', vendedor.id)
-    .eq('status', 'new');
-  console.log(`   🆕 Leads sin contactar: ${leadsSinContactar?.length || 0}${errorLeadsNew ? ` (ERROR: ${errorLeadsNew.message})` : ''}`);
+  let citasHoy: any[];
+  let leadsSinContactar: any[];
+  let leadsEstancados: any[];
+  let hipotecasEstancadas: any[];
+  let cumpleaneros: any[];
+  let promos: any[];
 
-  // 2b. Leads estancados (3+ días sin actividad)
-  const hace3dias = new Date();
-  hace3dias.setDate(hace3dias.getDate() - 3);
-  const { data: leadsEstancados, error: errorLeadsStale } = await supabase.client
-    .from('leads')
-    .select('name, phone, status, updated_at')
-    .eq('assigned_to', vendedor.id)
-    .in('status', ['contacted', 'appointment_scheduled'])
-    .lt('updated_at', hace3dias.toISOString());
-  console.log(`   ⏳ Leads estancados (3+ días): ${leadsEstancados?.length || 0}${errorLeadsStale ? ` (ERROR: ${errorLeadsStale.message})` : ''}`);
+  if (options?.prefetchedData) {
+    // Filtrar datos pre-cargados por vendedor (0 queries)
+    const pf = options.prefetchedData;
+    citasHoy = pf.allCitasHoy.filter((c: any) => c.team_member_id === vendedor.id);
+    leadsSinContactar = pf.allLeadsNew.filter((l: any) => l.assigned_to === vendedor.id);
+    leadsEstancados = pf.allLeadsEstancados.filter((l: any) => l.assigned_to === vendedor.id);
+    hipotecasEstancadas = vendedor.role === 'asesor'
+      ? pf.allHipotecasEstancadas.filter((h: any) => h.assigned_advisor_id === vendedor.id)
+      : [];
+    cumpleaneros = pf.allCumpleaneros.filter((c: any) => c.assigned_to === vendedor.id);
+    promos = pf.promos;
+  } else {
+    // Fallback: queries individuales (para /test-briefing endpoint)
+    const { data: c } = await supabase.client
+      .from('appointments').select('*, leads(name, phone)')
+      .eq('team_member_id', vendedor.id).eq('scheduled_date', hoyStr).eq('status', 'scheduled')
+      .order('scheduled_time', { ascending: true });
+    citasHoy = c || [];
 
-  // ═══════════════════════════════════════════════════════════
-  // 3. HIPOTECAS ESTANCADAS (si es asesor)
-  // ═══════════════════════════════════════════════════════════
-  let hipotecasEstancadas: any[] = [];
-  if (vendedor.role === 'asesor') {
-    const hace7dias = new Date();
-    hace7dias.setDate(hace7dias.getDate() - 7);
-    const { data: hips } = await supabase.client
-      .from('mortgage_applications')
-      .select('lead_name, bank, status, updated_at')
-      .eq('assigned_advisor_id', vendedor.id)
-      .in('status', ['pending', 'in_review', 'documents', 'sent_to_bank'])
-      .lt('updated_at', hace7dias.toISOString());
-    hipotecasEstancadas = hips || [];
+    const { data: ln } = await supabase.client
+      .from('leads').select('name, phone, created_at')
+      .eq('assigned_to', vendedor.id).eq('status', 'new');
+    leadsSinContactar = ln || [];
+
+    const hace3dias = new Date();
+    hace3dias.setDate(hace3dias.getDate() - 3);
+    const { data: le } = await supabase.client
+      .from('leads').select('name, phone, status, updated_at')
+      .eq('assigned_to', vendedor.id).in('status', ['contacted', 'appointment_scheduled'])
+      .lt('updated_at', hace3dias.toISOString());
+    leadsEstancados = le || [];
+
+    hipotecasEstancadas = [];
+    if (vendedor.role === 'asesor') {
+      const hace7dias = new Date();
+      hace7dias.setDate(hace7dias.getDate() - 7);
+      const { data: hips } = await supabase.client
+        .from('mortgage_applications').select('lead_name, bank, status, updated_at')
+        .eq('assigned_advisor_id', vendedor.id).in('status', ['pending', 'in_review', 'documents', 'sent_to_bank'])
+        .lt('updated_at', hace7dias.toISOString());
+      hipotecasEstancadas = hips || [];
+    }
+
+    const mesActual = String(hoy.getMonth() + 1).padStart(2, '0');
+    const diaActual = String(hoy.getDate()).padStart(2, '0');
+    const { data: cu } = await supabase.client
+      .from('leads').select('name, phone')
+      .eq('assigned_to', vendedor.id).ilike('birthday', `%-${mesActual}-${diaActual}`);
+    cumpleaneros = cu || [];
+
+    const { data: pr } = await supabase.client
+      .from('promotions').select('name, development, discount_percent, end_date')
+      .lte('start_date', hoyStr).gte('end_date', hoyStr).eq('status', 'active').limit(3);
+    promos = pr || [];
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 4. CUMPLEAÑOS DEL DÍA
-  // ═══════════════════════════════════════════════════════════
-  const mesActual = String(hoy.getMonth() + 1).padStart(2, '0');
-  const diaActual = String(hoy.getDate()).padStart(2, '0');
-  const { data: cumpleaneros } = await supabase.client
-    .from('leads')
-    .select('name, phone')
-    .eq('assigned_to', vendedor.id)
-    .ilike('birthday', `%-${mesActual}-${diaActual}`);
-
-  // ═══════════════════════════════════════════════════════════
-  // 5. PROMOCIONES ACTIVAS
-  // ═══════════════════════════════════════════════════════════
-  const { data: promos } = await supabase.client
-    .from('promotions')
-    .select('name, development, discount_percent, end_date')
-    .lte('start_date', hoyStr)
-    .gte('end_date', hoyStr)
-    .eq('status', 'active')
-    .limit(3);
+  console.log(`   🗓️ Citas hoy: ${citasHoy.length}`);
+  console.log(`   🆕 Leads sin contactar: ${leadsSinContactar.length}`);
+  console.log(`   ⏳ Leads estancados: ${leadsEstancados.length}`);
 
   // ═══════════════════════════════════════════════════════════
   // CONSTRUIR MENSAJE CONSOLIDADO

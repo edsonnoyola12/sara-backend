@@ -164,6 +164,72 @@ export async function procesarFollowupsPendientes(supabase: SupabaseService, met
 }
 
 // ═══════════════════════════════════════════════════════════
+// ARCHIVAR CONVERSATION_HISTORY VIEJO (>90 días)
+// Recorta entries antiguos para evitar que JSONB crezca infinitamente
+// Un lead activo 1 año ≈ 900KB sin archival
+// ═══════════════════════════════════════════════════════════
+export async function archivarConversationHistory(supabase: SupabaseService): Promise<void> {
+  try {
+    console.log('🗄️ Archivando conversation_history antiguos...');
+
+    // Buscar leads con conversation_history no vacío
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, conversation_history')
+      .not('conversation_history', 'is', null);
+
+    if (!leads || leads.length === 0) {
+      console.log('🗄️ No hay leads con conversation_history');
+      return;
+    }
+
+    const hace90dias = new Date();
+    hace90dias.setDate(hace90dias.getDate() - 90);
+    const cutoff = hace90dias.toISOString();
+    const MIN_KEEP = 30; // Siempre mantener al menos 30 entries
+
+    let archivados = 0;
+    let entriesTrimmed = 0;
+
+    for (const lead of leads) {
+      const historial = lead.conversation_history;
+      if (!Array.isArray(historial) || historial.length <= MIN_KEEP) continue;
+
+      // Contar entries viejos
+      let oldCount = 0;
+      for (const entry of historial) {
+        const ts = entry.timestamp || entry.created_at;
+        if (ts && ts < cutoff) oldCount++;
+      }
+
+      // Solo archivar si hay entries viejos Y quedarían >= MIN_KEEP
+      if (oldCount === 0) continue;
+      const keepFromEnd = Math.max(MIN_KEEP, historial.length - oldCount);
+      if (keepFromEnd >= historial.length) continue;
+
+      // Mantener los últimos N entries
+      const trimmed = historial.slice(-keepFromEnd);
+      const removedCount = historial.length - trimmed.length;
+
+      const { error } = await supabase.client
+        .from('leads')
+        .update({ conversation_history: trimmed })
+        .eq('id', lead.id);
+
+      if (!error) {
+        archivados++;
+        entriesTrimmed += removedCount;
+        console.log(`🗄️ ${lead.name}: ${historial.length} → ${trimmed.length} entries (-${removedCount})`);
+      }
+    }
+
+    console.log(`🗄️ Archival completado: ${archivados} leads, ${entriesTrimmed} entries removidos`);
+  } catch (e) {
+    console.error('❌ Error en archival de conversation_history:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // VERIFICAR LEADS ESTANCADOS
 // ═══════════════════════════════════════════════════════════
 export async function verificarLeadsEstancados(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
