@@ -8,6 +8,7 @@ import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { BroadcastQueueService } from '../services/broadcastQueueService';
 import { logEvento } from './briefings';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
+import { safeJsonParse } from '../utils/safeHelpers';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LÍMITE DE MENSAJES AUTOMÁTICOS POR DÍA
@@ -27,7 +28,7 @@ export async function puedeEnviarMensajeAutomatico(supabase: SupabaseService, le
 
     if (!lead) return false;
 
-    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const notes = safeJsonParse(lead.notes);
     const mensajesHoy = notes.mensajes_automaticos_hoy || { fecha: '', count: 0 };
 
     // Si es un nuevo día, resetear contador
@@ -60,7 +61,7 @@ export async function registrarMensajeAutomatico(supabase: SupabaseService, lead
 
     if (!lead) return;
 
-    const notes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+    const notes = safeJsonParse(lead.notes);
     const mensajesHoy = notes.mensajes_automaticos_hoy || { fecha: '', count: 0 };
 
     // Si es un nuevo día, resetear
@@ -129,7 +130,7 @@ export async function seguimientoHipotecas(supabase: SupabaseService, meta: Meta
       try {
         const { data: leadFull } = await supabase.client
           .from('leads').select('notes').eq('id', hip.lead_id).single();
-        const notas = typeof leadFull?.notes === 'string' ? JSON.parse(leadFull?.notes || '{}') : (leadFull?.notes || {});
+        const notas = safeJsonParse(leadFull?.notes);
         const vendedorOrigId = notas.vendedor_original_id;
         if (vendedorOrigId && vendedorOrigId !== asesor.id) {
           const { data: vendedorOrig } = await supabase.client

@@ -1,4 +1,5 @@
 import { SupabaseService } from './supabase';
+import { safeJsonParse } from '../utils/safeHelpers';
 
 export class BridgeService {
   constructor(private supabase: SupabaseService) {}
@@ -19,10 +20,7 @@ export class BridgeService {
         .eq('id', teamMemberId)
         .single();
 
-      let notes: any = {};
-      if (member?.notes) {
-        notes = typeof member.notes === 'string' ? JSON.parse(member.notes) : member.notes;
-      }
+      let notes: any = safeJsonParse(member?.notes);
 
       // Configurar bridge activo (6 minutos)
       const expiresAt = new Date(Date.now() + 6 * 60 * 1000).toISOString();
@@ -36,10 +34,11 @@ export class BridgeService {
       };
 
       // Guardar en notas del team member
-      await this.supabase.client
+      const { error: bridgeTmErr } = await this.supabase.client
         .from('team_members')
         .update({ notes })
         .eq('id', teamMemberId);
+      if (bridgeTmErr) console.error('❌ Bridge: Error guardando notes team_member:', bridgeTmErr.message);
 
       // También guardar en notas del lead para que sus respuestas se redirijan
       const { data: lead } = await this.supabase.client
@@ -48,10 +47,7 @@ export class BridgeService {
         .eq('id', leadId)
         .single();
 
-      let leadNotes: any = {};
-      if (lead?.notes) {
-        leadNotes = typeof lead.notes === 'string' ? JSON.parse(lead.notes) : lead.notes;
-      }
+      let leadNotes: any = safeJsonParse(lead?.notes);
 
       leadNotes.active_bridge_to_vendedor = {
         vendedor_id: teamMemberId,
@@ -60,10 +56,11 @@ export class BridgeService {
         expires_at: expiresAt
       };
 
-      await this.supabase.client
+      const { error: bridgeLeadErr } = await this.supabase.client
         .from('leads')
         .update({ notes: leadNotes })
         .eq('id', leadId);
+      if (bridgeLeadErr) console.error('❌ Bridge: Error guardando notes lead:', bridgeLeadErr.message);
 
       console.log(`🔗 Bridge activado: ${teamMemberName} ↔ ${leadName} (expira: ${expiresAt})`);
       return { success: true };

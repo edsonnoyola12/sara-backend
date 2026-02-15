@@ -10,6 +10,7 @@ import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { createRetellService, RetellService } from '../services/retellService';
 import { createTTSService, TTSService } from '../services/ttsService';
+import { safeJsonParse } from './safeHelpers';
 
 export interface EnviarMensajeTeamResult {
   success: boolean;
@@ -119,9 +120,7 @@ export async function enviarMensajeTeamMember(
 
   try {
     // 1. Obtener notas actuales
-    const notasActuales = typeof teamMember.notes === 'string'
-      ? JSON.parse(teamMember.notes || '{}')
-      : (teamMember.notes || {});
+    const notasActuales = safeJsonParse(teamMember.notes);
 
     // 2. Verificar ventana 24h
     const lastInteraction = notasActuales.last_sara_interaction;
@@ -380,9 +379,7 @@ export async function llamarTeamMemberConRetell(
   }
 
   // Verificar límite de llamadas por día
-  const notasActuales = typeof teamMember.notes === 'string'
-    ? JSON.parse(teamMember.notes || '{}')
-    : (teamMember.notes || {});
+  const notasActuales = safeJsonParse(teamMember.notes);
 
   const hoy = new Date().toISOString().split('T')[0];
   const llamadasHoy = notasActuales.llamadas_retell_hoy || { fecha: '', count: 0 };
@@ -470,7 +467,7 @@ export async function verificarPendingParaLlamar(
   const dosHorasMs = CALL_CONFIG.esperaAntesLlamar * 60 * 60 * 1000;
 
   for (const tm of teamMembers) {
-    const notas = typeof tm.notes === 'string' ? JSON.parse(tm.notes || '{}') : (tm.notes || {});
+    const notas = safeJsonParse(tm.notes);
 
     // Buscar pending messages de tipos que permiten llamada
     for (const tipo of CALL_CONFIG.tiposConLlamada) {
@@ -595,7 +592,7 @@ export async function verificarDeliveryTeamMessages(
     const VEINTICUATRO_H = 24 * 60 * 60 * 1000;
 
     for (const tm of teamMembers) {
-      const notas = typeof tm.notes === 'string' ? JSON.parse(tm.notes || '{}') : (tm.notes || {});
+      const notas = safeJsonParse(tm.notes);
 
       // 2. Recopilar wamids de: last_team_message_wamids + pending keys con wamid
       const wamidsToCheck: Array<{ wamid: string; sent_at: string; tipo: string; source: string }> = [];

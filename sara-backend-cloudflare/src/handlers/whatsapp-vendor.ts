@@ -9,6 +9,7 @@ import { FollowupService } from '../services/followupService';
 import { BridgeService } from '../services/bridgeService';
 import { isPendingExpired } from '../utils/teamMessaging';
 import { AppointmentService } from '../services/appointmentService';
+import { safeJsonParse } from '../utils/safeHelpers';
 
 export async function handleVendedorMessage(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, teamMembers: any[]): Promise<void> {
   const mensaje = body.toLowerCase().trim();
@@ -2219,8 +2220,7 @@ export async function vendedorCerrarBridge(ctx: HandlerContext, handler: any, fr
       .eq('id', vendedor.id)
       .single();
 
-    const notes = vendedorData?.notes ?
-      (typeof vendedorData.notes === 'string' ? JSON.parse(vendedorData.notes) : vendedorData.notes) : {};
+    const notes = safeJsonParse(vendedorData?.notes);
 
     let cerradoAlgo = false;
     let leadsAfectados: string[] = [];
@@ -2237,8 +2237,7 @@ export async function vendedorCerrarBridge(ctx: HandlerContext, handler: any, fr
         .single();
 
       if (leadData) {
-        const leadNotes = leadData.notes ?
-          (typeof leadData.notes === 'string' ? JSON.parse(leadData.notes) : leadData.notes) : {};
+        const leadNotes = safeJsonParse(leadData.notes);
         delete leadNotes.active_bridge_to_vendedor;
         await ctx.supabase.client
           .from('leads')
@@ -5538,12 +5537,7 @@ export async function vendedorContactarLead(ctx: HandlerContext, handler: any, f
       .eq('id', vendedor.id)
       .single();
 
-    let notasVendedor: any = {};
-    if (vendedorData?.notes) {
-      notasVendedor = typeof vendedorData.notes === 'string'
-        ? JSON.parse(vendedorData.notes)
-        : vendedorData.notes;
-    }
+    let notasVendedor: any = safeJsonParse(vendedorData?.notes);
 
     notasVendedor.pending_template_selection = {
       lead_id: lead.id,

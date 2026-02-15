@@ -25,6 +25,7 @@ import { getAvailableVendor, TeamMemberAvailability } from './services/leadManag
 import { createTTSTrackingService } from './services/ttsTrackingService';
 import { createMessageTrackingService } from './services/messageTrackingService';
 import { BusinessHoursService } from './services/businessHoursService';
+import { safeJsonParse } from './utils/safeHelpers';
 
 // CRON modules
 import {
@@ -225,8 +226,8 @@ function isAllowedOrigin(origin: string | null): boolean {
 
 function getCorsOrigin(request: Request): string {
   const origin = request.headers.get('Origin');
-  // Permitir cualquier origen para el CRM (simplificado)
-  if (origin) {
+  // Validar contra whitelist
+  if (origin && isAllowedOrigin(origin)) {
     return origin;
   }
   // Para webhooks de Meta/Facebook que no tienen Origin header
@@ -828,9 +829,7 @@ export default {
 
           if (teamMember) {
             // ═══ DEDUPLICACIÓN TEAM MEMBERS ═══
-            const tmNotes = typeof teamMember.notes === 'string'
-              ? JSON.parse(teamMember.notes || '{}')
-              : (teamMember.notes || {});
+            const tmNotes = safeJsonParse(teamMember.notes);
             const tmLastMsgId = tmNotes.last_processed_msg_id;
 
             // Si el mismo mensaje ID ya fue procesado, saltar
@@ -840,7 +839,7 @@ export default {
             }
 
             // Marcar este mensaje como en proceso
-            await supabase.client
+            const { error: dedupTmErr } = await supabase.client
               .from('team_members')
               .update({
                 notes: {
@@ -850,7 +849,8 @@ export default {
                 }
               })
               .eq('id', teamMember.id);
-            console.log(`👤 [TEAM] Deduplicación OK para team_member ${teamMember.id}`);
+            if (dedupTmErr) console.error('❌ Dedup team_member write failed:', dedupTmErr.message);
+            else console.log(`👤 [TEAM] Deduplicación OK para team_member ${teamMember.id}`);
           } else {
             // ═══ DEDUPLICACIÓN LEADS ═══
             const { data: recentMsg } = await supabase.client
@@ -859,8 +859,9 @@ export default {
               .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`)
               .maybeSingle();
 
-            const lastMsgId = recentMsg?.notes?.last_processed_msg_id;
-            const lastMsgTime = recentMsg?.notes?.last_processed_msg_time;
+            const leadNotes = safeJsonParse(recentMsg?.notes);
+            const lastMsgId = leadNotes.last_processed_msg_id;
+            const lastMsgTime = leadNotes.last_processed_msg_time;
 
             // Si el mismo mensaje ID ya fue procesado, saltar
             if (lastMsgId === messageId) {
@@ -876,16 +877,17 @@ export default {
 
             // Marcar este mensaje como en proceso
             if (recentMsg) {
-              await supabase.client
+              const { error: dedupLeadErr } = await supabase.client
                 .from('leads')
                 .update({
                   notes: {
-                    ...(recentMsg.notes || {}),
+                    ...leadNotes,
                     last_processed_msg_id: messageId,
                     last_processed_msg_time: now
                   }
                 })
                 .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`);
+              if (dedupLeadErr) console.error('❌ Dedup lead write failed:', dedupLeadErr.message);
             }
           }
           // ═══ FIN DEDUPLICACIÓN ═══
@@ -2246,7 +2248,7 @@ export default {
 
         let reseteados = 0;
         for (const v of todosVendedores || []) {
-          const notas = typeof v.notes === 'string' ? JSON.parse(v.notes || '{}') : (v.notes || {});
+          const notas = safeJsonParse(v.notes);
           if (notas.onboarding_completed) {
             delete notas.onboarding_completed;
             delete notas.onboarding_date;

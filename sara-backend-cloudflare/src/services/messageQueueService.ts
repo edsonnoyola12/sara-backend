@@ -17,6 +17,7 @@
 
 import { SupabaseService } from './supabase';
 import { MetaWhatsAppService } from './meta-whatsapp';
+import { safeJsonParse } from '../utils/safeHelpers';
 
 // Tipos para el sistema de cola
 export interface QueuedMessage {
@@ -114,9 +115,7 @@ export class MessageQueueService {
       }
 
       // 2. Verificar ventana 24h
-      const notes = typeof teamMember.notes === 'string'
-        ? JSON.parse(teamMember.notes || '{}')
-        : (teamMember.notes || {});
+      const notes = safeJsonParse(teamMember.notes);
 
       const lastInteraction = notes.last_sara_interaction;
       const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -441,9 +440,7 @@ export class MessageQueueService {
    * Guarda mensaje pendiente en notes (sistema legacy)
    */
   private async savePendingToNotes(teamMember: any, messageType: MessageType, messageContent: string): Promise<void> {
-    const notes = typeof teamMember.notes === 'string'
-      ? JSON.parse(teamMember.notes || '{}')
-      : (teamMember.notes || {});
+    const notes = safeJsonParse(teamMember.notes);
 
     const pendingKey = this.getPendingKey(messageType);
 
@@ -472,9 +469,7 @@ export class MessageQueueService {
 
     if (!teamMember) return null;
 
-    const notes = typeof teamMember.notes === 'string'
-      ? JSON.parse(teamMember.notes || '{}')
-      : (teamMember.notes || {});
+    const notes = safeJsonParse(teamMember.notes);
 
     // Buscar en orden de prioridad
     const pendingKeys: { key: string; type: MessageType; priority: number }[] = [
@@ -532,9 +527,7 @@ export class MessageQueueService {
 
     if (!teamMember) return;
 
-    const notes = typeof teamMember.notes === 'string'
-      ? JSON.parse(teamMember.notes || '{}')
-      : (teamMember.notes || {});
+    const notes = safeJsonParse(teamMember.notes);
 
     const pendingKey = this.getPendingKey(messageType as MessageType);
     delete notes[pendingKey];

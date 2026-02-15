@@ -268,15 +268,44 @@ export class MetaWhatsAppService {
     // Sanitizar UTF-8 antes de enviar
     const cleanBody = sanitizeUTF8(body);
 
+    // Validar largo de mensaje - WhatsApp límite 4096 chars
+    if (cleanBody.length > 4000) {
+      console.warn(`⚠️ Mensaje largo (${cleanBody.length} chars) a ${phone}, dividiendo...`);
+      const chunks: string[] = [];
+      let remaining = cleanBody;
+      while (remaining.length > 0) {
+        if (remaining.length <= 4000) {
+          chunks.push(remaining);
+          break;
+        }
+        let splitAt = remaining.lastIndexOf('\n', 4000);
+        if (splitAt < 2000) splitAt = remaining.lastIndexOf('. ', 4000);
+        if (splitAt < 2000) splitAt = 4000;
+        chunks.push(remaining.substring(0, splitAt));
+        remaining = remaining.substring(splitAt).trimStart();
+      }
+      let lastResult: any;
+      for (const chunk of chunks) {
+        lastResult = await this._sendSingleMessage(phone, chunk, bypassRateLimit);
+      }
+      return lastResult;
+    }
+
+    return this._sendSingleMessage(phone, cleanBody, bypassRateLimit);
+  }
+
+  private async _sendSingleMessage(phone: string, body: string, bypassRateLimit: boolean): Promise<any> {
+    const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
+
     const payload = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
       to: phone,
       type: 'text',
-      text: { preview_url: true, body: cleanBody }
+      text: { preview_url: true, body }
     };
 
-    console.log(`📤 Meta WA enviando a ${phone}: ${cleanBody.substring(0, 50)}...`);
+    console.log(`📤 Meta WA enviando a ${phone}: ${body.substring(0, 50)}...`);
 
     const response = await this.fetchWithRetry(url, {
       method: 'POST',
@@ -302,7 +331,7 @@ export class MetaWhatsAppService {
         recipientPhone: phone,
         messageType: 'text',
         categoria: bypassRateLimit ? 'respuesta_sara' : 'broadcast',
-        contenido: cleanBody.substring(0, 200)
+        contenido: body.substring(0, 200)
       });
     }
 

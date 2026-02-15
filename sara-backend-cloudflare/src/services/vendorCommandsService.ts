@@ -1,4 +1,5 @@
 import { SupabaseService } from './supabase';
+import { safeJsonParse } from '../utils/safeHelpers';
 
 /**
  * Sanitiza notas para evitar corrupción.
@@ -829,7 +830,7 @@ export class VendorCommandsService {
       }
 
       // 4. Actualizar lead con asesor asignado
-      const leadNotes = typeof lead.notes === 'string' ? JSON.parse(lead.notes) : (lead.notes || {});
+      const leadNotes = safeJsonParse(lead.notes);
       leadNotes.asesor_id = asesor.id;
       leadNotes.asesor_name = asesor.name;
       leadNotes.asesor_asignado_at = new Date().toISOString();

@@ -8,6 +8,7 @@ import * as utils from './whatsapp-utils';
 import { isPendingExpired } from '../utils/teamMessaging';
 import { CEOCommandsService } from '../services/ceoCommandsService';
 import { AgenciaCommandsService } from '../services/agenciaCommandsService';
+import { safeJsonParse } from '../utils/safeHelpers';
 import { AsesorCommandsService } from '../services/asesorCommandsService';
 import { VendorCommandsService } from '../services/vendorCommandsService';
 import { BridgeService } from '../services/bridgeService';
@@ -407,10 +408,7 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
           .eq('id', pendingMsgToLead.lead_id)
           .single();
 
-        let leadNotes: any = {};
-        if (leadData?.notes) {
-          leadNotes = typeof leadData.notes === 'string' ? JSON.parse(leadData.notes) : leadData.notes;
-        }
+        let leadNotes: any = safeJsonParse(leadData?.notes);
         leadNotes.pending_response_to = {
           team_member_id: ceo.id,
           team_member_name: ceo.name,
@@ -744,10 +742,7 @@ export async function ceoMensajeLead(ctx: HandlerContext, handler: any, from: st
 
       if (leads.length > 1) {
         // Guardar selección pendiente
-        let notes: any = {};
-        if (ceo.notes) {
-          notes = typeof ceo.notes === 'string' ? JSON.parse(ceo.notes) : ceo.notes;
-        }
+        let notes: any = safeJsonParse(ceo.notes);
         notes.pending_lead_selection = {
           leads: leads.map((l: any) => ({ id: l.id, name: l.name, phone: l.phone })),
           action: 'mensaje',
@@ -773,10 +768,7 @@ export async function ceoMensajeLead(ctx: HandlerContext, handler: any, from: st
       }
 
       // Guardar pending para esperar el mensaje
-      let notes: any = {};
-      if (ceo.notes) {
-        notes = typeof ceo.notes === 'string' ? JSON.parse(ceo.notes) : ceo.notes;
-      }
+      let notes: any = safeJsonParse(ceo.notes);
       notes.pending_message_to_lead = {
         lead_id: lead.id,
         lead_name: lead.name,
@@ -873,8 +865,7 @@ export async function ceoBridgeLead(ctx: HandlerContext, handler: any, from: str
           .eq('id', ceo.id)
           .single();
 
-        const notes = ceoData?.notes ?
-          (typeof ceoData.notes === 'string' ? JSON.parse(ceoData.notes) : ceoData.notes) : {};
+        const notes = safeJsonParse(ceoData?.notes);
 
         notes.pending_lead_selection = {
           leads: leads.map(l => ({ id: l.id, name: l.name, phone: l.phone })),
@@ -1130,8 +1121,7 @@ export async function ceoCerrarBridge(ctx: HandlerContext, handler: any, from: s
         .eq('id', ceo.id)
         .single();
 
-      const notes = ceoData?.notes ?
-        (typeof ceoData.notes === 'string' ? JSON.parse(ceoData.notes) : ceoData.notes) : {};
+      const notes = safeJsonParse(ceoData?.notes);
 
       let cerradoAlgo = false;
       let leadsAfectados: string[] = [];
@@ -1149,8 +1139,7 @@ export async function ceoCerrarBridge(ctx: HandlerContext, handler: any, from: s
           .single();
 
         if (leadData) {
-          const leadNotes = leadData.notes ?
-            (typeof leadData.notes === 'string' ? JSON.parse(leadData.notes) : leadData.notes) : {};
+          const leadNotes = safeJsonParse(leadData.notes);
           delete leadNotes.active_bridge_to_vendedor;
           await ctx.supabase.client
             .from('leads')

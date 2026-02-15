@@ -1,27 +1,67 @@
 import { SupabaseService } from '../services/supabase';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
+const ALLOWED_CRM_ORIGINS = [
+  'https://sara-crm.vercel.app',
+  'https://sara-crm-new.vercel.app',
+  'https://sara-crm.netlify.app',
+  'https://gruposantarita.com',
+  'https://www.gruposantarita.com',
+  'http://localhost:3000',
+  'http://localhost:5173',
+];
+
+function getCorsHeadersForRequest(request: Request): Record<string, string> {
+  const origin = request.headers.get('Origin');
+  const allowed = origin && (
+    ALLOWED_CRM_ORIGINS.includes(origin) ||
+    /^https:\/\/sara-crm.*\.vercel\.app$/.test(origin)
+  );
+  return {
+    'Access-Control-Allow-Origin': allowed ? origin! : ALLOWED_CRM_ORIGINS[0],
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  };
+}
+
+function checkTeamAuth(request: Request, env: any): boolean {
+  // API key auth
+  const authHeader = request.headers.get('Authorization');
+  const apiKey = authHeader?.replace('Bearer ', '');
+  const url = new URL(request.url);
+  const queryKey = url.searchParams.get('api_key');
+  if (env.API_SECRET && (apiKey === env.API_SECRET || queryKey === env.API_SECRET)) return true;
+  // Origin-based auth
+  const origin = request.headers.get('Origin');
+  if (origin && (ALLOWED_CRM_ORIGINS.includes(origin) || /^https:\/\/sara-crm.*\.vercel\.app$/.test(origin))) return true;
+  // No API_SECRET configured = dev mode
+  if (!env.API_SECRET) return true;
+  return false;
+}
 
 export async function handleTeamRoutes(request: Request, env: any, supabase: SupabaseService): Promise<Response | null> {
   const url = new URL(request.url);
   
+  const corsHeaders = getCorsHeadersForRequest(request);
+
   if (url.pathname === '/api/team-members' && request.method === 'GET') {
+    if (!checkTeamAuth(request, env)) {
+      return new Response(JSON.stringify({ error: 'No autorizado' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
     const { data, error } = await supabase.client
       .from('team_members')
       .select('*')
       .order('name');
-    
+
     if (error) {
       return new Response(JSON.stringify({ error: error.message }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-    
+
     return new Response(JSON.stringify(data), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });

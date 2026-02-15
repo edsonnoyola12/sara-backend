@@ -1,6 +1,7 @@
 import { SupabaseService } from './supabase';
 import { MetaWhatsAppService } from './meta-whatsapp';
 import { ClaudeService } from './claude';
+import { safeJsonParse } from '../utils/safeHelpers';
 
 interface VendorMetrics {
   id: string;
@@ -276,9 +277,7 @@ export class IACoachingService {
           .eq('id', vendedorId)
           .single();
 
-        const notasActuales = typeof vendedorActual?.notes === 'string'
-          ? JSON.parse(vendedorActual.notes || '{}')
-          : (vendedorActual?.notes || {});
+        const notasActuales = safeJsonParse(vendedorActual?.notes);
 
         notasActuales.last_coaching_sent = new Date().toISOString();
 
@@ -325,9 +324,7 @@ export class IACoachingService {
         // Buscar en campo directo O en notes (fallback)
         let lastCoachingDate = vendedor.last_coaching_sent;
         if (!lastCoachingDate && vendedor.notes) {
-          const notas = typeof vendedor.notes === 'string'
-            ? JSON.parse(vendedor.notes || '{}')
-            : (vendedor.notes || {});
+          const notas = safeJsonParse(vendedor.notes);
           lastCoachingDate = notas.last_coaching_sent;
         }
 

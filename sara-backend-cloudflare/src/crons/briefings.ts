@@ -16,6 +16,7 @@ import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { createTTSService } from '../services/ttsService';
+import { safeJsonParse } from '../utils/safeHelpers';
 
 // ═══════════════════════════════════════════════════════════
 // FELICITACIONES DE CUMPLEAÑOS - TEAM MEMBERS
@@ -297,7 +298,7 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
   console.log(`\n   📤 PREPARANDO ENVÍO...`);
   try {
     const nombreCorto = vendedor.name?.split(' ')[0] || 'Hola';
-    const notasActuales = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
+    const notasActuales = safeJsonParse(vendedor.notes);
 
     // Verificar si tiene ventana 24h abierta
     const lastInteraction = notasActuales.last_sara_interaction;
@@ -339,9 +340,7 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
         .select('notes')
         .eq('id', vendedor.id)
         .maybeSingle();
-      const freshNotas = typeof freshMember?.notes === 'string'
-        ? JSON.parse(freshMember.notes || '{}')
-        : (freshMember?.notes || notasActuales);
+      const freshNotas = freshMember?.notes ? safeJsonParse(freshMember.notes) : notasActuales;
 
       // Actualizar notas con contexto del briefing
       freshNotas.last_briefing_context = {
@@ -389,7 +388,7 @@ export async function enviarRecapDiario(supabase: SupabaseService, meta: MetaWha
   // SOLO ENVIAR SI NO USÓ SARA HOY
   // Si ya interactuó con SARA, no necesita el recap
   // ═══════════════════════════════════════════════════════════
-  const notasVendedor = typeof vendedor.notes === 'string' ? JSON.parse(vendedor.notes || '{}') : (vendedor.notes || {});
+  const notasVendedor = safeJsonParse(vendedor.notes);
   const lastInteraction = notasVendedor.last_sara_interaction;
 
   if (lastInteraction) {

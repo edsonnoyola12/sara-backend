@@ -1,4 +1,5 @@
 import { SupabaseService } from './supabase';
+import { safeJsonParse } from '../utils/safeHelpers';
 
 // Tipos exportados
 export interface MortgageData {
@@ -176,7 +177,7 @@ export class MortgageService {
       }
 
       // 3. Actualizar lead con asesor asignado
-      const leadNotes = typeof lead.notes === 'string' ? JSON.parse(lead.notes) : (lead.notes || {});
+      const leadNotes = safeJsonParse(lead.notes);
       leadNotes.asesor_id = asesor.id;
       leadNotes.asesor_name = asesor.name;
       leadNotes.flujo_credito_completado = true;

@@ -31,6 +31,44 @@ interface Env {
 type CorsResponseFn = (body: string | null, status?: number, contentType?: string, request?: Request) => Response;
 type CheckApiAuthFn = (request: Request, env: Env) => Response | null;
 
+// Whitelist de orígenes permitidos para endpoints con datos sensibles
+const ALLOWED_CRM_ORIGINS = [
+  'https://sara-crm.vercel.app',
+  'https://sara-crm-new.vercel.app',
+  'https://sara-crm.netlify.app',
+  'https://gruposantarita.com',
+  'https://www.gruposantarita.com',
+  'http://localhost:3000',
+  'http://localhost:5173',
+];
+
+function isAllowedCrmOrigin(origin: string | null): boolean {
+  if (!origin) return false;
+  if (ALLOWED_CRM_ORIGINS.includes(origin)) return true;
+  if (origin.match(/^https:\/\/sara-crm.*\.vercel\.app$/)) return true;
+  return false;
+}
+
+/**
+ * Check auth for sensitive data endpoints.
+ * Allows: API key auth OR request from whitelisted CRM origin.
+ */
+function checkSensitiveAuth(request: Request, env: Env, corsResponse: CorsResponseFn, checkApiAuth: CheckApiAuthFn): Response | null {
+  // If API key is provided and valid, allow
+  const apiAuthResult = checkApiAuth(request, env);
+  if (!apiAuthResult) return null; // API key valid
+
+  // If request comes from a whitelisted CRM origin, allow
+  const origin = request.headers.get('Origin');
+  if (isAllowedCrmOrigin(origin)) return null;
+
+  // Neither API key nor allowed origin - reject
+  return corsResponse(JSON.stringify({
+    error: 'No autorizado',
+    hint: 'Incluye header Authorization: Bearer <API_SECRET> o accede desde el CRM'
+  }), 401);
+}
+
 export async function handleApiCoreRoutes(
   url: URL,
   request: Request,
@@ -232,6 +270,8 @@ Responde *SI* para confirmar tu asistencia.`;
     // API Routes - Leads
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/api/leads' && request.method === 'GET') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
       const { data } = await supabase.client
         .from('leads')
         .select('*')

@@ -1028,13 +1028,18 @@ export class WhatsAppHandler {
           await this.supabase.client.from('leads').update(leadMsgResult.updateLead).eq('id', lead.id);
         }
 
-        // Enviar respuesta al lead
-        if (leadMsgResult.response) {
+        // Enviar respuesta al lead (validar que no esté vacía)
+        const responseText = leadMsgResult.response?.trim();
+        if (responseText) {
           if (leadMsgResult.sendVia === 'meta') {
-            await this.meta.sendWhatsAppMessage(cleanPhone, leadMsgResult.response);
+            await this.meta.sendWhatsAppMessage(cleanPhone, responseText);
           } else {
-            await this.twilio.sendWhatsAppMessage(from, leadMsgResult.response);
+            await this.twilio.sendWhatsAppMessage(from, responseText);
           }
+        } else if (leadMsgResult.response !== undefined) {
+          console.warn(`⚠️ Respuesta IA vacía para lead ${lead.name} (${cleanPhone}), enviando fallback`);
+          const fallback = `Hola${lead.name ? ' ' + lead.name.split(' ')[0] : ''}, estoy aquí para ayudarte. ¿En qué puedo asistirte?`;
+          await this.meta.sendWhatsAppMessage(cleanPhone, fallback);
         }
 
         // Notificar al vendedor si es necesario
