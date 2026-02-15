@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-14 (Sesión 39)
+> Última actualización: 2026-02-14 (Sesión 40)
 
 ---
 
@@ -98,6 +98,7 @@ npm test
 | `src/services/encuestasService.ts` | ~200 | Envío y procesamiento encuestas |
 | `src/services/messageQueueService.ts` | ~200 | Cola de mensajes (preparación futura) |
 | `src/utils/teamMessaging.ts` | ~510 | Sistema híbrido mensajes + llamadas + templateOverride |
+| `src/utils/safeHelpers.ts` | ~45 | safeJsonParse, safeSupabaseWrite, sanitizeForPrompt |
 
 ### Secciones Protegidas
 
@@ -826,6 +827,56 @@ Authorization: Bearer <API_SECRET>
 
 **Ahora (protegidos):**
 - Todos los `/test-*` requieren API key ✅
+
+### Hardening de Seguridad y Robustez (2026-02-14, Sesión 40, commit `61fc68f3`)
+
+Auditoría completa del sistema con 5 agentes paralelos. Se encontraron y corrigieron 8 problemas:
+
+#### Prioridad 1 - Robustez (5 fixes)
+
+| # | Fix | Archivo(s) | Impacto |
+|---|-----|-----------|---------|
+| 1 | **`safeJsonParse()`** helper | `src/utils/safeHelpers.ts` (NUEVO) | Reemplaza ~25 `JSON.parse` inseguros en 12 archivos. Si un campo `notes` está corrupto, retorna `{}` en vez de crashear |
+| 2 | **`safeSupabaseWrite()`** helper | `src/utils/safeHelpers.ts` | Error logging en writes críticos (dedup, bridges). Detecta fallos silenciosos de Supabase |
+| 3 | **Message length split** | `src/services/meta-whatsapp.ts` | Mensajes >4000 chars se dividen automáticamente por `\n` o `. ` (WhatsApp límite: 4096) |
+| 4 | **AI response validation** | `src/handlers/whatsapp.ts` | Si Claude devuelve respuesta vacía/whitespace, envía fallback "estoy aquí para ayudarte" |
+| 5 | **Lead dedup fix** | `src/index.ts` | `safeJsonParse` en dedup de leads - antes fallaba si `notes` era string JSON |
+
+**Archivos con `safeJsonParse` aplicado:**
+- CRONs: `briefings.ts`, `followups.ts`
+- Handlers: `whatsapp-ceo.ts`, `whatsapp-vendor.ts`
+- Services: `vendorCommandsService.ts`, `mortgageService.ts`, `iaCoachingService.ts`, `messageQueueService.ts`, `bridgeService.ts`
+- Utils: `teamMessaging.ts`
+- Core: `index.ts`
+
+#### Prioridad 2 - Seguridad (3 fixes)
+
+| # | Fix | Archivo(s) | Detalle |
+|---|-----|-----------|---------|
+| 6 | **CORS whitelist** | `src/index.ts` | `getCorsOrigin()` ahora valida contra `isAllowedOrigin()`. Antes reflejaba cualquier Origin |
+| 7 | **Auth en endpoints PII** | `src/routes/api-core.ts`, `src/routes/team-routes.ts` | GET `/api/leads` y `/api/team-members` requieren API key O origen CRM whitelisted |
+| 8 | **Prompt injection defense** | `src/services/aiConversationService.ts`, `src/utils/safeHelpers.ts` | `sanitizeForPrompt()` limpia nombres de leads + instrucción de defensa en system prompt |
+
+**Orígenes CRM permitidos:**
+```
+https://sara-crm.vercel.app
+https://sara-crm-new.vercel.app
+https://sara-crm.netlify.app
+https://gruposantarita.com / www.gruposantarita.com
+https://sara-crm*.vercel.app (regex)
+http://localhost:3000 / :5173
+```
+
+**`sanitizeForPrompt()` filtra:**
+- Bloques de código, HTML tags, JSON grandes
+- Patrones: "ignore previous instructions", "you are now", "act as", "forget everything", "new instructions:", "override"
+
+**Helpers disponibles en `src/utils/safeHelpers.ts`:**
+```typescript
+safeJsonParse(value, defaultValue?)    // JSON.parse seguro con fallback
+safeSupabaseWrite(query, context)      // Supabase write con error logging
+sanitizeForPrompt(input, maxLength?)   // Sanitizar inputs para Claude
+```
 
 ### 2026-01-29
 
