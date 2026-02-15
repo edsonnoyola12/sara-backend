@@ -44,7 +44,7 @@ export class NotificationService {
 
   async notificarAdmin(mensaje: string): Promise<boolean> {
     try {
-      await this.meta.sendWhatsAppMessage('5212224558475', mensaje, true);
+      await this.meta.sendWhatsAppMessage('5610016226', mensaje, true);
       return true;
     } catch (e) {
       console.error('Error notificando admin:', e);

@@ -334,7 +334,7 @@ export class WhatsAppHandler {
 
         // Alertar al admin
         try {
-          await this.meta.sendWhatsAppMessage('5212224558475',
+          await this.meta.sendWhatsAppMessage('5610016226',
             `🚫 *DNC DETECTADO*\n\n` +
             `📱 ${cleanPhone}\n` +
             `👤 ${lead.name || 'Sin nombre'}\n` +

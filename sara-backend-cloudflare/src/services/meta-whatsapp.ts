@@ -32,8 +32,8 @@ const DNC_PHRASES = [
   'bloquear', 'reportar spam', 'acoso', 'esto es spam', 'dejen de molestar'
 ];
 
-// Admin para alertas críticas
-const ADMIN_PHONE = '5212224558475'; // Tu número
+// Admin para alertas críticas de sistema → Edson (owner)
+const ADMIN_PHONE = '5610016226';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 🧪 MODO PRUEBA - Solo envía a teléfonos autorizados

@@ -2410,7 +2410,7 @@ export async function handleTestRoutes(
         .select('id');
 
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-      await meta.sendWhatsAppMessage('5212224558475',
+      await meta.sendWhatsAppMessage('5610016226',
         `🚨 *EMERGENCY STOP ACTIVADO*\n\n` +
         `✅ Broadcasts deshabilitados\n` +
         `✅ ${cancelled?.length || 0} jobs cancelados\n` +

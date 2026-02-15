@@ -2203,7 +2203,7 @@ export default {
           const dayOfWeek = now.getDay();
           if (backupData.status !== 'success' || dayOfWeek === 1) {
             const emoji = backupData.status === 'success' ? '✅' : '⚠️';
-            await meta.sendWhatsAppMessage('5212224558475',
+            await meta.sendWhatsAppMessage('5610016226',
               `💾 *BACKUP ${backupData.status === 'success' ? 'COMPLETADO' : 'CON ERRORES'}*\n\n` +
               `${emoji} Fecha: ${backupDate}\n` +
               `📊 Tamaño: ${backupSizeKB} KB\n` +
@@ -2222,7 +2222,7 @@ export default {
         console.error('❌ Error en backup diario:', e);
         // Notificar error
         try {
-          await meta.sendWhatsAppMessage('5212224558475',
+          await meta.sendWhatsAppMessage('5610016226',
             `🚨 *ERROR EN BACKUP*\n\n` +
             `Error: ${String(e)}\n\n` +
             `Por favor revisar logs.`
@@ -2274,7 +2274,7 @@ export default {
         console.log(`🎓 ONBOARDING RESET COMPLETADO: ${reseteados} vendedores`);
 
         // Notificar al admin
-        await meta.sendWhatsAppMessage('5212224558475',
+        await meta.sendWhatsAppMessage('5610016226',
           `🎓 *ONBOARDING RESET*\n\n` +
           `Se reseteó el tutorial de ${reseteados} vendedores.\n\n` +
           `La próxima vez que escriban a SARA, verán el tutorial completo con comandos.`
@@ -2999,7 +2999,7 @@ export default {
     // ═══════════════════════════════════════════════════════════
     if (mexicoMinute % 10 === 0) {
       try {
-        const deliveryResult = await verificarDeliveryTeamMessages(supabase, meta, '5214922019052');
+        const deliveryResult = await verificarDeliveryTeamMessages(supabase, meta, '5610016226');
         if (deliveryResult.undelivered > 0) {
           console.log(`⚠️ ${deliveryResult.undelivered} mensajes sin entregar al equipo`);
         }
