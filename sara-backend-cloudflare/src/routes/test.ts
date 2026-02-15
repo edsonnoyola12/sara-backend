@@ -9662,6 +9662,129 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // CHECK TOKEN - Verificar tipo y expiración del token de Meta
+    // USO: /check-token?api_key=XXX
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/check-token') {
+      const token = env.META_ACCESS_TOKEN;
+      const tokenPrefix = token?.substring(0, 10) || 'N/A';
+      const tokenLength = token?.length || 0;
+
+      // Debug token via Meta API
+      let tokenInfo: any = { error: 'No se pudo verificar' };
+      try {
+        const debugResp = await fetch(
+          `https://graph.facebook.com/v21.0/debug_token?input_token=${token}&access_token=${token}`
+        );
+        const debugData: any = await debugResp.json();
+        if (debugData.data) {
+          const d = debugData.data;
+          tokenInfo = {
+            app_id: d.app_id,
+            type: d.type, // USER, PAGE, APP, SYSTEM
+            expires_at: d.expires_at === 0 ? 'NEVER (permanent)' : new Date(d.expires_at * 1000).toISOString(),
+            is_valid: d.is_valid,
+            scopes: d.scopes,
+            granular_scopes: d.granular_scopes?.map((s: any) => s.permission),
+            issued_at: d.issued_at ? new Date(d.issued_at * 1000).toISOString() : null,
+            profile_id: d.profile_id,
+            user_id: d.user_id,
+          };
+        } else {
+          tokenInfo = { error: debugData.error?.message || 'Unknown error', raw: debugData };
+        }
+      } catch (e: any) {
+        tokenInfo = { error: e.message };
+      }
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        token_prefix: tokenPrefix + '...',
+        token_length: tokenLength,
+        is_system_user: tokenInfo.type === 'SYSTEM',
+        permanent: tokenInfo.expires_at === 'NEVER (permanent)',
+        token_info: tokenInfo,
+        recommendation: tokenInfo.type === 'SYSTEM'
+          ? '✅ Token de System User - permanente, ideal para producción'
+          : tokenInfo.type === 'USER'
+            ? '⚠️ Token de usuario - EXPIRA. Cambiar a System User en business.facebook.com/settings/system-users'
+            : `ℹ️ Token tipo: ${tokenInfo.type || 'desconocido'}`
+      }, null, 2));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ONBOARDING - Enviar mensaje de bienvenida al equipo
+    // USO: /onboarding-equipo?api_key=XXX (dry-run)
+    // USO: /onboarding-equipo?enviar=true&api_key=XXX (envío real)
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/onboarding-equipo') {
+      const enviar = url.searchParams.get('enviar') === 'true';
+      const soloPhone = url.searchParams.get('phone');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      let query = supabase.client
+        .from('team_members')
+        .select('id, name, phone, role, active')
+        .eq('active', true)
+        .order('role');
+
+      if (soloPhone) {
+        query = supabase.client
+          .from('team_members')
+          .select('id, name, phone, role, active')
+          .or(`phone.eq.${soloPhone},phone.like.%${soloPhone.slice(-10)}`);
+      }
+
+      const { data: members } = await query;
+
+      if ((!members || members.length === 0) && soloPhone) {
+        // Phone not in team_members - send directly
+        try {
+          await meta.sendTemplate(soloPhone, 'reactivar_equipo', 'es_MX', [
+            { type: 'body', parameters: [{ type: 'text', text: 'Hola' }] }
+          ], true);
+          return corsResponse(JSON.stringify({ ok: true, mode: 'ENVÍO DIRECTO', phone: soloPhone, status: '✅ Template enviado (no es team member)' }));
+        } catch (e: any) {
+          return corsResponse(JSON.stringify({ error: e.message }), 500);
+        }
+      }
+      if (!members || members.length === 0) {
+        return corsResponse(JSON.stringify({ error: 'No hay team members activos' }), 400);
+      }
+
+      const results: any[] = [];
+
+      for (const m of members) {
+        const roleName = m.role === 'admin' ? 'CEO'
+          : m.role === 'vendedor' ? 'Vendedor'
+          : m.role === 'coordinador' ? 'Coordinador'
+          : m.role === 'asesor' ? 'Asesor'
+          : m.role;
+
+        if (enviar) {
+          try {
+            // Send template reactivar_equipo (doesn't need 24h window)
+            await meta.sendTemplate(m.phone, 'reactivar_equipo', 'es_MX', [
+              { type: 'body', parameters: [{ type: 'text', text: m.name?.split(' ')[0] || 'Hola' }] }
+            ], true);
+            results.push({ name: m.name, phone: m.phone, role: roleName, status: '✅ Template enviado' });
+          } catch (e: any) {
+            results.push({ name: m.name, phone: m.phone, role: roleName, status: `❌ Error: ${e.message}` });
+          }
+        } else {
+          results.push({ name: m.name, phone: m.phone, role: roleName, status: '🔍 Dry-run (sin enviar)' });
+        }
+      }
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        mode: enviar ? 'ENVÍO REAL' : 'DRY-RUN (agregar ?enviar=true para enviar)',
+        total: results.length,
+        results
+      }, null, 2));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // ACTIVATE TEAM MEMBERS - Activar/desactivar miembros
     // USO: /activate-team?exclude=Vendedor Test,Asesor Crédito Test&api_key=XXX
     // ═══════════════════════════════════════════════════════════════
