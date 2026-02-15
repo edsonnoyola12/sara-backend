@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-14 (Sesión 40)
+> Última actualización: 2026-02-15 (Sesión 41)
 
 ---
 
@@ -877,6 +877,37 @@ safeJsonParse(value, defaultValue?)    // JSON.parse seguro con fallback
 safeSupabaseWrite(query, context)      // Supabase write con error logging
 sanitizeForPrompt(input, maxLength?)   // Sanitizar inputs para Claude
 ```
+
+#### Prioridad 3 - Escalabilidad (3 fixes, commit `6fac1803`)
+
+| # | Fix | Archivo(s) | Detalle |
+|---|-----|-----------|---------|
+| 9 | **Batch briefing queries** | `src/crons/briefings.ts`, `src/index.ts` | `prefetchBriefingData()` carga 6 queries en paralelo (citas, leads new, leads estancados, hipotecas, cumpleaños, promos) ANTES del loop de vendedores. Para 9 vendedores: ~45 queries → 6 |
+| 10 | **Conversation history archival** | `src/crons/maintenance.ts`, `src/index.ts` | `archivarConversationHistory()` recorta entries >90 días, mantiene mínimo 30. Corre diario 7 PM MX (CRON `0 1 * * *`) |
+| 11 | **Distributed lock para bridges** | `src/services/bridgeService.ts` | `activarBridge()` verifica si el lead ya tiene bridge activo con otro vendedor. Rechaza con mensaje claro si ya está en bridge |
+
+**Batch briefings - cómo funciona:**
+```typescript
+// ANTES: 5-6 queries POR vendedor (citas, leads new, estancados, hipotecas, cumples, promos)
+// 9 vendedores × 5 queries = 45 subrequests
+
+// AHORA: 6 queries globales + filtrado local
+const prefetchedData = await prefetchBriefingData(supabase);
+// Cada vendedor filtra con .filter() sin queries adicionales
+await enviarBriefingMatutino(supabase, meta, v, { prefetchedData });
+```
+
+**Archival de conversation_history:**
+- Busca leads con historial >30 entries
+- Elimina entries con timestamp >90 días
+- Siempre mantiene mínimo 30 entries (incluso si son viejos)
+- Previene crecimiento infinito de JSONB (~900KB/lead/año sin archival)
+
+**Bridge lock:**
+- Antes de activar bridge, lee `notes.active_bridge_to_vendedor` del lead
+- Si existe bridge activo (no expirado) con OTRO vendedor → rechaza
+- Mensaje: "[Lead] ya tiene chat directo con [Vendedor]. Espera a que termine."
+- Si es el MISMO vendedor → permite (re-activar su propio bridge)
 
 ### 2026-01-29
 
