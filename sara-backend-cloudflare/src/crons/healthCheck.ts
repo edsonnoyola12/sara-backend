@@ -407,43 +407,78 @@ export async function enviarDigestoErroresDiario(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ALERT CEO - Send WhatsApp alert with deduplication
+// ALERT SISTEMA - Send WhatsApp alert to Edson (owner) via template
 // ═══════════════════════════════════════════════════════════════════════════
 
-const CEO_PHONE = '5214922019052';
-const DEV_PHONE = '5610016226'; // Edson - errores de sistema van aquí
+const OWNER_PHONE = '5610016226'; // Edson - TODAS las alertas de sistema van aquí
 
+/**
+ * Envía alerta de sistema a Edson vía template (no requiere ventana 24h).
+ * Template: alerta_sistema (1 parámetro body: el mensaje de alerta)
+ * Fallback: si template falla, intenta mensaje directo.
+ * Dedup: máximo 1 alerta por hora (configurable con dedupKey).
+ */
+export async function enviarAlertaSistema(
+  meta: MetaWhatsAppService,
+  mensaje: string,
+  env?: { SARA_CACHE?: KVNamespace },
+  dedupKey: string = 'last_health_alert'
+): Promise<boolean> {
+  try {
+    // Dedup: check if we already sent an alert in the last hour
+    if (env?.SARA_CACHE && dedupKey) {
+      const lastAlert = await env.SARA_CACHE.get(`alert_dedup:${dedupKey}`);
+      if (lastAlert) {
+        console.log(`⏭️ Alerta ${dedupKey} ya enviada en la última hora, skipping`);
+        return false;
+      }
+    }
+
+    // Truncar mensaje a 1000 chars (límite parámetro template)
+    const mensajeTruncado = mensaje.length > 1000 ? mensaje.substring(0, 997) + '...' : mensaje;
+
+    let sent = false;
+
+    // Intentar con template primero (funciona sin ventana 24h)
+    try {
+      await meta.sendTemplate(OWNER_PHONE, 'alerta_sistema', 'es_MX', [
+        { type: 'body', parameters: [{ type: 'text', text: mensajeTruncado }] }
+      ], true);
+      sent = true;
+      console.log(`🚨 Alerta sistema enviada via template: ${mensaje.substring(0, 50)}...`);
+    } catch (templateErr) {
+      console.warn('⚠️ Template alerta_sistema falló, intentando mensaje directo:', templateErr);
+      // Fallback: mensaje directo (solo funciona si ventana 24h abierta)
+      try {
+        await meta.sendWhatsAppMessage(OWNER_PHONE,
+          `🚨 *ALERTA SISTEMA SARA*\n\n${mensaje}\n\n_Alerta automática_`
+        );
+        sent = true;
+        console.log(`🚨 Alerta sistema enviada via texto directo (fallback)`);
+      } catch (directErr) {
+        console.error('❌ No se pudo enviar alerta ni por template ni directo:', directErr);
+      }
+    }
+
+    // Mark alert sent (1 hour cooldown)
+    if (sent && env?.SARA_CACHE && dedupKey) {
+      await env.SARA_CACHE.put(`alert_dedup:${dedupKey}`, new Date().toISOString(), { expirationTtl: 3600 });
+    }
+
+    return sent;
+  } catch (e) {
+    console.error('Error sending system alert:', e);
+    return false;
+  }
+}
+
+// Backward compat alias
 export async function alertarCEO(
   meta: MetaWhatsAppService,
   env: { SARA_CACHE?: KVNamespace },
   mensaje: string
 ): Promise<boolean> {
-  try {
-    // Dedup: check if we already sent an alert in the last hour
-    if (env.SARA_CACHE) {
-      const lastAlert = await env.SARA_CACHE.get('last_health_alert');
-      if (lastAlert) {
-        console.log('⏭️ Health alert already sent in the last hour, skipping');
-        return false;
-      }
-    }
-
-    // Send alert to Dev (Edson), NOT CEO
-    await meta.sendWhatsAppMessage(DEV_PHONE,
-      `🚨 *ALERTA SISTEMA SARA*\n\n${mensaje}\n\n_Alerta automática - se silencia por 1 hora_`
-    );
-
-    // Mark alert sent (1 hour cooldown)
-    if (env.SARA_CACHE) {
-      await env.SARA_CACHE.put('last_health_alert', new Date().toISOString(), { expirationTtl: 3600 });
-    }
-
-    console.log('🚨 Health alert sent to CEO');
-    return true;
-  } catch (e) {
-    console.error('Error sending health alert:', e);
-    return false;
-  }
+  return enviarAlertaSistema(meta, mensaje, env, 'last_health_alert');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -11,6 +11,7 @@ import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { createRetellService, RetellService } from '../services/retellService';
 import { createTTSService, TTSService } from '../services/ttsService';
 import { safeJsonParse } from './safeHelpers';
+import { enviarAlertaSistema } from '../crons/healthCheck';
 
 export interface EnviarMensajeTeamResult {
   success: boolean;
@@ -711,7 +712,7 @@ export async function verificarDeliveryTeamMessages(
         `Verificados: ${checked} | Entregados: ${delivered} | Sin entregar: ${undelivered}`;
 
       try {
-        await meta.sendWhatsAppMessage(adminPhone, alerta);
+        await enviarAlertaSistema(meta, alerta, undefined, 'delivery_undelivered');
         console.log(`📬 Alerta de delivery enviada al admin (${undelivered} sin entregar)`);
       } catch (alertError) {
         console.error('❌ Error enviando alerta de delivery al admin:', alertError);

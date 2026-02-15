@@ -7,6 +7,7 @@ import { MetaWhatsAppService } from './meta-whatsapp';
 import { createTTSService } from './ttsService';
 import { createTTSTrackingService } from './ttsTrackingService';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
+import { enviarAlertaSistema } from '../crons/healthCheck';
 
 export class NotificationService {
   private openaiApiKey?: string;
@@ -44,7 +45,7 @@ export class NotificationService {
 
   async notificarAdmin(mensaje: string): Promise<boolean> {
     try {
-      await this.meta.sendWhatsAppMessage('5610016226', mensaje, true);
+      await enviarAlertaSistema(this.meta, mensaje, undefined, 'notification');
       return true;
     } catch (e) {
       console.error('Error notificando admin:', e);

@@ -338,9 +338,21 @@ export class MetaWhatsAppService {
     return data;
   }
 
-  // Enviar alerta crítica al admin
+  // Enviar alerta crítica al admin (intenta template primero, fallback texto directo)
   private async sendAlertToAdmin(message: string): Promise<void> {
     try {
+      const msgTruncado = message.length > 1000 ? message.substring(0, 997) + '...' : message;
+      // Intentar template primero (no requiere ventana 24h)
+      try {
+        await this.sendTemplate(ADMIN_PHONE, 'alerta_sistema', 'es_MX', [
+          { type: 'body', parameters: [{ type: 'text', text: msgTruncado }] }
+        ], true);
+        console.log(`🚨 Alerta enviada a admin via template: ${message.substring(0, 50)}...`);
+        return;
+      } catch (_templateErr) {
+        // Template no disponible, fallback a texto directo
+      }
+      // Fallback: texto directo (requiere ventana 24h)
       const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
       const payload = {
         messaging_product: 'whatsapp',
@@ -357,7 +369,7 @@ export class MetaWhatsAppService {
         },
         body: JSON.stringify(payload)
       });
-      console.log(`🚨 Alerta enviada a admin: ${message.substring(0, 50)}...`);
+      console.log(`🚨 Alerta enviada a admin (fallback directo): ${message.substring(0, 50)}...`);
     } catch (e) {
       console.error('❌ Error enviando alerta a admin:', e);
     }

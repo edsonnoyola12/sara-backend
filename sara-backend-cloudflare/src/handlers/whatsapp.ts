@@ -15,6 +15,7 @@ import * as ceoHandlers from './whatsapp-ceo';
 import * as vendorHandlers from './whatsapp-vendor';
 import { HandlerContext } from './whatsapp-types';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
+import { enviarAlertaSistema } from '../crons/healthCheck';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MÓDULOS REFACTORIZADOS
@@ -334,13 +335,9 @@ export class WhatsAppHandler {
 
         // Alertar al admin
         try {
-          await this.meta.sendWhatsAppMessage('5610016226',
-            `🚫 *DNC DETECTADO*\n\n` +
-            `📱 ${cleanPhone}\n` +
-            `👤 ${lead.name || 'Sin nombre'}\n` +
-            `💬 "${trimmedBody}"\n\n` +
-            `Lead marcado como DO NOT CONTACT`,
-            true // bypass rate limit para alertas
+          await enviarAlertaSistema(this.meta,
+            `🚫 DNC DETECTADO\n\n📱 ${cleanPhone}\n👤 ${lead.name || 'Sin nombre'}\n💬 "${trimmedBody}"\n\nLead marcado como DO NOT CONTACT`,
+            undefined, 'dnc'
           );
         } catch (e) {
           console.error('⚠️ No se pudo alertar admin sobre DNC');

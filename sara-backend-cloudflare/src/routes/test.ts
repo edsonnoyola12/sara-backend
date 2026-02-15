@@ -101,7 +101,7 @@ import {
   generarVideoSemanalLogros,
 } from '../crons/videos';
 
-import { runHealthCheck, trackError } from '../crons/healthCheck';
+import { runHealthCheck, trackError, enviarAlertaSistema } from '../crons/healthCheck';
 
 interface Env {
   SUPABASE_URL: string;
@@ -2410,13 +2410,9 @@ export async function handleTestRoutes(
         .select('id');
 
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-      await meta.sendWhatsAppMessage('5610016226',
-        `🚨 *EMERGENCY STOP ACTIVADO*\n\n` +
-        `✅ Broadcasts deshabilitados\n` +
-        `✅ ${cancelled?.length || 0} jobs cancelados\n` +
-        `✅ ${followupsCancelled?.length || 0} follow-ups cancelados\n\n` +
-        `Para reactivar: POST /api/broadcasts-enable`,
-        true
+      await enviarAlertaSistema(meta,
+        `🚨 EMERGENCY STOP ACTIVADO\n\n✅ Broadcasts deshabilitados\n✅ ${cancelled?.length || 0} jobs cancelados\n✅ ${followupsCancelled?.length || 0} follow-ups cancelados\n\nPara reactivar: POST /api/broadcasts-enable`,
+        env, 'emergency_stop'
       );
 
       return corsResponse(JSON.stringify({
@@ -9646,6 +9642,50 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       await enviarAlertasProactivasCEO(supabase, meta);
       return corsResponse(JSON.stringify({ ok: true, message: 'Alertas proactivas enviadas' }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // CREAR TEMPLATE alerta_sistema en Meta (ejecutar una sola vez)
+    // USO: /crear-template-alerta?api_key=XXX
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/crear-template-alerta') {
+      const WABA_ID = (env as any).META_WHATSAPP_BUSINESS_ID;
+      if (!WABA_ID) {
+        return corsResponse(JSON.stringify({ error: 'META_WHATSAPP_BUSINESS_ID no configurado' }), 400);
+      }
+      try {
+        const resp = await fetch(
+          `https://graph.facebook.com/v22.0/${WABA_ID}/message_templates`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${env.META_ACCESS_TOKEN}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              name: 'alerta_sistema',
+              language: 'es_MX',
+              category: 'UTILITY',
+              components: [
+                {
+                  type: 'BODY',
+                  text: '🚨 *Alerta Sistema SARA*\n\n{{1}}\n\n_Alerta automática_',
+                  example: { body_text: [['Health check: Base de datos no responde. Verificar Supabase.']] }
+                }
+              ]
+            })
+          }
+        );
+        const result: any = await resp.json();
+        return corsResponse(JSON.stringify({
+          ok: resp.ok,
+          status: resp.status,
+          result,
+          nota: resp.ok ? 'Template creado. Esperar aprobación de Meta (usualmente minutos para UTILITY).' : 'Error al crear template'
+        }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
     }
 
     // ═══════════════════════════════════════════════════════════════

@@ -173,7 +173,8 @@ import {
   trackError,
   cronHealthCheck,
   logErrorToDB,
-  enviarDigestoErroresDiario
+  enviarDigestoErroresDiario,
+  enviarAlertaSistema
 } from './crons/healthCheck';
 
 export interface Env {
@@ -2203,16 +2204,16 @@ export default {
           const dayOfWeek = now.getDay();
           if (backupData.status !== 'success' || dayOfWeek === 1) {
             const emoji = backupData.status === 'success' ? '✅' : '⚠️';
-            await meta.sendWhatsAppMessage('5610016226',
-              `💾 *BACKUP ${backupData.status === 'success' ? 'COMPLETADO' : 'CON ERRORES'}*\n\n` +
+            await enviarAlertaSistema(meta,
+              `💾 BACKUP ${backupData.status === 'success' ? 'COMPLETADO' : 'CON ERRORES'}\n\n` +
               `${emoji} Fecha: ${backupDate}\n` +
               `📊 Tamaño: ${backupSizeKB} KB\n` +
               `📋 Datos:\n` +
-              `   • Leads: ${backupData.tables?.leads?.count || 0}\n` +
-              `   • Citas: ${backupData.tables?.appointments?.count || 0}\n` +
-              `   • Equipo: ${backupData.tables?.team_members?.count || 0}\n` +
-              `   • Propiedades: ${backupData.tables?.properties?.count || 0}\n\n` +
-              `_Backups se guardan 7 días_`
+              `• Leads: ${backupData.tables?.leads?.count || 0}\n` +
+              `• Citas: ${backupData.tables?.appointments?.count || 0}\n` +
+              `• Equipo: ${backupData.tables?.team_members?.count || 0}\n` +
+              `• Propiedades: ${backupData.tables?.properties?.count || 0}`,
+              env, 'backup'
             );
           }
         } else {
@@ -2222,10 +2223,9 @@ export default {
         console.error('❌ Error en backup diario:', e);
         // Notificar error
         try {
-          await meta.sendWhatsAppMessage('5610016226',
-            `🚨 *ERROR EN BACKUP*\n\n` +
-            `Error: ${String(e)}\n\n` +
-            `Por favor revisar logs.`
+          await enviarAlertaSistema(meta,
+            `🚨 ERROR EN BACKUP\n\nError: ${String(e)}\n\nPor favor revisar logs.`,
+            env, 'backup_error'
           );
         } catch (notifyErr) {
           console.error('❌ No se pudo notificar error de backup');
@@ -2274,10 +2274,9 @@ export default {
         console.log(`🎓 ONBOARDING RESET COMPLETADO: ${reseteados} vendedores`);
 
         // Notificar al admin
-        await meta.sendWhatsAppMessage('5610016226',
-          `🎓 *ONBOARDING RESET*\n\n` +
-          `Se reseteó el tutorial de ${reseteados} vendedores.\n\n` +
-          `La próxima vez que escriban a SARA, verán el tutorial completo con comandos.`
+        await enviarAlertaSistema(meta,
+          `🎓 ONBOARDING RESET\n\nSe reseteó el tutorial de ${reseteados} vendedores.\n\nLa próxima vez que escriban a SARA, verán el tutorial completo con comandos.`,
+          env, 'onboarding_reset'
         );
       } catch (e) {
         console.error('❌ Error reseteando onboarding:', e);
