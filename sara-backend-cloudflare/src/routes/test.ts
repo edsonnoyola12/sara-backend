@@ -9645,6 +9645,26 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // ACTIVATE TEAM MEMBERS - Activar/desactivar miembros
+    // USO: /activate-team?exclude=Vendedor Test,Asesor Crédito Test&api_key=XXX
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/activate-team') {
+      const exclude = (url.searchParams.get('exclude') || '').split(',').map(s => s.trim()).filter(Boolean);
+      // Activate all
+      const { error: e1 } = await supabase.client.from('team_members').update({ active: true }).neq('name', '');
+      if (e1) return corsResponse(JSON.stringify({ error: e1.message }), 500);
+      // Deactivate excluded
+      for (const name of exclude) {
+        await supabase.client.from('team_members').update({ active: false }).eq('name', name);
+      }
+      // Verify
+      const { data } = await supabase.client.from('team_members').select('name, active, role').order('role');
+      const activeM = (data || []).filter((m: any) => m.active);
+      const inactiveM = (data || []).filter((m: any) => !m.active);
+      return corsResponse(JSON.stringify({ ok: true, active: activeM.length, inactive: inactiveM.length, activeMembers: activeM, inactiveMembers: inactiveM }));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // CHECK TEMPLATE STATUS - Consultar status de un template por nombre
     // USO: /check-template?name=alerta_sistema&api_key=XXX
     // ═══════════════════════════════════════════════════════════════
