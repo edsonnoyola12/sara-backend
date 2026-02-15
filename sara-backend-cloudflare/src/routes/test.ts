@@ -9645,6 +9645,37 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // CHECK TEMPLATE STATUS - Consultar status de un template por nombre
+    // USO: /check-template?name=alerta_sistema&api_key=XXX
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-alerta-sistema') {
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      const msg = url.searchParams.get('msg') || 'Test de alerta sistema - si recibes esto, el template funciona correctamente.';
+      try {
+        const result = await enviarAlertaSistema(meta, msg, env, '');
+        return corsResponse(JSON.stringify({ ok: true, sent: result, msg }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
+      }
+    }
+
+    if (url.pathname === '/check-template') {
+      const WABA_ID = (env as any).META_WHATSAPP_BUSINESS_ID;
+      const tplName = url.searchParams.get('name') || 'alerta_sistema';
+      if (!WABA_ID) return corsResponse(JSON.stringify({ error: 'WABA_ID not configured' }), 400);
+      try {
+        const resp = await fetch(
+          `https://graph.facebook.com/v22.0/${WABA_ID}/message_templates?name=${tplName}&fields=name,status,category,language`,
+          { headers: { 'Authorization': `Bearer ${env.META_ACCESS_TOKEN}` } }
+        );
+        const result: any = await resp.json();
+        return corsResponse(JSON.stringify({ ok: resp.ok, templates: result.data || [], raw: result }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // CREAR TEMPLATE alerta_sistema en Meta (ejecutar una sola vez)
     // USO: /crear-template-alerta?api_key=XXX
     // ═══════════════════════════════════════════════════════════════
