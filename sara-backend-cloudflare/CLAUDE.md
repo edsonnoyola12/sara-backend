@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-15 (Sesión 41)
+> Última actualización: 2026-02-15 (Sesión 44)
 
 ---
 
@@ -70,7 +70,7 @@ npm test
 | `src/crons/alerts.ts` | ~2,070 | Alertas de leads, cumpleaños, leads fríos/calientes |
 | `src/crons/followups.ts` | ~2,360 | Follow-ups, nurturing, broadcasts, re-engagement |
 | `src/crons/leadScoring.ts` | ~660 | Scoring, señales calientes, objeciones |
-| `src/crons/nurturing.ts` | ~1,580 | Recuperación crédito, NPS, referidos, post-compra, satisfacción |
+| `src/crons/nurturing.ts` | ~1,860 | Recuperación crédito, NPS, referidos, post-compra, satisfacción, cleanup flags |
 | `src/crons/maintenance.ts` | ~400 | Bridges, leads estancados, aniversarios |
 | `src/crons/videos.ts` | ~780 | Videos Veo 3 personalizados |
 | `src/crons/dashboard.ts` | ~1,020 | Status, analytics, health, backup |
@@ -347,6 +347,23 @@ sold/closed               delivered                      +1 año
 - `/run-mantenimiento` - Ejecutar check-in mantenimiento
 - `/run-referidos` - Ejecutar solicitud de referidos
 - `/run-nps` - Ejecutar encuestas NPS
+
+**Robustez de encuestas (Sesión 44, commit `429ac260`):**
+
+Las 4 funciones de envío (`enviarEncuestaNPS`, `seguimientoPostEntrega`, `encuestaSatisfaccionCasa`, `checkInMantenimiento`) usan el patrón **mark-before-send**:
+1. Actualizar flag + timestamp + audit trail en notes ANTES de enviar
+2. Enviar mensaje
+3. Capturar wamid del resultado y guardar en notes
+
+Protecciones implementadas:
+- **Mark-before-send**: Previene duplicados por CRON race condition
+- **Wamid tracking**: `resultado_envio?.messages?.[0]?.id` guardado en notes
+- **Audit trail**: `surveys_sent` array en notes (rolling últimos 10)
+- **TTL 48h**: Handlers de respuesta auto-limpian flags con >48h
+- **`isLikelySurveyResponse()`**: Filtra mensajes largos o con palabras de agenda/propiedad
+- **Regex estrictos**: NPS solo acepta `/^\s*(\d{1,2})\s*$/`, satisfacción `/^\s*([1-4])\s*$/`
+- **Vendor notifications**: Usan `enviarMensajeTeamMember()` (respeta ventana 24h)
+- **Auto-cleanup CRON**: `limpiarFlagsEncuestasExpirados()` limpia flags >72h diario 7PM MX
 
 ---
 
