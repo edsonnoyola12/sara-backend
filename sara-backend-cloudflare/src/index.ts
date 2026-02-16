@@ -895,23 +895,36 @@ export default {
                   .select('notes')
                   .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`)
                   .maybeSingle();
-                const bhNotes = leadBH?.notes || {};
-                const lastNotified = bhNotes.outside_hours_notified_at;
-                const hace12h = Date.now() - 12 * 60 * 60 * 1000;
-                const yaNotifico = lastNotified && new Date(lastNotified).getTime() > hace12h;
+                const bhNotes = typeof leadBH?.notes === 'string' ? JSON.parse(leadBH.notes || '{}') : (leadBH?.notes || {});
 
-                if (!yaNotifico) {
-                  console.log(`🕐 Lead escribe fuera de horario - enviando aviso`);
-                  await meta.sendWhatsAppMessage(from, outsideMsg);
-                  // Guardar flag de dedup
-                  if (leadBH) {
-                    await supabase.client
-                      .from('leads')
-                      .update({ notes: { ...bhNotes, outside_hours_notified_at: new Date().toISOString() } })
-                      .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`);
-                  }
+                // NO enviar aviso si el lead tiene encuesta pendiente (NPS, satisfacción, etc.)
+                const tieneEncuestaPendiente = bhNotes.esperando_respuesta_nps
+                  || bhNotes.esperando_respuesta_entrega
+                  || bhNotes.esperando_respuesta_satisfaccion_casa
+                  || bhNotes.esperando_respuesta_mantenimiento
+                  || bhNotes.pending_client_survey
+                  || bhNotes.pending_nps_survey;
+
+                if (tieneEncuestaPendiente) {
+                  console.log(`🕐 Lead fuera de horario pero tiene encuesta pendiente - skip aviso`);
                 } else {
-                  console.log(`🕐 Lead fuera de horario pero ya notificado en últimas 12h - skip aviso`);
+                  const lastNotified = bhNotes.outside_hours_notified_at;
+                  const hace12h = Date.now() - 12 * 60 * 60 * 1000;
+                  const yaNotifico = lastNotified && new Date(lastNotified).getTime() > hace12h;
+
+                  if (!yaNotifico) {
+                    console.log(`🕐 Lead escribe fuera de horario - enviando aviso`);
+                    await meta.sendWhatsAppMessage(from, outsideMsg);
+                    // Guardar flag de dedup
+                    if (leadBH) {
+                      await supabase.client
+                        .from('leads')
+                        .update({ notes: { ...bhNotes, outside_hours_notified_at: new Date().toISOString() } })
+                        .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`);
+                    }
+                  } else {
+                    console.log(`🕐 Lead fuera de horario pero ya notificado en últimas 12h - skip aviso`);
+                  }
                 }
                 // NO retornar - seguir procesando con IA normalmente
               }

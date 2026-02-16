@@ -5648,11 +5648,13 @@ _Solo responde con el número_ 🙏`;
       console.log(`TEST: Enviando encuesta NPS a ${phoneFormatted}...`);
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
 
+      const phoneSuffix = phone.replace(/^52/, '').slice(-10);
       const { data: lead } = await supabase.client
         .from('leads')
         .select('id, name, phone')
-        .eq('phone', phoneFormatted)
-        .single();
+        .or(`phone.eq.${phoneFormatted},phone.like.%${phoneSuffix}`)
+        .limit(1)
+        .maybeSingle();
 
       if (!lead) {
         return corsResponse(JSON.stringify({ error: 'Lead no encontrado' }), 404);
@@ -5663,12 +5665,19 @@ _Solo responde con el número_ 🙏`;
       // Crear encuesta NPS en BD
       await supabase.client.from('surveys').insert({
         lead_id: lead.id,
-        lead_phone: phoneFormatted,
+        lead_phone: lead.phone,
         lead_name: lead.name,
         survey_type: 'nps',
         status: 'sent',
         expires_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
       });
+
+      // Marcar pending en lead notes para que el interceptor funcione
+      const { data: leadFull } = await supabase.client.from('leads').select('notes').eq('id', lead.id).single();
+      const notas = typeof leadFull?.notes === 'string' ? JSON.parse(leadFull.notes || '{}') : (leadFull?.notes || {});
+      notas.esperando_respuesta_nps = true;
+      notas.esperando_respuesta_nps_at = new Date().toISOString();
+      await supabase.client.from('leads').update({ notes: notas }).eq('id', lead.id);
 
       const msgNPS = `🌟 *¡Felicidades por tu nuevo hogar, ${nombreCorto}!*
 
@@ -5681,8 +5690,8 @@ Del *0 al 10*, ¿qué tan probable es que nos recomiendes con un amigo o familia
 
 _Solo responde con el número_ 🙏`;
 
-      await meta.sendWhatsAppMessage(phoneFormatted, msgNPS);
-      return corsResponse(JSON.stringify({ ok: true, message: `Encuesta NPS enviada a ${phoneFormatted}` }));
+      await meta.sendWhatsAppMessage(lead.phone, msgNPS);
+      return corsResponse(JSON.stringify({ ok: true, message: `Encuesta NPS enviada a ${lead.phone}` }));
     }
 
     // Ver todas las encuestas
