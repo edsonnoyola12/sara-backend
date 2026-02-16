@@ -401,10 +401,13 @@ WhatsApp → POST /webhook/meta
 │   └── ¿Es lead? → continuar aquí
 │
 ├── 3. VERIFICAR ENCUESTAS PENDIENTES ──── ANTES de cualquier otra cosa
-│   ├── NPS (0-10) → procesarRespuestaNPS()
+│   ├── TTL check: si flag tiene >48h → auto-limpiar y continuar
+│   ├── isLikelySurveyResponse(): filtrar mensajes largos/con palabras agenda
+│   ├── NPS (0-10) → procesarRespuestaNPS() [regex: /^\s*(\d{1,2})\s*$/]
 │   ├── Post-entrega → procesarRespuestaEntrega()
-│   ├── Satisfacción casa → procesarRespuestaSatisfaccionCasa()
-│   └── Mantenimiento → procesarRespuestaMantenimiento()
+│   ├── Satisfacción casa → procesarRespuestaSatisfaccionCasa() [regex: /^\s*([1-4])\s*$/]
+│   ├── Mantenimiento → procesarRespuestaMantenimiento()
+│   ├── pending_satisfaction_survey → TTL 48h + isLikelySurveyResponse
 │   └── Si procesó encuesta → return (NO pasar a IA)
 │
 ├── 4. MULTIMEDIA
@@ -664,7 +667,9 @@ curl "https://sara-backend.edson-633.workers.dev/test-envio-7pm?enviar=true&phon
 │ ├── 7 PM → Reporte diario vendedores (template reporte_vendedor)    │
 │ ├── 7 PM → Reporte diario asesores (template reporte_asesor)        │
 │ ├── 7 PM → Reporte diario marketing (directo)                      │
-│ └── Backup diario (KV)                                              │
+│ ├── Backup diario (KV)                                              │
+│ ├── Archival conversation_history >90 días                          │
+│ └── Limpieza flags encuestas expirados >72h                         │
 │                                                                     │
 │ SÁBADO:                                                             │
 │ ├── 2 PM → Recap semanal vendedores                                │
@@ -859,6 +864,9 @@ curl "https://sara-backend.edson-633.workers.dev/test-ventana-24h?api_key=XXX"
 | 13 | **Números puros (0-10) NO son emojis** | Son respuestas NPS/encuestas |
 | 14 | **isPendingExpired() ANTES de entregar** | No entregar mensajes viejos |
 | 15 | **Precios EQUIPADOS por default** | Cliente espera precio final |
+| 16 | **Mark-before-send en encuestas** | Flag ANTES de enviar, previene duplicados por CRON race condition |
+| 17 | **TTL 48h en flags de encuesta** | Flags viejos interceptan mensajes normales semanas después |
+| 18 | **isLikelySurveyResponse() SIEMPRE** | Sin filtro, "sábado a las 10" se procesa como NPS score 10 |
 
 ---
 
@@ -872,6 +880,9 @@ curl "https://sara-backend.edson-633.workers.dev/test-ventana-24h?api_key=XXX"
 | Mensajes duplicados | Lead/equipo recibe 2-3 veces | Deduplicación falló | Verificar `last_processed_msg_id` |
 | Score no sube | Lead HOT muestra score bajo | CRON de scoring no ejecuta | Verificar logs cada 2h |
 | GPS/brochure no se envía | Lead pide pero no recibe | Property sin `gps_link` o `brochure_urls` | Verificar tabla properties |
+| Encuesta duplicada | Lead recibe 2+ encuestas | Flag se marca DESPUÉS del envío (race condition) | Verificar mark-before-send en nurturing.ts |
+| Encuesta intercepta mensaje normal | "sábado 10am" → NPS score 10 | isLikelySurveyResponse no activo o regex muy amplio | Verificar regex estrictos + filtro |
+| Flag encuesta nunca se limpia | Mensaje "1" interceptado semanas después | Sin TTL ni auto-cleanup | `limpiarFlagsEncuestasExpirados()` corre diario 7PM |
 | SARA dice info incorrecta | Alberca en Falco, renta, etc. | Post-procesamiento no detectó | Agregar nueva safety net |
 | Template rechazado por Meta | Error 132015 en logs | Template no aprobado o params incorrectos | Verificar en `/api/templates` |
 | Llamada Retell no sale | Pending sin llamada después de 2h | Fuera de horario o max llamadas | Verificar CALL_CONFIG |
