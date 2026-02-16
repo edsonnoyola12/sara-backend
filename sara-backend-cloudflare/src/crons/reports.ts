@@ -12,6 +12,7 @@
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/metaWhatsAppService';
 import { enviarMensajeTeamMember, EnviarMensajeTeamResult } from '../utils/teamMessaging';
+import { parseNotasSafe, formatVendorFeedback } from '../handlers/whatsapp-utils';
 
 // ═══════════════════════════════════════════════════════════════
 // REPORTES CEO AUTOMÁTICOS
@@ -223,7 +224,14 @@ ${citasHoy && citasHoy.length > 0 ? `*${citasHoy.length} citas agendadas:*\n${ci
 • Días restantes: ${diasRestantes}
 ${alertasDiarias.length > 0 ? `\n━━━━━━━━━━━━━━━━━━━━━\n⚠️ *ALERTAS*\n━━━━━━━━━━━━━━━━━━━━━\n${alertasDiarias.join('\n')}` : ''}
 ${rendimientoAyer.length > 0 ? `\n━━━━━━━━━━━━━━━━━━━━━\n👥 *EQUIPO AYER*\n━━━━━━━━━━━━━━━━━━━━━\n${rendimientoAyer.slice(0, 5).join('\n')}` : ''}
-
+${(() => {
+    const fbEntries: string[] = [];
+    pipelineDiario?.forEach((p: any) => {
+      const fb = formatVendorFeedback(p.notes, { compact: true });
+      if (fb) fbEntries.push(`• ${p.name?.split(' ')[0] || 'Lead'} ${fb}`);
+    });
+    return fbEntries.length > 0 ? `\n━━━━━━━━━━━━━━━━━━━━━\n📝 *FEEDBACK POST-VISITA*\n━━━━━━━━━━━━━━━━━━━━━\n${fbEntries.slice(0, 5).join('\n')}` : '';
+  })()}
 _Escribe *resumen* para más detalles_`;
 
   // Enviar a cada admin (evitar duplicados por teléfono) - EN PARALELO
@@ -1614,6 +1622,16 @@ export async function enviarReporteDiarioVendedores(supabase: SupabaseService, m
 
       if (followupsPendientes > 0) {
         insights.push(`📬 ${followupsPendientes} mensaje${followupsPendientes > 1 ? 's' : ''} pendiente${followupsPendientes > 1 ? 's' : ''} de aprobar`);
+      }
+
+      // Feedback post-visita compacto
+      const fbCompact: string[] = [];
+      pipelineVendedor.forEach((p: any) => {
+        const fb = formatVendorFeedback(p.notes, { compact: true });
+        if (fb) fbCompact.push(`${p.name?.split(' ')[0] || 'Lead'} ${fb}`);
+      });
+      if (fbCompact.length > 0) {
+        insights.push(`📝 Feedback: ${fbCompact.slice(0, 3).join(', ')}`);
       }
 
       const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buen trabajo hoy!';

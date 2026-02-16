@@ -17,6 +17,7 @@ import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { createTTSService } from '../services/ttsService';
 import { safeJsonParse } from '../utils/safeHelpers';
+import { parseNotasSafe, formatVendorFeedback } from '../handlers/whatsapp-utils';
 
 // ═══════════════════════════════════════════════════════════
 // FELICITACIONES DE CUMPLEAÑOS - TEAM MEMBERS
@@ -129,7 +130,7 @@ export async function prefetchBriefingData(supabase: SupabaseService): Promise<B
   const [citasRes, leadsNewRes, leadsStaleRes, hipsRes, cumplesRes, promosRes] = await Promise.all([
     supabase.client
       .from('appointments')
-      .select('*, leads(name, phone)')
+      .select('*, leads(name, phone, notes)')
       .eq('scheduled_date', hoyStr)
       .eq('status', 'scheduled')
       .order('scheduled_time', { ascending: true }),
@@ -240,7 +241,7 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
   } else {
     // Fallback: queries individuales (para /test-briefing endpoint)
     const { data: c } = await supabase.client
-      .from('appointments').select('*, leads(name, phone)')
+      .from('appointments').select('*, leads(name, phone, notes)')
       .eq('team_member_id', vendedor.id).eq('scheduled_date', hoyStr).eq('status', 'scheduled')
       .order('scheduled_time', { ascending: true });
     citasHoy = c || [];
@@ -301,6 +302,19 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
     });
   } else {
     mensaje += `: Sin citas\n`;
+  }
+
+  // Feedback post-visita de leads con cita hoy
+  const feedbackEntries: string[] = [];
+  if (citasHoy && citasHoy.length > 0) {
+    citasHoy.forEach((c: any) => {
+      const fb = formatVendorFeedback(c.leads?.notes);
+      if (fb) feedbackEntries.push(`  • ${c.leads?.name || 'Cliente'}: ${fb}`);
+    });
+  }
+  if (feedbackEntries.length > 0) {
+    mensaje += `\n📝 *FEEDBACK POST-VISITA*:\n`;
+    feedbackEntries.slice(0, 3).forEach(e => { mensaje += e + '\n'; });
   }
 
   // Acciones requeridas

@@ -206,6 +206,21 @@ export class AIConversationService {
       contextoExtra.push(`Urgencia: ${urgenciaStr}`);
     }
 
+    // Feedback post-visita del vendedor
+    if (notes.vendor_feedback && notes.vendor_feedback.rating) {
+      const vf = notes.vendor_feedback;
+      const feedbackMap: Record<number, string> = {
+        1: '🔥 LEAD MUY INTERESADO post-visita - cierra agresivamente, ofrece apartado',
+        2: '👍 Lead interesado post-visita - refuerza beneficios y cierra cita de seguimiento',
+        3: '😐 Lead tibio post-visita - pregunta qué no le convenció y ofrece alternativas',
+        4: '❄️ No le convenció la visita - pregunta qué no le gustó antes de insistir'
+      };
+      const instruccion = feedbackMap[vf.rating] || '';
+      if (instruccion) {
+        contextoExtra.push(instruccion);
+      }
+    }
+
     // Construir respuesta
     let resultado = '';
 

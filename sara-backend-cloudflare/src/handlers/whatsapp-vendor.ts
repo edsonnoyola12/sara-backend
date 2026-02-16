@@ -10,6 +10,7 @@ import { BridgeService } from '../services/bridgeService';
 import { isPendingExpired } from '../utils/teamMessaging';
 import { AppointmentService } from '../services/appointmentService';
 import { safeJsonParse } from '../utils/safeHelpers';
+import { formatVendorFeedback } from './whatsapp-utils';
 
 export async function handleVendedorMessage(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, teamMembers: any[]): Promise<void> {
   const mensaje = body.toLowerCase().trim();
@@ -4591,15 +4592,18 @@ export async function vendedorQuienEs(ctx: HandlerContext, handler: any, from: s
 
     if (leads.length === 1) {
       const l = leads[0];
+      const feedback = formatVendorFeedback(l.notes);
       const msg = `👤 *${l.name}*\n\n` +
         `📱 Tel: ${l.phone || 'No disponible'}\n` +
         `📌 Etapa: ${l.stage || l.status || 'Sin etapa'}\n` +
+        (feedback ? `📝 ${feedback}\n` : '') +
         `📅 Registrado: ${new Date(l.created_at).toLocaleDateString('es-MX')}`;
       await ctx.twilio.sendWhatsAppMessage(from, msg);
     } else {
       let msg = `🔍 Encontré ${leads.length} leads:\n\n`;
       leads.forEach((l, i) => {
-        msg += `*${i + 1}.* ${l.name} (${l.stage || l.status || 'Sin etapa'})\n`;
+        const fb = formatVendorFeedback(l.notes, { compact: true });
+        msg += `*${i + 1}.* ${l.name} (${l.stage || l.status || 'Sin etapa'})${fb ? ' ' + fb : ''}\n`;
       });
       await ctx.twilio.sendWhatsAppMessage(from, msg);
     }

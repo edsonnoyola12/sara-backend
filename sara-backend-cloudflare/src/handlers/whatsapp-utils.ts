@@ -27,6 +27,24 @@ import type { AIAnalysis, DatosConversacion, ContextoDecision } from './constant
 // HELPER FUNCTIONS (from lines 105-330)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+export function parseNotasSafe(notes: any): any {
+  if (!notes) return {};
+  if (typeof notes === 'string') {
+    try { return JSON.parse(notes); } catch { return {}; }
+  }
+  return typeof notes === 'object' ? notes : {};
+}
+
+export function formatVendorFeedback(notes: any, options?: { compact?: boolean }): string | null {
+  const parsed = parseNotasSafe(notes);
+  const vf = parsed?.vendor_feedback;
+  if (!vf || !vf.rating) return null;
+  const emoji = vf.rating === 1 ? '🔥' : vf.rating === 2 ? '👍' : vf.rating === 3 ? '😐' : '❄️';
+  if (options?.compact) return `${emoji} ${vf.rating_text}`;
+  const fecha = vf.fecha ? new Date(vf.fecha).toLocaleDateString('es-MX') : '';
+  return `${emoji} Post-visita: *${vf.rating_text}* (${vf.vendedor_name?.split(' ')[0] || 'Vendedor'}${fecha ? ', ' + fecha : ''})`;
+}
+
 export function formatPhoneMX(phone: string): string {
   const digits = phone.replace(/\D/g, '');
   if (digits.length === 10) {

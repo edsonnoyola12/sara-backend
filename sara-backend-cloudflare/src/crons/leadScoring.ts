@@ -185,6 +185,14 @@ export function calcularLeadScore(lead: any): { score: number; factors: LeadScor
     factors.creditReadyScore = 10; // Pago de contado = máximo score
   }
 
+  // 5.5 BONUS/PENALTY POR FEEDBACK POST-VISITA (dentro de hotSignalsScore)
+  if ((notas as any)?.vendor_feedback?.rating) {
+    const rating = (notas as any).vendor_feedback.rating;
+    if (rating === 1) factors.hotSignalsScore = Math.min(factors.hotSignalsScore + 10, 25);
+    else if (rating === 2) factors.hotSignalsScore = Math.min(factors.hotSignalsScore + 5, 25);
+    else if (rating === 4) factors.hotSignalsScore = Math.max(factors.hotSignalsScore - 5, 0);
+  }
+
   // 6. SCORE POR ENGAGEMENT (0-10 puntos)
   // Respuestas a mensajes, citas agendadas, etc.
   if ((notas as any)?.pending_response_to) factors.engagementScore += 3;
