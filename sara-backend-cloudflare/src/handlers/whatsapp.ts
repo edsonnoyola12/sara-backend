@@ -16,6 +16,7 @@ import * as vendorHandlers from './whatsapp-vendor';
 import { HandlerContext } from './whatsapp-types';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { enviarAlertaSistema } from '../crons/healthCheck';
+import { isLikelySurveyResponse } from '../crons/nurturing';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MÓDULOS REFACTORIZADOS
@@ -660,56 +661,71 @@ export class WhatsAppHandler {
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       const notasLead = typeof lead?.notes === 'object' && lead?.notes ? lead.notes : {};
       if (notasLead.pending_satisfaction_survey) {
-        const respuesta = trimmedBody.trim();
-        const ratings: { [key: string]: { label: string; emoji: string } } = {
-          '1': { label: 'Excelente', emoji: '🌟' },
-          '2': { label: 'Buena', emoji: '👍' },
-          '3': { label: 'Regular', emoji: '😐' },
-          '4': { label: 'Mala', emoji: '😔' }
-        };
-
-        const rating = ratings[respuesta];
-        if (rating) {
-          console.log(`📋 Procesando respuesta a encuesta de satisfacción: ${respuesta}`);
-          const nombreCliente = lead.name?.split(' ')[0] || '';
-          const propiedad = notasLead.pending_satisfaction_survey.property || 'la propiedad';
-
-          // Guardar la respuesta en surveys
-          try {
-            await this.supabase.client.from('surveys').insert({
-              lead_id: lead.id,
-              survey_type: 'satisfaction',
-              rating: parseInt(respuesta),
-              rating_label: rating.label,
-              property: propiedad,
-              created_at: new Date().toISOString()
-            });
-          } catch (err) {
-            console.error('⚠️ Error guardando encuesta:', err);
+        // TTL check: si tiene más de 48h, auto-limpiar y continuar al flujo normal
+        const surveySetAt = notasLead.pending_satisfaction_survey.sent_at;
+        if (surveySetAt) {
+          const horasDesde = (Date.now() - new Date(surveySetAt).getTime()) / (1000 * 60 * 60);
+          if (horasDesde > 48) {
+            console.log(`📋 pending_satisfaction_survey expirada (${Math.round(horasDesde)}h) - limpiando`);
+            delete notasLead.pending_satisfaction_survey;
+            await this.supabase.client.from('leads').update({ notes: notasLead }).eq('id', lead.id);
+            // Continuar al flujo normal (no return)
           }
+        }
 
-          // Limpiar pending_satisfaction_survey
-          delete notasLead.pending_satisfaction_survey;
-          await this.supabase.client
-            .from('leads')
-            .update({ notes: notasLead })
-            .eq('id', lead.id);
+        // Solo procesar si aún existe el flag (no expiró) y parece respuesta a encuesta
+        if (notasLead.pending_satisfaction_survey && isLikelySurveyResponse(trimmedBody.trim())) {
+          const respuesta = trimmedBody.trim();
+          const ratings: { [key: string]: { label: string; emoji: string } } = {
+            '1': { label: 'Excelente', emoji: '🌟' },
+            '2': { label: 'Buena', emoji: '👍' },
+            '3': { label: 'Regular', emoji: '😐' },
+            '4': { label: 'Mala', emoji: '😔' }
+          };
 
-          let respuestaCliente = '';
-          if (respuesta === '1' || respuesta === '2') {
-            respuestaCliente = `¡Gracias por tu feedback, ${nombreCliente}! ${rating.emoji}\n\n` +
-              `Nos alegra que hayas tenido una experiencia *${rating.label.toLowerCase()}*.\n\n` +
-              `Si tienes alguna pregunta sobre *${propiedad}*, ¡aquí estamos para ayudarte! 🏠`;
-          } else {
-            respuestaCliente = `Gracias por tu feedback, ${nombreCliente}. ${rating.emoji}\n\n` +
-              `Lamentamos que tu experiencia no haya sido la mejor.\n` +
-              `Tomaremos en cuenta tus comentarios para mejorar.\n\n` +
-              `¿Hay algo específico que podamos hacer para ayudarte? 🙏`;
+          const rating = ratings[respuesta];
+          if (rating) {
+            console.log(`📋 Procesando respuesta a encuesta de satisfacción: ${respuesta}`);
+            const nombreCliente = lead.name?.split(' ')[0] || 'amigo';
+            const propiedad = notasLead.pending_satisfaction_survey.property || 'la propiedad';
+
+            // Guardar la respuesta en surveys
+            try {
+              await this.supabase.client.from('surveys').insert({
+                lead_id: lead.id,
+                survey_type: 'satisfaction',
+                rating: parseInt(respuesta),
+                rating_label: rating.label,
+                property: propiedad,
+                created_at: new Date().toISOString()
+              });
+            } catch (err) {
+              console.error('⚠️ Error guardando encuesta:', err);
+            }
+
+            // Limpiar pending_satisfaction_survey
+            delete notasLead.pending_satisfaction_survey;
+            await this.supabase.client
+              .from('leads')
+              .update({ notes: notasLead })
+              .eq('id', lead.id);
+
+            let respuestaCliente = '';
+            if (respuesta === '1' || respuesta === '2') {
+              respuestaCliente = `¡Gracias por tu feedback, ${nombreCliente}! ${rating.emoji}\n\n` +
+                `Nos alegra que hayas tenido una experiencia *${rating.label.toLowerCase()}*.\n\n` +
+                `Si tienes alguna pregunta sobre *${propiedad}*, ¡aquí estamos para ayudarte! 🏠`;
+            } else {
+              respuestaCliente = `Gracias por tu feedback, ${nombreCliente}. ${rating.emoji}\n\n` +
+                `Lamentamos que tu experiencia no haya sido la mejor.\n` +
+                `Tomaremos en cuenta tus comentarios para mejorar.\n\n` +
+                `¿Hay algo específico que podamos hacer para ayudarte? 🙏`;
+            }
+
+            await this.meta.sendWhatsAppMessage(cleanPhone, respuestaCliente);
+            console.log(`✅ Encuesta de satisfacción procesada para ${lead.name}`);
+            return;
           }
-
-          await this.meta.sendWhatsAppMessage(cleanPhone, respuestaCliente);
-          console.log(`✅ Encuesta de satisfacción procesada para ${lead.name}`);
-          return;
         }
       }
 

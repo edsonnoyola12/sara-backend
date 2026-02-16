@@ -53,7 +53,7 @@ export class EncuestasService {
     notificarVendedor: string;
   } {
     const msgLower = mensaje.toLowerCase().trim();
-    const nombreCorto = nombreLead.split(' ')[0];
+    const nombreCorto = (nombreLead || 'amigo').split(' ')[0] || 'amigo';
 
     // PRIMERO: Detectar respuestas numéricas (1, 2, 3)
     // 1️⃣ Me encantó, quiero avanzar → positivo

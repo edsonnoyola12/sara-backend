@@ -6,6 +6,7 @@
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { puedeEnviarMensajeAutomatico, registrarMensajeAutomatico } from './followups';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 
 // ═══════════════════════════════════════════════════════════
 // HELPER: Validar si un mensaje parece respuesta a encuesta
@@ -840,25 +841,40 @@ Responde con un número del *0 al 10*:
 Tu respuesta nos ayuda a mejorar 🙏`;
 
       try {
-        await meta.sendWhatsAppMessage(cliente.phone, mensaje);
-        enviados++;
-        resultado.enviados = enviados;
-        resultado.detalles.push(`✅ Enviado a ${cliente.name} (${cliente.phone}) - ${cliente.status}`);
-        console.log(`📊 Encuesta NPS enviada a: ${cliente.name} (${cliente.status})`);
-
-        // Marcar como enviada
+        // MARK BEFORE SEND (previene duplicados por CRON race condition)
+        const ahora = new Date().toISOString();
         const notasActualizadas = {
           ...notas,
           encuesta_nps_enviada: hoyStr,
           encuesta_nps_status: cliente.status,
           esperando_respuesta_nps: true,
-          esperando_respuesta_nps_at: new Date().toISOString()
+          esperando_respuesta_nps_at: ahora,
+          surveys_sent: [
+            ...((notas.surveys_sent || []).slice(-9)),
+            { type: 'nps', sent_at: ahora }
+          ]
         };
 
         await supabase.client
           .from('leads')
           .update({ notes: notasActualizadas })
           .eq('id', cliente.id);
+
+        // Ahora sí enviar
+        const resultado_envio = await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+        const wamid = resultado_envio?.messages?.[0]?.id;
+
+        // Guardar wamid si se obtuvo
+        if (wamid) {
+          const notasConWamid = { ...notasActualizadas, survey_wamid: wamid };
+          notasConWamid.surveys_sent[notasConWamid.surveys_sent.length - 1].wamid = wamid;
+          await supabase.client.from('leads').update({ notes: notasConWamid }).eq('id', cliente.id);
+        }
+
+        enviados++;
+        resultado.enviados = enviados;
+        resultado.detalles.push(`✅ Enviado a ${cliente.name} (${cliente.phone}) - ${cliente.status}${wamid ? ` wamid:${wamid.slice(-8)}` : ''}`);
+        console.log(`📊 Encuesta NPS enviada a: ${cliente.name} (${cliente.status})${wamid ? ` wamid:${wamid.slice(-8)}` : ''}`);
 
         await new Promise(r => setTimeout(r, 2000));
 
@@ -946,25 +962,19 @@ Lamentamos que tu experiencia no haya sido la mejor. 😔
 
 Un asesor te contactará pronto.`;
 
-    // Alertar al vendedor sobre detractor
+    // Alertar al vendedor sobre detractor (via enviarMensajeTeamMember para respetar ventana 24h)
     if (lead.assigned_to) {
       const { data: vendedor } = await supabase.client
         .from('team_members')
-        .select('phone')
+        .select('*')
         .eq('id', lead.assigned_to)
         .single();
 
-      if (vendedor?.phone) {
-        await meta.sendWhatsAppMessage(vendedor.phone,
-          `🚨 *ALERTA NPS BAJO*
-
-Cliente: ${lead.name}
-Score: ${score}/10 (${categoria})
-Status: ${lead.status}
-
-⚠️ Requiere atención inmediata. Contacta al cliente para resolver su experiencia.
-
-📞 bridge ${nombre}`);
+      if (vendedor) {
+        await enviarMensajeTeamMember(supabase, meta, vendedor,
+          `🚨 *ALERTA NPS BAJO*\n\nCliente: ${lead.name}\nScore: ${score}/10 (${categoria})\nStatus: ${lead.status}\n\n⚠️ Requiere atención inmediata. Contacta al cliente para resolver su experiencia.\n\n📞 bridge ${nombre}`,
+          { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
+        );
       }
     }
   }
@@ -1056,16 +1066,17 @@ Si hay algo pendiente o algún detalle por resolver, responde y te ayudamos de i
 ¡Bienvenido a la familia Santa Rita! 🎉`;
 
       try {
-        await meta.sendWhatsAppMessage(cliente.phone, mensaje);
-        enviados++;
-        console.log(`🔑 Seguimiento post-entrega enviado a: ${cliente.name}`);
-
-        // Marcar como enviado
+        // MARK BEFORE SEND (previene duplicados por CRON race condition)
+        const ahora = new Date().toISOString();
         const notasActualizadas = {
           ...notas,
           seguimiento_entrega_enviado: hoyStr,
           esperando_respuesta_entrega: true,
-          esperando_respuesta_entrega_at: new Date().toISOString()
+          esperando_respuesta_entrega_at: ahora,
+          surveys_sent: [
+            ...((notas.surveys_sent || []).slice(-9)),
+            { type: 'post_entrega', sent_at: ahora }
+          ]
         };
 
         await supabase.client
@@ -1073,22 +1084,32 @@ Si hay algo pendiente o algún detalle por resolver, responde y te ayudamos de i
           .update({ notes: notasActualizadas })
           .eq('id', cliente.id);
 
-        // Notificar al vendedor
+        // Ahora sí enviar
+        const resultado_envio = await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+        const wamid = resultado_envio?.messages?.[0]?.id;
+
+        if (wamid) {
+          const notasConWamid = { ...notasActualizadas, survey_wamid: wamid };
+          notasConWamid.surveys_sent[notasConWamid.surveys_sent.length - 1].wamid = wamid;
+          await supabase.client.from('leads').update({ notes: notasConWamid }).eq('id', cliente.id);
+        }
+
+        enviados++;
+        console.log(`🔑 Seguimiento post-entrega enviado a: ${cliente.name}${wamid ? ` wamid:${wamid.slice(-8)}` : ''}`);
+
+        // Notificar al vendedor (via enviarMensajeTeamMember para respetar ventana 24h)
         if (cliente.assigned_to) {
           const { data: vendedor } = await supabase.client
             .from('team_members')
-            .select('name, phone')
+            .select('*')
             .eq('id', cliente.assigned_to)
             .single();
 
-          if (vendedor?.phone) {
-            await meta.sendWhatsAppMessage(vendedor.phone,
-              `🔑 *Seguimiento post-entrega enviado*
-
-Cliente: ${cliente.name}
-Casa: ${desarrollo}
-
-💡 Si responde con algún problema, atiéndelo de inmediato.`);
+          if (vendedor) {
+            await enviarMensajeTeamMember(supabase, meta, vendedor,
+              `🔑 *Seguimiento post-entrega enviado*\n\nCliente: ${cliente.name}\nCasa: ${desarrollo}\n\n💡 Si responde con algún problema, atiéndelo de inmediato.`,
+              { tipoMensaje: 'notificacion', pendingKey: 'pending_mensaje' }
+            );
           }
         }
 
@@ -1179,25 +1200,19 @@ Recuerda que estamos aquí si necesitas algo. ¡Disfruta tu nuevo hogar! 🏠✨
     .update({ notes: notasActualizadas })
     .eq('id', lead.id);
 
-  // Si hay problema, alertar al vendedor
+  // Si hay problema, alertar al vendedor (via enviarMensajeTeamMember para respetar ventana 24h)
   if (requiereAtencion && lead.assigned_to) {
     const { data: vendedor } = await supabase.client
       .from('team_members')
-      .select('phone')
+      .select('*')
       .eq('id', lead.assigned_to)
       .single();
 
-    if (vendedor?.phone) {
-      await meta.sendWhatsAppMessage(vendedor.phone,
-        `🚨 *PROBLEMA POST-ENTREGA*
-
-Cliente: ${lead.name}
-📱 ${lead.phone}
-
-Mensaje: "${mensaje}"
-
-⚠️ Requiere atención inmediata.
-📞 bridge ${nombre}`);
+    if (vendedor) {
+      await enviarMensajeTeamMember(supabase, meta, vendedor,
+        `🚨 *PROBLEMA POST-ENTREGA*\n\nCliente: ${lead.name}\n📱 ${lead.phone}\n\nMensaje: "${mensaje}"\n\n⚠️ Requiere atención inmediata.\n📞 bridge ${nombre}`,
+        { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
+      );
     }
   }
 
@@ -1277,23 +1292,37 @@ Queremos saber cómo te ha ido:
 Tu opinión nos ayuda a mejorar 🙏`;
 
       try {
-        await meta.sendWhatsAppMessage(cliente.phone, mensaje);
-        enviados++;
-        console.log(`🏡 Encuesta de satisfacción enviada a: ${cliente.name} (${mesesDesdeEntrega} meses)`);
-
-        // Marcar como enviada
+        // MARK BEFORE SEND (previene duplicados por CRON race condition)
+        const ahora = new Date().toISOString();
         const notasActualizadas = {
           ...notas,
           encuesta_satisfaccion_casa_enviada: hoyStr,
           meses_en_casa: mesesDesdeEntrega,
           esperando_respuesta_satisfaccion_casa: true,
-          esperando_respuesta_satisfaccion_casa_at: new Date().toISOString()
+          esperando_respuesta_satisfaccion_casa_at: ahora,
+          surveys_sent: [
+            ...((notas.surveys_sent || []).slice(-9)),
+            { type: 'satisfaccion_casa', sent_at: ahora }
+          ]
         };
 
         await supabase.client
           .from('leads')
           .update({ notes: notasActualizadas })
           .eq('id', cliente.id);
+
+        // Ahora sí enviar
+        const resultado_envio = await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+        const wamid = resultado_envio?.messages?.[0]?.id;
+
+        if (wamid) {
+          const notasConWamid = { ...notasActualizadas, survey_wamid: wamid };
+          notasConWamid.surveys_sent[notasConWamid.surveys_sent.length - 1].wamid = wamid;
+          await supabase.client.from('leads').update({ notes: notasConWamid }).eq('id', cliente.id);
+        }
+
+        enviados++;
+        console.log(`🏡 Encuesta de satisfacción enviada a: ${cliente.name} (${mesesDesdeEntrega} meses)${wamid ? ` wamid:${wamid.slice(-8)}` : ''}`);
 
         await new Promise(r => setTimeout(r, 2000));
 
@@ -1426,26 +1455,19 @@ Estamos para ayudarte. 🤝`;
     .update({ notes: notasActualizadas })
     .eq('id', lead.id);
 
-  // Si requiere atención, alertar al vendedor
+  // Si requiere atención, alertar al vendedor (via enviarMensajeTeamMember para respetar ventana 24h)
   if (requiereAtencion && lead.assigned_to) {
     const { data: vendedor } = await supabase.client
       .from('team_members')
-      .select('phone')
+      .select('*')
       .eq('id', lead.assigned_to)
       .single();
 
-    if (vendedor?.phone) {
-      await meta.sendWhatsAppMessage(vendedor.phone,
-        `⚠️ *CLIENTE INSATISFECHO*
-
-Cliente: ${lead.name}
-Calificación: ${calificacion}/4 (${categoria})
-📱 ${lead.phone}
-
-Mensaje: "${mensaje}"
-
-🚨 Requiere seguimiento inmediato.
-📞 bridge ${nombre}`);
+    if (vendedor) {
+      await enviarMensajeTeamMember(supabase, meta, vendedor,
+        `⚠️ *CLIENTE INSATISFECHO*\n\nCliente: ${lead.name}\nCalificación: ${calificacion}/4 (${categoria})\n📱 ${lead.phone}\n\nMensaje: "${mensaje}"\n\n🚨 Requiere seguimiento inmediato.\n📞 bridge ${nombre}`,
+        { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
+      );
     }
   }
 
@@ -1532,23 +1554,37 @@ Es buen momento para revisar el mantenimiento preventivo:
 Responde *SÍ* si todo está bien o *AYUDA* si necesitas contactos de proveedores. 🤝`;
 
       try {
-        await meta.sendWhatsAppMessage(cliente.phone, mensaje);
-        enviados++;
-        console.log(`🔧 Check-in de mantenimiento enviado a: ${cliente.name} (${añosDesdeEntrega} años)`);
-
-        // Marcar como enviado
+        // MARK BEFORE SEND (previene duplicados por CRON race condition)
+        const ahora = new Date().toISOString();
         const notasActualizadas = {
           ...notas,
           ultimo_checkin_mantenimiento: hoyStr,
           años_en_casa: añosDesdeEntrega,
           esperando_respuesta_mantenimiento: true,
-          esperando_respuesta_mantenimiento_at: new Date().toISOString()
+          esperando_respuesta_mantenimiento_at: ahora,
+          surveys_sent: [
+            ...((notas.surveys_sent || []).slice(-9)),
+            { type: 'mantenimiento', sent_at: ahora }
+          ]
         };
 
         await supabase.client
           .from('leads')
           .update({ notes: notasActualizadas })
           .eq('id', cliente.id);
+
+        // Ahora sí enviar
+        const resultado_envio = await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+        const wamid = resultado_envio?.messages?.[0]?.id;
+
+        if (wamid) {
+          const notasConWamid = { ...notasActualizadas, survey_wamid: wamid };
+          notasConWamid.surveys_sent[notasConWamid.surveys_sent.length - 1].wamid = wamid;
+          await supabase.client.from('leads').update({ notes: notasConWamid }).eq('id', cliente.id);
+        }
+
+        enviados++;
+        console.log(`🔧 Check-in de mantenimiento enviado a: ${cliente.name} (${añosDesdeEntrega} años)${wamid ? ` wamid:${wamid.slice(-8)}` : ''}`);
 
         await new Promise(r => setTimeout(r, 2000));
 
@@ -1643,24 +1679,19 @@ Recuerda que el mantenimiento preventivo alarga la vida de tu inversión.
     .update({ notes: notasActualizadas })
     .eq('id', lead.id);
 
-  // Si necesita proveedores, notificar al vendedor
+  // Si necesita proveedores, notificar al vendedor (via enviarMensajeTeamMember para respetar ventana 24h)
   if (necesitaProveedores && lead.assigned_to) {
     const { data: vendedor } = await supabase.client
       .from('team_members')
-      .select('phone')
+      .select('*')
       .eq('id', lead.assigned_to)
       .single();
 
-    if (vendedor?.phone) {
-      await meta.sendWhatsAppMessage(vendedor.phone,
-        `🔧 *CLIENTE NECESITA PROVEEDORES*
-
-Cliente: ${lead.name}
-📱 ${lead.phone}
-Mensaje: "${mensaje}"
-
-💡 Envíale lista de proveedores recomendados.
-📞 bridge ${nombre}`);
+    if (vendedor) {
+      await enviarMensajeTeamMember(supabase, meta, vendedor,
+        `🔧 *CLIENTE NECESITA PROVEEDORES*\n\nCliente: ${lead.name}\n📱 ${lead.phone}\nMensaje: "${mensaje}"\n\n💡 Envíale lista de proveedores recomendados.\n📞 bridge ${nombre}`,
+        { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
+      );
     }
   }
 
@@ -1747,5 +1778,94 @@ Estamos aquí para lo que necesites 😊`;
     console.log(`📅 Check-in 60 días completado: ${enviados} enviados`);
   } catch (e) {
     console.error('Error en checkIn60Dias:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// LIMPIEZA DE FLAGS DE ENCUESTAS EXPIRADOS
+// Corre 1x/día en CRON nocturno (0 1 * * * = 7 PM México)
+// Limpia flags esperando_respuesta_* con más de 72h
+// ═══════════════════════════════════════════════════════════
+export async function limpiarFlagsEncuestasExpirados(
+  supabase: SupabaseService
+): Promise<{ limpiados: number; leadsAfectados: number }> {
+  try {
+    console.log('🧹 Iniciando limpieza de flags de encuestas expirados...');
+
+    const flagsALimpiar = [
+      { flag: 'esperando_respuesta_nps', at: 'esperando_respuesta_nps_at' },
+      { flag: 'esperando_respuesta_entrega', at: 'esperando_respuesta_entrega_at' },
+      { flag: 'esperando_respuesta_satisfaccion_casa', at: 'esperando_respuesta_satisfaccion_casa_at' },
+      { flag: 'esperando_respuesta_mantenimiento', at: 'esperando_respuesta_mantenimiento_at' },
+      { flag: 'pending_client_survey', at: '' },
+      { flag: 'pending_satisfaction_survey', at: '' },
+    ];
+
+    // Buscar leads con cualquier flag de encuesta pendiente
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, notes')
+      .not('notes', 'is', null);
+
+    if (!leads || leads.length === 0) {
+      console.log('🧹 No hay leads con notes para verificar');
+      return { limpiados: 0, leadsAfectados: 0 };
+    }
+
+    let totalLimpiados = 0;
+    let leadsAfectados = 0;
+    const ahora = Date.now();
+    const HORAS_EXPIRACION = 72;
+
+    for (const lead of leads) {
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      let modificado = false;
+      let flagsLimpiados = 0;
+
+      for (const { flag, at } of flagsALimpiar) {
+        if (!notas[flag]) continue;
+
+        // Determinar timestamp: del campo _at, o de sent_at dentro del objeto
+        let timestamp: string | null = null;
+        if (at && notas[at]) {
+          timestamp = notas[at];
+        } else if (typeof notas[flag] === 'object' && notas[flag].sent_at) {
+          timestamp = notas[flag].sent_at;
+        }
+
+        if (!timestamp) {
+          // Sin timestamp → flag huérfano, limpiar
+          delete notas[flag];
+          if (at) delete notas[at];
+          modificado = true;
+          flagsLimpiados++;
+          continue;
+        }
+
+        const horasDesde = (ahora - new Date(timestamp).getTime()) / (1000 * 60 * 60);
+        if (horasDesde > HORAS_EXPIRACION) {
+          console.log(`🧹 Limpiando ${flag} de ${lead.name || lead.id} (${Math.round(horasDesde)}h)`);
+          delete notas[flag];
+          if (at) delete notas[at];
+          modificado = true;
+          flagsLimpiados++;
+        }
+      }
+
+      if (modificado) {
+        await supabase.client
+          .from('leads')
+          .update({ notes: notas })
+          .eq('id', lead.id);
+        totalLimpiados += flagsLimpiados;
+        leadsAfectados++;
+      }
+    }
+
+    console.log(`🧹 Limpieza completada: ${totalLimpiados} flags de ${leadsAfectados} leads`);
+    return { limpiados: totalLimpiados, leadsAfectados };
+  } catch (e) {
+    console.error('Error en limpiarFlagsEncuestasExpirados:', e);
+    return { limpiados: 0, leadsAfectados: 0 };
   }
 }

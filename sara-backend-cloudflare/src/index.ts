@@ -144,7 +144,8 @@ import {
   checkInMantenimiento,
   procesarRespuestaMantenimiento,
   isLikelySurveyResponse,
-  checkIn60Dias
+  checkIn60Dias,
+  limpiarFlagsEncuestasExpirados
 } from './crons/nurturing';
 
 // Maintenance - Bridge, followups, stagnant leads, anniversaries
@@ -2244,6 +2245,17 @@ export default {
         await archivarConversationHistory(supabase);
       } catch (e) {
         console.error('❌ Error en archival:', e);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // LIMPIEZA: Flags de encuestas expirados (>72h) - diario 7 PM MX
+    // ═══════════════════════════════════════════════════════════
+    if (event.cron === '0 1 * * *') {
+      try {
+        await limpiarFlagsEncuestasExpirados(supabase);
+      } catch (e) {
+        console.error('❌ Error limpiando flags expirados:', e);
       }
     }
 
