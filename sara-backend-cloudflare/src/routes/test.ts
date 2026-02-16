@@ -10,6 +10,7 @@ import { CacheService } from '../services/cacheService';
 import { ClaudeService } from '../services/claude';
 import { CalendarService } from '../services/calendar';
 import { WhatsAppHandler } from '../handlers/whatsapp';
+import { createMetaWithTracking } from '../utils/metaTracking';
 import { CEOCommandsService } from '../services/ceoCommandsService';
 import { VendorCommandsService } from '../services/vendorCommandsService';
 import { AsesorCommandsService } from '../services/asesorCommandsService';
@@ -1825,7 +1826,7 @@ export async function handleTestRoutes(
       try {
         // Inicializar servicios necesarios
         const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
-        const meta = createMetaWithTracking(env, supabase);
+        const meta = await createMetaWithTracking(env, supabase);
         const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
 
         // Llamar al handler de WhatsApp

@@ -328,10 +328,26 @@ export class LeadMessageService {
       const desarrollo = recentOffer.development;
       const precioFmt = recentOffer.offered_price?.toLocaleString('es-MX', { maximumFractionDigits: 0 });
 
+      // Solo tratar como respuesta a oferta si es un mensaje corto (≤10 palabras)
+      // Mensajes largos como "hola quiero info de monte verde" NO son respuestas a oferta
+      const wordCount = body.trim().split(/\s+/).length;
+      if (wordCount > 10) {
+        console.log(`📋 Mensaje muy largo (${wordCount} palabras) para ser respuesta a oferta, pasando a IA`);
+        return { action: 'continue_to_ai' };
+      }
+
       // Detectar tipo de respuesta
       const respuestasPositivas = ['si', 'sí', 'quiero', 'me interesa', 'interesado', 'interesada', 'va', 'sale', 'ok', 'dale', 'perfecto', 'acepto', 'de acuerdo', 'claro'];
       const respuestasNegativas = ['no', 'no me interesa', 'no gracias', 'paso', 'muy caro', 'no puedo', 'no tengo', 'descartado'];
       const respuestasPregunta = ['cuanto', 'cuánto', 'precio', 'enganche', 'financiamiento', 'mensualidad', 'credito', 'crédito', 'banco', 'requisitos', 'cuando', 'cuándo', 'donde', 'dónde', 'que incluye', 'qué incluye'];
+
+      // Palabras que indican que NO es respuesta a oferta sino un mensaje normal
+      const palabrasNoOferta = ['hola', 'info', 'información', 'informacion', 'busco', 'tienen', 'donde', 'ubicacion', 'ubicación', 'brochure', 'folleto', 'video', 'casa', 'terreno', 'desarrollo'];
+      const esConversacionNormal = palabrasNoOferta.some(p => mensajeLower.includes(p));
+      if (esConversacionNormal) {
+        console.log(`📋 Mensaje parece conversación normal, no respuesta a oferta`);
+        return { action: 'continue_to_ai' };
+      }
 
       const esNegativo = respuestasNegativas.some(r => mensajeLower.includes(r));
       // Solo es positivo si NO es negativo (para evitar "no me interesa" detectado como "me interesa")
