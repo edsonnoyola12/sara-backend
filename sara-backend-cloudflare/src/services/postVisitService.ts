@@ -68,7 +68,7 @@ export class PostVisitService {
     // Guardar contexto en las notas del vendedor (team_member)
     await this.guardarContextoVendedor(vendedor.id, context);
 
-    const mensaje = `📋 *POST-VISITA: ${lead.name?.toUpperCase()}*\n\n` +
+    const mensaje = `📋 *POST-VISITA: ${(lead.name || 'Cliente').toUpperCase()}*\n\n` +
       `¿Llegó ${nombreCorto} a la cita de hoy en *${context.property}*?\n\n` +
       `1️⃣ Sí, llegó\n` +
       `2️⃣ No llegó`;
