@@ -385,6 +385,7 @@ function requiresAuth(pathname: string): boolean {
     /^\/api\/reports/,                       // Business Intelligence - Reports
     /^\/api\/reportes/,                      // Reportes legacy
     /^\/api\/message-metrics/,               // Métricas de mensajes (CRM)
+    /^\/api\/message-audit/,                 // Auditoría de mensajes (CRM)
     /^\/api\/tts-metrics/,                   // Métricas de TTS (CRM)
     /^\/api\/metrics\/quality/,              // Calidad de respuestas (CRM)
     /^\/api\/surveys/,                       // Encuestas (CRM)
@@ -404,16 +405,34 @@ function requiresAuth(pathname: string): boolean {
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPER: Crear MetaWhatsAppService con tracking habilitado
 // ═══════════════════════════════════════════════════════════════════════════
-function createMetaWithTracking(env: any, supabase: SupabaseService): MetaWhatsAppService {
+async function createMetaWithTracking(env: any, supabase: SupabaseService): Promise<MetaWhatsAppService> {
   const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
 
-  // Configurar tracking automático de mensajes
+  // Pre-cargar team member phones para auto-detectar recipientType
+  const { data: teamMembers } = await supabase.client
+    .from('team_members')
+    .select('id, name, phone')
+    .eq('active', true);
+
+  const tmPhoneMap = new Map<string, { id: string; name: string }>();
+  for (const tm of teamMembers || []) {
+    if (tm.phone) {
+      tmPhoneMap.set(tm.phone.slice(-10), { id: tm.id, name: tm.name });
+    }
+  }
+
+  // Configurar tracking automático de mensajes con auto-detect recipientType
   const msgTracking = createMessageTrackingService(supabase);
   meta.setTrackingCallback(async (data) => {
+    const phoneSuffix = data.recipientPhone.slice(-10);
+    const tm = tmPhoneMap.get(phoneSuffix);
+
     await msgTracking.logMessageSent({
       messageId: data.messageId,
       recipientPhone: data.recipientPhone,
-      recipientType: 'lead', // Default, se puede mejorar
+      recipientType: tm ? 'team_member' : 'lead',
+      recipientId: tm?.id,
+      recipientName: tm?.name,
       messageType: data.messageType,
       categoria: data.categoria,
       contenido: data.contenido
@@ -897,7 +916,7 @@ export default {
           // ═══ FIN DEDUPLICACIÓN ═══
 
           const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
-          const meta = createMetaWithTracking(env, supabase);
+          const meta = await createMetaWithTracking(env, supabase);
           const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
           const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
 
@@ -1897,7 +1916,7 @@ export default {
 
     try {
     const supabase = new SupabaseService(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
-    const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+    const meta = await createMetaWithTracking(env, supabase);
 
     const now = new Date();
 

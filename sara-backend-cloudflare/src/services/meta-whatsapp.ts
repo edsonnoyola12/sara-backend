@@ -424,7 +424,21 @@ export class MetaWhatsAppService {
       },
       body: JSON.stringify(payload)
     });
-    return response.json();
+    const data = await response.json();
+
+    // 📊 Tracking de imagen enviada
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId,
+        recipientPhone: phone,
+        messageType: 'image',
+        categoria: 'imagen',
+        contenido: caption?.substring(0, 200) || 'Imagen enviada'
+      });
+    }
+
+    return data;
   }
 
   async sendWhatsAppVideo(to: string, videoUrl: string, caption?: string): Promise<any> {
@@ -448,7 +462,21 @@ export class MetaWhatsAppService {
       },
       body: JSON.stringify(payload)
     });
-    return response.json();
+    const data = await response.json();
+
+    // 📊 Tracking de video enviado
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId,
+        recipientPhone: phone,
+        messageType: 'video',
+        categoria: 'video',
+        contenido: caption?.substring(0, 200) || 'Video enviado'
+      });
+    }
+
+    return data;
   }
 
   async sendWhatsAppDocument(to: string, documentUrl: string, filename: string, caption?: string): Promise<any> {
@@ -484,6 +512,19 @@ export class MetaWhatsAppService {
       throw new Error(data.error?.message || 'Error enviando documento');
     }
     console.log(`✅ Documento enviado: ${data.messages?.[0]?.id}`);
+
+    // 📊 Tracking de documento enviado
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId,
+        recipientPhone: phone,
+        messageType: 'document',
+        categoria: 'documento',
+        contenido: `Documento: ${filename}`
+      });
+    }
+
     return data;
   }
 
@@ -517,6 +558,19 @@ export class MetaWhatsAppService {
       throw new Error(data.error?.message || 'Error enviando video');
     }
     console.log(`✅ Video enviado: ${data.messages?.[0]?.id}`);
+
+    // 📊 Tracking de video enviado (por media_id)
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId,
+        recipientPhone: phone,
+        messageType: 'video',
+        categoria: 'video',
+        contenido: caption?.substring(0, 200) || 'Video enviado'
+      });
+    }
+
     return data;
   }
 
@@ -627,6 +681,19 @@ export class MetaWhatsAppService {
       throw new Error(data.error?.message || 'Error enviando audio');
     }
     console.log(`✅ Audio enviado: ${data.messages?.[0]?.id}`);
+
+    // 📊 Tracking de audio enviado (por URL)
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId,
+        recipientPhone: phone,
+        messageType: 'audio',
+        categoria: 'audio',
+        contenido: 'Audio enviado'
+      });
+    }
+
     return data;
   }
 
@@ -856,7 +923,21 @@ export class MetaWhatsAppService {
       },
       body: JSON.stringify(payload)
     });
-    return response.json();
+    const data = await response.json();
+
+    // 📊 Tracking de ubicación enviada
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId,
+        recipientPhone: phone,
+        messageType: 'text',
+        categoria: 'ubicacion',
+        contenido: `Ubicación: ${name || ''} (${latitude}, ${longitude})`
+      });
+    }
+
+    return data;
   }
 
   async markAsRead(messageId: string): Promise<any> {

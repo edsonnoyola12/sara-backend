@@ -489,6 +489,74 @@ export async function handleApiBiRoutes(
       }
     }
 
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // GET /api/message-audit - Auditoría de mensajes enviados a un destinatario
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if (url.pathname === '/api/message-audit' && request.method === 'GET') {
+      try {
+        const phone = url.searchParams.get('phone');
+        const days = parseInt(url.searchParams.get('days') || '7');
+
+        if (!phone) {
+          return corsResponse(JSON.stringify({ error: 'Parámetro phone requerido' }), 400);
+        }
+
+        const phoneSuffix = phone.slice(-10);
+        const desde = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+        const { data: mensajes, error } = await supabase.client
+          .from('messages_sent')
+          .select('*')
+          .like('recipient_phone', `%${phoneSuffix}`)
+          .gte('sent_at', desde)
+          .order('sent_at', { ascending: false });
+
+        if (error) {
+          if (error.code === '42P01') {
+            return corsResponse(JSON.stringify({
+              error: 'Tabla messages_sent no existe',
+              instrucciones: 'Ejecutar sql/message_tracking.sql en Supabase Dashboard'
+            }), 200);
+          }
+          return corsResponse(JSON.stringify({ error: error.message }), 500);
+        }
+
+        const msgs = mensajes || [];
+        const enviados = msgs.length;
+        const entregados = msgs.filter(m => m.status === 'delivered' || m.status === 'read').length;
+        const leidos = msgs.filter(m => m.status === 'read' || m.read_at).length;
+        const fallidos = msgs.filter(m => m.status === 'failed').length;
+
+        return corsResponse(JSON.stringify({
+          phone: phoneSuffix,
+          periodo: `últimos ${days} días`,
+          resumen: {
+            enviados,
+            entregados,
+            leidos,
+            fallidos,
+            tasaEntrega: enviados > 0 ? Math.round(entregados / enviados * 100) : 0,
+            tasaLectura: entregados > 0 ? Math.round(leidos / entregados * 100) : 0
+          },
+          mensajes: msgs.map(m => ({
+            message_id: m.message_id,
+            message_type: m.message_type,
+            categoria: m.categoria,
+            recipient_type: m.recipient_type,
+            contenido: m.contenido,
+            status: m.status,
+            sent_at: m.sent_at,
+            delivered_at: m.delivered_at,
+            read_at: m.read_at,
+            failed_at: m.failed_at,
+            error_message: m.error_message
+          }))
+        }, null, 2));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
     // ═══════════════════════════════════════════════════════════
     // API Routes - Reportes CEO (Diario, Semanal, Mensual)
     // ═══════════════════════════════════════════════════════════
