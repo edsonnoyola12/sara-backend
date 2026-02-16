@@ -5448,9 +5448,18 @@ Estoy aquí para ayudarte. 😊`;
         return corsResponse(JSON.stringify({ error: 'Lead no encontrado', hint: 'Usa ?lead_id=UUID' }), 400);
       }
 
-      // 2. Obtener vendedor (fallback: vendedor asignado al lead o primer vendedor activo)
+      // 2. Obtener vendedor
+      // IMPORTANTE: Si hay vendedor_phone override, buscar POR TELÉFONO primero
+      // para que el contexto se guarde con el ID correcto del vendedor receptor
       let vendedor: any = null;
-      if (vendedorId) {
+      if (vendedorPhoneOverride) {
+        const phoneSuffix = vendedorPhoneOverride.replace(/\D/g, '').slice(-10);
+        const { data } = await supabase.client.from('team_members').select('*')
+          .or(`phone.eq.${vendedorPhoneOverride},phone.like.%${phoneSuffix}`)
+          .limit(1).maybeSingle();
+        vendedor = data;
+      }
+      if (!vendedor && vendedorId) {
         const { data } = await supabase.client.from('team_members').select('*').eq('id', vendedorId).single();
         vendedor = data;
       }

@@ -21,8 +21,13 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
 
   // ═══════════════════════════════════════════════════════════
   // 0. VERIFICAR SI HAY FLUJO POST-VISITA EN CURSO
+  // Intenta por ID primero, luego por teléfono como fallback
   // ═══════════════════════════════════════════════════════════
-  const postVisitResult = await handler.procesarPostVisitaVendedor(vendedor.id, body);
+  let postVisitResult = await handler.procesarPostVisitaVendedor(vendedor.id, body);
+  if (!postVisitResult) {
+    // Fallback: buscar por teléfono (cubre caso de ID mismatch en test endpoint)
+    postVisitResult = await handler.buscarYProcesarPostVisitaPorPhone(from, body, teamMembers);
+  }
   if (postVisitResult) {
     console.log('📋 POST-VISITA: Procesando respuesta de vendedor');
     await ctx.meta.sendWhatsAppMessage(from, postVisitResult.respuesta);
