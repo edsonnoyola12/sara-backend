@@ -2714,7 +2714,7 @@ export default {
 
     // FLUJO POST-VISITA - pregunta al vendedor "¿Llegó el lead?" (30-90min después de cita)
     console.log('📋 Verificando citas pasadas para flujo post-visita...');
-    await iniciarFlujosPostVisita(supabase, meta);
+    await iniciarFlujosPostVisita(supabase, meta, env.SARA_CACHE);
 
     // ENCUESTAS AUTOMÁTICAS - cada hora verifica citas completadas hace 2h
     console.log('📋 Verificando encuestas post-cita pendientes...');

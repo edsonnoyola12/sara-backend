@@ -5431,7 +5431,7 @@ Estoy aquí para ayudarte. 😊`;
 
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       const { PostVisitService } = await import('../services/postVisitService');
-      const postVisitService = new PostVisitService(supabase);
+      const postVisitService = new PostVisitService(supabase, env.SARA_CACHE);
 
       // 1. Obtener lead (fallback: lead más reciente con vendedor)
       let lead: any = null;
@@ -5759,7 +5759,7 @@ _Solo responde con el número_ 🙏`;
     if (url.pathname === '/test-flujo-postvisita' || url.pathname === '/run-flujo-postvisita') {
       console.log('🧪 TEST: Forzando flujo post-visita...');
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-      await iniciarFlujosPostVisita(supabase, meta);
+      await iniciarFlujosPostVisita(supabase, meta, env.SARA_CACHE);
       return corsResponse(JSON.stringify({ ok: true, message: 'Flujo post-visita ejecutado' }));
     }
 

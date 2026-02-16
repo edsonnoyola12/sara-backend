@@ -1361,7 +1361,7 @@ export async function detectarYCrearReferido(
 
 export async function procesarPostVisitaVendedor(ctx: HandlerContext, vendedorId: string, mensaje: string): Promise<any | null> {
   try {
-    const postVisitService = new (await import('../services/postVisitService')).PostVisitService(ctx.supabase);
+    const postVisitService = new (await import('../services/postVisitService')).PostVisitService(ctx.supabase, ctx.env?.SARA_CACHE);
     const result = await postVisitService.procesarRespuestaVendedor(vendedorId, mensaje);
     return result;
   } catch (e) {
@@ -1375,45 +1375,46 @@ export async function buscarYProcesarPostVisitaPorPhone(ctx: HandlerContext, pho
     const phoneSuffix = phone.replace(/\D/g, '').slice(-10);
     console.log(`📋 POST-VISITA SEARCH: Buscando phoneSuffix=${phoneSuffix}`);
 
-    const postVisitService = new (await import('../services/postVisitService')).PostVisitService(ctx.supabase);
+    const postVisitService = new (await import('../services/postVisitService')).PostVisitService(ctx.supabase, ctx.env?.SARA_CACHE);
 
-    // SIEMPRE query fresh de DB - NO usar cachedTeamMembers
-    // El KV cache (5 min TTL) puede tener notas stale sin post_visit_context
-    // porque el CRON actualiza notes en DB pero el cache no se invalida
+    // 1. CHECK KV PRIMERO — buscar vendedorId por phone suffix
+    if (ctx.env?.SARA_CACHE) {
+      try {
+        const vendedorId = await ctx.env.SARA_CACHE.get(`post_visit_phone_${phoneSuffix}`);
+        if (vendedorId) {
+          console.log(`📋 POST-VISITA SEARCH: KV hit! vendedorId=${vendedorId} para phone=${phoneSuffix}`);
+          const result = await postVisitService.procesarRespuestaVendedor(vendedorId, mensaje);
+          if (result) return result;
+        }
+      } catch (kvErr) {
+        console.error('📋 KV phone lookup failed, falling back to DB:', kvErr);
+      }
+    }
+
+    // 2. FALLBACK a DB scan (legacy — por si KV no tiene el dato)
     const { data, error } = await ctx.supabase.client
       .from('team_members')
       .select('id, name, notes');
     console.log(`📋 POST-VISITA SEARCH: team_members encontrados=${data?.length || 0}, error=${error?.message || 'ninguno'}`);
     if (!data) return null;
-    const teamMembers = data;
 
     let foundAnyContext = false;
-    for (const tm of teamMembers) {
+    for (const tm of data) {
       let notas: any = {};
       if (tm.notes) {
         if (typeof tm.notes === 'string') {
-          try {
-            notas = JSON.parse(tm.notes);
-          } catch (e) {
-            notas = {};
-          }
+          try { notas = JSON.parse(tm.notes); } catch (e) { notas = {}; }
         } else if (typeof tm.notes === 'object') {
           notas = tm.notes;
         }
       }
       const context = notas.post_visit_context;
 
-      const notasKeys = Object.keys(notas);
-      if (notasKeys.length > 0) {
-        console.log(`📋 POST-VISITA SEARCH: ${tm.name} tiene notas con keys=[${notasKeys.join(',')}]`);
-      }
-
       if (context) {
         foundAnyContext = true;
         const contextPhone = context.vendedor_phone?.replace(/\D/g, '').slice(-10);
-        console.log(`📋 POST-VISITA SEARCH: ${tm.name} tiene post_visit_context con vendedor_phone=${contextPhone}`);
         if (contextPhone === phoneSuffix) {
-          console.log(`📋 POST-VISITA: ¡MATCH! Encontrado contexto para ${tm.name}`);
+          console.log(`📋 POST-VISITA: ¡MATCH en DB! Encontrado contexto para ${tm.name}`);
           const result = await postVisitService.procesarRespuestaVendedor(tm.id, mensaje);
           return result;
         }
@@ -1421,7 +1422,7 @@ export async function buscarYProcesarPostVisitaPorPhone(ctx: HandlerContext, pho
     }
 
     if (!foundAnyContext) {
-      console.log(`📋 POST-VISITA SEARCH: NINGÚN team_member tiene post_visit_context`);
+      console.log(`📋 POST-VISITA SEARCH: NINGÚN team_member tiene post_visit_context (ni KV ni DB)`);
     }
 
     console.log(`📋 POST-VISITA SEARCH: No se encontró contexto con phone=${phoneSuffix}`);
@@ -1433,7 +1434,7 @@ export async function buscarYProcesarPostVisitaPorPhone(ctx: HandlerContext, pho
 }
 
 export async function ejecutarAccionPostVisita(ctx: HandlerContext, result: any): Promise<void> {
-  const postVisitService = new (await import('../services/postVisitService')).PostVisitService(ctx.supabase);
+  const postVisitService = new (await import('../services/postVisitService')).PostVisitService(ctx.supabase, ctx.env?.SARA_CACHE);
 
   try {
     switch (result.accion) {
@@ -1552,7 +1553,7 @@ export function getLocationMapsLink(location: string): string | null {
 
 export async function iniciarPostVisita(ctx: HandlerContext, appointment: any, lead: any, vendedor: any): Promise<string | null> {
   try {
-    const postVisitService = new (await import('../services/postVisitService')).PostVisitService(ctx.supabase);
+    const postVisitService = new (await import('../services/postVisitService')).PostVisitService(ctx.supabase, ctx.env?.SARA_CACHE);
     const { mensaje, context } = await postVisitService.iniciarFlujoPostVisita(appointment, lead, vendedor);
 
     await ctx.meta.sendWhatsAppMessage(vendedor.phone, mensaje);

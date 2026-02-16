@@ -1009,7 +1009,7 @@ _¡Éxito esta semana!_ 🚀`;
 // Pregunta al VENDEDOR: "¿Llegó el lead?" → luego encuesta al lead
 // ═══════════════════════════════════════════════════════════════
 
-export async function iniciarFlujosPostVisita(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+export async function iniciarFlujosPostVisita(supabase: SupabaseService, meta: MetaWhatsAppService, kv?: KVNamespace): Promise<void> {
   try {
     const ahora = new Date();
 
@@ -1061,7 +1061,7 @@ export async function iniciarFlujosPostVisita(supabase: SupabaseService, meta: M
     console.log(`📋 POST-VISITA: ${citasPasadas.length} citas para iniciar flujo`);
 
     const { PostVisitService } = await import('../services/postVisitService');
-    const postVisitService = new PostVisitService(supabase);
+    const postVisitService = new PostVisitService(supabase, kv);
 
     for (const cita of citasPasadas) {
       const lead = cita.leads as any;

@@ -40,7 +40,7 @@ export interface PostVisitContext {
 }
 
 export class PostVisitService {
-  constructor(private supabase: SupabaseService) {}
+  constructor(private supabase: SupabaseService, private kv?: KVNamespace) {}
 
   // ═══════════════════════════════════════════════════════════════════
   // PASO 1: Iniciar flujo - Preguntar al vendedor si llegó el lead
@@ -316,6 +316,21 @@ export class PostVisitService {
     try {
       console.log(`📋 GUARDANDO CONTEXTO: vendedorId=${vendedorId}, state=${context.state}`);
 
+      // 1. GUARDAR EN KV PRIMERO (inmune a race conditions de notes)
+      if (this.kv) {
+        try {
+          const phoneSuffix = context.vendedor_phone?.replace(/\D/g, '').slice(-10);
+          await this.kv.put(`post_visit_${vendedorId}`, JSON.stringify(context), { expirationTtl: 3600 });
+          if (phoneSuffix) {
+            await this.kv.put(`post_visit_phone_${phoneSuffix}`, vendedorId, { expirationTtl: 3600 });
+          }
+          console.log(`📋 GUARDANDO CONTEXTO: KV guardado OK (vendedorId=${vendedorId}, phone=${phoneSuffix})`);
+        } catch (kvErr) {
+          console.error('📋 KV write failed, falling back to notes only:', kvErr);
+        }
+      }
+
+      // 2. TAMBIÉN guardar en notes (backup / legacy)
       const { data: vendedor, error: selectError } = await this.supabase.client
         .from('team_members')
         .select('id, name, notes')
@@ -327,47 +342,25 @@ export class PostVisitService {
         return;
       }
 
-      console.log(`📋 GUARDANDO CONTEXTO: vendedor encontrado = ${vendedor?.name || 'N/A'}`);
-      console.log(`📋 GUARDANDO CONTEXTO: notas type = ${typeof vendedor?.notes}`);
-
-      // IMPORTANTE: notes puede ser string (JSON) u objeto
       let notas: any = {};
       if (vendedor?.notes) {
         if (typeof vendedor.notes === 'string') {
-          try {
-            notas = JSON.parse(vendedor.notes);
-          } catch (e) {
-            notas = {};
-          }
+          try { notas = JSON.parse(vendedor.notes); } catch (e) { notas = {}; }
         } else if (typeof vendedor.notes === 'object') {
           notas = { ...vendedor.notes };
         }
       }
       notas.post_visit_context = context;
 
-      console.log(`📋 GUARDANDO CONTEXTO: nuevas notas = ${JSON.stringify(notas).substring(0, 300)}`);
-
-      const { data: updateResult, error: updateError } = await this.supabase.client
+      const { error: updateError } = await this.supabase.client
         .from('team_members')
         .update({ notes: notas })
-        .eq('id', vendedorId)
-        .select('id, notes');
+        .eq('id', vendedorId);
 
       if (updateError) {
-        console.log(`📋 GUARDANDO CONTEXTO: Error update: ${updateError.message}`);
+        console.log(`📋 GUARDANDO CONTEXTO: Error update notes: ${updateError.message}`);
       } else {
-        console.log(`📋 GUARDANDO CONTEXTO: updateResult = ${JSON.stringify(updateResult)?.substring(0, 200)}`);
-
-        // Verificar inmediatamente que se guardó
-        const { data: verify } = await this.supabase.client
-          .from('team_members')
-          .select('notes')
-          .eq('id', vendedorId)
-          .single();
-
-        const hasContext = verify?.notes?.post_visit_context ? 'SÍ' : 'NO';
-        console.log(`📋 GUARDANDO CONTEXTO: VERIFICACIÓN - tiene post_visit_context? ${hasContext}`);
-        console.log(`📋 GUARDANDO CONTEXTO: OK - vendedor_phone=${context.vendedor_phone}`);
+        console.log(`📋 GUARDANDO CONTEXTO: OK - notes + KV guardados, vendedor_phone=${context.vendedor_phone}`);
       }
     } catch (e) {
       console.error('Error guardando contexto vendedor:', e);
@@ -376,21 +369,30 @@ export class PostVisitService {
 
   async obtenerContextoVendedor(vendedorId: string): Promise<PostVisitContext | null> {
     try {
+      // 1. CHECK KV PRIMERO (fuente de verdad, inmune a race conditions)
+      if (this.kv) {
+        try {
+          const kvContext = await this.kv.get(`post_visit_${vendedorId}`, 'json') as PostVisitContext | null;
+          if (kvContext) {
+            console.log(`📋 OBTENER CONTEXTO: Encontrado en KV para vendedorId=${vendedorId}, state=${kvContext.state}`);
+            return kvContext;
+          }
+        } catch (kvErr) {
+          console.error('📋 KV read failed, falling back to notes:', kvErr);
+        }
+      }
+
+      // 2. FALLBACK a notes (legacy)
       const { data: vendedor } = await this.supabase.client
         .from('team_members')
         .select('notes')
         .eq('id', vendedorId)
         .single();
 
-      // IMPORTANTE: notes puede ser string (JSON) u objeto
       let notas: any = {};
       if (vendedor?.notes) {
         if (typeof vendedor.notes === 'string') {
-          try {
-            notas = JSON.parse(vendedor.notes);
-          } catch (e) {
-            notas = {};
-          }
+          try { notas = JSON.parse(vendedor.notes); } catch (e) { notas = {}; }
         } else if (typeof vendedor.notes === 'object') {
           notas = vendedor.notes;
         }
@@ -405,6 +407,30 @@ export class PostVisitService {
     try {
       const phoneSuffix = phone.replace(/\D/g, '').slice(-10);
 
+      // 1. CHECK KV PRIMERO — buscar vendedorId por phone suffix
+      if (this.kv) {
+        try {
+          const vendedorId = await this.kv.get(`post_visit_phone_${phoneSuffix}`);
+          if (vendedorId) {
+            const context = await this.kv.get(`post_visit_${vendedorId}`, 'json') as PostVisitContext | null;
+            if (context) {
+              const { data: vendedor } = await this.supabase.client
+                .from('team_members')
+                .select('*')
+                .eq('id', vendedorId)
+                .single();
+              if (vendedor) {
+                console.log(`📋 BUSCAR CONTEXTO: Encontrado en KV para phone=${phoneSuffix}, vendedor=${vendedor.name}`);
+                return { vendedor, context };
+              }
+            }
+          }
+        } catch (kvErr) {
+          console.error('📋 KV phone lookup failed, falling back to notes:', kvErr);
+        }
+      }
+
+      // 2. FALLBACK a notes (legacy)
       const { data: vendedores } = await this.supabase.client
         .from('team_members')
         .select('*')
@@ -413,7 +439,6 @@ export class PostVisitService {
       if (!vendedores) return null;
 
       for (const vendedor of vendedores) {
-        // IMPORTANTE: notes puede ser string (JSON) u objeto
         let notas: any = {};
         if (vendedor.notes) {
           if (typeof vendedor.notes === 'string') {
@@ -435,13 +460,29 @@ export class PostVisitService {
 
   private async limpiarContextoVendedor(vendedorId: string): Promise<void> {
     try {
+      // 1. LIMPIAR KV PRIMERO
+      if (this.kv) {
+        try {
+          // Leer context antes de borrar para obtener vendedor_phone
+          const context = await this.kv.get(`post_visit_${vendedorId}`, 'json') as PostVisitContext | null;
+          await this.kv.delete(`post_visit_${vendedorId}`);
+          if (context?.vendedor_phone) {
+            const phoneSuffix = context.vendedor_phone.replace(/\D/g, '').slice(-10);
+            await this.kv.delete(`post_visit_phone_${phoneSuffix}`);
+          }
+          console.log(`📋 LIMPIAR CONTEXTO: KV borrado para vendedorId=${vendedorId}`);
+        } catch (kvErr) {
+          console.error('📋 KV delete failed:', kvErr);
+        }
+      }
+
+      // 2. LIMPIAR de notes (legacy)
       const { data: vendedor } = await this.supabase.client
         .from('team_members')
         .select('notes')
         .eq('id', vendedorId)
         .single();
 
-      // IMPORTANTE: notes puede ser string (JSON) u objeto
       let notas: any = {};
       if (vendedor?.notes) {
         if (typeof vendedor.notes === 'string') {
