@@ -40,6 +40,37 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
   }
 
   // ═══════════════════════════════════════════════════════════
+  // 0.5 VERIFICAR pending_show_confirmation (pregunta ¿LLEGÓ?)
+  // CRÍTICO: Debe correr ANTES de pending_template_selection y
+  // pending_message_to_lead que interceptarían "1"/"2"
+  // ═══════════════════════════════════════════════════════════
+  const showConfirmResult = await procesarRespuestaShowConfirmation(ctx, handler, vendedor.id, mensaje);
+  if (showConfirmResult.handled) {
+    await ctx.meta.sendWhatsAppMessage(from, showConfirmResult.mensajeVendedor!);
+
+    // Si el lead SÍ llegó, enviar encuesta de satisfacción
+    if (showConfirmResult.siLlego && showConfirmResult.leadPhone) {
+      await enviarEncuestaSatisfaccion(ctx, handler, showConfirmResult.leadPhone, showConfirmResult.leadName, showConfirmResult.property);
+    }
+
+    // Si NO llegó, ofrecer reagendar
+    if (showConfirmResult.noLlego && showConfirmResult.leadPhone) {
+      const nombreCliente = showConfirmResult.leadName?.split(' ')[0] || 'Hola';
+      try {
+        await ctx.meta.sendWhatsAppMessage(showConfirmResult.leadPhone,
+          `Hola ${nombreCliente}, notamos que no pudiste asistir a tu cita. 😊\n\n` +
+          `¿Te gustaría reagendar para otro día?\n` +
+          `Escríbenos cuando gustes y con gusto te ayudamos.`
+        );
+      } catch (err) {
+        console.error('Error enviando mensaje reagenda:', err);
+      }
+    }
+
+    return;
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // 1. OBTENER NOTAS Y PROCESAR ESTADOS PENDIENTES
   // ═══════════════════════════════════════════════════════════
   const { notes, notasVendedor } = await vendorService.getVendedorNotes(vendedor.id);
@@ -443,36 +474,6 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
       delete notasVendedor.pending_message_to_lead;
       await ctx.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
     }
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  // PRIMERO: Verificar pending_show_confirmation (pregunta ¿LLEGÓ?)
-  // Esto debe procesarse ANTES del onboarding para no perder respuestas
-  // ═══════════════════════════════════════════════════════════
-  const showConfirmResult = await procesarRespuestaShowConfirmation(ctx, handler, vendedor.id, mensaje);
-  if (showConfirmResult.handled) {
-    await ctx.meta.sendWhatsAppMessage(from, showConfirmResult.mensajeVendedor!);
-
-    // Si el lead SÍ llegó, enviar encuesta de satisfacción
-    if (showConfirmResult.siLlego && showConfirmResult.leadPhone) {
-      await enviarEncuestaSatisfaccion(ctx, handler, showConfirmResult.leadPhone, showConfirmResult.leadName, showConfirmResult.property);
-    }
-
-    // Si NO llegó, ofrecer reagendar
-    if (showConfirmResult.noLlego && showConfirmResult.leadPhone) {
-      const nombreCliente = showConfirmResult.leadName?.split(' ')[0] || 'Hola';
-      try {
-        await ctx.meta.sendWhatsAppMessage(showConfirmResult.leadPhone,
-          `Hola ${nombreCliente}, notamos que no pudiste asistir a tu cita. 😊\n\n` +
-          `¿Te gustaría reagendar para otro día?\n` +
-          `Escríbenos cuando gustes y con gusto te ayudamos.`
-        );
-      } catch (err) {
-        console.error('Error enviando mensaje reagenda:', err);
-      }
-    }
-
-    return;
   }
 
   // ═══════════════════════════════════════════════════════════
