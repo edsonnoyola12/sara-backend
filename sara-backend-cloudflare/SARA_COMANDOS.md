@@ -1567,7 +1567,7 @@ El archivo `index.ts` fue refactorizado de ~22,700 líneas a ~14,300 líneas (-3
 | 2 | `alerts.ts` | ~450 | Alertas leads fríos/calientes, cumpleaños |
 | 3 | `followups.ts` | ~800 | Follow-ups, nurturing, broadcasts |
 | 4 | `leadScoring.ts` | ~550 | Scoring, señales calientes, objeciones |
-| 4 | `nurturing.ts` | ~1200 | Recuperación crédito, NPS, referidos, post-compra |
+| 4 | `nurturing.ts` | ~1860 | Recuperación crédito, NPS, referidos, post-compra, cleanup flags |
 | 5 | `maintenance.ts` | ~340 | Bridges, leads estancados, aniversarios |
 | 6 | `videos.ts` | ~710 | Videos Veo 3 personalizados |
 | 7 | `dashboard.ts` | ~700 | Status, analytics, health, backup |
@@ -2592,6 +2592,7 @@ SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
 | Satisfacción casa | Martes 11am | ✅ |
 | Check-in mantenimiento | Sábado 10am | ✅ |
 | Referidos | Miércoles 11am | ✅ |
+| Limpieza flags encuestas expirados | Diario 7PM | ✅ |
 
 ### 🏠 FLUJOS POST-COMPRA
 
@@ -2610,6 +2611,16 @@ delivered → 3-7 días: 🔑 Seguimiento entrega (llaves, escrituras, servicios
 - `/run-mantenimiento` - Check-in mantenimiento
 - `/run-referidos` - Solicitud de referidos
 - `/run-nps` - Encuestas NPS
+
+**Protecciones de robustez (Sesión 44):**
+- Mark-before-send: flag actualizado ANTES de enviar (previene duplicados por CRON race condition)
+- Wamid tracking: captura ID del mensaje para verificar delivery
+- Audit trail: `surveys_sent` en notes del lead (rolling últimos 10)
+- TTL 48h: flags auto-limpian si lead no responde en 48h
+- `isLikelySurveyResponse()`: filtra mensajes largos o con palabras de agenda/propiedad
+- Regex estrictos: NPS solo `/^\s*(\d{1,2})\s*$/`, satisfacción `/^\s*([1-4])\s*$/`
+- Vendor notifications via `enviarMensajeTeamMember()` (respeta ventana 24h)
+- Auto-cleanup CRON: `limpiarFlagsEncuestasExpirados()` limpia flags >72h diario 7PM
 
 ### 🔒 FLUJOS DE NEGOCIO
 
@@ -2634,7 +2645,7 @@ delivered → 3-7 días: 🔑 Seguimiento entrega (llaves, escrituras, servicios
 | Categoría | Tests | Estado |
 |-----------|-------|--------|
 | Unit tests | 304 | ✅ |
-| Post-compra tests | 47 | ✅ |
+| Post-compra tests | 65 | ✅ |
 | E2E Lead Journey | 7 | ✅ |
 | E2E Vendor Journey | 5 | ✅ |
 | E2E CEO Journey | 5 | ✅ |
@@ -3505,3 +3516,23 @@ Cliente post-entrega envía foto de humedad
 **Deploy:** Version ID `f71281b4-2578-4ac1-a49a-86500dc5143d`
 
 **Sistema 100% operativo - Última verificación: 2026-02-01**
+
+---
+
+### 2026-02-15 (Sesión 44) - Robustecimiento de Encuestas/Cuestionarios
+
+Auditoría de 7 flujos de encuesta reveló 8 problemas. 7 fixes aplicados.
+
+| # | Fix | Archivo(s) |
+|---|-----|-----------|
+| 1 | Name crash: `(nombreLead \|\| 'amigo').split(' ')[0] \|\| 'amigo'` | `encuestasService.ts`, `whatsapp.ts` |
+| 2 | Vendor notifications → `enviarMensajeTeamMember` (respeta 24h) | `nurturing.ts` (5 puntos) |
+| 3 | Mark-before-send en 4 funciones de envío | `nurturing.ts` |
+| 4 | TTL 48h + `isLikelySurveyResponse` en `pending_satisfaction_survey` | `whatsapp.ts` |
+| 5 | Wamid tracking en envío de encuestas | `nurturing.ts` |
+| 6 | Auto-cleanup CRON: `limpiarFlagsEncuestasExpirados()` (>72h, diario 7PM) | `nurturing.ts`, `index.ts` |
+| 7 | Audit trail: `surveys_sent` array en notes (rolling últimos 10) | `nurturing.ts` |
+
+**Tests:** 369/369 pasando
+**Commit:** `429ac260`
+**Deploy:** Version ID `1e542c66`
