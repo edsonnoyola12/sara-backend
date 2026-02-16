@@ -101,10 +101,16 @@ export class PostVisitService {
       // ─────────────────────────────────────────────────────────────
       case 'pending_arrival_check':
         if (msgLimpio === '1' || msgLimpio.includes('sí') || msgLimpio.includes('si') || msgLimpio.includes('llegó')) {
-          // SÍ LLEGÓ → Preguntar qué tal
+          // SÍ LLEGÓ → Marcar cita como completada + preguntar qué tal
           context.state = 'pending_vendor_feedback';
           context.arrived = true;
           await this.guardarContextoVendedor(vendedorId, context);
+
+          // Actualizar cita como completada (quita de la query del CRON)
+          await this.supabase.client
+            .from('appointments')
+            .update({ status: 'completed' })
+            .eq('id', context.appointment_id);
 
           return {
             respuesta: `👍 Perfecto. ¿Cómo ves a *${nombreCorto}*?\n\n` +

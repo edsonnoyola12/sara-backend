@@ -1065,26 +1065,34 @@ export async function iniciarFlujosPostVisita(supabase: SupabaseService, meta: M
       }
 
       // Verificar si ya se inició flujo para esta cita
-      const vendedorNotas = typeof vendedor.notes === 'object' ? vendedor.notes : {};
+      // NOTA: notes puede ser string JSON o objeto - hay que parsear ambos
+      let vendedorNotas: any = {};
+      if (vendedor.notes) {
+        if (typeof vendedor.notes === 'string') {
+          try { vendedorNotas = JSON.parse(vendedor.notes); } catch { vendedorNotas = {}; }
+        } else if (typeof vendedor.notes === 'object') {
+          vendedorNotas = vendedor.notes;
+        }
+      }
       const contextoExistente = vendedorNotas?.post_visit_context;
       if (contextoExistente && contextoExistente.appointment_id === cita.id) {
         console.log(`📋 POST-VISITA: Flujo ya iniciado para ${lead.name}`);
         continue;
       }
 
-      // Verificar si cita ya fue procesada (en notas de la cita)
-      if (cita.post_visit_initiated) {
-        console.log(`📋 POST-VISITA: Cita ${cita.id} ya procesada`);
-        continue;
-      }
-
       try {
-        // MARK-BEFORE-SEND: Marcar cita como iniciada ANTES de enviar
-        // (Previene race condition: CRON cada 2 min puede procesar la misma cita)
-        await supabase.client
+        // MARK-BEFORE-SEND: Cambiar status a 'completed' ANTES de enviar
+        // Esto saca la cita de la query .in('status', ['scheduled', 'confirmed'])
+        // y previene que el CRON (cada 2 min) la procese otra vez
+        const { error: statusError } = await supabase.client
           .from('appointments')
-          .update({ post_visit_initiated: true })
+          .update({ status: 'completed' })
           .eq('id', cita.id);
+
+        if (statusError) {
+          console.error(`📋 POST-VISITA: Error marcando cita ${cita.id} como completed:`, statusError);
+          continue; // No enviar si no pudimos marcar (previene duplicados)
+        }
 
         // Iniciar flujo post-visita
         const { mensaje, context } = await postVisitService.iniciarFlujoPostVisita(cita, lead, vendedor);
