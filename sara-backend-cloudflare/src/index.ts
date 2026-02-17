@@ -3005,7 +3005,7 @@ export default {
     // ═══════════════════════════════════════════════════════════
     if (mexicoMinute % 10 === 0) {
       try {
-        const deliveryResult = await verificarDeliveryTeamMessages(supabase, meta, '5610016226');
+        const deliveryResult = await verificarDeliveryTeamMessages(supabase, meta, '5610016226', env);
         if (deliveryResult.undelivered > 0) {
           console.log(`⚠️ ${deliveryResult.undelivered} mensajes sin entregar al equipo`);
         }

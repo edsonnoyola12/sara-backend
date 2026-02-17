@@ -567,7 +567,8 @@ export function esHorarioParaLlamar(): boolean {
 export async function verificarDeliveryTeamMessages(
   supabase: SupabaseService,
   meta: MetaWhatsAppService,
-  adminPhone: string
+  adminPhone: string,
+  env?: { SARA_CACHE?: any }
 ): Promise<{ checked: number; delivered: number; undelivered: number; detalles: any[] }> {
   console.log('📬 Verificando delivery de mensajes al equipo...');
 
@@ -696,24 +697,33 @@ export async function verificarDeliveryTeamMessages(
       await supabase.client.from('team_members').update({ notes: notas }).eq('id', tm.id);
     }
 
-    // 8. Si hay undelivered → enviar alerta al admin (CEO)
+    // 8. Si hay undelivered → enviar alerta al admin (agrupada por persona)
     if (undelivered > 0) {
-      const resumen = detalles.map(d =>
-        `- ${d.nombre}: ${d.tipo} (${d.status}, hace ${d.edad_min}min)`
+      // Agrupar por persona para evitar entradas duplicadas
+      const porPersona = new Map<string, { tipos: string[]; status: string; edad_max: number }>();
+      for (const d of detalles) {
+        const existing = porPersona.get(d.nombre);
+        if (existing) {
+          if (!existing.tipos.includes(d.tipo)) existing.tipos.push(d.tipo);
+          existing.edad_max = Math.max(existing.edad_max, d.edad_min);
+        } else {
+          porPersona.set(d.nombre, { tipos: [d.tipo], status: d.status, edad_max: d.edad_min });
+        }
+      }
+
+      const resumen = Array.from(porPersona.entries()).map(([nombre, info]) =>
+        `- ${nombre}: ${info.tipos.join(', ')} (${info.status}, hace ${info.edad_max}min)`
       ).join('\n');
 
-      const alerta = `⚠️ *ALERTA: ${undelivered} mensaje(s) sin entregar al equipo*\n\n` +
-        `Estos mensajes fueron aceptados por Meta pero NO llegaron al teléfono:\n\n` +
+      const personas = porPersona.size;
+      const alerta = `⚠️ *ALERTA: ${undelivered} msg sin entregar a ${personas} persona(s)*\n\n` +
         `${resumen}\n\n` +
-        `Posibles causas:\n` +
-        `- Número bloqueó a SARA\n` +
-        `- Teléfono apagado/sin internet\n` +
-        `- Error de Meta\n\n` +
-        `Verificados: ${checked} | Entregados: ${delivered} | Sin entregar: ${undelivered}`;
+        `Causas: bloqueó SARA / sin internet / error Meta\n` +
+        `✅ ${delivered} entregados | ❌ ${undelivered} sin entregar`;
 
       try {
-        await enviarAlertaSistema(meta, alerta, undefined, 'delivery_undelivered');
-        console.log(`📬 Alerta de delivery enviada al admin (${undelivered} sin entregar)`);
+        await enviarAlertaSistema(meta, alerta, env, 'delivery_undelivered');
+        console.log(`📬 Alerta de delivery enviada al admin (${undelivered} sin entregar a ${personas} personas)`);
       } catch (alertError) {
         console.error('❌ Error enviando alerta de delivery al admin:', alertError);
       }
