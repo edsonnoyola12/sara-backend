@@ -33,7 +33,8 @@ export async function handleAutomation(request: Request, env: any) {
         const mensaje = `¡Hola ${lead.name || 'Cliente'}! 👋 Soy SARA de Grupo Santa Rita.\n\n¿Qué te pareció tu visita? Me encantaría conocer tu opinión:\n\n1️⃣ Excelente\n2️⃣ Buena\n3️⃣ Regular\n4️⃣ Necesito más información\n\nTu feedback nos ayuda a mejorar 🙏`;
         
         await twilio.sendWhatsAppMessage('whatsapp:' + lead.phone, mensaje);
-        await supabase.client.from('leads').update({ survey_sent: true }).eq('id', lead.id);
+        const { error: errSurvey } = await supabase.client.from('leads').update({ survey_sent: true }).eq('id', lead.id);
+        if (errSurvey) console.error('⚠️ Error updating survey_sent flag for lead', lead.id, ':', errSurvey);
         results.encuestasEnviadas++;
       }
     }
@@ -48,7 +49,8 @@ export async function handleAutomation(request: Request, env: any) {
             await twilio.sendWhatsAppMessage('whatsapp:' + v.phone, alerta);
           }
         }
-        await supabase.client.from('leads').update({ alerta_enviada_24h: true }).eq('id', lead.id);
+        const { error: errAlerta24h } = await supabase.client.from('leads').update({ alerta_enviada_24h: true }).eq('id', lead.id);
+        if (errAlerta24h) console.error('⚠️ Error updating alerta_enviada_24h flag for lead', lead.id, ':', errAlerta24h);
         results.alertasLeadOlvidado++;
       }
     }
@@ -63,7 +65,8 @@ export async function handleAutomation(request: Request, env: any) {
             await twilio.sendWhatsAppMessage('whatsapp:' + v.phone, recordatorio);
           }
         }
-        await supabase.client.from('leads').update({ recordatorio_5dias: true }).eq('id', lead.id);
+        const { error: errRecordatorio5d } = await supabase.client.from('leads').update({ recordatorio_5dias: true }).eq('id', lead.id);
+        if (errRecordatorio5d) console.error('⚠️ Error updating recordatorio_5dias flag for lead', lead.id, ':', errRecordatorio5d);
         results.recordatoriosSeguimiento++;
       }
     }

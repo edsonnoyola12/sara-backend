@@ -92,36 +92,41 @@ export async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: M
     // Enviar alertas a cada vendedor
     let alertasEnviadas = 0;
     for (const [vendedorId, vendedor] of vendedoresMap) {
-      const leadsDelVendedor = leadsPorVendedor.get(vendedorId) || [];
-      if (leadsDelVendedor.length === 0 || !vendedor.phone) continue;
+      try {
+        const leadsDelVendedor = leadsPorVendedor.get(vendedorId) || [];
+        if (leadsDelVendedor.length === 0 || !vendedor.phone) continue;
 
-      // Ordenar por días sin contacto (más críticos primero)
-      leadsDelVendedor.sort((a, b) => b.diasSinContacto - a.diasSinContacto);
+        // Ordenar por días sin contacto (más críticos primero)
+        leadsDelVendedor.sort((a, b) => b.diasSinContacto - a.diasSinContacto);
 
-      // Tomar máximo 5 leads para no saturar
-      const top5 = leadsDelVendedor.slice(0, 5);
+        // Tomar máximo 5 leads para no saturar
+        const top5 = leadsDelVendedor.slice(0, 5);
 
-      let mensaje = `🥶 *ALERTA: ${leadsDelVendedor.length} LEAD(S) ENFRIÁNDOSE*\n`;
-      mensaje += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+        let mensaje = `🥶 *ALERTA: ${leadsDelVendedor.length} LEAD(S) ENFRIÁNDOSE*\n`;
+        mensaje += `━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-      for (const { lead, razon, diasSinContacto } of top5) {
-        mensaje += `${razon}\n`;
-        mensaje += `👤 *${lead.name || 'Sin nombre'}*\n`;
-        mensaje += `📱 ${lead.phone}\n`;
-        mensaje += `⏰ ${diasSinContacto} días sin contacto\n`;
-        if (lead.property_interest) mensaje += `🏠 ${lead.property_interest}\n`;
-        mensaje += `\n`;
+        for (const { lead, razon, diasSinContacto } of top5) {
+          mensaje += `${razon}\n`;
+          mensaje += `👤 *${lead.name || 'Sin nombre'}*\n`;
+          mensaje += `📱 ${lead.phone}\n`;
+          mensaje += `⏰ ${diasSinContacto} días sin contacto\n`;
+          if (lead.property_interest) mensaje += `🏠 ${lead.property_interest}\n`;
+          mensaje += `\n`;
+        }
+
+        if (leadsDelVendedor.length > 5) {
+          mensaje += `_...y ${leadsDelVendedor.length - 5} más_\n\n`;
+        }
+
+        mensaje += `⚡ *¡Contacta hoy para no perderlos!*`;
+
+        await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+        alertasEnviadas++;
+        console.log(`📤 Alerta enviada a ${vendedor.name}: ${leadsDelVendedor.length} leads fríos`);
+      } catch (error) {
+        console.error(`❌ Error enviando alerta leads fríos a vendedor ${vendedor.name || vendedorId}:`, error);
+        continue;
       }
-
-      if (leadsDelVendedor.length > 5) {
-        mensaje += `_...y ${leadsDelVendedor.length - 5} más_\n\n`;
-      }
-
-      mensaje += `⚡ *¡Contacta hoy para no perderlos!*`;
-
-      await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
-      alertasEnviadas++;
-      console.log(`📤 Alerta enviada a ${vendedor.name}: ${leadsDelVendedor.length} leads fríos`);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -149,29 +154,34 @@ export async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: M
       }
 
       for (const [asesorId, asesor] of asesoresMap) {
-        const hipotecas = hipotecasPorAsesor.get(asesorId) || [];
-        if (hipotecas.length === 0) continue;
+        try {
+          const hipotecas = hipotecasPorAsesor.get(asesorId) || [];
+          if (hipotecas.length === 0) continue;
 
-        let mensaje = `🥶 *ALERTA: ${hipotecas.length} CRÉDITO(S) SIN MOVIMIENTO*\n`;
-        mensaje += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+          let mensaje = `🥶 *ALERTA: ${hipotecas.length} CRÉDITO(S) SIN MOVIMIENTO*\n`;
+          mensaje += `━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-        for (const hip of hipotecas.slice(0, 5)) {
-          const diasSinMov = Math.floor((ahora.getTime() - new Date(hip.updated_at).getTime()) / (1000 * 60 * 60 * 24));
-          mensaje += `👤 *${hip.leads?.name || 'Sin nombre'}*\n`;
-          mensaje += `📱 ${hip.leads?.phone || 'N/A'}\n`;
-          mensaje += `⏰ ${diasSinMov} días sin movimiento\n`;
-          mensaje += `📊 Status: ${hip.status}\n\n`;
+          for (const hip of hipotecas.slice(0, 5)) {
+            const diasSinMov = Math.floor((ahora.getTime() - new Date(hip.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+            mensaje += `👤 *${hip.leads?.name || 'Sin nombre'}*\n`;
+            mensaje += `📱 ${hip.leads?.phone || 'N/A'}\n`;
+            mensaje += `⏰ ${diasSinMov} días sin movimiento\n`;
+            mensaje += `📊 Status: ${hip.status}\n\n`;
+          }
+
+          if (hipotecas.length > 5) {
+            mensaje += `_...y ${hipotecas.length - 5} más_\n\n`;
+          }
+
+          mensaje += `⚡ *¡Dar seguimiento para no perder la venta!*`;
+
+          await meta.sendWhatsAppMessage(asesor.phone, mensaje);
+          alertasEnviadas++;
+          console.log(`📤 Alerta créditos enviada a ${asesor.name}: ${hipotecas.length} créditos fríos`);
+        } catch (error) {
+          console.error(`❌ Error enviando alerta créditos a asesor ${asesor.name || asesorId}:`, error);
+          continue;
         }
-
-        if (hipotecas.length > 5) {
-          mensaje += `_...y ${hipotecas.length - 5} más_\n\n`;
-        }
-
-        mensaje += `⚡ *¡Dar seguimiento para no perder la venta!*`;
-
-        await meta.sendWhatsAppMessage(asesor.phone, mensaje);
-        alertasEnviadas++;
-        console.log(`📤 Alerta créditos enviada a ${asesor.name}: ${hipotecas.length} créditos fríos`);
       }
     }
 
@@ -217,10 +227,15 @@ export async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: M
         mensaje += `\n_Ya se notificó a los vendedores y asesores._`;
 
         for (const admin of admins) {
-          if (admin.phone) {
-            await meta.sendWhatsAppMessage(admin.phone, mensaje);
-            alertasEnviadas++;
-            console.log(`📤 Resumen enviado a ${admin.name} (${admin.role})`);
+          try {
+            if (admin.phone) {
+              await meta.sendWhatsAppMessage(admin.phone, mensaje);
+              alertasEnviadas++;
+              console.log(`📤 Resumen enviado a ${admin.name} (${admin.role})`);
+            }
+          } catch (error) {
+            console.error(`❌ Error enviando resumen leads fríos a admin ${admin.name || admin.id}:`, error);
+            continue;
           }
         }
       }
@@ -376,6 +391,7 @@ export async function detectarNoShows(supabase: SupabaseService, meta: MetaWhats
     let preguntasEnviadas = 0;
 
     for (const cita of citasPotenciales) {
+      try {
       console.log(`🔍 Evaluando cita ${cita.id}: ${cita.lead_name} a las ${cita.scheduled_time}`);
 
       // Parsear fecha y hora de la cita
@@ -517,6 +533,10 @@ Responde para *${leadName}*:
         .eq('id', vendedor.id);
 
       preguntasEnviadas++;
+      } catch (error) {
+        console.error(`❌ Error procesando cita ${cita.id} (${cita.lead_name}):`, error);
+        continue;
+      }
     }
 
     console.log(`✅ Preguntas de asistencia enviadas: ${preguntasEnviadas}`);
@@ -547,59 +567,64 @@ export async function verificarTimeoutConfirmaciones(supabase: SupabaseService, 
     let timeoutsEncontrados = 0;
 
     for (const vendedor of vendedores) {
-      let notes: any = {};
       try {
-        if (vendedor.notes) {
-          notes = typeof vendedor.notes === 'string'
-            ? JSON.parse(vendedor.notes)
-            : vendedor.notes;
-        }
-      } catch (e) {
-        continue;
-      }
-
-      // Verificar si tiene confirmación pendiente
-      const confirmacion = notes?.pending_show_confirmation;
-      if (!confirmacion?.asked_at) continue;
-
-      // Si ya enviamos recordatorio, no enviar otro
-      if (confirmacion.reminder_sent) {
-        console.log(`⏭️ Ya se envió recordatorio a ${vendedor.name} sobre ${confirmacion.lead_name}, saltando`);
-        continue;
-      }
-
-      const preguntadoEn = new Date(confirmacion.asked_at);
-
-      // Si ya pasaron 2 horas sin respuesta
-      if (preguntadoEn < dosHorasAtras) {
-        console.log(`⏰ TIMEOUT: Vendedor ${vendedor.name} no respondió sobre ${confirmacion.lead_name}`);
-        timeoutsEncontrados++;
-
-        // NO enviamos encuesta automáticamente - solo recordamos al vendedor
-        if (vendedor.phone) {
-          await meta.sendWhatsAppMessage(vendedor.phone,
-            `⏰ *Recordatorio pendiente*\n\n` +
-            `No respondiste sobre la cita con *${confirmacion.lead_name}*.\n\n` +
-            `¿Llegó a la visita?\n` +
-            `1️⃣ Sí llegó\n` +
-            `2️⃣ No llegó\n\n` +
-            `_Responde para que pueda dar seguimiento adecuado._`
-          );
-          console.log(`📤 Recordatorio enviado a ${vendedor.name} sobre ${confirmacion.lead_name}`);
+        let notes: any = {};
+        try {
+          if (vendedor.notes) {
+            notes = typeof vendedor.notes === 'string'
+              ? JSON.parse(vendedor.notes)
+              : vendedor.notes;
+          }
+        } catch (e) {
+          continue;
         }
 
-        // Marcar que ya enviamos recordatorio
-        const notasActualizadas = { ...notes };
-        notasActualizadas.pending_show_confirmation = {
-          ...confirmacion,
-          reminder_sent: true,
-          reminder_sent_at: new Date().toISOString()
-        };
+        // Verificar si tiene confirmación pendiente
+        const confirmacion = notes?.pending_show_confirmation;
+        if (!confirmacion?.asked_at) continue;
 
-        await supabase.client
-          .from('team_members')
-          .update({ notes: JSON.stringify(notasActualizadas) })
-          .eq('id', vendedor.id);
+        // Si ya enviamos recordatorio, no enviar otro
+        if (confirmacion.reminder_sent) {
+          console.log(`⏭️ Ya se envió recordatorio a ${vendedor.name} sobre ${confirmacion.lead_name}, saltando`);
+          continue;
+        }
+
+        const preguntadoEn = new Date(confirmacion.asked_at);
+
+        // Si ya pasaron 2 horas sin respuesta
+        if (preguntadoEn < dosHorasAtras) {
+          console.log(`⏰ TIMEOUT: Vendedor ${vendedor.name} no respondió sobre ${confirmacion.lead_name}`);
+          timeoutsEncontrados++;
+
+          // NO enviamos encuesta automáticamente - solo recordamos al vendedor
+          if (vendedor.phone) {
+            await meta.sendWhatsAppMessage(vendedor.phone,
+              `⏰ *Recordatorio pendiente*\n\n` +
+              `No respondiste sobre la cita con *${confirmacion.lead_name}*.\n\n` +
+              `¿Llegó a la visita?\n` +
+              `1️⃣ Sí llegó\n` +
+              `2️⃣ No llegó\n\n` +
+              `_Responde para que pueda dar seguimiento adecuado._`
+            );
+            console.log(`📤 Recordatorio enviado a ${vendedor.name} sobre ${confirmacion.lead_name}`);
+          }
+
+          // Marcar que ya enviamos recordatorio
+          const notasActualizadas = { ...notes };
+          notasActualizadas.pending_show_confirmation = {
+            ...confirmacion,
+            reminder_sent: true,
+            reminder_sent_at: new Date().toISOString()
+          };
+
+          await supabase.client
+            .from('team_members')
+            .update({ notes: JSON.stringify(notasActualizadas) })
+            .eq('id', vendedor.id);
+        }
+      } catch (error) {
+        console.error(`❌ Error procesando timeout confirmación vendedor ${vendedor.name || vendedor.id}:`, error);
+        continue;
       }
     }
 
@@ -1723,18 +1748,23 @@ export async function reactivarLeadsPerdidos(supabase: SupabaseService, meta: Me
 
     // Notificar a vendedores
     for (const [vendedorId, leads] of leadsPorVendedor) {
-      const vendedor = leads[0].vendedor;
-      if (!vendedor?.phone) continue;
+      try {
+        const vendedor = leads[0].vendedor;
+        if (!vendedor?.phone) continue;
 
-      let msg = `🔄 *LEADS REACTIVADOS*\n\nSe enviaron mensajes a ${leads.length} lead(s) que habías dado por perdidos:\n\n`;
-      for (const { lead } of leads.slice(0, 5)) {
-        msg += `• *${lead.name}* - ${lead.phone}\n`;
-        if (lead.lost_reason) msg += `  _Razón: ${lead.lost_reason}_\n`;
+        let msg = `🔄 *LEADS REACTIVADOS*\n\nSe enviaron mensajes a ${leads.length} lead(s) que habías dado por perdidos:\n\n`;
+        for (const { lead } of leads.slice(0, 5)) {
+          msg += `• *${lead.name}* - ${lead.phone}\n`;
+          if (lead.lost_reason) msg += `  _Razón: ${lead.lost_reason}_\n`;
+        }
+        if (leads.length > 5) msg += `\n_...y ${leads.length - 5} más_\n`;
+        msg += `\n💡 *Si responden, ya están en tu pipeline como "contactados".*`;
+
+        await meta.sendWhatsAppMessage(vendedor.phone, msg);
+      } catch (error) {
+        console.error(`❌ Error notificando reactivación a vendedor ${vendedorId}:`, error);
+        continue;
       }
-      if (leads.length > 5) msg += `\n_...y ${leads.length - 5} más_\n`;
-      msg += `\n💡 *Si responden, ya están en tu pipeline como "contactados".*`;
-
-      await meta.sendWhatsAppMessage(vendedor.phone, msg);
     }
 
     console.log(`✅ Reactivación completada: ${reactivados} leads contactados`);
@@ -1943,29 +1973,34 @@ export async function felicitarCumpleañosEquipo(supabase: SupabaseService, meta
       .eq('active', true);
 
     for (const persona of cumpleaneros) {
-      if (!persona.phone) continue;
+      try {
+        if (!persona.phone) continue;
 
-      // Mensaje al cumpleañero
-      const mensajeCumpleanero = `🎂 *¡Feliz Cumpleaños ${persona.name}!* 🎉\n\n` +
-        `Todo el equipo de Santa Rita te desea un día increíble lleno de alegría.\n\n` +
-        `¡Que se cumplan todos tus sueños este nuevo año de vida! 🌟\n\n` +
-        `_Con cariño, tu equipo SARA_ 💝`;
+        // Mensaje al cumpleañero
+        const mensajeCumpleanero = `🎂 *¡Feliz Cumpleaños ${persona.name}!* 🎉\n\n` +
+          `Todo el equipo de Santa Rita te desea un día increíble lleno de alegría.\n\n` +
+          `¡Que se cumplan todos tus sueños este nuevo año de vida! 🌟\n\n` +
+          `_Con cariño, tu equipo SARA_ 💝`;
 
-      await meta.sendWhatsAppMessage(persona.phone, mensajeCumpleanero);
-      console.log(`🎂 Felicitación enviada a ${persona.name}`);
+        await meta.sendWhatsAppMessage(persona.phone, mensajeCumpleanero);
+        console.log(`🎂 Felicitación enviada a ${persona.name}`);
 
-      // Notificar al resto del equipo
-      for (const member of todosLosMembers || []) {
-        if (member.id === persona.id || !member.phone) continue;
+        // Notificar al resto del equipo
+        for (const member of todosLosMembers || []) {
+          if (member.id === persona.id || !member.phone) continue;
 
-        const notificacion = `🎂 ¡Hoy es cumpleaños de *${persona.name}*!\n\n` +
-          `No olvides felicitarlo(a) 🎉`;
+          const notificacion = `🎂 ¡Hoy es cumpleaños de *${persona.name}*!\n\n` +
+            `No olvides felicitarlo(a) 🎉`;
 
-        try {
-          await meta.sendWhatsAppMessage(member.phone, notificacion);
-        } catch (e) {
-          // Silent fail para notificaciones secundarias
+          try {
+            await meta.sendWhatsAppMessage(member.phone, notificacion);
+          } catch (e) {
+            // Silent fail para notificaciones secundarias
+          }
         }
+      } catch (error) {
+        console.error(`❌ Error enviando felicitación cumpleaños equipo a ${persona.name || persona.id}:`, error);
+        continue;
       }
     }
 

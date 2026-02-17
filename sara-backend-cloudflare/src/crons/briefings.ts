@@ -34,13 +34,18 @@ export async function enviarFelicitaciones(supabase: SupabaseService, meta: Meta
     .like('birthday', `%-${fechaHoy}`);
 
   for (const persona of cumples || []) {
-    if (!persona.phone) continue;
-    const mensaje = `🎂 *¡Feliz Cumpleaños ${persona.name}!* 🎉\n\nTodo el equipo de Santa Rita te desea un día increíble. ¡Que se cumplan todos tus sueños! 🌟`;
-    await enviarMensajeTeamMember(supabase, meta, persona, mensaje, {
-      tipoMensaje: 'notificacion',
-      pendingKey: 'pending_mensaje'
-    });
-    await logEvento(supabase, 'cumpleanos', `Felicitación enviada a ${persona.name}`, { phone: persona.phone });
+    try {
+      if (!persona.phone) continue;
+      const mensaje = `🎂 *¡Feliz Cumpleaños ${persona.name}!* 🎉\n\nTodo el equipo de Santa Rita te desea un día increíble. ¡Que se cumplan todos tus sueños! 🌟`;
+      await enviarMensajeTeamMember(supabase, meta, persona, mensaje, {
+        tipoMensaje: 'notificacion',
+        pendingKey: 'pending_mensaje'
+      });
+      await logEvento(supabase, 'cumpleanos', `Felicitación enviada a ${persona.name}`, { phone: persona.phone });
+    } catch (error) {
+      console.error(`❌ Error enviando felicitación a ${persona.name || persona.id}:`, error);
+      continue;
+    }
   }
 }
 
@@ -703,25 +708,30 @@ export async function recordatorioAsesores(supabase: SupabaseService, meta: Meta
     .eq('active', true);
 
   for (const v of vendedores || []) {
-    if (!v.phone || !v.recibe_briefing) continue;
+    try {
+      if (!v.phone || !v.recibe_briefing) continue;
 
-    const { data: leadsSinContactar } = await supabase.client
-      .from('leads')
-      .select('*')
-      .eq('assigned_to', v.id)
-      .eq('status', 'new');
+      const { data: leadsSinContactar } = await supabase.client
+        .from('leads')
+        .select('*')
+        .eq('assigned_to', v.id)
+        .eq('status', 'new');
 
-    if (leadsSinContactar && leadsSinContactar.length > 0) {
-      const mensaje = `💬 *Recordatorio de seguimiento*
+      if (leadsSinContactar && leadsSinContactar.length > 0) {
+        const mensaje = `💬 *Recordatorio de seguimiento*
 
 ${v.name}, tienes ${leadsSinContactar.length} lead(s) nuevos sin contactar.
 
 Revísalos en el CRM y márcalos como contactados.`;
 
-      await enviarMensajeTeamMember(supabase, meta, v, mensaje, {
-        tipoMensaje: 'notificacion',
-        pendingKey: 'pending_mensaje'
-      });
+        await enviarMensajeTeamMember(supabase, meta, v, mensaje, {
+          tipoMensaje: 'notificacion',
+          pendingKey: 'pending_mensaje'
+        });
+      }
+    } catch (error) {
+      console.error(`❌ Error enviando recordatorio a vendedor ${v.name || v.id}:`, error);
+      continue;
     }
   }
 
@@ -738,39 +748,44 @@ Revísalos en el CRM y márcalos como contactados.`;
   fechaLimite.setDate(fechaLimite.getDate() - diasSinMovimiento);
 
   for (const asesor of asesores || []) {
-    if (!asesor.phone || asesor.is_active === false) continue;
+    try {
+      if (!asesor.phone || asesor.is_active === false) continue;
 
-    const { data: hipotecasSinMover } = await supabase.client
-      .from('mortgage_applications')
-      .select('*')
-      .eq('assigned_advisor_id', asesor.id)
-      .in('status', ['pending', 'in_review', 'documents'])
-      .lt('updated_at', fechaLimite.toISOString());
+      const { data: hipotecasSinMover } = await supabase.client
+        .from('mortgage_applications')
+        .select('*')
+        .eq('assigned_advisor_id', asesor.id)
+        .in('status', ['pending', 'in_review', 'documents'])
+        .lt('updated_at', fechaLimite.toISOString());
 
-    if (hipotecasSinMover && hipotecasSinMover.length > 0) {
-      let mensaje = `🏦 *Recordatorio de Créditos*
+      if (hipotecasSinMover && hipotecasSinMover.length > 0) {
+        let mensaje = `🏦 *Recordatorio de Créditos*
 
 ${asesor.name}, tienes ${hipotecasSinMover.length} solicitud(es) sin actualizar en ${diasSinMovimiento}+ días:
 
 `;
 
-      hipotecasSinMover.slice(0, 5).forEach((h: any, i: number) => {
-        mensaje += `${i + 1}. ${h.lead_name} - ${h.bank || 'Banco por definir'}
+        hipotecasSinMover.slice(0, 5).forEach((h: any, i: number) => {
+          mensaje += `${i + 1}. ${h.lead_name} - ${h.bank || 'Banco por definir'}
 `;
-      });
+        });
 
-      if (hipotecasSinMover.length > 5) {
-        mensaje += `\n...y ${hipotecasSinMover.length - 5} más`;
-      }
+        if (hipotecasSinMover.length > 5) {
+          mensaje += `\n...y ${hipotecasSinMover.length - 5} más`;
+        }
 
-      mensaje += `
+        mensaje += `
 ⚡ Actualiza el status en el CRM`;
 
-      await enviarMensajeTeamMember(supabase, meta, asesor, mensaje, {
-        tipoMensaje: 'notificacion',
-        pendingKey: 'pending_mensaje'
-      });
-      console.log('📤 Recordatorio enviado a asesor:', asesor.name, '-', hipotecasSinMover.length, 'hipotecas');
+        await enviarMensajeTeamMember(supabase, meta, asesor, mensaje, {
+          tipoMensaje: 'notificacion',
+          pendingKey: 'pending_mensaje'
+        });
+        console.log('📤 Recordatorio enviado a asesor:', asesor.name, '-', hipotecasSinMover.length, 'hipotecas');
+      }
+    } catch (error) {
+      console.error(`❌ Error enviando recordatorio a asesor ${asesor.name || asesor.id}:`, error);
+      continue;
     }
   }
 }

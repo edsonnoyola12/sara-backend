@@ -117,13 +117,14 @@ export class CreditFlowService {
         delete notas.credit_flow_context;
 
         // Actualizar lead - quitar status de credit_flow
-        await this.supabase.client
+        const { error: errCancelFlow } = await this.supabase.client
           .from('leads')
           .update({
             notes: notas,
             status: lead.status === 'credit_flow' ? 'contacted' : lead.status
           })
           .eq('id', leadId);
+        if (errCancelFlow) console.error('⚠️ Error updating lead cancelar flujo:', errCancelFlow);
 
         // Registrar en lead_activities
         try {
@@ -180,13 +181,14 @@ export class CreditFlowService {
     await this.guardarContexto(lead.id, context);
 
     // Marcar lead como en flujo de crédito
-    await this.supabase.client
+    const { error: errIniciarFlujo } = await this.supabase.client
       .from('leads')
       .update({
         needs_mortgage: true,
         status: 'credit_flow'
       })
       .eq('id', lead.id);
+    if (errIniciarFlujo) console.error('⚠️ Error updating lead iniciar flujo crédito:', errIniciarFlujo);
 
     if (!tieneNombre) {
       return {
@@ -250,10 +252,11 @@ Escribe el nombre del banco o "no sé" si quieres que te oriente.`,
           await this.guardarContexto(leadId, context);
 
           // Actualizar nombre en lead
-          await this.supabase.client
+          const { error: errNombre } = await this.supabase.client
             .from('leads')
             .update({ name: nombreExtraido })
             .eq('id', leadId);
+          if (errNombre) console.error('⚠️ Error updating lead name in credit flow:', errNombre);
 
           return {
             respuesta: `¡Mucho gusto ${nombreExtraido}! 🤝
@@ -312,10 +315,11 @@ Escribe el nombre del banco o "no sé" si quieres que te oriente.`,
           await this.guardarContexto(leadId, context);
 
           // Actualizar lead con banco
-          await this.supabase.client
+          const { error: errBanco } = await this.supabase.client
             .from('leads')
             .update({ banco_preferido: bancoDetectado })
             .eq('id', leadId);
+          if (errBanco) console.error('⚠️ Error updating lead banco_preferido:', errBanco);
 
           const bancoMsg = bancoDetectado === 'Por definir'
             ? '¡Sin problema! Te orientamos con las mejores opciones.'
@@ -433,13 +437,14 @@ O escribe "no sé" para que te oriente.`,
           await this.guardarContexto(leadId, context);
 
           // Guardar en lead
-          await this.supabase.client
+          const { error: errIngreso } = await this.supabase.client
             .from('leads')
             .update({
               ingreso_mensual: ingreso,
               mortgage_data: { ingreso_mensual: ingreso }
             })
             .eq('id', leadId);
+          if (errIngreso) console.error('⚠️ Error updating lead ingreso_mensual:', errIngreso);
 
           return {
             respuesta: `Perfecto, *$${ingreso.toLocaleString('es-MX')}* mensuales 👍
@@ -503,10 +508,11 @@ O escribe "no sé" para que te oriente.`,
         await this.guardarContexto(leadId, context);
 
         // Guardar en lead
-        await this.supabase.client
+        const { error: errEnganche } = await this.supabase.client
           .from('leads')
           .update({ enganche_disponible: enganche })
           .eq('id', leadId);
+        if (errEnganche) console.error('⚠️ Error updating lead enganche_disponible:', errEnganche);
 
         // Generar simulación
         const simulacion = this.generarSimulacion(context.ingreso_mensual || 0, enganche, context.banco_preferido);
@@ -568,10 +574,11 @@ ${simulacion}
           context.updated_at = new Date().toISOString();
 
           // Actualizar lead
-          await this.supabase.client
+          const { error: errModalidad } = await this.supabase.client
             .from('leads')
             .update({ modalidad_asesoria: modalidad })
             .eq('id', leadId);
+          if (errModalidad) console.error('⚠️ Error updating lead modalidad_asesoria:', errModalidad);
 
           // ═══ PRESENCIAL: Mostrar casas y pedir cita ═══
           if (modalidad === 'presencial') {
@@ -635,10 +642,11 @@ Atendemos de Lunes a Viernes 9am-6pm y Sábados 9am-2pm 😊`,
             context.vendedor_original_id = vendedorOriginalId;
           }
 
-          await this.supabase.client
+          const { error: errQualified } = await this.supabase.client
             .from('leads')
             .update(updateData)
             .eq('id', leadId);
+          if (errQualified) console.error('⚠️ Error updating lead credit_qualified:', errQualified);
 
           // Crear mortgage_application
           if (asesor?.id) {
@@ -669,7 +677,8 @@ Atendemos de Lunes a Viernes 9am-6pm y Sábados 9am-2pm 😊`,
                 notas = typeof leadNotes.notes === 'string' ? JSON.parse(leadNotes.notes) : leadNotes.notes;
               }
               notas.vendedor_original_id = vendedorOriginalId;
-              await this.supabase.client.from('leads').update({ notes: notas }).eq('id', leadId);
+              const { error: errVendorOriginal } = await this.supabase.client.from('leads').update({ notes: notas }).eq('id', leadId);
+              if (errVendorOriginal) console.error('⚠️ Error updating lead vendedor_original notes:', errVendorOriginal);
               console.log(`📝 Vendedor original ${vendedorOriginalId} guardado en notes del lead`);
             } catch (e) {
               console.error('Error guardando vendedor original en notes:', e);
@@ -1169,10 +1178,11 @@ Por ejemplo: "mañana a las 11am" o "el sábado a las 10"`,
 
       notas.credit_flow_context = context;
 
-      await this.supabase.client
+      const { error: errGuardarCtx } = await this.supabase.client
         .from('leads')
         .update({ notes: notas })
         .eq('id', leadId);
+      if (errGuardarCtx) console.error('⚠️ Error updating lead notes (guardarContexto):', errGuardarCtx);
     } catch (e) {
       console.error('Error guardando contexto crédito:', e);
     }
@@ -1221,10 +1231,11 @@ Por ejemplo: "mañana a las 11am" o "el sábado a las 10"`,
 
       delete notas.credit_flow_context;
 
-      await this.supabase.client
+      const { error: errLimpiarCtx } = await this.supabase.client
         .from('leads')
         .update({ notes: notas })
         .eq('id', leadId);
+      if (errLimpiarCtx) console.error('⚠️ Error updating lead notes (limpiarContexto):', errLimpiarCtx);
     } catch (e) {
       console.error('Error limpiando contexto crédito:', e);
     }

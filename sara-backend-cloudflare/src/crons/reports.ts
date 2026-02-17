@@ -1516,6 +1516,7 @@ export async function enviarReporteDiarioVendedores(supabase: SupabaseService, m
 
     // Enviar reporte a cada vendedor
     for (const vendedor of vendedores) {
+      try {
       if (!vendedor.phone) continue;
 
       // Datos individuales del vendedor - HOY
@@ -1705,6 +1706,10 @@ _¡Descansa y mañana con todo!_ 🚀`;
 
       // Esperar 1s entre mensajes
       await new Promise(r => setTimeout(r, 1000));
+      } catch (error) {
+        console.error(`❌ Error procesando reporte diario vendedor ${vendedor.name || vendedor.id}:`, error);
+        continue;
+      }
     }
 
     console.log(`✅ Reportes diarios procesados para ${vendedores.length} vendedores`);
@@ -2080,50 +2085,55 @@ export async function enviarReporteDiarioAsesores(supabase: SupabaseService, met
     const fechaHoy = `${hoy.getDate()}/${hoy.getMonth()+1}/${hoy.getFullYear()}`;
 
     for (const asesor of asesores) {
-      if (!asesor.phone || asesor.is_active === false) continue;
+      try {
+        if (!asesor.phone || asesor.is_active === false) continue;
 
-      const nuevasHoy = hipotecasHoy?.filter(h => h.assigned_advisor_id === asesor.id) || [];
-      const aprobadasAsesorHoy = aprobadasHoy?.filter(h => h.assigned_advisor_id === asesor.id) || [];
-      const nuevasAyer = hipotecasAyer?.filter(h => h.assigned_advisor_id === asesor.id) || [];
-      const pipelineAsesor = pipelineActivo?.filter(h => h.assigned_advisor_id === asesor.id) || [];
-      const pendientes = pipelineAsesor.filter(h => h.status === 'pending').length;
-      const enProceso = pipelineAsesor.filter(h => h.status === 'in_progress').length;
-      const enBanco = pipelineAsesor.filter(h => h.status === 'sent_to_bank').length;
+        const nuevasHoy = hipotecasHoy?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+        const aprobadasAsesorHoy = aprobadasHoy?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+        const nuevasAyer = hipotecasAyer?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+        const pipelineAsesor = pipelineActivo?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+        const pendientes = pipelineAsesor.filter(h => h.status === 'pending').length;
+        const enProceso = pipelineAsesor.filter(h => h.status === 'in_progress').length;
+        const enBanco = pipelineAsesor.filter(h => h.status === 'sent_to_bank').length;
 
-      const insights: string[] = [];
-      if (aprobadasAsesorHoy.length > 0) insights.push(`🎉 ¡${aprobadasAsesorHoy.length} hipoteca${aprobadasAsesorHoy.length > 1 ? 's' : ''} aprobada${aprobadasAsesorHoy.length > 1 ? 's' : ''} hoy!`);
-      if (nuevasHoy.length > nuevasAyer.length && nuevasHoy.length > 0) insights.push(`📈 Más solicitudes que ayer: ${nuevasAyer.length}→${nuevasHoy.length}`);
-      if (pendientes > 3) insights.push(`📋 ${pendientes} solicitudes pendientes de revisar`);
-      if (enBanco > 0) insights.push(`🏦 ${enBanco} en banco - dar seguimiento`);
-      const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buen trabajo hoy!';
-      const nombreCorto = asesor.name?.split(' ')[0] || 'Asesor';
+        const insights: string[] = [];
+        if (aprobadasAsesorHoy.length > 0) insights.push(`🎉 ¡${aprobadasAsesorHoy.length} hipoteca${aprobadasAsesorHoy.length > 1 ? 's' : ''} aprobada${aprobadasAsesorHoy.length > 1 ? 's' : ''} hoy!`);
+        if (nuevasHoy.length > nuevasAyer.length && nuevasHoy.length > 0) insights.push(`📈 Más solicitudes que ayer: ${nuevasAyer.length}→${nuevasHoy.length}`);
+        if (pendientes > 3) insights.push(`📋 ${pendientes} solicitudes pendientes de revisar`);
+        if (enBanco > 0) insights.push(`🏦 ${enBanco} en banco - dar seguimiento`);
+        const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buen trabajo hoy!';
+        const nombreCorto = asesor.name?.split(' ')[0] || 'Asesor';
 
-      const msg = `📊 *TU RESUMEN DEL DÍA*\nHola *${nombreCorto}* 👋\n_${fechaHoy}_\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *HOY*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes nuevas: *${nuevasHoy.length}* ${calcVar(nuevasHoy.length, nuevasAyer.length)}\n• Aprobadas: *${aprobadasAsesorHoy.length}* ${aprobadasAsesorHoy.length > 0 ? '🎉' : ''}\n\n━━━━━━━━━━━━━━━━━━━━━\n📋 *TU PIPELINE*\n━━━━━━━━━━━━━━━━━━━━━\n• Pendientes: ${pendientes}\n• En proceso: ${enProceso}\n• En banco: ${enBanco}\n• Total activo: *${pipelineAsesor.length}*\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Descansa y mañana con todo!_ 🚀`;
+        const msg = `📊 *TU RESUMEN DEL DÍA*\nHola *${nombreCorto}* 👋\n_${fechaHoy}_\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *HOY*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes nuevas: *${nuevasHoy.length}* ${calcVar(nuevasHoy.length, nuevasAyer.length)}\n• Aprobadas: *${aprobadasAsesorHoy.length}* ${aprobadasAsesorHoy.length > 0 ? '🎉' : ''}\n\n━━━━━━━━━━━━━━━━━━━━━\n📋 *TU PIPELINE*\n━━━━━━━━━━━━━━━━━━━━━\n• Pendientes: ${pendientes}\n• En proceso: ${enProceso}\n• En banco: ${enBanco}\n• Total activo: *${pipelineAsesor.length}*\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Descansa y mañana con todo!_ 🚀`;
 
-      // ═══ USAR HELPER QUE RESPETA VENTANA 24H ═══
-      const templateParams = [
-        nombreCorto,
-        `${nuevasHoy.length}`,
-        `${aprobadasAsesorHoy.length}`,
-        `${pipelineAsesor.length} expedientes`
-      ];
+        // ═══ USAR HELPER QUE RESPETA VENTANA 24H ═══
+        const templateParams = [
+          nombreCorto,
+          `${nuevasHoy.length}`,
+          `${aprobadasAsesorHoy.length}`,
+          `${pipelineAsesor.length} expedientes`
+        ];
 
-      const resultado = await enviarMensajeTeamMember(supabase, meta, asesor, msg, {
-        tipoMensaje: 'reporte_diario_asesor',
-        guardarPending: true,
-        pendingKey: 'pending_reporte_diario',
-        templateOverride: {
-          name: 'reporte_asesor',
-          params: templateParams
+        const resultado = await enviarMensajeTeamMember(supabase, meta, asesor, msg, {
+          tipoMensaje: 'reporte_diario_asesor',
+          guardarPending: true,
+          pendingKey: 'pending_reporte_diario',
+          templateOverride: {
+            name: 'reporte_asesor',
+            params: templateParams
+          }
+        });
+
+        if (resultado.success) {
+          console.log(`📊 Reporte diario asesor ${resultado.method === 'direct' ? 'enviado' : 'template+pending'} a ${asesor.name}`);
+        } else {
+          console.log(`❌ Error enviando reporte diario a ${asesor.name}`);
         }
-      });
-
-      if (resultado.success) {
-        console.log(`📊 Reporte diario asesor ${resultado.method === 'direct' ? 'enviado' : 'template+pending'} a ${asesor.name}`);
-      } else {
-        console.log(`❌ Error enviando reporte diario a ${asesor.name}`);
+        await new Promise(r => setTimeout(r, 1000));
+      } catch (error) {
+        console.error(`❌ Error procesando reporte diario asesor ${asesor.name || asesor.id}:`, error);
+        continue;
       }
-      await new Promise(r => setTimeout(r, 1000));
     }
     console.log(`✅ Reportes diarios procesados para ${asesores.length} asesores`);
   } catch (e) {
@@ -2157,42 +2167,47 @@ export async function enviarReporteSemanalAsesores(supabase: SupabaseService, me
     const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
 
     for (const asesor of asesores) {
-      if (!asesor.phone || asesor.is_active === false) continue;
+      try {
+        if (!asesor.phone || asesor.is_active === false) continue;
 
-      const nuevasSem = hipotecasSemana?.filter(h => h.assigned_advisor_id === asesor.id) || [];
-      const aprobadasAsesor = aprobadasSemana?.filter(h => h.assigned_advisor_id === asesor.id) || [];
-      const rechazadasAsesor = rechazadasSemana?.filter(h => h.assigned_advisor_id === asesor.id) || [];
-      const nuevasSemAnt = hipotecasSemAnt?.filter(h => h.assigned_advisor_id === asesor.id) || [];
-      const aprobadasAnt = aprobadasSemAnt?.filter(h => h.assigned_advisor_id === asesor.id) || [];
-      const pipelineAsesor = pipelineActivo?.filter(h => h.assigned_advisor_id === asesor.id) || [];
-      const tasaAprobacion = (aprobadasAsesor.length + rechazadasAsesor.length) > 0 ? Math.round((aprobadasAsesor.length / (aprobadasAsesor.length + rechazadasAsesor.length)) * 100) : 0;
-      const posicion = asesoresConAprobaciones.findIndex(a => a.id === asesor.id) + 1;
-      const medallas = ['🥇', '🥈', '🥉'];
-      const posicionStr = posicion <= 3 ? medallas[posicion - 1] : `#${posicion}`;
+        const nuevasSem = hipotecasSemana?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+        const aprobadasAsesor = aprobadasSemana?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+        const rechazadasAsesor = rechazadasSemana?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+        const nuevasSemAnt = hipotecasSemAnt?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+        const aprobadasAnt = aprobadasSemAnt?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+        const pipelineAsesor = pipelineActivo?.filter(h => h.assigned_advisor_id === asesor.id) || [];
+        const tasaAprobacion = (aprobadasAsesor.length + rechazadasAsesor.length) > 0 ? Math.round((aprobadasAsesor.length / (aprobadasAsesor.length + rechazadasAsesor.length)) * 100) : 0;
+        const posicion = asesoresConAprobaciones.findIndex(a => a.id === asesor.id) + 1;
+        const medallas = ['🥇', '🥈', '🥉'];
+        const posicionStr = posicion <= 3 ? medallas[posicion - 1] : `#${posicion}`;
 
-      const insights: string[] = [];
-      if (aprobadasAsesor.length > aprobadasAnt.length && aprobadasAnt.length > 0) insights.push(`🚀 Aprobaciones crecieron ${Math.round(((aprobadasAsesor.length - aprobadasAnt.length) / aprobadasAnt.length) * 100)}% vs semana anterior`);
-      if (posicion === 1) insights.push(`🏆 ¡Fuiste el #1 del equipo!`);
-      else if (posicion <= 3) insights.push(`🎯 Top 3 del equipo`);
-      if (tasaAprobacion >= 70) insights.push(`✅ Excelente tasa de aprobación: ${tasaAprobacion}%`);
-      const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buena semana!';
-      const nombreCorto = asesor.name?.split(' ')[0] || 'Asesor';
+        const insights: string[] = [];
+        if (aprobadasAsesor.length > aprobadasAnt.length && aprobadasAnt.length > 0) insights.push(`🚀 Aprobaciones crecieron ${Math.round(((aprobadasAsesor.length - aprobadasAnt.length) / aprobadasAnt.length) * 100)}% vs semana anterior`);
+        if (posicion === 1) insights.push(`🏆 ¡Fuiste el #1 del equipo!`);
+        else if (posicion <= 3) insights.push(`🎯 Top 3 del equipo`);
+        if (tasaAprobacion >= 70) insights.push(`✅ Excelente tasa de aprobación: ${tasaAprobacion}%`);
+        const insightsText = insights.length > 0 ? insights.join('\n') : '💪 ¡Buena semana!';
+        const nombreCorto = asesor.name?.split(' ')[0] || 'Asesor';
 
-      const msg = `📊 *TU REPORTE SEMANAL*\nHola *${nombreCorto}* 👋\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *ESTA SEMANA*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes nuevas: *${nuevasSem.length}* ${calcVar(nuevasSem.length, nuevasSemAnt.length)}\n• Aprobadas: *${aprobadasAsesor.length}* ${calcVar(aprobadasAsesor.length, aprobadasAnt.length)}\n• Rechazadas: ${rechazadasAsesor.length}\n• Tasa aprobación: *${tasaAprobacion}%*\n\n━━━━━━━━━━━━━━━━━━━━━\n📋 *PIPELINE ACTIVO*\n━━━━━━━━━━━━━━━━━━━━━\n• Pendientes: ${pipelineAsesor.filter(h => h.status === 'pending').length}\n• En proceso: ${pipelineAsesor.filter(h => h.status === 'in_progress').length}\n• En banco: ${pipelineAsesor.filter(h => h.status === 'sent_to_bank').length}\n• Total: *${pipelineAsesor.length}*\n\n━━━━━━━━━━━━━━━━━━━━━\n🏆 *RANKING EQUIPO*\n━━━━━━━━━━━━━━━━━━━━━\n• Posición: *${posicionStr}* de ${asesoresConAprobaciones.length}\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Éxito esta semana!_ 🚀`;
+        const msg = `📊 *TU REPORTE SEMANAL*\nHola *${nombreCorto}* 👋\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *ESTA SEMANA*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes nuevas: *${nuevasSem.length}* ${calcVar(nuevasSem.length, nuevasSemAnt.length)}\n• Aprobadas: *${aprobadasAsesor.length}* ${calcVar(aprobadasAsesor.length, aprobadasAnt.length)}\n• Rechazadas: ${rechazadasAsesor.length}\n• Tasa aprobación: *${tasaAprobacion}%*\n\n━━━━━━━━━━━━━━━━━━━━━\n📋 *PIPELINE ACTIVO*\n━━━━━━━━━━━━━━━━━━━━━\n• Pendientes: ${pipelineAsesor.filter(h => h.status === 'pending').length}\n• En proceso: ${pipelineAsesor.filter(h => h.status === 'in_progress').length}\n• En banco: ${pipelineAsesor.filter(h => h.status === 'sent_to_bank').length}\n• Total: *${pipelineAsesor.length}*\n\n━━━━━━━━━━━━━━━━━━━━━\n🏆 *RANKING EQUIPO*\n━━━━━━━━━━━━━━━━━━━━━\n• Posición: *${posicionStr}* de ${asesoresConAprobaciones.length}\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Éxito esta semana!_ 🚀`;
 
-      // ═══ USAR HELPER QUE RESPETA VENTANA 24H ═══
-      const resultado = await enviarMensajeTeamMember(supabase, meta, asesor, msg, {
-        tipoMensaje: 'reporte_semanal_asesor',
-        guardarPending: true,
-        pendingKey: 'pending_reporte_semanal'
-      });
+        // ═══ USAR HELPER QUE RESPETA VENTANA 24H ═══
+        const resultado = await enviarMensajeTeamMember(supabase, meta, asesor, msg, {
+          tipoMensaje: 'reporte_semanal_asesor',
+          guardarPending: true,
+          pendingKey: 'pending_reporte_semanal'
+        });
 
-      if (resultado.success) {
-        console.log(`📊 Reporte semanal asesor ${resultado.method === 'direct' ? 'enviado' : 'template+pending'} a ${asesor.name}`);
-      } else {
-        console.log(`❌ Error enviando reporte semanal a ${asesor.name}`);
+        if (resultado.success) {
+          console.log(`📊 Reporte semanal asesor ${resultado.method === 'direct' ? 'enviado' : 'template+pending'} a ${asesor.name}`);
+        } else {
+          console.log(`❌ Error enviando reporte semanal a ${asesor.name}`);
+        }
+        await new Promise(r => setTimeout(r, 1000));
+      } catch (error) {
+        console.error(`❌ Error procesando reporte semanal asesor ${asesor.name || asesor.id}:`, error);
+        continue;
       }
-      await new Promise(r => setTimeout(r, 1000));
     }
     console.log(`✅ Reportes semanales procesados para ${asesores.length} asesores`);
   } catch (e) {
@@ -2650,8 +2665,13 @@ ${resumen.slice(0, 5).join('\n')}
 ✅ Brochures y catálogos actualizados automáticamente.`;
 
       for (const admin of admins) {
-        if (admin.phone) {
-          await meta.sendWhatsAppMessage(admin.phone, mensaje);
+        try {
+          if (admin.phone) {
+            await meta.sendWhatsAppMessage(admin.phone, mensaje);
+          }
+        } catch (error) {
+          console.error(`❌ Error notificando aumento precios a admin:`, error);
+          continue;
         }
       }
     }

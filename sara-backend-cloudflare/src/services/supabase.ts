@@ -26,7 +26,8 @@ export class SupabaseService {
   }
 
   async updateLead(id: string, updates: any) {
-    const { data } = await this.client.from('leads').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id).select().single();
+    const { data, error } = await this.client.from('leads').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id).select().single();
+    if (error) console.error('⚠️ Error updating lead:', error);
     return data;
   }
 

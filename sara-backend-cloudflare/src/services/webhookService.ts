@@ -174,7 +174,7 @@ export class WebhookService {
       .eq('id', id);
 
     if (error) {
-      console.error('Error updating webhook:', error);
+      console.error('⚠️ Error updating webhook:', error);
       return false;
     }
 

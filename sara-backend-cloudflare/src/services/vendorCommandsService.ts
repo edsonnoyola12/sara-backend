@@ -66,10 +66,11 @@ export class VendorCommandsService {
       const keysSanitizadas = Object.keys(notasSanitizadas).length;
       if (keysOriginal !== keysSanitizadas) {
         console.error(`⚠️ NOTAS SANITIZADAS para ${vendedorId}: ${keysOriginal} -> ${keysSanitizadas} keys`);
-        await this.supabase.client
+        const { error: errSanitize } = await this.supabase.client
           .from('team_members')
           .update({ notes: notasSanitizadas })
           .eq('id', vendedorId);
+        if (errSanitize) console.error('⚠️ Error updating sanitized notes for team member', vendedorId, ':', errSanitize);
       }
 
       return { notes: notasSanitizadas, notasVendedor: notasSanitizadas };
@@ -836,13 +837,14 @@ export class VendorCommandsService {
       leadNotes.asesor_asignado_at = new Date().toISOString();
       leadNotes.asesor_asignado_por = vendedor.name;
 
-      await this.supabase.client
+      const { error: errAsesorAssign } = await this.supabase.client
         .from('leads')
         .update({
           credit_status: 'asesor_assigned',
           notes: leadNotes
         })
         .eq('id', lead.id);
+      if (errAsesorAssign) console.error('⚠️ Error updating lead asesor assignment:', errAsesorAssign);
 
       console.log('✅ Lead actualizado con asesor');
 
@@ -1404,10 +1406,11 @@ export class VendorCommandsService {
       if (currentIndex === -1) {
         // Status no está en el funnel estándar, moverlo a contacted
         const newStatus = direction === 'next' ? 'contacted' : 'new';
-        await this.supabase.client
+        const { error: errFunnelReset } = await this.supabase.client
           .from('leads')
           .update({ status: newStatus, updated_at: new Date().toISOString() })
           .eq('id', lead.id);
+        if (errFunnelReset) console.error('⚠️ Error updating lead funnel reset:', errFunnelReset);
         return { success: true, lead, newStatus };
       }
 
@@ -1427,10 +1430,11 @@ export class VendorCommandsService {
 
       const newStatus = this.FUNNEL_STAGES[newIndex];
 
-      await this.supabase.client
+      const { error: errFunnelMove } = await this.supabase.client
         .from('leads')
         .update({ status: newStatus, updated_at: new Date().toISOString() })
         .eq('id', lead.id);
+      if (errFunnelMove) console.error('⚠️ Error moving lead in funnel for lead', lead.id, ':', errFunnelMove);
 
       console.log(`✅ Lead ${lead.name} movido de ${lead.status} a ${newStatus}`);
 
@@ -1570,10 +1574,11 @@ export class VendorCommandsService {
       const lead = leads[0];
       const newStage = archivar ? 'archived' : 'new';
 
-      await this.supabase.client
+      const { error: errArchive } = await this.supabase.client
         .from('leads')
         .update({ stage: newStage, updated_at: new Date().toISOString() })
         .eq('id', lead.id);
+      if (errArchive) console.error('⚠️ Error archiving/unarchiving lead', lead.id, ':', errArchive);
 
       return { success: true, lead };
     } catch (e) {
@@ -1654,10 +1659,11 @@ export class VendorCommandsService {
 
       notasLead.notas_vendedor = notasArray;
 
-      await this.supabase.client
+      const { error: errAddNote } = await this.supabase.client
         .from('leads')
         .update({ notes: notasLead, updated_at: new Date().toISOString() })
         .eq('id', lead.id);
+      if (errAddNote) console.error('⚠️ Error adding vendor note for lead', lead.id, ':', errAddNote);
 
       // Guardar en lead_activities para que aparezca en el CRM
       // Usamos 'whatsapp' porque es el único tipo que el CRM muestra bien

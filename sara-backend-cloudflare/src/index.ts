@@ -694,7 +694,11 @@ export default {
           console.warn('⚠️ META_WEBHOOK_SECRET no configurado - webhooks sin verificar');
         }
 
-        const body = JSON.parse(bodyText) as any;
+        const body = safeJsonParse(bodyText, null);
+        if (!body) {
+          console.error('❌ WEBHOOK META: JSON inválido, bodyText:', bodyText?.substring(0, 200));
+          return new Response('OK', { status: 200 });
+        }
         console.log('📥 Body recibido:', JSON.stringify(body).substring(0, 500));
 
         const entry = body?.entry?.[0];
@@ -1428,7 +1432,11 @@ export default {
           console.warn('⚠️ META_WEBHOOK_SECRET no configurado - webhooks sin verificar');
         }
 
-        const body = JSON.parse(bodyText) as any;
+        const body = safeJsonParse(bodyText, null);
+        if (!body) {
+          console.error('❌ FACEBOOK LEADS: JSON inválido, bodyText:', bodyText?.substring(0, 200));
+          return new Response('OK', { status: 200 });
+        }
         console.log('🔥 Facebook Lead recibido:', JSON.stringify(body));
 
         const entry = body?.entry?.[0];
