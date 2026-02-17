@@ -1261,6 +1261,7 @@ FLAGS:
 - send_brochure: true si pide brochure/PDF/catálogo/planos/folleto
 - send_video: true si pide "el video" explícitamente
 - send_matterport: true si pide tour 3D/recorrido virtual (NO "quiero ver casas" = cita física)
+⚠️ "PLANOS" = BROCHURE (send_brochure: true). El brochure tiene los planos. NO enviar matterport cuando piden planos. Solo ofrecer: "¿Te gustaría también un recorrido virtual en 3D?"
 - send_contactos: true SOLO si pide crédito/asesor explícitamente
 
 
@@ -2098,6 +2099,25 @@ Tengo brochures completos con fotos, planos y precios de cada desarrollo.
 
 Dime cuál y te lo envío ahora mismo 📲`;
           parsed.send_brochure = true;
+        }
+      }
+
+      // ═══ CORRECCIÓN: PLANOS = BROCHURE, no matterport ═══
+      if (pideBrochure && (msgLowerCallback.includes('plano') || msgLowerCallback.includes('planos'))) {
+        // Cuando piden planos, enviar brochure (tiene los planos) pero NO matterport automático
+        parsed.send_brochure = true;
+        parsed.send_matterport = false;
+        // Si la respuesta menciona "recorrido 3D" o "matterport" como si fuera lo mismo, corregir
+        if (parsed.response) {
+          const resp = parsed.response.toLowerCase();
+          if (resp.includes('recorrido 3d') || resp.includes('recorrido virtual') || resp.includes('matterport') || resp.includes('tour 3d')) {
+            parsed.response = parsed.response
+              .replace(/[Tt]e envío el recorrido (3D|virtual|3d).*/g, 'Te envío el brochure con los planos 📄')
+              .replace(/[Aa]quí.*recorrido (3D|virtual|3d).*/g, 'En el brochure encontrarás los planos completos 📄');
+            if (!parsed.response.includes('recorrido virtual')) {
+              parsed.response += '\n\n¿Te gustaría también un recorrido virtual en 3D? 🏠';
+            }
+          }
         }
       }
 
@@ -4719,7 +4739,8 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   partes.push(`🎬 *Video:* ${propiedadMatch.youtube_link}`);
                   recursosDesc.push('video');
                 }
-                if (propiedadMatch.matterport_link) {
+                const pidioPlanos = msgLower.includes('plano') || msgLower.includes('planos');
+                if (propiedadMatch.matterport_link && !pidioPlanos && analysis.send_matterport !== false) {
                   partes.push(`🏠 *Recorrido 3D:* ${propiedadMatch.matterport_link}`);
                   recursosDesc.push('recorrido 3D');
                 }
