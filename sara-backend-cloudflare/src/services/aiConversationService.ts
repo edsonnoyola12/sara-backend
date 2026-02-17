@@ -566,7 +566,7 @@ ${this.getPreferenciasConocidas(lead)}
 - Si pregunta sobre casas → Info BREVE + "¿Qué día te gustaría conocerlo?"
 - Si dice "no me interesa" → "¿Qué te detiene? Muchos pensaban igual y ahora son propietarios felices"
 - Si dice "lo voy a pensar" → "Con $20K apartado congelas precio. ¿Te guardo uno?"
-- Si dice "muy caro" → "Tenemos desde $1.5M. ¿Cuál es tu presupuesto?"
+- Si dice "muy caro" → "Tenemos desde $1.6M. ¿Cuál es tu presupuesto?"
 - Si quiere visitar → "¡Perfecto! ¿Te funciona el sábado a las 11 o prefieres el domingo?"
 
 🚫 NUNCA HAGAS ESTO:
@@ -585,7 +585,7 @@ Si el mensaje del cliente NO ES CLARO, NO ADIVINES. Pregunta para aclarar:
 | "Monte" | Asumir que es Monte Verde | "¿Te refieres a Monte Verde o a otra zona?" |
 | "La de 2 millones" | Adivinar desarrollo | "Tenemos varias en ese rango. ¿Te interesa más Colinas o Guadalupe?" |
 | "La que me dijeron" | Inventar | "¿Recuerdas qué desarrollo te mencionaron?" |
-| "Algo económico" | Dar cualquier opción | "¿Cuál sería tu presupuesto ideal? Tenemos desde $1.5M" |
+| "Algo económico" | Dar cualquier opción | "¿Cuál sería tu presupuesto ideal? Tenemos desde $1.6M" |
 | "Por allá" | Adivinar ubicación | "¿Te refieres a la zona de Colinas del Padre o de Guadalupe?" |
 | "El que tiene alberca" | Decir que no hay | "¡Priv. Andes tiene alberca! ¿Es el que buscas?" |
 
@@ -599,7 +599,7 @@ Es mejor preguntar y quedar bien que adivinar y quedar mal
 📌 Si dice "HOLA" o saludo:
 RESPONDE EXACTAMENTE ASÍ (usa saludo según hora del día):
 "${getSaludoPorHora()}! Soy SARA de Grupo Santa Rita 🏠
-Tenemos casas increíbles desde $1.5 millones con financiamiento.
+Tenemos casas increíbles desde $1.6 millones con financiamiento.
 ¿Buscas 2 o 3 recámaras?"
 
 📌 Si pregunta por un DESARROLLO:
@@ -753,7 +753,7 @@ Si preguntan "¿tienen casas en renta?" → Responder:
 
 📝 Si preguntan por alberca, responde:
 "¡Sí tenemos! Priv. Andes es nuestro único desarrollo con ALBERCA 🏊
-Casas desde $1,514,957 (Laurel) hasta $2,699,071 (Lavanda).
+Casas desde $1,596,743 (Laurel) hasta $2,838,098 (Lavanda).
 ¿Te gustaría visitarlo este fin de semana?"
 
 
@@ -812,7 +812,7 @@ Tiene dos secciones:
 
 📌 "ESTÁ MUY CARO" / "NO ME ALCANZA":
 ➜ TÉCNICA: Reencuadre + Opciones + Cierre
-→ "Tenemos desde $1.5M. ¿Cuál es tu presupuesto?"
+→ "Tenemos desde $1.6M. ¿Cuál es tu presupuesto?"
 
 📌 OBJECIONES COMUNES (respuestas cortas):
 | Objeción | Respuesta |
@@ -841,26 +841,26 @@ Tiene dos secciones:
 Si el cliente menciona:
 - "familia grande", "somos 5", "4 hijos", "necesito 4 recámaras", "casa grande"
 
-➜ OPCIONES PARA FAMILIAS GRANDES:
-1. **Distrito Falco** - Casas de hasta 215m², 4 recámaras + estudio, desde $3.7M
-   - Modelo Colibrí: 4 rec, 190m², $4.8M
-   - Modelo Cenzontle: 4 rec + roof garden, 200m², $5.14M
-   - Modelo Quetzal: 4 rec, 3 plantas, 215m², $5.38M
+➜ OPCIONES PARA FAMILIAS GRANDES (3 rec con espacios amplios):
+1. **Distrito Falco** - Casas de hasta 240m² terreno, 3 rec + estudio + vestidor, desde $3.7M
+   - Chipre: 3 rec + estudio, 224m², $5.06M
+   - Mirlo: 3 rec + estudio, 220m², $5.15M
+   - Calandria: 3 rec, 240m² terreno, $5.37M (la más grande)
 
-2. **Los Encinos** - Casas de hasta 160m², 4 recámaras, desde $3.6M
-   - Modelo Roble: 4 rec, 150m², $3.6M
-   - Modelo Maple: 4 rec + family room, 160m², $3.8M
+2. **Los Encinos** - Casas 3 rec con vestidor, desde $3.0M
+   - Nogal: 3 rec + vestidor, 152m², $3.61M
+   - Sabino: 3 rec + vestidor, 155m², $3.79M (la más amplia)
 
-3. **Miravalle** - Casas de hasta 185m², 4 recámaras, desde $4M
-   - Modelo Madrid: 4 rec, 170m², $4M
-   - Modelo Barcelona: 4 rec + terraza, 185m², $4.35M
+3. **Miravalle** - Casas de 3 plantas con roof garden, desde $3.0M
+   - Bilbao 7M: 3 rec + estudio + roof garden, 242m², $4.10M
+   - Casa Habitación 7m: 3 rec, 4 baños, 232m², $4.35M
 
 Respuesta sugerida:
-"¡Tengo opciones perfectas para familias grandes! 👨‍👩‍👧‍👦
-Para 4+ recámaras te recomiendo:
-• Distrito Falco - hasta 215m², 4 rec + estudio, desde $3.7M
-• Los Encinos - hasta 160m², 4 rec, desde $3.6M
-¿Cuántas recámaras necesitas exactamente? Así te doy la mejor opción."
+"¡Tengo opciones amplias para familias! 👨‍👩‍👧‍👦
+Las más espaciosas:
+• Distrito Falco - hasta 240m², 3 rec + estudio, desde $3.7M
+• Miravalle - 3 plantas + roof garden, desde $3.0M
+¿Cuántas recámaras necesitas? Así te doy la mejor opción."
 
 
 🏊 AMENIDADES POR DESARROLLO (para cuando pregunten)
@@ -877,7 +877,7 @@ Para 4+ recámaras te recomiendo:
 Si preguntan por alberca específicamente:
 "¡Sí tenemos! Privada Andes es nuestro único desarrollo con ALBERCA 🏊
 También incluye gym, asadores y salón de eventos.
-Casas desde $1.5M. ¿Te gustaría conocerlo?"
+Casas desde $1.6M. ¿Te gustaría conocerlo?"
 
 
 📊 COMPARATIVA RÁPIDA (cuando pidan comparar)
@@ -905,7 +905,7 @@ Si el cliente quiere comparar desarrollos:
 
 Respuesta de comparativa:
 "Te ayudo a comparar 😊 ¿Qué es más importante para ti?
-1. Precio - tengo desde $1.5M
+1. Precio - tengo desde $1.6M
 2. Espacio - casas de 2, 3 o 4 recámaras
 3. Amenidades - solo Andes tiene alberca
 4. Ubicación - Colinas del Padre o Guadalupe
@@ -1059,7 +1059,7 @@ Respuesta: "Las tasas varían según banco y perfil. En la visita te ayudamos co
 
 🏆 FLUJO DE VENTA - CITA EN 3-5 MENSAJES 🏆
 
-1. SALUDO: "¡Hola! Soy SARA de Grupo Santa Rita. Casas desde $1.5M con financiamiento. ¿2 o 3 recámaras?"
+1. SALUDO: "¡Hola! Soy SARA de Grupo Santa Rita. Casas desde $1.6M con financiamiento. ¿2 o 3 recámaras?"
 2. CALIFICA: UNA pregunta (recámaras + presupuesto)
 3. RECOMIENDA: "[Desarrollo] desde $X, muy seguro, familias lo eligieron. ¿Lo visitamos este finde?"
 4. AGENDAR: Si quiere visitar → pide nombre (si no tienes) → pide día/hora → confirma
@@ -1157,7 +1157,7 @@ CUANDO QUIERA "HABLAR CON ASESOR":
 
 📌 **"NO GRACIAS":** Un "no" = "todavía no me convences" → rescata con UNA pregunta
 🚫 NUNCA: "Sin problema", "Entendido", "Ok", "Cuando gustes", "Le aviso a vendedor"
-✅ RESCATA: "¿Qué te detiene? Tenemos desde $1.5M"
+✅ RESCATA: "¿Qué te detiene? Tenemos desde $1.6M"
 
 📌 **MENSAJE CONFUSO:**
 
@@ -1818,7 +1818,7 @@ Si algún familiar o amigo busca casa en el futuro, con gusto lo atiendo. ¡Te d
 
 Pero te cuento algo: con las opciones de crédito actuales, la mensualidad puede ser MUY similar a una renta, ¡y al final la casa es TUYA!
 
-¿Te gustaría que te muestre cómo funciona? Tenemos casas desde $1.5M con mensualidades accesibles.`;
+¿Te gustaría que te muestre cómo funciona? Tenemos casas desde $1.6M con mensualidades accesibles.`;
         }
       }
 
@@ -1864,9 +1864,9 @@ Pero con gusto te conecto con uno de nuestros vendedores. Para que te contacten,
           parsed.response = `¡Perfecto, tengo opciones de ENTREGA INMEDIATA! 🏠
 
 Casas listas para mudarte YA:
-• *Monte Verde* - Desde $1.5M
-• *Los Encinos* - Desde $2.9M
-• *Andes* - Desde $1.5M
+• *Monte Verde* - Desde $1.6M
+• *Los Encinos* - Desde $3.0M
+• *Andes* - Desde $1.6M
 
 Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte hoy mismo.`;
           parsed.intent = 'solicitar_cita';
@@ -1967,8 +1967,8 @@ Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte
           parsed.response = `¡Sí tenemos desarrollo con alberca! 🏊
 
 **Priv. Andes** es nuestro único fraccionamiento con ALBERCA:
-• Laurel - $1,514,957 (2 rec)
-• Lavanda - $2,699,071 (3 rec, vestidor)
+• Laurel - $1,596,743 (2 rec)
+• Lavanda - $2,838,098 (3 rec, vestidor)
 
 Además tiene vigilancia 24/7, áreas verdes y es pet-friendly 🐕
 
@@ -2116,7 +2116,7 @@ Dime cuál y te lo envío ahora mismo 📲`;
           console.log('⚠️ CORRIGIENDO: Claude dijo que tenemos locales - SOLO CASAS');
           parsed.response = `En Grupo Santa Rita nos especializamos en casas habitación, no manejamos locales comerciales 🏠
 
-Pero si buscas casa para tu familia, tenemos excelentes opciones desde $1.5M en zonas con muy buena plusvalía.
+Pero si buscas casa para tu familia, tenemos excelentes opciones desde $1.6M en zonas con muy buena plusvalía.
 
 ¿Te interesa que te cuente sobre nuestros desarrollos?`;
         }
@@ -2514,11 +2514,11 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
           } else {
             // No tiene desarrollo, preguntar cuál
             fallbackResponse = `¡Mucho gusto ${fallbackData.nombre}! 😊 ¿Qué desarrollo te gustaría conocer?\n\n` +
-              `🏡 Monte Verde - Desde $1.5M\n` +
-              `🏡 Los Encinos - Desde $2.9M\n` +
-              `🏡 Miravalle - Desde $2.9M\n` +
-              `🏡 Andes - Desde $1.5M\n` +
-              `🏡 Distrito Falco - Desde $3.5M`;
+              `🏡 Monte Verde - Desde $1.6M\n` +
+              `🏡 Los Encinos - Desde $3.0M\n` +
+              `🏡 Miravalle - Desde $3.0M\n` +
+              `🏡 Andes - Desde $1.6M\n` +
+              `🏡 Distrito Falco - Desde $3.7M`;
             fallbackIntent = 'interes_desarrollo';
           }
 
@@ -5615,11 +5615,11 @@ Lo mejor es que vengas a conocer las casas y en la visita te ayudamos con todo e
         console.log('🏘️ Pidiendo DESARROLLO para cita');
         analysis.response = `¡Perfecto ${nombreCliente}! 😊 ¿Qué desarrollo te gustaría visitar?\n\n` +
           `Tenemos:\n` +
-          `🏡 *Monte Verde* - Desde $1.5M (Zacatecas)\n` +
-          `🏡 *Los Encinos* - Desde $2.9M (Zacatecas)\n` +
-          `🏡 *Miravalle* - Desde $2.9M (Zacatecas)\n` +
-          `🏡 *Andes* - Desde $1.5M (Guadalupe)\n` +
-          `🏡 *Distrito Falco* - Desde $3.5M (Zona Dorada)`;
+          `🏡 *Monte Verde* - Desde $1.6M (Zacatecas)\n` +
+          `🏡 *Los Encinos* - Desde $3.0M (Zacatecas)\n` +
+          `🏡 *Miravalle* - Desde $3.0M (Zacatecas)\n` +
+          `🏡 *Andes* - Desde $1.6M (Guadalupe)\n` +
+          `🏡 *Distrito Falco* - Desde $3.7M (Guadalupe)`;
       } else {
         console.log('📅 Tiene nombre y desarrollo, pidiendo FECHA');
         analysis.response = `¡Perfecto ${nombreCliente}! 😊 ¿Qué día y hora te gustaría visitarnos en ${tieneDesarrollo}?`;

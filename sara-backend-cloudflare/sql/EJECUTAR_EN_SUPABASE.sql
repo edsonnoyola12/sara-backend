@@ -1,18 +1,31 @@
 -- =====================================================
 -- EJECUTAR EN SUPABASE DASHBOARD → SQL EDITOR
--- PRECIOS VIGENTES AL 28 FEBRERO 2026
+-- PRECIOS SINCRONIZADOS CON BROCHURES - 17 FEBRERO 2026
 -- =====================================================
 
 -- =====================================================
--- 1. LOS ENCINOS
+-- 1. LOS ENCINOS (sincronizado con brochure los_encinos.html)
 -- =====================================================
-UPDATE properties SET price = 2888864, price_equipped = 3004115, land_size = 102, area_m2 = 166.80, floors = 2, bedrooms = 3, has_vestidor = true WHERE name = 'Encino Blanco' AND development = 'Los Encinos';
-UPDATE properties SET price = 3424391, price_equipped = 3551830, land_size = 119, area_m2 = 203.30, floors = 2, bedrooms = 3, has_vestidor = true WHERE name = 'Encino Verde' AND development = 'Los Encinos';
-UPDATE properties SET price = 3655444, price_equipped = 3795090, land_size = 204, area_m2 = 146.50, floors = 1, bedrooms = 3, has_vestidor = true WHERE name = 'Encino Dorado' AND development = 'Los Encinos';
-UPDATE properties SET price = 3124738, price_equipped = 3252013, land_size = 102, area_m2 = 182.40, floors = 3, bedrooms = 3, has_vestidor = true, has_terrace = true WHERE name = 'Roble Descendente' AND development = 'Los Encinos';
-UPDATE properties SET price = 3434524, price_equipped = 3569318, land_size = 119, area_m2 = 210.80, floors = 3, bedrooms = 3, has_vestidor = true, has_terrace = true WHERE name = 'Maple Ascendente' AND development = 'Los Encinos';
-UPDATE properties SET price = 3434524, price_equipped = 3569318 WHERE name = 'Ascendente' AND development = 'Los Encinos';
-UPDATE properties SET price = 3124738, price_equipped = 3252013 WHERE name = 'Descendente' AND development = 'Los Encinos';
+-- Actualizar modelos existentes con precios correctos del brochure
+UPDATE properties SET price = 2877640, price_equipped = 2997760, land_size = 120, area_m2 = 123.50, floors = 2, bedrooms = 3, has_vestidor = false WHERE name = 'Encino Blanco' AND development = 'Los Encinos';
+UPDATE properties SET price = 3082653, price_equipped = 3211458, land_size = 120, area_m2 = 133.10, floors = 2, bedrooms = 3, has_vestidor = false WHERE name = 'Encino Verde' AND development = 'Los Encinos';
+UPDATE properties SET price = 3235908, price_equipped = 3371254, land_size = 120, area_m2 = 146.27, floors = 2, bedrooms = 3, has_vestidor = false WHERE name = 'Encino Dorado' AND development = 'Los Encinos';
+
+-- Renombrar "Roble Descendente" → "Roble" con precios de brochure
+UPDATE properties SET name = 'Roble', price = 3271840, price_equipped = 3409723, land_size = 120, area_m2 = 140.70, floors = 2, bedrooms = 3, has_vestidor = true, has_terrace = false WHERE name = 'Roble Descendente' AND development = 'Los Encinos';
+
+-- Renombrar "Maple Ascendente" → "Maple" con precios de brochure
+UPDATE properties SET name = 'Maple', price = 3305689, price_equipped = 3445449, land_size = 120, area_m2 = 143.40, floors = 2, bedrooms = 3, has_vestidor = true, has_terrace = false WHERE name = 'Maple Ascendente' AND development = 'Los Encinos';
+
+-- Eliminar duplicados "Descendente" y "Ascendente" (entradas con nombres cortos sin modelo)
+DELETE FROM properties WHERE name = 'Descendente' AND development = 'Los Encinos';
+DELETE FROM properties WHERE name = 'Ascendente' AND development = 'Los Encinos';
+
+-- Insertar modelos faltantes: Nogal y Sabino
+INSERT INTO properties (name, development, category, neighborhood, city, price, price_equipped, land_size, area_m2, floors, bedrooms, bathrooms, has_vestidor, description, sales_phrase, ideal_client)
+VALUES
+('Nogal', 'Los Encinos', 'Casa', 'Colinas del Padre', 'Zacatecas', 3467789, 3614476, 120, 152.10, 2, 3, 2.5, true, '2 plantas, 3 rec con vestidor, 2.5 baños, sala-comedor, cocina, cochera 2 autos. Terreno 120m².', 'Amplia con vestidor en Los Encinos', 'Familias que buscan espacio'),
+('Sabino', 'Los Encinos', 'Casa', 'Colinas del Padre', 'Zacatecas', 3645670, 3799879, 120, 155.60, 2, 3, 2.5, true, '2 plantas, 3 rec con vestidor, 2.5 baños, sala-comedor, cocina, cochera 2 autos. Terreno 120m². Modelo premium.', 'Modelo premium de Los Encinos', 'Familias que buscan lo mejor');
 
 -- =====================================================
 -- 2. MONTE VERDE
