@@ -1868,6 +1868,7 @@ Casas listas para mudarte YA:
 • *Monte Verde* - Desde $1.6M
 • *Los Encinos* - Desde $3.0M
 • *Andes* - Desde $1.6M
+• *Paseo Colorines* - Desde $3.0M
 
 Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte hoy mismo.`;
           parsed.intent = 'solicitar_cita';
@@ -2538,6 +2539,8 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
               `🏡 Los Encinos - Desde $3.0M\n` +
               `🏡 Miravalle - Desde $3.0M\n` +
               `🏡 Andes - Desde $1.6M\n` +
+              `🏡 Alpes - Desde $2.1M\n` +
+              `🏡 Paseo Colorines - Desde $3.0M\n` +
               `🏡 Distrito Falco - Desde $3.7M`;
             fallbackIntent = 'interes_desarrollo';
           }
@@ -2647,7 +2650,7 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
               intent: 'solicitar_cita',
               secondary_intents: [],
               extracted_data: { ...fallbackData, fecha: fechaExtraida, hora: horaExtraida },
-              response: `¡Perfecto! ¿Qué desarrollo te gustaría visitar?\n\n🏡 Monte Verde - Desde $1.6M\n🏡 Los Encinos - Desde $3.0M\n🏡 Miravalle - Desde $3.0M\n🏡 Andes - Desde $1.6M\n🏡 Distrito Falco - Desde $3.7M`,
+              response: `¡Perfecto! ¿Qué desarrollo te gustaría visitar?\n\n🏡 Monte Verde - Desde $1.6M\n🏡 Los Encinos - Desde $3.0M\n🏡 Miravalle - Desde $3.0M\n🏡 Andes - Desde $1.6M\n🏡 Alpes - Desde $2.1M\n🏡 Paseo Colorines - Desde $3.0M\n🏡 Distrito Falco - Desde $3.7M`,
               send_gps: false,
               send_video_desarrollo: false,
               send_contactos: false,
@@ -5640,6 +5643,8 @@ Lo mejor es que vengas a conocer las casas y en la visita te ayudamos con todo e
           `🏡 *Los Encinos* - Desde $3.0M (Zacatecas)\n` +
           `🏡 *Miravalle* - Desde $3.0M (Zacatecas)\n` +
           `🏡 *Andes* - Desde $1.6M (Guadalupe)\n` +
+          `🏡 *Alpes* - Desde $2.1M (Zacatecas)\n` +
+          `🏡 *Paseo Colorines* - Desde $3.0M (Zacatecas)\n` +
           `🏡 *Distrito Falco* - Desde $3.7M (Guadalupe)`;
       } else {
         console.log('📅 Tiene nombre y desarrollo, pidiendo FECHA');
