@@ -5,6 +5,7 @@
 
 import { HandlerContext } from './whatsapp-types';
 import * as utils from './whatsapp-utils';
+import { deliverPendingMessage } from './whatsapp-utils';
 import { isPendingExpired } from '../utils/teamMessaging';
 import { CEOCommandsService } from '../services/ceoCommandsService';
 import { AgenciaCommandsService } from '../services/agenciaCommandsService';
@@ -45,17 +46,19 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
     // Actualizar last_sara_interaction (ventana 24h ahora está abierta)
     notasCEO.last_sara_interaction = new Date().toISOString();
 
+    // ═══════════════════════════════════════════════════════════
+    // PENDING MESSAGES: Usa deliverPendingMessage() que resuelve:
+    // 1. Re-lee notes frescas de DB (evita sobreescribir cambios de CRONs)
+    // 2. Captura wamid de Meta API (verifica delivery)
+    // 3. Verifica errores de Supabase .update() (no falla silenciosamente)
+    // ═══════════════════════════════════════════════════════════
+
     // PENDING BRIEFING - Usa expiración configurable (18h)
     const pendingBriefingCEO = notasCEO?.pending_briefing;
     if (pendingBriefingCEO?.sent_at && pendingBriefingCEO?.mensaje_completo) {
       if (!isPendingExpired(pendingBriefingCEO, 'briefing')) {
         console.log(`📋 [PENDING] CEO ${nombreCEO} respondió template - enviando briefing`);
-        await ctx.meta.sendWhatsAppMessage(cleanPhone, pendingBriefingCEO.mensaje_completo);
-
-        const { pending_briefing, ...notasSinPending } = notasCEO;
-        await ctx.supabase.client.from('team_members').update({
-          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString(), last_briefing_context: { sent_at: new Date().toISOString(), delivered: true } }
-        }).eq('id', ceo.id);
+        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_briefing', pendingBriefingCEO.mensaje_completo, 'last_briefing_context');
         return;
       }
     }
@@ -65,12 +68,7 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
     if (pendingRecapCEO?.sent_at && pendingRecapCEO?.mensaje_completo) {
       if (!isPendingExpired(pendingRecapCEO, 'recap')) {
         console.log(`📋 [PENDING] CEO ${nombreCEO} respondió template - enviando recap`);
-        await ctx.meta.sendWhatsAppMessage(cleanPhone, pendingRecapCEO.mensaje_completo);
-
-        const { pending_recap, ...notasSinPending } = notasCEO;
-        await ctx.supabase.client.from('team_members').update({
-          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString(), last_recap_context: { sent_at: new Date().toISOString(), delivered: true } }
-        }).eq('id', ceo.id);
+        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_recap', pendingRecapCEO.mensaje_completo, 'last_recap_context');
         return;
       }
     }
@@ -80,12 +78,7 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
     if (pendingReporteDiarioCEO?.sent_at && pendingReporteDiarioCEO?.mensaje_completo) {
       if (!isPendingExpired(pendingReporteDiarioCEO, 'reporte_diario')) {
         console.log(`📊 [PENDING] CEO ${nombreCEO} respondió template - enviando reporte diario`);
-        await ctx.meta.sendWhatsAppMessage(cleanPhone, pendingReporteDiarioCEO.mensaje_completo);
-
-        const { pending_reporte_diario, ...notasSinPending } = notasCEO;
-        await ctx.supabase.client.from('team_members').update({
-          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString(), last_reporte_diario_context: { sent_at: new Date().toISOString(), delivered: true } }
-        }).eq('id', ceo.id);
+        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_reporte_diario', pendingReporteDiarioCEO.mensaje_completo, 'last_reporte_diario_context');
         return;
       }
     }
@@ -95,12 +88,7 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
     if (pendingReporteSemanalCEO?.sent_at && pendingReporteSemanalCEO?.mensaje_completo) {
       if (!isPendingExpired(pendingReporteSemanalCEO, 'resumen_semanal')) {
         console.log(`📊 [PENDING] CEO ${nombreCEO} respondió template - enviando reporte semanal`);
-        await ctx.meta.sendWhatsAppMessage(cleanPhone, pendingReporteSemanalCEO.mensaje_completo);
-
-        const { pending_reporte_semanal, ...notasSinPending } = notasCEO;
-        await ctx.supabase.client.from('team_members').update({
-          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString(), last_reporte_semanal_context: { sent_at: new Date().toISOString(), delivered: true } }
-        }).eq('id', ceo.id);
+        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_reporte_semanal', pendingReporteSemanalCEO.mensaje_completo, 'last_reporte_semanal_context');
         return;
       }
     }
@@ -110,12 +98,7 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
     if (pendingResumenSemanalCEO?.sent_at && pendingResumenSemanalCEO?.mensaje_completo) {
       if (!isPendingExpired(pendingResumenSemanalCEO, 'resumen_semanal')) {
         console.log(`📋 [PENDING] CEO ${nombreCEO} respondió template - enviando resumen semanal`);
-        await ctx.meta.sendWhatsAppMessage(cleanPhone, pendingResumenSemanalCEO.mensaje_completo);
-
-        const { pending_resumen_semanal, ...notasSinPending } = notasCEO;
-        await ctx.supabase.client.from('team_members').update({
-          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString(), last_resumen_semanal_context: { sent_at: new Date().toISOString(), delivered: true } }
-        }).eq('id', ceo.id);
+        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_resumen_semanal', pendingResumenSemanalCEO.mensaje_completo, 'last_resumen_semanal_context');
         return;
       }
     }
@@ -126,12 +109,7 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
       const horasDesde = (Date.now() - new Date(pendingVideoSemanalCEO.sent_at).getTime()) / (1000 * 60 * 60);
       if (horasDesde <= 24) {
         console.log(`🎬 [PENDING PRIORITY] CEO ${nombreCEO} respondió template - enviando resumen semanal de logros`);
-        await ctx.meta.sendWhatsAppMessage(cleanPhone, pendingVideoSemanalCEO.mensaje_completo);
-
-        const { pending_video_semanal, ...notasSinPending } = notasCEO;
-        await ctx.supabase.client.from('team_members').update({
-          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString() }
-        }).eq('id', ceo.id);
+        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_video_semanal', pendingVideoSemanalCEO.mensaje_completo);
         return;
       }
     }
@@ -154,10 +132,8 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
           console.error('⚠️ Error generando audio TTS:', ttsErr);
         }
 
-        const { pending_audio, ...notasSinPendingAudio } = notasCEO;
-        await ctx.supabase.client.from('team_members').update({
-          notes: { ...notasSinPendingAudio, last_sara_interaction: new Date().toISOString() }
-        }).eq('id', ceo.id);
+        // Audio uses deliverPendingMessage for cleanup (fresh re-read + error check)
+        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_audio', '__ALREADY_SENT__');
         return;
       }
     }
@@ -167,12 +143,7 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
     if (pendingMensajeCEO?.sent_at && pendingMensajeCEO?.mensaje_completo) {
       if (!isPendingExpired(pendingMensajeCEO, 'notificacion')) {
         console.log(`📬 [PENDING] CEO ${nombreCEO} respondió template - enviando mensaje pendiente`);
-        await ctx.meta.sendWhatsAppMessage(cleanPhone, pendingMensajeCEO.mensaje_completo);
-
-        const { pending_mensaje, ...notasSinPending } = notasCEO;
-        await ctx.supabase.client.from('team_members').update({
-          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString() }
-        }).eq('id', ceo.id);
+        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_mensaje', pendingMensajeCEO.mensaje_completo);
         return;
       }
     }
@@ -182,12 +153,7 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
     if (pendingAlertaLeadCEO?.sent_at && pendingAlertaLeadCEO?.mensaje_completo) {
       if (!isPendingExpired(pendingAlertaLeadCEO, 'notificacion')) {
         console.log(`🔥 [PENDING] CEO ${nombreCEO} respondió template - enviando alerta de lead`);
-        await ctx.meta.sendWhatsAppMessage(cleanPhone, pendingAlertaLeadCEO.mensaje_completo);
-
-        const { pending_alerta_lead, ...notasSinPending } = notasCEO;
-        await ctx.supabase.client.from('team_members').update({
-          notes: { ...notasSinPending, last_sara_interaction: new Date().toISOString() }
-        }).eq('id', ceo.id);
+        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_alerta_lead', pendingAlertaLeadCEO.mensaje_completo);
         return;
       }
     }
@@ -220,12 +186,18 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
           const msgFormateado = `💬 *${nombreCEO}:*\n${body}`;
           await ctx.meta.sendWhatsAppMessage(leadPhone, msgFormateado);
 
-          // Actualizar last_activity (NO extender automáticamente)
-          notasCEO.active_bridge.last_activity = new Date().toISOString();
-          await ctx.supabase.client
+          // Actualizar last_activity (re-read fresh notes to avoid stale overwrite)
+          const { data: freshBridge } = await ctx.supabase.client
+            .from('team_members').select('notes').eq('id', ceo.id).single();
+          const freshBridgeNotes = utils.parseNotasSafe(freshBridge?.notes);
+          if (freshBridgeNotes.active_bridge) {
+            freshBridgeNotes.active_bridge.last_activity = new Date().toISOString();
+          }
+          const { error: bridgeErr } = await ctx.supabase.client
             .from('team_members')
-            .update({ notes: notasCEO })
+            .update({ notes: freshBridgeNotes })
             .eq('id', ceo.id);
+          if (bridgeErr) console.error('⚠️ Error updating bridge activity:', bridgeErr);
 
           // ═══ REGISTRAR ACTIVIDAD EN BITÁCORA ═══
           if (activeBridge.lead_id) {
@@ -258,17 +230,19 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
 
         await ctx.meta.sendWhatsAppMessage(cleanPhone, respuestaCumple);
 
-        // Limpiar pending_birthday_response
-        const { pending_birthday_response, ...notasSinPending } = notasCEO;
-        await ctx.supabase.client.from('team_members').update({
-          notes: {
-            ...notasSinPending,
-            birthday_response_received: {
-              at: new Date().toISOString(),
-              message: body.substring(0, 200)
-            }
-          }
+        // Limpiar pending_birthday_response (re-read fresh + error check)
+        const { data: freshBday } = await ctx.supabase.client
+          .from('team_members').select('notes').eq('id', ceo.id).single();
+        const freshBdayNotes = utils.parseNotasSafe(freshBday?.notes);
+        delete freshBdayNotes.pending_birthday_response;
+        freshBdayNotes.birthday_response_received = {
+          at: new Date().toISOString(),
+          message: body.substring(0, 200)
+        };
+        const { error: bdayErr } = await ctx.supabase.client.from('team_members').update({
+          notes: freshBdayNotes
         }).eq('id', ceo.id);
+        if (bdayErr) console.error('⚠️ Error updating birthday response:', bdayErr);
 
         return;
       }

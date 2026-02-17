@@ -24,6 +24,80 @@ import {
 import type { AIAnalysis, DatosConversacion, ContextoDecision } from './constants';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// HELPER: Entregar mensaje pending con re-read + error check + wamid
+// Resuelve: stale data, silent update failures, missing wamid tracking
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export async function deliverPendingMessage(
+  ctx: HandlerContext,
+  memberId: string,
+  phone: string,
+  pendingKey: string,
+  message: string,
+  contextKey?: string
+): Promise<{ success: boolean; wamid?: string }> {
+  // 1. Send message and capture wamid (skip if already sent externally)
+  let wamid: string | undefined;
+  if (message !== '__ALREADY_SENT__') {
+    try {
+      const result = await ctx.meta.sendWhatsAppMessage(phone, message);
+      wamid = result?.messages?.[0]?.id;
+      if (wamid) {
+        console.log(`✅ Pending ${pendingKey} entregado (wamid: ${wamid})`);
+      } else {
+        console.log(`⚠️ Pending ${pendingKey} enviado pero sin wamid en respuesta`);
+      }
+    } catch (err) {
+      console.error(`❌ Error enviando ${pendingKey}:`, err);
+      return { success: false };
+    }
+  }
+
+  // 2. Re-read fresh notes from DB (avoid stale data overwrite)
+  const { data: freshMember, error: readError } = await ctx.supabase.client
+    .from('team_members')
+    .select('notes')
+    .eq('id', memberId)
+    .single();
+
+  if (readError) {
+    console.error(`⚠️ Error leyendo notes frescas para ${pendingKey}:`, readError);
+  }
+
+  let freshNotes: any = {};
+  if (freshMember?.notes) {
+    freshNotes = typeof freshMember.notes === 'string'
+      ? parseNotasSafe(freshMember.notes)
+      : (typeof freshMember.notes === 'object' ? freshMember.notes : {});
+  }
+
+  // 3. Remove pending key from fresh notes
+  delete freshNotes[pendingKey];
+
+  // 4. Add metadata
+  freshNotes.last_sara_interaction = new Date().toISOString();
+  if (contextKey) {
+    freshNotes[contextKey] = {
+      sent_at: new Date().toISOString(),
+      delivered: true,
+      wamid
+    };
+  }
+
+  // 5. Write back with error check
+  const { error: writeError } = await ctx.supabase.client
+    .from('team_members')
+    .update({ notes: freshNotes })
+    .eq('id', memberId);
+
+  if (writeError) {
+    console.error(`⚠️ Error actualizando notes después de ${pendingKey}:`, writeError);
+  }
+
+  return { success: true, wamid };
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // HELPER FUNCTIONS (from lines 105-330)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

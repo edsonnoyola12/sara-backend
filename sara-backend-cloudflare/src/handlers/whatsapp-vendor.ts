@@ -8,6 +8,7 @@ import { OfferTrackingService, CreateOfferParams, OfferStatus } from '../service
 import { FollowupService } from '../services/followupService';
 import { BridgeService } from '../services/bridgeService';
 import { isPendingExpired } from '../utils/teamMessaging';
+import { deliverPendingMessage, parseNotasSafe } from './whatsapp-utils';
 import { AppointmentService } from '../services/appointmentService';
 import { safeJsonParse } from '../utils/safeHelpers';
 import { formatVendorFeedback } from './whatsapp-utils';
@@ -85,22 +86,20 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
     notasVendedor.last_sara_interaction = new Date().toISOString();
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // PENDING MESSAGES: Usa deliverPendingMessage() que resuelve:
+  // 1. Re-lee notes frescas de DB (evita sobreescribir cambios de CRONs)
+  // 2. Captura wamid de Meta API (verifica delivery)
+  // 3. Verifica errores de Supabase .update() (no falla silenciosamente)
+  // ═══════════════════════════════════════════════════════════
+
   // PENDING BRIEFING (mañana) - Usa expiración configurable (18h para briefing)
   const pendingBriefingInicio = notasVendedor?.pending_briefing;
   if (pendingBriefingInicio?.sent_at && pendingBriefingInicio?.mensaje_completo) {
     if (!isPendingExpired(pendingBriefingInicio, 'briefing')) {
       console.log(`📋 [PENDING] ${nombreVendedor} respondió template - enviando briefing`);
-      await ctx.meta.sendWhatsAppMessage(from, pendingBriefingInicio.mensaje_completo);
-
-      const { pending_briefing, ...notasSinPendingBriefing } = notasVendedor;
-      await ctx.supabase.client.from('team_members').update({
-        notes: {
-          ...notasSinPendingBriefing,
-          last_sara_interaction: new Date().toISOString(),
-          last_briefing_context: { sent_at: new Date().toISOString(), delivered: true }
-        }
-      }).eq('id', vendedor.id);
-      return; // IMPORTANTE: Salir sin más procesamiento
+      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_briefing', pendingBriefingInicio.mensaje_completo, 'last_briefing_context');
+      return;
     }
   }
 
@@ -109,16 +108,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
   if (pendingRecapInicio?.sent_at && pendingRecapInicio?.mensaje_completo) {
     if (!isPendingExpired(pendingRecapInicio, 'recap')) {
       console.log(`📋 [PENDING] ${nombreVendedor} respondió template - enviando recap`);
-      await ctx.meta.sendWhatsAppMessage(from, pendingRecapInicio.mensaje_completo);
-
-      const { pending_recap, ...notasSinPendingRecap } = notasVendedor;
-      await ctx.supabase.client.from('team_members').update({
-        notes: {
-          ...notasSinPendingRecap,
-          last_sara_interaction: new Date().toISOString(),
-          last_recap_context: { sent_at: new Date().toISOString(), delivered: true }
-        }
-      }).eq('id', vendedor.id);
+      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_recap', pendingRecapInicio.mensaje_completo, 'last_recap_context');
       return;
     }
   }
@@ -128,16 +118,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
   if (pendingReporteDiarioInicio?.sent_at && pendingReporteDiarioInicio?.mensaje_completo) {
     if (!isPendingExpired(pendingReporteDiarioInicio, 'reporte_diario')) {
       console.log(`📊 [PENDING] ${nombreVendedor} respondió template - enviando reporte diario`);
-      await ctx.meta.sendWhatsAppMessage(from, pendingReporteDiarioInicio.mensaje_completo);
-
-      const { pending_reporte_diario, ...notasSinPendingReporte } = notasVendedor;
-      await ctx.supabase.client.from('team_members').update({
-        notes: {
-          ...notasSinPendingReporte,
-          last_sara_interaction: new Date().toISOString(),
-          last_reporte_diario_context: { sent_at: new Date().toISOString(), delivered: true }
-        }
-      }).eq('id', vendedor.id);
+      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_reporte_diario', pendingReporteDiarioInicio.mensaje_completo, 'last_reporte_diario_context');
       return;
     }
   }
@@ -147,16 +128,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
   if (pendingReporteSemanalInicio?.sent_at && pendingReporteSemanalInicio?.mensaje_completo) {
     if (!isPendingExpired(pendingReporteSemanalInicio, 'resumen_semanal')) {
       console.log(`📊 [PENDING] ${nombreVendedor} respondió template - enviando reporte semanal`);
-      await ctx.meta.sendWhatsAppMessage(from, pendingReporteSemanalInicio.mensaje_completo);
-
-      const { pending_reporte_semanal, ...notasSinPendingSemanal } = notasVendedor;
-      await ctx.supabase.client.from('team_members').update({
-        notes: {
-          ...notasSinPendingSemanal,
-          last_sara_interaction: new Date().toISOString(),
-          last_reporte_semanal_context: { sent_at: new Date().toISOString(), delivered: true }
-        }
-      }).eq('id', vendedor.id);
+      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_reporte_semanal', pendingReporteSemanalInicio.mensaje_completo, 'last_reporte_semanal_context');
       return;
     }
   }
@@ -166,16 +138,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
   if (pendingResumenSemanalInicio?.sent_at && pendingResumenSemanalInicio?.mensaje_completo) {
     if (!isPendingExpired(pendingResumenSemanalInicio, 'resumen_semanal')) {
       console.log(`📋 [PENDING] ${nombreVendedor} respondió template - enviando resumen semanal`);
-      await ctx.meta.sendWhatsAppMessage(from, pendingResumenSemanalInicio.mensaje_completo);
-
-      const { pending_resumen_semanal, ...notasSinPendingResumen } = notasVendedor;
-      await ctx.supabase.client.from('team_members').update({
-        notes: {
-          ...notasSinPendingResumen,
-          last_sara_interaction: new Date().toISOString(),
-          last_resumen_semanal_context: { sent_at: new Date().toISOString(), delivered: true }
-        }
-      }).eq('id', vendedor.id);
+      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_resumen_semanal', pendingResumenSemanalInicio.mensaje_completo, 'last_resumen_semanal_context');
       return;
     }
   }
@@ -186,15 +149,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
     const horasDesde = (Date.now() - new Date(pendingVideoSemanalInicio.sent_at).getTime()) / (1000 * 60 * 60);
     if (horasDesde <= 24) {
       console.log(`🎬 [PENDING PRIORITY] ${nombreVendedor} respondió template - enviando resumen semanal de logros`);
-      await ctx.meta.sendWhatsAppMessage(from, pendingVideoSemanalInicio.mensaje_completo);
-
-      const { pending_video_semanal, ...notasSinPendingVideo } = notasVendedor;
-      await ctx.supabase.client.from('team_members').update({
-        notes: {
-          ...notasSinPendingVideo,
-          last_sara_interaction: new Date().toISOString()
-        }
-      }).eq('id', vendedor.id);
+      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_video_semanal', pendingVideoSemanalInicio.mensaje_completo);
       return;
     }
   }
@@ -217,10 +172,8 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
         console.error('⚠️ Error generando audio TTS:', ttsErr);
       }
 
-      const { pending_audio, ...notasSinPendingAudioV } = notasVendedor;
-      await ctx.supabase.client.from('team_members').update({
-        notes: { ...notasSinPendingAudioV, last_sara_interaction: new Date().toISOString() }
-      }).eq('id', vendedor.id);
+      // Fresh re-read + error check (avoid stale data overwrite)
+      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_audio', '__ALREADY_SENT__');
       return;
     }
   }
@@ -230,15 +183,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
   if (pendingMensajeInicio?.sent_at && pendingMensajeInicio?.mensaje_completo) {
     if (!isPendingExpired(pendingMensajeInicio, 'notificacion')) {
       console.log(`📬 [PENDING] ${nombreVendedor} respondió template - enviando mensaje pendiente`);
-      await ctx.meta.sendWhatsAppMessage(from, pendingMensajeInicio.mensaje_completo);
-
-      const { pending_mensaje, ...notasSinPendingMensaje } = notasVendedor;
-      await ctx.supabase.client.from('team_members').update({
-        notes: {
-          ...notasSinPendingMensaje,
-          last_sara_interaction: new Date().toISOString()
-        }
-      }).eq('id', vendedor.id);
+      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_mensaje', pendingMensajeInicio.mensaje_completo);
       return;
     }
   }
@@ -248,15 +193,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
   if (pendingAlertaLeadInicio?.sent_at && pendingAlertaLeadInicio?.mensaje_completo) {
     if (!isPendingExpired(pendingAlertaLeadInicio, 'notificacion')) {
       console.log(`🔥 [PENDING] ${nombreVendedor} respondió template - enviando alerta de lead`);
-      await ctx.meta.sendWhatsAppMessage(from, pendingAlertaLeadInicio.mensaje_completo);
-
-      const { pending_alerta_lead, ...notasSinPendingAlerta } = notasVendedor;
-      await ctx.supabase.client.from('team_members').update({
-        notes: {
-          ...notasSinPendingAlerta,
-          last_sara_interaction: new Date().toISOString()
-        }
-      }).eq('id', vendedor.id);
+      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_alerta_lead', pendingAlertaLeadInicio.mensaje_completo);
       return;
     }
   }
@@ -278,23 +215,33 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
 
     // Opción 5: Cancelar
     if (opcion === 5) {
-      delete notasVendedor.pending_template_selection;
-      await ctx.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+      const { data: freshCancel } = await ctx.supabase.client
+        .from('team_members').select('notes').eq('id', vendedor.id).single();
+      const freshCancelNotes: any = typeof freshCancel?.notes === 'string'
+        ? parseNotasSafe(freshCancel.notes) : (freshCancel?.notes || {});
+      delete freshCancelNotes.pending_template_selection;
+      const { error: cancelErr } = await ctx.supabase.client.from('team_members').update({ notes: freshCancelNotes }).eq('id', vendedor.id);
+      if (cancelErr) console.error('⚠️ Error updating notes (cancel template):', cancelErr);
       await ctx.meta.sendWhatsAppMessage(from, `✅ Cancelado. No se envió nada a ${leadFullName}.`);
       return;
     }
 
     // Opción 4: Contacto directo (llamar/WhatsApp desde su cel)
     if (opcion === 4) {
-      // Guardar estado para registrar interacción después
-      notasVendedor.pending_direct_contact = {
+      // Fresh re-read + save direct contact state
+      const { data: freshDirect } = await ctx.supabase.client
+        .from('team_members').select('notes').eq('id', vendedor.id).single();
+      const freshDirectNotes: any = typeof freshDirect?.notes === 'string'
+        ? parseNotasSafe(freshDirect.notes) : (freshDirect?.notes || {});
+      freshDirectNotes.pending_direct_contact = {
         lead_id: leadId,
         lead_name: leadFullName,
         lead_phone: leadPhone,
         timestamp: new Date().toISOString()
       };
-      delete notasVendedor.pending_template_selection;
-      await ctx.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+      delete freshDirectNotes.pending_template_selection;
+      const { error: directErr } = await ctx.supabase.client.from('team_members').update({ notes: freshDirectNotes }).eq('id', vendedor.id);
+      if (directErr) console.error('⚠️ Error updating notes (direct contact):', directErr);
 
       await ctx.meta.sendWhatsAppMessage(from,
         `📞 *Contacto directo con ${leadFullName}*\n\n` +
@@ -311,9 +258,14 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
       return;
     }
 
-    // Opciones 1-3: Enviar template
-    delete notasVendedor.pending_template_selection;
-    await ctx.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+    // Opciones 1-3: Enviar template — fresh re-read + error check
+    const { data: freshTemplate } = await ctx.supabase.client
+      .from('team_members').select('notes').eq('id', vendedor.id).single();
+    const freshTemplateNotes: any = typeof freshTemplate?.notes === 'string'
+      ? parseNotasSafe(freshTemplate.notes) : (freshTemplate?.notes || {});
+    delete freshTemplateNotes.pending_template_selection;
+    const { error: tmplErr } = await ctx.supabase.client.from('team_members').update({ notes: freshTemplateNotes }).eq('id', vendedor.id);
+    if (tmplErr) console.error('⚠️ Error updating notes (template selection):', tmplErr);
 
     try {
       // Obtener desarrollo del lead para los templates que lo requieren
@@ -361,10 +313,11 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
       const notesActuales = typeof leadActual?.notes === 'object' ? leadActual.notes : {};
       notesActuales.template_sent = templateName;
       notesActuales.template_sent_at = new Date().toISOString();
-      await ctx.supabase.client.from('leads').update({
+      const { error: leadNoteErr } = await ctx.supabase.client.from('leads').update({
         notes: notesActuales
       }).eq('id', pendingTemplateSelection.lead_id);
-      console.log(`💾 template_sent guardado en notes: ${templateName} para lead ${pendingTemplateSelection.lead_id}`);
+      if (leadNoteErr) console.error('⚠️ Error guardando template_sent en lead notes:', leadNoteErr);
+      else console.log(`💾 template_sent guardado en notes: ${templateName} para lead ${pendingTemplateSelection.lead_id}`);
 
       await ctx.meta.sendWhatsAppMessage(from,
         `✅ *Template enviado a ${leadFullName}*\n\n` +
@@ -411,16 +364,21 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
       if (!dentroVentana24h) {
         console.error(`⚠️ Lead ${pendingMsgToLead.lead_name} fuera de ventana 24h, preguntando template`);
 
-        // Guardar contexto para selección de template
-        notasVendedor.pending_template_selection = {
+        // Fresh re-read + save template selection context
+        const { data: freshTmplSel } = await ctx.supabase.client
+          .from('team_members').select('notes').eq('id', vendedor.id).single();
+        const freshTmplSelNotes: any = typeof freshTmplSel?.notes === 'string'
+          ? parseNotasSafe(freshTmplSel.notes) : (freshTmplSel?.notes || {});
+        freshTmplSelNotes.pending_template_selection = {
           lead_id: pendingMsgToLead.lead_id,
           lead_name: pendingMsgToLead.lead_name,
           lead_phone: leadPhone,
           mensaje_original: body,
           timestamp: new Date().toISOString()
         };
-        delete notasVendedor.pending_message_to_lead;
-        await ctx.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+        delete freshTmplSelNotes.pending_message_to_lead;
+        const { error: tmplSelErr } = await ctx.supabase.client.from('team_members').update({ notes: freshTmplSelNotes }).eq('id', vendedor.id);
+        if (tmplSelErr) console.error('⚠️ Error updating notes (template selection from msg):', tmplSelErr);
 
         // Formatear teléfono para mostrar
         const telLimpio = leadPhone.replace(/\D/g, '').slice(-10);
@@ -446,9 +404,15 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
           `💬 *Mensaje de ${vendedor.name?.split(' ')[0] || 'tu asesor'}:*\n\n${body}`
         );
 
-        // Limpiar pending y confirmar
-        delete notasVendedor.pending_message_to_lead;
-        await ctx.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+        // Fresh re-read + clean pending
+        const { data: freshMsgSent } = await ctx.supabase.client
+          .from('team_members').select('notes').eq('id', vendedor.id).single();
+        const freshMsgSentNotes: any = typeof freshMsgSent?.notes === 'string'
+          ? parseNotasSafe(freshMsgSent.notes) : (freshMsgSent?.notes || {});
+        delete freshMsgSentNotes.pending_message_to_lead;
+        freshMsgSentNotes.last_sara_interaction = new Date().toISOString();
+        const { error: msgSentErr } = await ctx.supabase.client.from('team_members').update({ notes: freshMsgSentNotes }).eq('id', vendedor.id);
+        if (msgSentErr) console.error('⚠️ Error updating notes (msg sent to lead):', msgSentErr);
 
         await ctx.meta.sendWhatsAppMessage(from,
           `✅ *Mensaje enviado a ${pendingMsgToLead.lead_name}*\n\n` +
@@ -464,15 +428,25 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
           `❌ *Error al enviar mensaje a ${pendingMsgToLead.lead_name}*\n\n` +
           `El mensaje no pudo ser entregado. Intenta con *bridge ${pendingMsgToLead.lead_name?.split(' ')[0]}*`
         );
-        // Limpiar pending
-        delete notasVendedor.pending_message_to_lead;
-        await ctx.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+        // Fresh re-read + clean pending on error
+        const { data: freshMsgErr } = await ctx.supabase.client
+          .from('team_members').select('notes').eq('id', vendedor.id).single();
+        const freshMsgErrNotes: any = typeof freshMsgErr?.notes === 'string'
+          ? parseNotasSafe(freshMsgErr.notes) : (freshMsgErr?.notes || {});
+        delete freshMsgErrNotes.pending_message_to_lead;
+        const { error: msgErrUpd } = await ctx.supabase.client.from('team_members').update({ notes: freshMsgErrNotes }).eq('id', vendedor.id);
+        if (msgErrUpd) console.error('⚠️ Error updating notes (msg error cleanup):', msgErrUpd);
         return;
       }
     } else {
-      // Expirado, limpiar
-      delete notasVendedor.pending_message_to_lead;
-      await ctx.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+      // Expirado — fresh re-read + clean
+      const { data: freshExpired } = await ctx.supabase.client
+        .from('team_members').select('notes').eq('id', vendedor.id).single();
+      const freshExpiredNotes: any = typeof freshExpired?.notes === 'string'
+        ? parseNotasSafe(freshExpired.notes) : (freshExpired?.notes || {});
+      delete freshExpiredNotes.pending_message_to_lead;
+      const { error: expErr } = await ctx.supabase.client.from('team_members').update({ notes: freshExpiredNotes }).eq('id', vendedor.id);
+      if (expErr) console.error('⚠️ Error updating notes (expired msg cleanup):', expErr);
     }
   }
 
@@ -511,16 +485,17 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
 
     await ctx.meta.sendWhatsAppMessage(from, mensajeOnboarding);
 
-    // Marcar onboarding como completado
-    const notasActualizadas = {
-      ...notasVendedor,
-      onboarding_completed: true,
-      onboarding_date: new Date().toISOString()
-    };
-
-    await ctx.supabase.client.from('team_members').update({
-      notes: notasActualizadas
+    // Fresh re-read + mark onboarding completed
+    const { data: freshOnboard } = await ctx.supabase.client
+      .from('team_members').select('notes').eq('id', vendedor.id).single();
+    const freshOnboardNotes: any = typeof freshOnboard?.notes === 'string'
+      ? parseNotasSafe(freshOnboard.notes) : (freshOnboard?.notes || {});
+    freshOnboardNotes.onboarding_completed = true;
+    freshOnboardNotes.onboarding_date = new Date().toISOString();
+    const { error: onboardErr } = await ctx.supabase.client.from('team_members').update({
+      notes: freshOnboardNotes
     }).eq('id', vendedor.id);
+    if (onboardErr) console.error('⚠️ Error updating notes (onboarding):', onboardErr);
 
     // Si respondieron "sí" o similar, continuar normalmente
     if (['si', 'sí', 'ok', 'listo', 'va', 'dale'].includes(mensaje)) {
@@ -550,17 +525,20 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
 
       await ctx.meta.sendWhatsAppMessage(from, respuestaCumple);
 
-      // Limpiar pending_birthday_response
-      const { pending_birthday_response, ...notasSinPending } = notasVendedor;
-      await ctx.supabase.client.from('team_members').update({
-        notes: {
-          ...notasSinPending,
-          birthday_response_received: {
-            at: new Date().toISOString(),
-            message: body.substring(0, 200)
-          }
-        }
+      // Fresh re-read + clean pending birthday + error check
+      const { data: freshBday } = await ctx.supabase.client
+        .from('team_members').select('notes').eq('id', vendedor.id).single();
+      const freshBdayNotes: any = typeof freshBday?.notes === 'string'
+        ? parseNotasSafe(freshBday.notes) : (freshBday?.notes || {});
+      delete freshBdayNotes.pending_birthday_response;
+      freshBdayNotes.birthday_response_received = {
+        at: new Date().toISOString(),
+        message: body.substring(0, 200)
+      };
+      const { error: bdayErr } = await ctx.supabase.client.from('team_members').update({
+        notes: freshBdayNotes
       }).eq('id', vendedor.id);
+      if (bdayErr) console.error('⚠️ Error updating birthday response:', bdayErr);
 
       return;
     }
@@ -589,9 +567,14 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
         ];
         await ctx.meta.sendWhatsAppMessage(from, respuestasBriefing[Math.floor(Math.random() * respuestasBriefing.length)]);
 
-        // Limpiar contexto
-        const { last_briefing_context, ...notasSinBriefing } = notasVendedor;
-        await ctx.supabase.client.from('team_members').update({ notes: notasSinBriefing }).eq('id', vendedor.id);
+        // Fresh re-read + clean briefing context
+        const { data: freshBriefFb } = await ctx.supabase.client
+          .from('team_members').select('notes').eq('id', vendedor.id).single();
+        const freshBriefFbNotes: any = typeof freshBriefFb?.notes === 'string'
+          ? parseNotasSafe(freshBriefFb.notes) : (freshBriefFb?.notes || {});
+        delete freshBriefFbNotes.last_briefing_context;
+        const { error: briefFbErr } = await ctx.supabase.client.from('team_members').update({ notes: freshBriefFbNotes }).eq('id', vendedor.id);
+        if (briefFbErr) console.error('⚠️ Error cleaning briefing context:', briefFbErr);
         return;
       }
     }
@@ -608,9 +591,14 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
         ];
         await ctx.meta.sendWhatsAppMessage(from, respuestasRecap[Math.floor(Math.random() * respuestasRecap.length)]);
 
-        // Limpiar contexto
-        const { last_recap_context, ...notasSinRecap } = notasVendedor;
-        await ctx.supabase.client.from('team_members').update({ notes: notasSinRecap }).eq('id', vendedor.id);
+        // Fresh re-read + clean recap context
+        const { data: freshRecapFb } = await ctx.supabase.client
+          .from('team_members').select('notes').eq('id', vendedor.id).single();
+        const freshRecapFbNotes: any = typeof freshRecapFb?.notes === 'string'
+          ? parseNotasSafe(freshRecapFb.notes) : (freshRecapFb?.notes || {});
+        delete freshRecapFbNotes.last_recap_context;
+        const { error: recapFbErr } = await ctx.supabase.client.from('team_members').update({ notes: freshRecapFbNotes }).eq('id', vendedor.id);
+        if (recapFbErr) console.error('⚠️ Error cleaning recap context:', recapFbErr);
         return;
       }
     }
