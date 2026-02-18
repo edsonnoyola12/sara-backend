@@ -4347,7 +4347,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 
         // ═══ BOTONES CONTEXTUALES - Mejora UX ═══
         try {
-          const hasAppointment = !!(citaExistente && citaExistente.id);
+          const hasAppointment = !!(citaExistenteInfo);
           const botones = getBotonesContextuales(analysis.intent, lead.status, hasAppointment);
 
           if (botones && botones.length > 0) {
@@ -4924,7 +4924,8 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   partes.push(`🎬 *Video:* ${propiedadMatch.youtube_link}`);
                   recursosDesc.push('video');
                 }
-                const pidioPlanos = msgLower.includes('plano') || msgLower.includes('planos');
+                const msgLowerRes = (originalMessage || message || '').toLowerCase();
+                const pidioPlanos = msgLowerRes.includes('plano') || msgLowerRes.includes('planos');
                 if (propiedadMatch.matterport_link && !pidioPlanos && analysis.send_matterport !== false) {
                   partes.push(`🏠 *Recorrido 3D:* ${propiedadMatch.matterport_link}`);
                   recursosDesc.push('recorrido 3D');
