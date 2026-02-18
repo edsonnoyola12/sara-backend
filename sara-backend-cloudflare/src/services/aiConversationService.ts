@@ -4345,31 +4345,35 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         await this.enviarRespuestaConAudioOpcional(from, respuestaLimpia, leadNotesConId);
         console.log('✅ Respuesta de Claude enviada (sin pregunta de crédito)');
 
-        // ═══ BOTONES CONTEXTUALES - Mejora UX (max 1 vez cada 5 mensajes) ═══
+        // ═══ BOTONES CONTEXTUALES - Solo cuando SARA no hizo pregunta específica ═══
         try {
-          const historial = lead.conversation_history || [];
-          const ultimosBotones = historial.slice(-10).filter((m: any) =>
-            m.role === 'assistant' && m.content?.includes('¿Qué te gustaría hacer?')
-          );
-          const mensajesDesdeUltimoBotones = ultimosBotones.length > 0
-            ? historial.slice(historial.lastIndexOf(ultimosBotones[ultimosBotones.length - 1])).length
-            : 999;
+          const respLower = respuestaLimpia.toLowerCase();
+          const tienePregunaEspecifica = /¿(cuál|cual|qué|que|cuándo|cuando|cómo|como|sábado|sabado|domingo|día|dia|hora|nombre|recámara|recamara|presupuesto|te (interesa|gustaría|funciona|parece|llama)|vienes|visitamos|agendamos)/i.test(respuestaLimpia);
 
-          if (mensajesDesdeUltimoBotones >= 5) {
-            const hasAppointment = lead?.status === 'scheduled' || lead?.status === 'visit_scheduled';
-            const botones = getBotonesContextuales(analysis.intent, lead.status, hasAppointment);
-
-            if (botones && botones.length > 0) {
-              await new Promise(r => setTimeout(r, 500));
-              await this.meta.sendQuickReplyButtons(
-                from,
-                '¿Qué te gustaría hacer?',
-                botones
-              );
-              console.log('📱 Botones contextuales enviados');
-            }
+          if (tienePregunaEspecifica) {
+            console.log('⏭️ Botones omitidos (SARA ya hizo pregunta específica en su respuesta)');
           } else {
-            console.log(`⏭️ Botones omitidos (solo ${mensajesDesdeUltimoBotones} msgs desde último envío, necesita 5+)`);
+            const historial = lead.conversation_history || [];
+            const yaTieneBotones = historial.slice(-6).some((m: any) =>
+              m.role === 'assistant' && m.content?.includes('¿Qué te gustaría hacer?')
+            );
+
+            if (!yaTieneBotones) {
+              const hasAppointment = lead?.status === 'scheduled' || lead?.status === 'visit_scheduled';
+              const botones = getBotonesContextuales(analysis.intent, lead.status, hasAppointment);
+
+              if (botones && botones.length > 0) {
+                await new Promise(r => setTimeout(r, 500));
+                await this.meta.sendQuickReplyButtons(
+                  from,
+                  '¿Qué te gustaría hacer?',
+                  botones
+                );
+                console.log('📱 Botones contextuales enviados');
+              }
+            } else {
+              console.log('⏭️ Botones omitidos (ya enviados en últimos 6 mensajes)');
+            }
           }
         } catch (btnErr) {
           console.log('⚠️ No se pudieron enviar botones:', btnErr);
