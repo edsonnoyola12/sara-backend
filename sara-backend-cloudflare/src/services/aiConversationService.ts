@@ -4347,7 +4347,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 
         // ═══ BOTONES CONTEXTUALES - Mejora UX ═══
         try {
-          const hasAppointment = !!(citaExistenteInfo);
+          const hasAppointment = lead?.status === 'scheduled' || lead?.status === 'visit_scheduled';
           const botones = getBotonesContextuales(analysis.intent, lead.status, hasAppointment);
 
           if (botones && botones.length > 0) {
