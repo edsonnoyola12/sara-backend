@@ -282,7 +282,17 @@ export class WhatsAppHandler {
               await enviarMensajeTeamMember(this.supabase, this.meta, vendedorAsignado, notifMsg, {
                 tipoMensaje: 'alerta_lead',
                 guardarPending: true,
-                pendingKey: 'pending_alerta_lead'
+                pendingKey: 'pending_alerta_lead',
+                templateOverride: {
+                  name: 'notificacion_cita_vendedor',
+                  params: [
+                    '🆕 Nuevo lead asignado',
+                    cleanPhone,
+                    `wa.me/${cleanPhone}`,
+                    trimmedBody.substring(0, 50) || 'Mensaje nuevo',
+                    'Escribe "mis leads" para verlo'
+                  ]
+                }
               });
               console.log(`📤 Vendedor ${vendedorAsignado.name} notificado del nuevo lead`);
             } catch (e) {
