@@ -4864,11 +4864,13 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
           const desarrollosPendientes = desarrollosActuales.filter((d: string) => {
             return !desarrollosEnviados.some((sent: string) => sent.includes(d) || d.includes(sent));
           });
-          const yaEnvioTodosRecursos = desarrollosPendientes.length === 0;
+          // Si el lead pidió EXPLÍCITAMENTE, SIEMPRE enviar (ignorar resources_sent_for)
+          const yaEnvioTodosRecursos = !pidioRecursosExplicito && desarrollosPendientes.length === 0;
 
           console.log('🔍 ¿Ya envió TODOS recursos?', yaEnvioTodosRecursos,
             `| Pendientes: [${desarrollosPendientes.join(', ')}]`,
-            `| Ya enviados: [${desarrollosEnviados.join(', ')}]`);
+            `| Ya enviados: [${desarrollosEnviados.join(', ')}]`,
+            `| pidioExplicito: ${pidioRecursosExplicito}`);
 
           if (!yaEnvioTodosRecursos) {
             // Solo enviar recursos de desarrollos PENDIENTES (no los ya enviados)
