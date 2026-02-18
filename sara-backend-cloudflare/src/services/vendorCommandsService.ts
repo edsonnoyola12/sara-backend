@@ -1,5 +1,6 @@
 import { SupabaseService } from './supabase';
 import { safeJsonParse } from '../utils/safeHelpers';
+import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 
 /**
  * Sanitiza notas para evitar corrupción.
@@ -1508,7 +1509,7 @@ export class VendorCommandsService {
     const desarrollo = lead.property_interest || 'No especificado';
     return `🏦 *NUEVO LEAD ASIGNADO*\n\n` +
       `👤 *Cliente:* ${lead.name}\n` +
-      `📱 *Teléfono:* ${lead.phone}\n` +
+      `📱 *Teléfono:* ${formatPhoneForDisplay(lead.phone)}\n` +
       `🏠 *Interés:* ${desarrollo}\n` +
       `👨‍💼 *Asignado por:* ${vendedor.name}\n\n` +
       `📋 Por favor contacta al cliente para iniciar el proceso de crédito.`;
@@ -1518,14 +1519,14 @@ export class VendorCommandsService {
     return `✅ *Asesor Asignado*\n\n` +
       `👤 Lead: ${lead.name}\n` +
       `🏦 Asesor: ${asesor.name}\n` +
-      `📱 Tel asesor: ${asesor.phone}\n\n` +
+      `📱 Tel asesor: ${formatPhoneForDisplay(asesor.phone)}\n\n` +
       `El asesor ha sido notificado y contactará al cliente.`;
   }
 
   formatMultipleLeadsAsesor(leads: any[], nombreBuscado: string): string {
     let msg = `⚠️ Encontré ${leads.length} leads con "${nombreBuscado}":\n\n`;
     leads.slice(0, 5).forEach((l, i) => {
-      msg += `${i + 1}. ${l.name} - ${l.phone}\n`;
+      msg += `${i + 1}. ${l.name} - ${formatPhoneForDisplay(l.phone)}\n`;
     });
     msg += `\n💡 Usa: *asignar asesor [nombre completo]*`;
     return msg;
@@ -1535,7 +1536,7 @@ export class VendorCommandsService {
     return `💬 *CONSULTA DE VENDEDOR*\n\n` +
       `👨‍💼 *De:* ${vendedor.name}\n` +
       `👤 *Sobre lead:* ${lead.name}\n` +
-      `📱 *Tel:* ${lead.phone}\n\n` +
+      `📱 *Tel:* ${formatPhoneForDisplay(lead.phone)}\n\n` +
       `📋 *Status actual:* ${solicitud?.status || 'Sin solicitud'}\n\n` +
       `Por favor responde con el estado del crédito de este cliente.`;
   }
@@ -1792,7 +1793,7 @@ export class VendorCommandsService {
       return result.error || `❌ No encontré a "${nombreLead}" en tus leads.`;
     }
     const lead = result.lead;
-    const phone = lead.phone || 'No disponible';
+    const phone = lead.phone ? formatPhoneForDisplay(lead.phone) : 'No disponible';
     return `📞 *${lead.name}*\n\n` +
       `📱 Teléfono: ${phone}\n` +
       `📌 Etapa: ${lead.status || 'Sin etapa'}\n` +

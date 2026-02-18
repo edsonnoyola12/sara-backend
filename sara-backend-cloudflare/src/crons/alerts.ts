@@ -20,6 +20,7 @@
 
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
+import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 import { CalendarService } from '../services/calendar';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 
@@ -108,7 +109,7 @@ export async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: M
         for (const { lead, razon, diasSinContacto } of top5) {
           mensaje += `${razon}\n`;
           mensaje += `👤 *${lead.name || 'Sin nombre'}*\n`;
-          mensaje += `📱 ${lead.phone}\n`;
+          mensaje += `📱 ${formatPhoneForDisplay(lead.phone)}\n`;
           mensaje += `⏰ ${diasSinContacto} días sin contacto\n`;
           if (lead.property_interest) mensaje += `🏠 ${lead.property_interest}\n`;
           mensaje += `\n`;
@@ -164,7 +165,7 @@ export async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: M
           for (const hip of hipotecas.slice(0, 5)) {
             const diasSinMov = Math.floor((ahora.getTime() - new Date(hip.updated_at).getTime()) / (1000 * 60 * 60 * 24));
             mensaje += `👤 *${hip.leads?.name || 'Sin nombre'}*\n`;
-            mensaje += `📱 ${hip.leads?.phone || 'N/A'}\n`;
+            mensaje += `📱 ${hip.leads?.phone ? formatPhoneForDisplay(hip.leads.phone) : 'N/A'}\n`;
             mensaje += `⏰ ${diasSinMov} días sin movimiento\n`;
             mensaje += `📊 Status: ${hip.status}\n\n`;
           }
@@ -1754,7 +1755,7 @@ export async function reactivarLeadsPerdidos(supabase: SupabaseService, meta: Me
 
         let msg = `🔄 *LEADS REACTIVADOS*\n\nSe enviaron mensajes a ${leads.length} lead(s) que habías dado por perdidos:\n\n`;
         for (const { lead } of leads.slice(0, 5)) {
-          msg += `• *${lead.name}* - ${lead.phone}\n`;
+          msg += `• *${lead.name}* - ${formatPhoneForDisplay(lead.phone)}\n`;
           if (lead.lost_reason) msg += `  _Razón: ${lead.lost_reason}_\n`;
         }
         if (leads.length > 5) msg += `\n_...y ${leads.length - 5} más_\n`;
@@ -1914,7 +1915,7 @@ export async function procesarCumpleañosLeads(
 
     for (const { lead } of cumples) {
       msg += `• *${lead.name}*\n`;
-      msg += `  📱 ${lead.phone}\n`;
+      msg += `  📱 ${formatPhoneForDisplay(lead.phone)}\n`;
       if (lead.property_interest) msg += `  🏠 Interés: ${lead.property_interest}\n`;
       msg += `\n`;
     }

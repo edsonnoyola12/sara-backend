@@ -6,6 +6,7 @@
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { registrarMensajeAutomatico } from './followups';
+import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 
 // ═══════════════════════════════════════════════════════════
 // VERIFICAR BRIDGES POR EXPIRAR
@@ -440,7 +441,7 @@ Esperamos que sigas disfrutando tu casa y creando recuerdos increíbles. ¡Graci
 
       for (const { cliente, años } of clientes.slice(0, 5)) {
         msg += `• *${cliente.name}* - ${años} año(s)\n`;
-        msg += `  📱 ${cliente.phone}\n`;
+        msg += `  📱 ${formatPhoneForDisplay(cliente.phone)}\n`;
         if (cliente.property_interest) msg += `  🏠 ${cliente.property_interest}\n`;
         msg += `\n`;
       }

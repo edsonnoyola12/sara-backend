@@ -8,6 +8,7 @@ import { createTTSService } from './ttsService';
 import { createTTSTrackingService } from './ttsTrackingService';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { enviarAlertaSistema } from '../crons/healthCheck';
+import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 
 export class NotificationService {
   private openaiApiKey?: string;
@@ -277,7 +278,7 @@ export class NotificationService {
               const hora = (cita.scheduled_time || '').substring(0, 5);
               const mensaje = `🏦 *RECORDATORIO - CITA CRÉDITO MAÑANA*\n\n` +
                 `👤 *Lead:* ${nombreLead}\n` +
-                `📱 *Tel:* ${cita.lead_phone || 'No disponible'}\n` +
+                `📱 *Tel:* ${cita.lead_phone ? formatPhoneForDisplay(cita.lead_phone) : 'No disponible'}\n` +
                 `🏠 *Lugar:* ${cita.property_name || 'oficina'}\n` +
                 `🕐 *Hora:* ${hora}\n\n` +
                 `💡 Coordina con el vendedor asignado para la visita.`;
@@ -501,7 +502,7 @@ export class NotificationService {
               const mensaje = `🏦 *RECORDATORIO CITA CRÉDITO - 2 HORAS*\n\n` +
                 `Tu cita es en ~2 horas:\n\n` +
                 `👤 *Lead:* ${nombreLead}\n` +
-                `📱 *Tel:* ${cita.lead_phone || 'No disponible'}\n` +
+                `📱 *Tel:* ${cita.lead_phone ? formatPhoneForDisplay(cita.lead_phone) : 'No disponible'}\n` +
                 `🏠 *Lugar:* ${cita.property_name || 'oficina'}\n` +
                 `🕐 *Hora:* ${hora}\n\n` +
                 `💡 Confirma con el cliente que asistirá.`;

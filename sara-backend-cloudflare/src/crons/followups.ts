@@ -9,6 +9,7 @@ import { BroadcastQueueService } from '../services/broadcastQueueService';
 import { logEvento } from './briefings';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { safeJsonParse } from '../utils/safeHelpers';
+import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LÍMITE DE MENSAJES AUTOMÁTICOS POR DÍA
@@ -1322,7 +1323,7 @@ export async function reengagementDirectoLeads(supabase: SupabaseService, meta: 
               if (vendedor?.phone) {
                 const alertaVendedor = `⚠️ *LEAD FRÍO - RE-ENGAGEMENT*\n\n` +
                   `👤 *${lead.name || 'Sin nombre'}*\n` +
-                  `📱 ${lead.phone}\n` +
+                  `📱 ${formatPhoneForDisplay(lead.phone)}\n` +
                   `🏠 ${desarrollo}\n` +
                   `📅 ${diasSinRespuesta} días sin respuesta\n\n` +
                   `SARA le envió seguimiento automático (${pasoActual}).\n` +

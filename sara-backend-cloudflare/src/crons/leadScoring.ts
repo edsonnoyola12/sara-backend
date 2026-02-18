@@ -7,6 +7,7 @@ import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { createTTSService } from '../services/ttsService';
 import { createTTSTrackingService } from '../services/ttsTrackingService';
+import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 
 // ═══════════════════════════════════════════════════════════
 // DETECCIÓN DE LEADS CALIENTES
@@ -272,7 +273,7 @@ export async function alertarLeadCaliente(
     const alertaMsg = `${emoji} *LEAD CALIENTE - ACTÚA YA*
 
 👤 *${nombreLead}*
-📱 ${lead.phone}
+📱 ${formatPhoneForDisplay(lead.phone)}
 🏠 Interés: ${lead.property_interest || 'No especificado'}
 
 💬 Dijo: "${mensaje.substring(0, 100)}${mensaje.length > 100 ? '...' : ''}"
@@ -625,7 +626,7 @@ Si quieres, te puedo enviar información detallada para que la revisen juntos. T
     let alertaMsg = `⚠️ *OBJECIÓN DETECTADA*
 
 👤 *${nombreLeadObj}*
-📱 ${lead.phone}
+📱 ${formatPhoneForDisplay(lead.phone)}
 🏠 Interés: ${lead.property_interest || 'No especificado'}
 
 💬 Dijo: "${mensaje.substring(0, 150)}${mensaje.length > 150 ? '...' : ''}"

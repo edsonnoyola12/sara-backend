@@ -8,7 +8,7 @@ import { OfferTrackingService, CreateOfferParams, OfferStatus } from '../service
 import { FollowupService } from '../services/followupService';
 import { BridgeService } from '../services/bridgeService';
 import { isPendingExpired } from '../utils/teamMessaging';
-import { deliverPendingMessage, parseNotasSafe } from './whatsapp-utils';
+import { deliverPendingMessage, parseNotasSafe, formatPhoneForDisplay } from './whatsapp-utils';
 import { AppointmentService } from '../services/appointmentService';
 import { safeJsonParse } from '../utils/safeHelpers';
 import { formatVendorFeedback } from './whatsapp-utils';
@@ -245,9 +245,9 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
 
       await ctx.meta.sendWhatsAppMessage(from,
         `📞 *Contacto directo con ${leadFullName}*\n\n` +
-        `📱 *Teléfono:* ${telFormateado}\n` +
-        `📲 *WhatsApp:* wa.me/52${telLimpio}\n` +
-        `📞 *Llamar:* tel:+52${telLimpio}\n\n` +
+        `📱 *Teléfono:* ${formatPhoneForDisplay(leadPhone)}\n` +
+        `📲 *WhatsApp:* wa.me/${formatPhoneForDisplay(leadPhone).replace('+', '')}\n` +
+        `📞 *Llamar:* tel:${formatPhoneForDisplay(leadPhone)}\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━━\n` +
         `⚠️ *IMPORTANTE*: Después de contactarlo, registra qué pasó:\n\n` +
         `Escribe: *nota ${leadName} [lo que pasó]*\n\n` +
@@ -329,7 +329,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
       console.error('Error enviando template seleccionado:', err);
       await ctx.meta.sendWhatsAppMessage(from,
         `❌ Error al enviar template. Intenta de nuevo o llama directamente:\n\n` +
-        `📱 ${telFormateado}`
+        `📱 ${formatPhoneForDisplay(leadPhone)}`
       );
     }
     return;
@@ -994,8 +994,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
         : `521${pendingNotify.lead_phone.replace(/\D/g, '').slice(-10)}`;
 
       // Formatear teléfono del vendedor para el lead
-      const vendedorPhone = vendedor.phone?.replace(/\D/g, '').slice(-10) || '';
-      const vendedorPhoneFormatted = vendedorPhone ? `52${vendedorPhone}` : '';
+      const vendedorPhoneFormatted = vendedor.phone ? formatPhoneForDisplay(vendedor.phone) : '';
 
       let mensajeLead = `¡Hola ${pendingNotify.lead_name.split(' ')[0]}! 👋\n\n` +
         `Te confirmamos tu cita:\n` +
@@ -1101,8 +1100,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
         : `521${pendingNotify.lead_phone.replace(/\D/g, '').slice(-10)}`;
 
       // Formatear teléfono del vendedor para el lead
-      const vendedorPhone = vendedor.phone?.replace(/\D/g, '').slice(-10) || '';
-      const vendedorPhoneFormatted = vendedorPhone ? `52${vendedorPhone}` : '';
+      const vendedorPhoneFormatted = vendedor.phone ? formatPhoneForDisplay(vendedor.phone) : '';
 
       let mensajeLead = `¡Hola ${pendingNotify.lead_name.split(' ')[0]}! 👋\n\n` +
         `Tu cita ha sido *reagendada*:\n` +
@@ -1715,7 +1713,7 @@ export async function routeCoordinadorCommand(ctx: HandlerContext, handler: any,
           // Notificar al vendedor
           if (crear.vendedor?.phone) {
             const vendedorPhone = crear.vendedor.phone.replace(/[^0-9]/g, '');
-            const notif = `🆕 *NUEVO LEAD ASIGNADO*\n\n👤 *${crear.lead.name}*\n📱 ${crear.lead.phone}\n\n¡Contáctalo pronto!`;
+            const notif = `🆕 *NUEVO LEAD ASIGNADO*\n\n👤 *${crear.lead.name}*\n📱 ${formatPhoneForDisplay(crear.lead.phone)}\n\n¡Contáctalo pronto!`;
             await ctx.meta.sendWhatsAppMessage(vendedorPhone, notif);
           }
         } else {
@@ -1732,7 +1730,7 @@ export async function routeCoordinadorCommand(ctx: HandlerContext, handler: any,
           // Notificar al vendedor con el desarrollo de interés
           if (crear.vendedor?.phone) {
             const vendedorPhone = crear.vendedor.phone.replace(/[^0-9]/g, '');
-            const notif = `🆕 *NUEVO LEAD ASIGNADO*\n\n👤 *${crear.lead.name}*\n📱 ${crear.lead.phone}\n🏠 Interés: *${desarrollo}*\n\n¡Contáctalo pronto!`;
+            const notif = `🆕 *NUEVO LEAD ASIGNADO*\n\n👤 *${crear.lead.name}*\n📱 ${formatPhoneForDisplay(crear.lead.phone)}\n🏠 Interés: *${desarrollo}*\n\n¡Contáctalo pronto!`;
             await ctx.meta.sendWhatsAppMessage(vendedorPhone, notif);
           }
         } else {
@@ -3864,7 +3862,7 @@ export async function asignarHipotecaALead(ctx: HandlerContext, handler: any, fr
     await ctx.twilio.sendWhatsAppMessage(handler.formatPhoneMX(aFormatted),
       `🏦 *NUEVO LEAD HIPOTECARIO*\n\n` +
       `👤 *${lead.name}*\n` +
-      `📱 ${lead.phone?.slice(-10) || 'Sin tel'}\n` +
+      `📱 ${lead.phone ? formatPhoneForDisplay(lead.phone) : 'Sin tel'}\n` +
       `👔 Vendedor: ${vendedor.name}\n\n` +
       `💡 El vendedor ${vendedor.name} te asignó este lead para crédito hipotecario.`
     );
@@ -4123,7 +4121,7 @@ export async function enviarNotificacionReagendar(ctx: HandlerContext, handler: 
     const msgLead = appointmentService.formatRescheduleMessage(lead, reagendar);
     await ctx.twilio.sendWhatsAppMessage(leadPhone, msgLead);
     await appointmentService.updateLeadAfterRescheduleNotification(lead.id, lead.notes);
-    await ctx.twilio.sendWhatsAppMessage(from, `✅ *Notificación enviada a ${lead.name}*\n\n📱 ${lead.phone}`);
+    await ctx.twilio.sendWhatsAppMessage(from, `✅ *Notificación enviada a ${lead.name}*\n\n📱 ${formatPhoneForDisplay(lead.phone)}`);
   } catch (error) {
     console.error('❌ Error enviando notificación:', error);
     await ctx.twilio.sendWhatsAppMessage(from, `❌ Error enviando notificación: ${error}`);
@@ -4267,12 +4265,11 @@ export async function vendedorVerHistorial(ctx: HandlerContext, handler: any, fr
     const historial = Array.isArray(lead.conversation_history) ? lead.conversation_history : [];
 
     // Formatear teléfono para mostrar
-    const telefonoCorto = lead.phone.replace(/^521/, '').replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
     const scoreEmoji = lead.lead_score >= 70 ? '🔥' : lead.lead_score >= 40 ? '🟡' : '🔵';
 
     // Construir mensaje de historial
     let msg = `📋 *Historial con ${lead.name || 'Lead'}*\n`;
-    msg += `📱 ${telefonoCorto} | ${scoreEmoji} Score: ${lead.lead_score || 0}\n`;
+    msg += `📱 ${formatPhoneForDisplay(lead.phone)} | ${scoreEmoji} Score: ${lead.lead_score || 0}\n`;
     msg += `🏠 ${lead.property_interest || 'Sin desarrollo'} | ${lead.status || 'new'}\n`;
     msg += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
@@ -4424,9 +4421,9 @@ export async function enviarConfirmacionAlLead(ctx: HandlerContext, handler: any
       const msgLead = appointmentService.formatConfirmationMessage(lead, conf);
       await ctx.twilio.sendWhatsAppMessage(leadPhone, msgLead);
       await appointmentService.updateLeadAfterConfirmation(lead.id, true, lead.notes);
-      await ctx.twilio.sendWhatsAppMessage(from, `✅ *Confirmación enviada a ${lead.name}* (mensaje normal)\n\n📱 ${lead.phone}`);
+      await ctx.twilio.sendWhatsAppMessage(from, `✅ *Confirmación enviada a ${lead.name}* (mensaje normal)\n\n📱 ${formatPhoneForDisplay(lead.phone)}`);
     } catch (e2) {
-      await ctx.twilio.sendWhatsAppMessage(from, `❌ No pude enviar a ${lead.name}. Verifica el número: ${lead.phone}`);
+      await ctx.twilio.sendWhatsAppMessage(from, `❌ No pude enviar a ${lead.name}. Verifica el número: ${formatPhoneForDisplay(lead.phone)}`);
     }
   }
 }
@@ -4588,7 +4585,7 @@ export async function vendedorQuienEs(ctx: HandlerContext, handler: any, from: s
       const l = leads[0];
       const feedback = formatVendorFeedback(l.notes);
       const msg = `👤 *${l.name}*\n\n` +
-        `📱 Tel: ${l.phone || 'No disponible'}\n` +
+        `📱 Tel: ${l.phone ? formatPhoneForDisplay(l.phone) : 'No disponible'}\n` +
         `📌 Etapa: ${l.stage || l.status || 'Sin etapa'}\n` +
         (feedback ? `📝 ${feedback}\n` : '') +
         `📅 Registrado: ${new Date(l.created_at).toLocaleDateString('es-MX')}`;
@@ -4791,7 +4788,7 @@ export async function vendedorPasarACredito(ctx: HandlerContext, handler: any, f
         await ctx.twilio.sendWhatsAppMessage(asesorPhone,
           `🏦 *NUEVO LEAD PARA CRÉDITO*\n\n` +
           `👤 *${lead.name}*\n` +
-          `📱 ${lead.phone}\n` +
+          `📱 ${formatPhoneForDisplay(lead.phone)}\n` +
           `🏠 Interés: ${lead.property_interest || 'No especificado'}\n` +
           `👔 Vendedor: ${vendedor.name}\n\n` +
           `⏰ Contáctalo pronto.\n\n` +
@@ -4845,14 +4842,14 @@ export async function vendedorNuevoLead(ctx: HandlerContext, handler: any, from:
           await ctx.twilio.sendWhatsAppMessage(from,
             `✅ Lead actualizado:\n\n` +
             `👤 ${leadExistente.name}\n` +
-            `📱 ${phoneNormalized}\n` +
+            `📱 ${formatPhoneForDisplay(phoneNormalized)}\n` +
             `🏠 Interés: ${desarrollo}`
           );
         } else {
           await ctx.twilio.sendWhatsAppMessage(from,
             `⚠️ Este lead ya existe y es tuyo:\n\n` +
             `👤 ${leadExistente.name}\n` +
-            `📱 ${phoneNormalized}`
+            `📱 ${formatPhoneForDisplay(phoneNormalized)}`
           );
         }
       } else {
@@ -4891,7 +4888,7 @@ export async function vendedorNuevoLead(ctx: HandlerContext, handler: any, from:
     await ctx.twilio.sendWhatsAppMessage(from,
       `✅ *Lead registrado*\n\n` +
       `👤 ${nombre}\n` +
-      `📱 ${phoneNormalized}\n` +
+      `📱 ${formatPhoneForDisplay(phoneNormalized)}\n` +
       (desarrollo ? `🏠 Interés: ${desarrollo}\n` : '') +
       `\n📌 El lead está asignado a ti.`
     );
@@ -4946,7 +4943,7 @@ export async function vendedorLeadsHot(ctx: HandlerContext, handler: any, from: 
 
     leads.forEach((lead: any, i: number) => {
       msg += `${i + 1}. *${lead.name || 'Sin nombre'}* (${lead.score}🔥)\n`;
-      msg += `   📱 ${lead.phone || 'Sin tel'}\n`;
+      msg += `   📱 ${lead.phone ? formatPhoneForDisplay(lead.phone) : 'Sin tel'}\n`;
       msg += `   📊 Status: ${lead.status || 'new'}\n\n`;
     });
 
@@ -4997,7 +4994,7 @@ export async function vendedorLeadsPendientes(ctx: HandlerContext, handler: any,
         : '∞';
       const temp = lead.score >= 70 ? '🔥' : lead.score >= 40 ? '🟡' : '🔵';
       msg += `${i + 1}. ${temp} *${lead.name || 'Sin nombre'}*\n`;
-      msg += `   📱 ${lead.phone || 'Sin tel'}\n`;
+      msg += `   📱 ${lead.phone ? formatPhoneForDisplay(lead.phone) : 'Sin tel'}\n`;
       msg += `   ⏱️ ${diasSinActividad} días sin actividad\n\n`;
     });
 
@@ -5550,9 +5547,6 @@ export async function vendedorContactarLead(ctx: HandlerContext, handler: any, f
       .update({ notes: notasVendedor })
       .eq('id', vendedor.id);
 
-    const telLimpio = leadPhone.replace(/\D/g, '').slice(-10);
-    const telFormateado = `${telLimpio.slice(0, 3)}-${telLimpio.slice(3, 6)}-${telLimpio.slice(6)}`;
-
     await ctx.meta.sendWhatsAppMessage(from,
       `⚠️ *${lead.name} no ha escrito en 24h*\n\n` +
       `WhatsApp no permite mensajes directos.\n\n` +
@@ -5560,7 +5554,7 @@ export async function vendedorContactarLead(ctx: HandlerContext, handler: any, f
       `*1.* 📩 Template seguimiento\n` +
       `*2.* 📩 Template reactivación\n` +
       `*3.* 📩 Template info crédito\n` +
-      `*4.* 📞 Llamar directo (${telFormateado})\n` +
+      `*4.* 📞 Llamar directo (${formatPhoneForDisplay(leadPhone)})\n` +
       `*5.* ❌ Cancelar\n\n` +
       `_Responde con el número_`
     );
@@ -5801,7 +5795,7 @@ export async function vendedorLlamarIA(ctx: HandlerContext, handler: any, from: 
     if (result.multiple) {
       await ctx.twilio.sendWhatsAppMessage(from,
         `⚠️ Encontré varios leads con ese nombre:\n\n` +
-        result.leads?.map((l: any) => `• ${l.name} - ${l.phone}`).join('\n') +
+        result.leads?.map((l: any) => `• ${l.name} - ${l.phone ? formatPhoneForDisplay(l.phone) : 'Sin tel'}`).join('\n') +
         '\n\nSé más específico con el nombre.'
       );
       return;
@@ -5848,7 +5842,7 @@ export async function vendedorLlamarIA(ctx: HandlerContext, handler: any, from: 
       await ctx.twilio.sendWhatsAppMessage(from,
         `📞 *Llamada IA iniciada*\n\n` +
         `👤 Lead: ${lead.name}\n` +
-        `📱 Teléfono: ${lead.phone}\n` +
+        `📱 Teléfono: ${formatPhoneForDisplay(lead.phone)}\n` +
         `🏠 Interés: ${desarrolloInteres || 'Por definir'}\n\n` +
         `SARA está llamando ahora. Te notificaré cuando termine con el resumen.`
       );
@@ -5871,7 +5865,7 @@ export async function vendedorLlamarIA(ctx: HandlerContext, handler: any, from: 
     } else {
       await ctx.twilio.sendWhatsAppMessage(from,
         `❌ Error iniciando llamada:\n${callResult.error}\n\n` +
-        `Puedes llamar manualmente: ${lead.phone}`
+        `Puedes llamar manualmente: ${formatPhoneForDisplay(lead.phone)}`
       );
     }
   } catch (e) {
@@ -5997,7 +5991,7 @@ export async function vendedorRecordarLlamar(ctx: HandlerContext, handler: any, 
       await ctx.twilio.sendWhatsAppMessage(from,
         `✅ *Llamada programada*\n\n` +
         `👤 *${lead.name}*\n` +
-        `📱 ${lead.phone}\n` +
+        `📱 ${formatPhoneForDisplay(lead.phone)}\n` +
         `📅 ${fechaFormateada}\n` +
         `🕐 ${hora}\n\n` +
         `Te recordaré antes de la llamada 📞`
@@ -6113,7 +6107,7 @@ export async function vendedorReagendarLlamada(ctx: HandlerContext, handler: any
     await ctx.twilio.sendWhatsAppMessage(from,
       `✅ *Llamada reagendada*\n\n` +
       `👤 *${lead.name}*\n` +
-      `📱 ${lead.phone}\n` +
+      `📱 ${formatPhoneForDisplay(lead.phone)}\n` +
       `❌ Antes: ${fechaAnterior} ${horaAnterior}\n` +
       `✅ Ahora: ${fechaFormateada} ${nuevaHora}\n\n` +
       `📲 *${lead.name?.split(' ')[0]} ya fue notificado*`

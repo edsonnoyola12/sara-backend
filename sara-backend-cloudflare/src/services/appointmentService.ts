@@ -3,6 +3,7 @@ import { CalendarService } from './calendar';
 import { TwilioService } from './twilio';
 import { HORARIOS } from '../handlers/constants';
 import { parseFecha as parseFechaCentral, parseFechaISO as parseFechaISOCentral, parseHoraISO as parseHoraISOCentral } from '../utils/dateParser';
+import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // INTERFACES
@@ -126,7 +127,7 @@ export class AppointmentService {
     const salesMsg = `📅 *NUEVA CITA*
 
 *Cliente:* ${clientName}
-📱 ${lead.phone}
+📱 ${formatPhoneForDisplay(lead.phone)}
 *Propiedad:* ${lead.property_interest || 'No especificado'}
 
 *Fecha:* ${dateFormatted}
@@ -352,7 +353,7 @@ Fecha: ${dateFormatted} ${appointment.scheduled_time}`;
 
       const eventData: any = {
         summary: `🏠 Visita ${desarrollo} - ${clientName}`,
-        description: `👤 Cliente: ${clientName}\n📱 Teléfono: ${cleanPhone}\n🏠 Desarrollo: ${desarrollo}\n📍 Dirección: ${direccion}\n🗺️ GPS: ${gpsLink}\n📊 Score: ${score}/100 ${temp}\n💳 Necesita crédito: ${necesitaCredito ? 'SÍ' : 'No especificado'}\n👤 Vendedor: ${vendedor?.name || 'Por asignar'}`,
+        description: `👤 Cliente: ${clientName}\n📱 Teléfono: ${formatPhoneForDisplay(cleanPhone)}\n🏠 Desarrollo: ${desarrollo}\n📍 Dirección: ${direccion}\n🗺️ GPS: ${gpsLink}\n📊 Score: ${score}/100 ${temp}\n💳 Necesita crédito: ${necesitaCredito ? 'SÍ' : 'No especificado'}\n👤 Vendedor: ${vendedor?.name || 'Por asignar'}`,
         location: direccion,
         start: { dateTime: startDateTime, timeZone: 'America/Mexico_City' },
         end: { dateTime: endDateTime, timeZone: 'America/Mexico_City' },
@@ -381,7 +382,7 @@ Fecha: ${dateFormatted} ${appointment.scheduled_time}`;
       if (necesitaCredito && asesorHipotecario?.email) {
         const eventAsesorData: any = {
           summary: `💳 Asesoría Crédito - ${clientName} (${desarrollo})`,
-          description: `👤 Cliente: ${clientName}\n📱 Teléfono: ${cleanPhone}\n🏠 Desarrollo: ${desarrollo}\n📍 Dirección: ${direccion}\n🗺️ GPS: ${gpsLink}\n📊 Score: ${score}/100 ${temp}\n👤 Vendedor: ${vendedor?.name || 'Por asignar'}`,
+          description: `👤 Cliente: ${clientName}\n📱 Teléfono: ${formatPhoneForDisplay(cleanPhone)}\n🏠 Desarrollo: ${desarrollo}\n📍 Dirección: ${direccion}\n🗺️ GPS: ${gpsLink}\n📊 Score: ${score}/100 ${temp}\n👤 Vendedor: ${vendedor?.name || 'Por asignar'}`,
           location: direccion,
           start: { dateTime: startDateTime, timeZone: 'America/Mexico_City' },
           end: { dateTime: endDateTime, timeZone: 'America/Mexico_City' },
@@ -494,7 +495,7 @@ Fecha: ${dateFormatted} ${appointment.scheduled_time}`;
 ━━━━━━━━━━━━━━━━━━━━
 
 👤 *Cliente:* ${clientName}
-📱 *Tel:* ${cleanPhone || ''}
+📱 *Tel:* ${cleanPhone ? formatPhoneForDisplay(cleanPhone) : ''}
 📊 *Score:* ${score}/100 ${temp}
 💳 *Crédito:* ${necesitaCredito ? '⚠️ SÍ NECESITA' : 'No especificado'}
 
@@ -535,7 +536,7 @@ ${cambioTexto}
 ━━━━━━━━━━━━━━━━━━━━
 
 👤 *Cliente:* ${clientName}
-📱 *Tel:* ${cleanPhone || ''}
+📱 *Tel:* ${cleanPhone ? formatPhoneForDisplay(cleanPhone) : ''}
 📊 *Score:* ${score}/100 ${temp}
 💳 *Crédito:* ${necesitaCredito ? '⚠️ SÍ NECESITA' : 'No especificado'}
 
@@ -563,7 +564,7 @@ https://calendar.google.com/calendar/u/1/r
 ━━━━━━━━━━━━━━━━━━━━
 
 👤 *Cliente:* ${clientName}
-📱 *Tel:* ${cleanPhone || ''}
+📱 *Tel:* ${cleanPhone ? formatPhoneForDisplay(cleanPhone) : ''}
 📊 *Score:* ${score}/100 ${temp}
 👤 *Vendedor:* ${vendedor?.name || 'Por asignar'}
 
@@ -583,13 +584,13 @@ https://calendar.google.com/calendar/u/1/r
     if (vendedor?.name) {
       infoContactos += `\n👤 *Vendedor:* ${vendedor.name}`;
       if (vendedor.phone) {
-        infoContactos += `\n📱 *Tel vendedor:* ${vendedor.phone}`;
+        infoContactos += `\n📱 *Tel vendedor:* ${formatPhoneForDisplay(vendedor.phone)}`;
       }
     }
     if (necesitaCredito && asesorHipotecario?.name) {
       infoContactos += `\n\n💳 *Asesor de crédito:* ${asesorHipotecario.name}`;
       if (asesorHipotecario.phone) {
-        infoContactos += `\n📱 *Tel asesor:* ${asesorHipotecario.phone}`;
+        infoContactos += `\n📱 *Tel asesor:* ${formatPhoneForDisplay(asesorHipotecario.phone)}`;
       }
     }
 
@@ -665,7 +666,7 @@ ${infoContactos}
     msg += `📍 *Lugar:* ${conf.desarrollo || 'Por confirmar'}\n`;
     if (conf.gps_link) msg += `🗺️ *Ubicación:* ${conf.gps_link}\n`;
     msg += `\n👤 *Te atiende:* ${conf.vendedor_name || 'Un asesor'}\n`;
-    if (conf.vendedor_phone) msg += `📱 *Su cel:* ${conf.vendedor_phone}\n`;
+    if (conf.vendedor_phone) msg += `📱 *Su cel:* ${formatPhoneForDisplay(conf.vendedor_phone)}\n`;
     msg += `\n¡Te esperamos! ¿Tienes alguna duda? 😊`;
     return msg;
   }
@@ -701,7 +702,7 @@ ${infoContactos}
     let msg = '';
     if (conf.gps_link) msg += `🗺️ *Ubicación:* ${conf.gps_link}\n`;
     if (conf.vendedor_name) msg += `👤 *Te atiende:* ${conf.vendedor_name}\n`;
-    if (conf.vendedor_phone) msg += `📱 *Su cel:* ${conf.vendedor_phone}\n`;
+    if (conf.vendedor_phone) msg += `📱 *Su cel:* ${formatPhoneForDisplay(conf.vendedor_phone)}\n`;
     if (msg) msg += '\n¡Te esperamos! 🏠';
     return msg;
   }
@@ -739,7 +740,7 @@ ${infoContactos}
 
   formatConfirmationSentToVendor(leadName: string, phone: string, wasTemplate: boolean): string {
     const tipo = wasTemplate ? '(Template - esperando respuesta)' : '(Mensaje normal - lead activo)';
-    return `✅ *Confirmación enviada a ${leadName}*\n\n📱 ${phone}\n📝 ${tipo}`;
+    return `✅ *Confirmación enviada a ${leadName}*\n\n📱 ${formatPhoneForDisplay(phone)}\n📝 ${tipo}`;
   }
 
   async cancelPendingConfirmation(vendedorId: string): Promise<{ lead: any } | null> {
@@ -787,7 +788,7 @@ ${infoContactos}
     msg += `🕐 *${reagendar.nueva_hora}*\n`;
     msg += `📍 *${reagendar.ubicacion || 'Por confirmar'}*\n\n`;
     msg += `👤 Te atiende: *${reagendar.vendedor_nombre}*\n`;
-    if (reagendar.vendedor_phone) msg += `📱 ${reagendar.vendedor_phone}\n`;
+    if (reagendar.vendedor_phone) msg += `📱 ${formatPhoneForDisplay(reagendar.vendedor_phone)}\n`;
     msg += `\n¡Te esperamos! 🏠`;
     return msg;
   }
@@ -911,7 +912,7 @@ ${infoContactos}
 
         const notifVendedor = `📞 *LLAMADA PROGRAMADA*\n\n` +
           `👤 *${clientName}*\n` +
-          `📱 ${cleanPhone}\n` +
+          `📱 ${formatPhoneForDisplay(cleanPhone)}\n` +
           (desarrollo ? `🏠 Interés: ${desarrollo}\n` : '') +
           `\n📅 *${fechaFormateada}*\n` +
           `🕐 *${hora}*\n\n` +
@@ -938,7 +939,7 @@ ${infoContactos}
             lead_phone: cleanPhone,
             lead_name: clientName,
             desarrollo: desarrollo || 'Seguimiento llamada',
-            message: `📞 *VERIFICAR LLAMADA*\n\n¿Se completó la llamada con ${clientName}?\n\nSi no pudiste contactarle, reagenda la llamada.\n\n📱 ${cleanPhone}`,
+            message: `📞 *VERIFICAR LLAMADA*\n\n¿Se completó la llamada con ${clientName}?\n\nSi no pudiste contactarle, reagenda la llamada.\n\n📱 ${formatPhoneForDisplay(cleanPhone)}`,
             scheduled_at: fechaFollowup.toISOString(),
             sent: false,
             cancelled: false,

@@ -7,6 +7,7 @@ import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { puedeEnviarMensajeAutomatico, registrarMensajeAutomatico } from './followups';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
+import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 
 // ═══════════════════════════════════════════════════════════
 // HELPER: Validar si un mensaje parece respuesta a encuesta
@@ -1210,7 +1211,7 @@ Recuerda que estamos aquí si necesitas algo. ¡Disfruta tu nuevo hogar! 🏠✨
 
     if (vendedor) {
       await enviarMensajeTeamMember(supabase, meta, vendedor,
-        `🚨 *PROBLEMA POST-ENTREGA*\n\nCliente: ${lead.name}\n📱 ${lead.phone}\n\nMensaje: "${mensaje}"\n\n⚠️ Requiere atención inmediata.\n📞 bridge ${nombre}`,
+        `🚨 *PROBLEMA POST-ENTREGA*\n\nCliente: ${lead.name}\n📱 ${formatPhoneForDisplay(lead.phone)}\n\nMensaje: "${mensaje}"\n\n⚠️ Requiere atención inmediata.\n📞 bridge ${nombre}`,
         { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
       );
     }
@@ -1465,7 +1466,7 @@ Estamos para ayudarte. 🤝`;
 
     if (vendedor) {
       await enviarMensajeTeamMember(supabase, meta, vendedor,
-        `⚠️ *CLIENTE INSATISFECHO*\n\nCliente: ${lead.name}\nCalificación: ${calificacion}/4 (${categoria})\n📱 ${lead.phone}\n\nMensaje: "${mensaje}"\n\n🚨 Requiere seguimiento inmediato.\n📞 bridge ${nombre}`,
+        `⚠️ *CLIENTE INSATISFECHO*\n\nCliente: ${lead.name}\nCalificación: ${calificacion}/4 (${categoria})\n📱 ${formatPhoneForDisplay(lead.phone)}\n\nMensaje: "${mensaje}"\n\n🚨 Requiere seguimiento inmediato.\n📞 bridge ${nombre}`,
         { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
       );
     }
@@ -1689,7 +1690,7 @@ Recuerda que el mantenimiento preventivo alarga la vida de tu inversión.
 
     if (vendedor) {
       await enviarMensajeTeamMember(supabase, meta, vendedor,
-        `🔧 *CLIENTE NECESITA PROVEEDORES*\n\nCliente: ${lead.name}\n📱 ${lead.phone}\nMensaje: "${mensaje}"\n\n💡 Envíale lista de proveedores recomendados.\n📞 bridge ${nombre}`,
+        `🔧 *CLIENTE NECESITA PROVEEDORES*\n\nCliente: ${lead.name}\n📱 ${formatPhoneForDisplay(lead.phone)}\nMensaje: "${mensaje}"\n\n💡 Envíale lista de proveedores recomendados.\n📞 bridge ${nombre}`,
         { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
       );
     }

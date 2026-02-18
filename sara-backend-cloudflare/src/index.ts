@@ -5,6 +5,7 @@ import { CacheService } from './services/cacheService';
 import { MetaWhatsAppService } from './services/meta-whatsapp';
 import { CalendarService } from './services/calendar';
 import { WhatsAppHandler } from './handlers/whatsapp';
+import { formatPhoneForDisplay } from './handlers/whatsapp-utils';
 import { handleTeamRoutes } from './routes/team-routes';
 import { handlePromotionRoutes } from './routes/promotions';
 import { handleRetellRoutes } from './routes/retell';
@@ -1009,7 +1010,7 @@ export default {
                             if (vendedorOriginal?.phone) {
                               const msgVendedor = `🏦 *LEAD EN CRÉDITO HIPOTECARIO*\n\n` +
                                 `👤 *${resultado.context.lead_name}*\n` +
-                                `📱 ${lead.phone}\n\n` +
+                                `📱 ${lead.phone ? formatPhoneForDisplay(lead.phone) : 'Sin tel'}\n\n` +
                                 `Tu lead fue asignado al asesor hipotecario *${asesor.name || 'N/A'}* para su trámite de crédito.\n\n` +
                                 `💡 Sigues siendo responsable de la venta. Cuando el crédito esté listo, coordina la visita.\n\n` +
                                 `Escribe *mis leads* para ver tu lista.`;
@@ -1075,7 +1076,7 @@ export default {
                 await meta.sendWhatsAppMessage(vendedor.phone,
                   `🚨 *REPORTE DE CLIENTE*\n\n` +
                   `👤 ${leadImg.name}\n` +
-                  `📱 ${leadImg.phone}\n` +
+                  `📱 ${leadImg.phone ? formatPhoneForDisplay(leadImg.phone) : 'Sin tel'}\n` +
                   `🏠 Cliente entregado\n` +
                   `📸 Envió foto ${tipoProblema}\n\n` +
                   `Por favor contacta al cliente para dar seguimiento.`
@@ -1088,7 +1089,7 @@ export default {
               await meta.sendWhatsAppMessage(CEO_PHONE,
                 `🚨 *REPORTE POST-ENTREGA*\n\n` +
                 `👤 ${leadImg.name}\n` +
-                `📱 ${leadImg.phone}\n` +
+                `📱 ${leadImg.phone ? formatPhoneForDisplay(leadImg.phone) : 'Sin tel'}\n` +
                 `📸 Envió foto: ${caption || '(sin descripción)'}\n` +
                 `👷 Vendedor: ${vendedor?.name || 'Sin asignar'}`
               );
@@ -2001,7 +2002,7 @@ export default {
                     const msgReasignado = `🚨 *LEAD REASIGNADO*\n\n` +
                       `Se te asignó un lead que estaba sin vendedor:\n\n` +
                       `👤 *${lead.name || 'Sin nombre'}*\n` +
-                      `📱 ${lead.phone}\n` +
+                      `📱 ${lead.phone ? formatPhoneForDisplay(lead.phone) : 'Sin tel'}\n` +
                       `🏠 ${lead.property_interest || 'Sin desarrollo definido'}\n\n` +
                       `⚠️ Este lead estuvo sin atención, contáctalo lo antes posible.\n\n` +
                       `Escribe *leads* para ver tu lista completa.`;
@@ -2645,7 +2646,7 @@ export default {
               await meta.sendWhatsAppMessage(vendedor.phone,
                 `⚠️ *CITA EN 2 HORAS - SIN CONFIRMAR*\n\n` +
                 `👤 *${lead.name || 'Lead'}*\n` +
-                `📱 ${lead.phone}\n` +
+                `📱 ${lead.phone ? formatPhoneForDisplay(lead.phone) : 'Sin tel'}\n` +
                 `🏠 ${cita.development || 'Sin desarrollo'}\n` +
                 `🕐 ${cita.scheduled_time} hoy\n\n` +
                 `💡 El cliente NO ha confirmado.\n` +

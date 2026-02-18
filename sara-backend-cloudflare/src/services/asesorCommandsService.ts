@@ -1,4 +1,5 @@
 import { SupabaseService } from './supabase';
+import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 
 interface CommandResult {
   action: 'send_message' | 'call_handler' | 'not_recognized';
@@ -422,7 +423,7 @@ export class AsesorCommandsService {
       const ingreso = ctx?.ingreso_mensual ? `$${ctx.ingreso_mensual.toLocaleString('es-MX')}` : '—';
 
       msg += `${i + 1}. ${status} *${lead.name}*\n`;
-      msg += `   📱 ${this.formatPhone(lead.phone)}\n`;
+      msg += `   📱 ${formatPhoneForDisplay(lead.phone)}\n`;
       msg += `   🏦 ${banco} | 💰 ${ingreso}\n\n`;
     });
 
@@ -460,7 +461,7 @@ export class AsesorCommandsService {
     const ctx: CreditFlowContext | undefined = notes?.credit_flow_context;
 
     let msg = `📊 *STATUS: ${lead.name}*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
-    msg += `📱 *Teléfono:* ${this.formatPhone(lead.phone)}\n`;
+    msg += `📱 *Teléfono:* ${formatPhoneForDisplay(lead.phone)}\n`;
     msg += `📌 *Estado:* ${this.getStatusText(lead.status)}\n`;
     msg += `📅 *Registrado:* ${this.formatDate(lead.created_at)}\n\n`;
 
@@ -742,9 +743,9 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
       return { message: `❌ No encontré a "${query}" en tus leads.` };
     }
 
-    const phone = this.formatPhone(lead.phone);
+    const phone = formatPhoneForDisplay(lead.phone);
     return {
-      message: `📱 *${lead.name}*\n\nTeléfono: ${phone}\n\nwa.me/${lead.phone.replace(/\D/g, '')}`
+      message: `📱 *${lead.name}*\n\nTeléfono: ${phone}\n\nwa.me/${formatPhoneForDisplay(lead.phone).replace('+', '')}`
     };
   }
 
@@ -950,7 +951,7 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
         const emoji = diasEsperando > 3 ? '🔴' : diasEsperando > 1 ? '🟡' : '🟢';
 
         msg += `${emoji} *${sol.lead_name || 'Sin nombre'}*\n`;
-        msg += `   📱 ${sol.lead_phone}\n`;
+        msg += `   📱 ${formatPhoneForDisplay(sol.lead_phone)}\n`;
         msg += `   ⏱️ Esperando hace ${diasEsperando} día${diasEsperando !== 1 ? 's' : ''}\n`;
 
         if (docsFaltantes.length > 0) {
@@ -1370,7 +1371,7 @@ O sin vendedor (se asigna automáticamente):
   }
 
   formatLeadYaExiste(lead: any): string {
-    return `⚠️ *Lead ya existe*\n\n👤 ${lead.name}\n📱 ${lead.phone}\n📌 Status: ${lead.status}`;
+    return `⚠️ *Lead ya existe*\n\n👤 ${lead.name}\n📱 ${formatPhoneForDisplay(lead.phone)}\n📌 Status: ${lead.status}`;
   }
 
   parseAgendarCita(body: string): { nombre: string; fecha: string; hora: string; lugar?: string } | null {

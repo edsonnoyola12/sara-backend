@@ -5,6 +5,7 @@
 
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
+import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 
 interface Env {
   SUPABASE_URL: string;
@@ -1771,7 +1772,7 @@ Reglas:
                         const msgCallbackRapido =
                           `📞⚡ *CALLBACK RÁPIDO*\n\n` +
                           `👤 *Lead:* ${lead.name || 'Sin nombre'}\n` +
-                          `📱 *Teléfono:* wa.me/${leadPhone.replace(/\D/g, '')}\n` +
+                          `📱 *Teléfono:* wa.me/${formatPhoneForDisplay(leadPhone).replace('+', '')}\n` +
                           `🏠 *Desarrollo:* ${desarrolloFinal || 'General'}\n` +
                           `⏰ *Tiempo:* Pidió que le marquen en ~${minutos} minutos\n\n` +
                           `💬 ${callbackData.description || 'El lead pidió que le volvieran a marcar pronto.'}`;
@@ -1784,7 +1785,7 @@ Reglas:
                             params: [
                               'CALLBACK RÁPIDO',
                               lead.name || 'Sin nombre',
-                              `wa.me/${leadPhone.replace(/\D/g, '')}`,
+                              `wa.me/${formatPhoneForDisplay(leadPhone).replace('+', '')}`,
                               desarrolloFinal || 'General',
                               `En ~${minutos} minutos`
                             ]
@@ -1871,7 +1872,7 @@ Reglas:
                             msgVendedor = `📅📋 *SEGUIMIENTO AGENDADO*\n\n`;
                           }
                           msgVendedor += `👤 *Lead:* ${lead.name || 'Sin nombre'}\n`;
-                          msgVendedor += `📱 *Teléfono:* wa.me/${leadPhone.replace(/\D/g, '')}\n`;
+                          msgVendedor += `📱 *Teléfono:* wa.me/${formatPhoneForDisplay(leadPhone).replace('+', '')}\n`;
                           msgVendedor += `🏠 *Desarrollo:* ${desarrolloNombre}\n`;
                           msgVendedor += `📅 *Fecha:* ${fechaBonita}\n`;
                           if (citaTipo === 'visita' && gpsLink) {
@@ -1899,7 +1900,7 @@ Reglas:
                               params: [
                                 tipoTituloVendedor,
                                 lead.name || 'Sin nombre',
-                                `wa.me/${leadPhone.replace(/\D/g, '')}`,
+                                `wa.me/${formatPhoneForDisplay(leadPhone).replace('+', '')}`,
                                 desarrolloNombre,
                                 fechaBonita
                               ]

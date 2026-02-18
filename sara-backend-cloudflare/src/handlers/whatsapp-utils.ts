@@ -133,6 +133,28 @@ export function formatPhoneMX(phone: string): string {
   }
 }
 
+/**
+ * Formato para MOSTRAR teléfonos a humanos y en wa.me/ links
+ * DB: "5214928787098" → Display: "+524928787098" (sin el 1 después de 52)
+ */
+export function formatPhoneForDisplay(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  // "5214928787098" (13 dígitos, empieza con 521) → "+524928787098"
+  if (digits.length === 13 && digits.startsWith('521')) {
+    return `+52${digits.slice(3)}`;
+  }
+  // "524928787098" (12 dígitos, empieza con 52) → "+524928787098"
+  if (digits.length === 12 && digits.startsWith('52')) {
+    return `+${digits}`;
+  }
+  // "4928787098" (10 dígitos) → "+524928787098"
+  if (digits.length === 10) {
+    return `+52${digits}`;
+  }
+  // Fallback: +52 + últimos 10 dígitos
+  return `+52${digits.slice(-10)}`;
+}
+
 export function parseFechaEspanolWrapper(texto: string): ParsedFecha | null {
   return parseFechaEspanolUtil(texto);
 }
@@ -687,7 +709,7 @@ export async function crearCitaCompleta(
             params: [
               isReschedule ? '📅 Cita reagendada' : '📅 Nueva cita',
               result.clientName || lead?.name || 'Lead',
-              `wa.me/${cleanPhone}`,
+              `wa.me/${formatPhoneForDisplay(cleanPhone).replace('+', '')}`,
               desarrollo || 'Por confirmar',
               `${fecha} ${hora}`
             ]

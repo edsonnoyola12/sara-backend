@@ -274,7 +274,7 @@ export class WhatsAppHandler {
           const vendedorAsignado = teamMembers.find((tm: any) => tm.id === leadResult.assignedVendedorId);
           if (vendedorAsignado) {
             const notifMsg = `🆕 *NUEVO LEAD ASIGNADO*\n\n` +
-              `📱 ${cleanPhone}\n` +
+              `📱 ${utils.formatPhoneForDisplay(cleanPhone)}\n` +
               `💬 "${trimmedBody.substring(0, 100)}"\n\n` +
               `Este lead te fue asignado automáticamente. ¡Responde pronto!\n\n` +
               `Escribe *mis leads* para ver tu lista.`;
@@ -287,8 +287,8 @@ export class WhatsAppHandler {
                   name: 'notificacion_cita_vendedor',
                   params: [
                     '🆕 Nuevo lead asignado',
-                    cleanPhone,
-                    `wa.me/${cleanPhone}`,
+                    utils.formatPhoneForDisplay(cleanPhone),
+                    `wa.me/${utils.formatPhoneForDisplay(cleanPhone).replace('+', '')}`,
                     trimmedBody.substring(0, 50) || 'Mensaje nuevo',
                     'Escribe "mis leads" para verlo'
                   ]
@@ -347,7 +347,7 @@ export class WhatsAppHandler {
         // Alertar al admin
         try {
           await enviarAlertaSistema(this.meta,
-            `🚫 DNC DETECTADO\n\n📱 ${cleanPhone}\n👤 ${lead.name || 'Sin nombre'}\n💬 "${trimmedBody}"\n\nLead marcado como DO NOT CONTACT`,
+            `🚫 DNC DETECTADO\n\n📱 ${utils.formatPhoneForDisplay(cleanPhone)}\n👤 ${lead.name || 'Sin nombre'}\n💬 "${trimmedBody}"\n\nLead marcado como DO NOT CONTACT`,
             undefined, 'dnc'
           );
         } catch (e) {
@@ -974,8 +974,8 @@ export class WhatsAppHandler {
           // Dar al lead los links para contactar directo
           await this.meta.sendWhatsAppMessage(cleanPhone,
             `👤 *${vendedorNombre}* es tu ${rol}.\n\n` +
-            `📱 *WhatsApp:*\nwa.me/${vendedorPhone}\n\n` +
-            `📞 *Llamar:*\ntel:+${vendedorPhone}\n\n` +
+            `📱 *WhatsApp:*\nwa.me/${utils.formatPhoneForDisplay(vendedorPhone).replace('+', '')}\n\n` +
+            `📞 *Llamar:*\ntel:${utils.formatPhoneForDisplay(vendedorPhone)}\n\n` +
             `_También le avisé que quieres hablar._`
           );
 
