@@ -13,6 +13,7 @@ import { EncuestasService } from '../services/encuestasService';
 import { ConversationContextService } from '../services/conversationContextService';
 import { scoringService } from '../services/leadScoring';
 import { resourceService } from '../services/resourceService';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { parseReagendarParams as parseReagendarParamsUtil } from '../utils/vendedorParsers';
 import {
   parseFechaEspanol as parseFechaEspanolUtil,
@@ -675,14 +676,51 @@ export async function crearCitaCompleta(
       const msgVendedor = isReschedule
         ? appointmentService.formatMensajeVendedorReagendamiento(result, desarrollo, fecha, hora, fechaAnterior, horaAnterior)
         : appointmentService.formatMensajeVendedorNuevaCita(result, desarrollo, fecha, hora);
-      await ctx.twilio.sendWhatsAppMessage(vendedor.phone, msgVendedor);
-      console.log(isReschedule ? '📤 Notificación de REAGENDAMIENTO enviada a vendedor' : '📤 Notificación enviada a vendedor');
+      const tipoNotif = isReschedule ? 'reagendamiento' : 'nueva_cita';
+      try {
+        const notifResult = await enviarMensajeTeamMember(ctx.supabase, ctx.meta, vendedor, msgVendedor, {
+          tipoMensaje: 'alerta_lead',
+          guardarPending: true,
+          pendingKey: 'pending_mensaje',
+          templateOverride: {
+            name: 'notificacion_cita_vendedor',
+            params: [
+              isReschedule ? '📅 Cita reagendada' : '📅 Nueva cita',
+              result.clientName || lead?.name || 'Lead',
+              `wa.me/${cleanPhone}`,
+              desarrollo || 'Por confirmar',
+              `${fecha} ${hora}`
+            ]
+          }
+        });
+        console.log(isReschedule
+          ? `📤 Notificación de REAGENDAMIENTO enviada a vendedor (${notifResult.method})`
+          : `📤 Notificación de cita enviada a vendedor (${notifResult.method})`);
+
+        // Marcar vendedor_notified = true
+        if (result.appointment?.id && notifResult.success) {
+          await ctx.supabase.client.from('appointments')
+            .update({ vendedor_notified: true })
+            .eq('id', result.appointment.id);
+          console.log(`✅ vendedor_notified=true para cita ${result.appointment.id}`);
+        }
+      } catch (notifErr) {
+        console.error('⚠️ Error notificando vendedor de cita:', notifErr);
+      }
     }
 
     if (necesitaCredito && asesorHipotecario?.phone && asesorHipotecario?.is_active !== false) {
       const msgAsesor = appointmentService.formatMensajeAsesorNuevaCita(result, desarrollo, fecha, hora);
-      await ctx.twilio.sendWhatsAppMessage(asesorHipotecario.phone, msgAsesor);
-      console.log('📤 Notificación enviada a asesor hipotecario');
+      try {
+        await enviarMensajeTeamMember(ctx.supabase, ctx.meta, asesorHipotecario, msgAsesor, {
+          tipoMensaje: 'alerta_lead',
+          guardarPending: true,
+          pendingKey: 'pending_mensaje'
+        });
+        console.log('📤 Notificación enviada a asesor hipotecario (via enviarMensajeTeamMember)');
+      } catch (asesorErr) {
+        console.error('⚠️ Error notificando asesor de cita:', asesorErr);
+      }
     }
 
     const confirmacion = appointmentService.formatMensajeConfirmacionCliente(result, desarrollo, fecha, hora);
