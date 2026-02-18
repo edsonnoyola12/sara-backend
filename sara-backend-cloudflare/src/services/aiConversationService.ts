@@ -194,6 +194,17 @@ export class AIConversationService {
       contextoExtra.push(`Ha preguntado por: ${notes.desarrollos_interes.join(', ')}`);
     }
 
+    // Recursos ya enviados por desarrollo
+    if (notes.recursos_enviados && typeof notes.recursos_enviados === 'object') {
+      const resEntries = Object.entries(notes.recursos_enviados);
+      if (resEntries.length > 0) {
+        const resSummary = resEntries.map(([dev, info]: [string, any]) =>
+          `${dev}: ${info.types?.join('+') || 'recursos'}`
+        ).join(', ');
+        contextoExtra.push(`📦 Recursos YA ENVIADOS: ${resSummary} (NO los vuelvas a prometer)`);
+      }
+    }
+
     // Si es cliente recurrente o referido
     if (notes.es_referido) {
       contextoExtra.push('📢 ES REFERIDO - tratar especialmente bien');
@@ -221,8 +232,32 @@ export class AIConversationService {
       }
     }
 
+    // Días sin contacto (engagement freshness)
+    if (lead.last_message_at) {
+      const diasUltMsg = Math.floor((Date.now() - new Date(lead.last_message_at).getTime()) / (1000 * 60 * 60 * 24));
+      if (diasUltMsg > 3) {
+        contextoExtra.push(`⚠️ Sin contacto hace ${diasUltMsg} días`);
+      }
+    }
+
+    // Resumen journey
+    const journeyParts: string[] = [];
+    if (lead.created_at) {
+      const dias = Math.floor((Date.now() - new Date(lead.created_at).getTime()) / (1000 * 60 * 60 * 24));
+      if (dias === 0) journeyParts.push('Lead de HOY');
+      else if (dias === 1) journeyParts.push('Lead de AYER');
+      else if (dias <= 7) journeyParts.push(`Lead de hace ${dias} días`);
+      else journeyParts.push(`Lead de hace ${Math.floor(dias / 7)} semanas`);
+    }
+    if (lead.source) journeyParts.push(`vía ${lead.source}`);
+    const journeySummary = journeyParts.length > 0 ? journeyParts.join(' | ') : '';
+
     // Construir respuesta
     let resultado = '';
+
+    if (journeySummary) {
+      resultado += `- 📊 ${journeySummary}\n`;
+    }
 
     if (preferencias.length > 0) {
       resultado += `- Preferencias: ${preferencias.join(' | ')}\n`;
@@ -462,6 +497,32 @@ export class AIConversationService {
       }
     } catch (e) {
       console.error('⚠️ Error verificando cita existente para prompt:', e);
+    }
+
+    // ═══ HISTORIAL DE CITAS PASADAS (para contexto de Claude) ═══
+    let citasPasadasContext = '';
+    try {
+      const { data: citasPasadas } = await this.supabase.client
+        .from('appointments')
+        .select('scheduled_date, scheduled_time, property_name, status')
+        .eq('lead_id', lead.id)
+        .in('status', ['completed', 'visited', 'cancelled', 'cancelled_by_lead', 'no_show'])
+        .order('scheduled_date', { ascending: false })
+        .limit(5);
+
+      if (citasPasadas && citasPasadas.length > 0) {
+        const statusMap: Record<string, string> = {
+          'completed': 'Visitó', 'visited': 'Visitó',
+          'cancelled': 'Canceló', 'cancelled_by_lead': 'Canceló',
+          'no_show': 'No asistió'
+        };
+        const citasStr = citasPasadas.map((c: any) =>
+          `${statusMap[c.status] || c.status} ${c.property_name || ''} (${c.scheduled_date})`
+        ).join(' | ');
+        citasPasadasContext = `\n- Citas anteriores: ${citasStr}`;
+      }
+    } catch (e) {
+      console.error('⚠️ Error consultando citas pasadas:', e);
     }
 
     // ═══ DETECCIÓN DE FASE DE CONVERSACIÓN ═══
@@ -1218,7 +1279,7 @@ DATOS DEL CLIENTE
 - Interés: ${lead.property_interest || 'No definido'}
 - Crédito: ${lead.needs_mortgage === null ? '❌ NO SÉ - PREGUNTAR DESPUÉS DE CITA' : lead.needs_mortgage ? 'Sí necesita' : 'Tiene recursos propios'}
 - Score: ${lead.lead_score || 0}/100
-${citaExistenteInfo ? `- Cita: ${citaExistenteInfo}` : '- Cita: ❌ NO TIENE CITA AÚN'}
+${citaExistenteInfo ? `- Cita: ${citaExistenteInfo}` : '- Cita: ❌ NO TIENE CITA AÚN'}${citasPasadasContext}
 
 ${esConversacionNueva && !nombreConfirmado ? '⚠️ CONVERSACIÓN NUEVA - DEBES PREGUNTAR NOMBRE EN TU PRIMER MENSAJE ⚠️' : ''}
 ${!nombreConfirmado ? '⚠️ CRÍTICO: NO TENGO NOMBRE CONFIRMADO. Pide el nombre antes de continuar.' : ''}
@@ -2274,6 +2335,45 @@ Por WhatsApp te atiendo 24/7 🙌
           console.log('🔧 ENFORCEMENT: SARA prometió brochure pero NO activó flag → activando send_brochure');
           parsed.send_brochure = true;
         }
+      }
+
+      // ═══ ENFORCEMENT #2: Lead PIDIÓ recursos explícitamente en su mensaje ═══
+      const msgLowerEnf = message.toLowerCase();
+      const leadPideVideo = msgLowerEnf.includes('mandame el video') || msgLowerEnf.includes('mándame el video') ||
+        msgLowerEnf.includes('envíame el video') || msgLowerEnf.includes('enviame el video') ||
+        msgLowerEnf.includes('quiero ver el video') || msgLowerEnf.includes('quiero el video') ||
+        msgLowerEnf.includes('pasame el video') || msgLowerEnf.includes('pásame el video') ||
+        msgLowerEnf.includes('si mandamelo') || msgLowerEnf.includes('sí mándamelo') ||
+        msgLowerEnf.includes('dale mandamelo') || msgLowerEnf.includes('si envialo') ||
+        msgLowerEnf.includes('sí envíalo') || msgLowerEnf.includes('mandame video') ||
+        msgLowerEnf.includes('mándame video') || msgLowerEnf.includes('mandalo') ||
+        (msgLowerEnf.includes('video') && (msgLowerEnf.includes('manda') || msgLowerEnf.includes('envia') || msgLowerEnf.includes('envía') || msgLowerEnf.includes('quiero')));
+      const leadPideGPS = msgLowerEnf.includes('mandame la ubicacion') || msgLowerEnf.includes('mándame la ubicación') ||
+        msgLowerEnf.includes('envíame la ubicacion') || msgLowerEnf.includes('enviame la ubicacion') ||
+        msgLowerEnf.includes('pasame la ubicacion') || msgLowerEnf.includes('pásame la ubicación') ||
+        msgLowerEnf.includes('donde queda') || msgLowerEnf.includes('dónde queda') ||
+        msgLowerEnf.includes('mandame el gps') || msgLowerEnf.includes('mándame el gps') ||
+        msgLowerEnf.includes('mandame el mapa') || msgLowerEnf.includes('mándame el mapa') ||
+        msgLowerEnf.includes('quiero la ubicacion') || msgLowerEnf.includes('quiero la ubicación') ||
+        msgLowerEnf.includes('mandame ubicacion') || msgLowerEnf.includes('mándame ubicación');
+      const leadPideBrochure = msgLowerEnf.includes('mandame el brochure') || msgLowerEnf.includes('mándame el brochure') ||
+        msgLowerEnf.includes('quiero el brochure') || msgLowerEnf.includes('quiero el folleto') ||
+        msgLowerEnf.includes('mandame el folleto') || msgLowerEnf.includes('mándame el folleto') ||
+        msgLowerEnf.includes('quiero los planos') || msgLowerEnf.includes('mandame los planos') ||
+        msgLowerEnf.includes('mándame los planos') || msgLowerEnf.includes('envíame el catálogo') ||
+        msgLowerEnf.includes('mandame el catalogo') || msgLowerEnf.includes('quiero el catalogo');
+
+      if (leadPideVideo && !parsed.send_video_desarrollo) {
+        console.log('🔧 ENFORCEMENT-LEAD: Lead pidió video explícitamente → activando send_video_desarrollo');
+        parsed.send_video_desarrollo = true;
+      }
+      if (leadPideGPS && !parsed.send_gps) {
+        console.log('🔧 ENFORCEMENT-LEAD: Lead pidió GPS/ubicación explícitamente → activando send_gps');
+        parsed.send_gps = true;
+      }
+      if (leadPideBrochure && !parsed.send_brochure) {
+        console.log('🔧 ENFORCEMENT-LEAD: Lead pidió brochure/folleto explícitamente → activando send_brochure');
+        parsed.send_brochure = true;
       }
 
       return {
@@ -4608,6 +4708,41 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         }
       }
       
+      // ═══ PRE-DETECCIÓN: Si lead pidió recursos de un desarrollo específico pero Claude no lo extrajo ═══
+      if (!desarrolloInteres && originalMessage) {
+        const msgLowerPre = originalMessage.toLowerCase();
+        const devRegex = /(?:mandame|mándame|envíame|enviame|quiero|pasame|pásame)\s+(?:el|la|los|las)?\s*(?:video|ubicacion|ubicación|gps|brochure|folleto|planos?|catalogo|catálogo|info|información)\s+(?:de|del)\s+(.+?)(?:\s*$|\s*[.,!?])/i;
+        const matchDev = originalMessage.match(devRegex);
+        if (matchDev) {
+          const devCandidate = matchDev[1].trim();
+          const propMatch = properties.find((p: any) => {
+            const nombre = (p.development || p.name || '').toLowerCase();
+            return nombre.includes(devCandidate.toLowerCase()) || devCandidate.toLowerCase().includes(nombre);
+          });
+          if (propMatch) {
+            desarrolloInteres = propMatch.development || propMatch.name;
+            console.log('🔧 PRE-DETECCIÓN: Lead pidió recurso de desarrollo detectado:', desarrolloInteres);
+          }
+        }
+        // También detectar nombre de desarrollo sin "de" — ej: "mandame video monte verde"
+        if (!desarrolloInteres) {
+          const nombresDesarrollos = properties.map((p: any) => (p.development || p.name || '').toLowerCase()).filter(Boolean);
+          const uniqueDevs = [...new Set(nombresDesarrollos)];
+          for (const dev of uniqueDevs) {
+            if (dev && msgLowerPre.includes(dev) &&
+                (msgLowerPre.includes('video') || msgLowerPre.includes('ubicacion') || msgLowerPre.includes('ubicación') ||
+                 msgLowerPre.includes('brochure') || msgLowerPre.includes('folleto') || msgLowerPre.includes('gps'))) {
+              const propMatch = properties.find((p: any) => (p.development || p.name || '').toLowerCase() === dev);
+              if (propMatch) {
+                desarrolloInteres = propMatch.development || propMatch.name;
+                console.log('🔧 PRE-DETECCIÓN: Desarrollo encontrado en mensaje:', desarrolloInteres);
+                break;
+              }
+            }
+          }
+        }
+      }
+
       // 6. Si hay DESARROLLO → Enviar recursos (solo si se completó el flujo principal)
       // ✅ FIX 07-ENE-2026: Recursos se envían SIN requerir nombre
       if (desarrolloInteres) {
@@ -4622,7 +4757,9 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
           (!ingresoCliente || ingresoCliente === 0); // Falta al menos el ingreso
         
         // ⚠️ NO enviar recursos si Claude está preguntando algo importante (excepto si pidió recursos explícitamente)
-        const pidioRecursosExplicito = analysis.send_video_desarrollo === true;
+        const pidioRecursosExplicito = analysis.send_video_desarrollo === true ||
+          analysis.send_gps === true || analysis.send_brochure === true ||
+          analysis.send_video === true || analysis.send_matterport === true;
         const claudeEstaPreguntando = !pidioRecursosExplicito && claudeResponse.includes('¿') && 
           (claudeResponse.includes('ganas') || 
            claudeResponse.includes('ingreso') ||
@@ -4719,31 +4856,44 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
           
           console.log('🔍 Estado recursos en DB:', leadFresco?.resources_sent, '|', leadFresco?.resources_sent_for);
           
-          // ═══ FIX: Comparar como SET para ignorar el orden ═══
-          const desarrollosActuales = desarrolloInteres.toLowerCase().split(',').map((d: string) => d.trim()).filter(Boolean).sort();
-          const desarrollosEnviados = (leadFresco?.resources_sent_for || '').toLowerCase().split(',').map((d: string) => d.trim()).filter(Boolean).sort();
-          
-          // Comparar si tienen los mismos elementos (sin importar orden original)
-          const mismoContenido = desarrollosActuales.length === desarrollosEnviados.length && 
-                                 desarrollosActuales.every((d: string, i: number) => d === desarrollosEnviados[i]);
-          const yaEnvioRecursos = leadFresco?.resources_sent === true && mismoContenido;
-          
-          console.log('🔍 ¿Ya envió recursos?', yaEnvioRecursos, `(${desarrollosEnviados.join(',')} vs ${desarrollosActuales.join(',')})`);
-          
-          if (!yaEnvioRecursos) {
-            // CORRECCIÓN: Enviar recursos de TODOS los desarrollos
-            const desarrollosLista = desarrolloInteres.includes(',') 
+          // ═══ FIX: Comparar PER-DESARROLLO — solo bloquear los que YA se enviaron ═══
+          const desarrollosActuales = desarrolloInteres.toLowerCase().split(',').map((d: string) => d.trim()).filter(Boolean);
+          const desarrollosEnviados = (leadFresco?.resources_sent_for || '').toLowerCase().split(',').map((d: string) => d.trim()).filter(Boolean);
+
+          // Filtrar: solo enviar desarrollos que NO se hayan enviado antes (fuzzy match)
+          const desarrollosPendientes = desarrollosActuales.filter((d: string) => {
+            return !desarrollosEnviados.some((sent: string) => sent.includes(d) || d.includes(sent));
+          });
+          const yaEnvioTodosRecursos = desarrollosPendientes.length === 0;
+
+          console.log('🔍 ¿Ya envió TODOS recursos?', yaEnvioTodosRecursos,
+            `| Pendientes: [${desarrollosPendientes.join(', ')}]`,
+            `| Ya enviados: [${desarrollosEnviados.join(', ')}]`);
+
+          if (!yaEnvioTodosRecursos) {
+            // Solo enviar recursos de desarrollos PENDIENTES (no los ya enviados)
+            const todosDesarrollosOriginales = desarrolloInteres.includes(',')
               ? desarrolloInteres.split(',').map((d: string) => d.trim())
               : [desarrolloInteres];
+            // Filtrar para obtener nombres originales (con case correcto) de los pendientes
+            const desarrollosLista = todosDesarrollosOriginales.filter((d: string) => {
+              const dLower = d.toLowerCase().trim();
+              return desarrollosPendientes.some((p: string) => p.includes(dLower) || dLower.includes(p));
+            });
+            // Si el filtro falló (edge case), usar todos
+            if (desarrollosLista.length === 0) {
+              desarrollosLista.push(...todosDesarrollosOriginales);
+            }
             
             console.log('📦 Enviando recursos de:', desarrollosLista.join(', '));
             
-            // PRIMERO marcar como enviados (evitar race condition)
+            // PRIMERO marcar como enviados (evitar race condition) — APPEND, no sobrescribir
+            const todosEnviados = [...new Set([...desarrollosEnviados, ...desarrollosPendientes])].join(', ');
             await this.supabase.client
               .from('leads')
-              .update({ resources_sent: true, resources_sent_for: desarrolloInteres })
+              .update({ resources_sent: true, resources_sent_for: todosEnviados })
               .eq('id', lead.id);
-            console.log('✅ Flag resources_sent guardado ANTES de enviar');
+            console.log('✅ Flag resources_sent guardado ANTES de enviar | Total:', todosEnviados);
             
             // Nombre para saludo - SOLO PRIMER NOMBRE
             const primerNombre = nombreCliente ? nombreCliente.split(' ')[0] : '';
@@ -4807,6 +4957,14 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   await this.meta.sendWhatsAppMessage(from, `${intro}\n\n${partes.join('\n\n')}`);
                   console.log(`✅ Recursos combinados enviados para ${dev}: ${recursosDesc.join(', ')}`);
                   accionesHistorial.push({ accion: `Envié ${recursosDesc.join(', ')}`, detalles: dev });
+                } else if (!brochurePDF) {
+                  // Fallback: desarrollo en DB pero SIN video/matterport/GPS — enviar brochure HTML
+                  const brochureFallback = brochureUrl || `https://brochures-santarita.pages.dev/${dev.toLowerCase().replace(/\s+/g, '_')}`;
+                  await new Promise(r => setTimeout(r, 400));
+                  await this.meta.sendWhatsAppMessage(from,
+                    `📋 Aquí te comparto información de *${dev}*:\n${brochureFallback}\n\n_Fotos, planos y precios_`);
+                  console.log(`⚠️ ${dev} sin video/GPS — enviado brochure como fallback`);
+                  accionesHistorial.push({ accion: 'Envié brochure (sin video disponible)', detalles: dev });
                 }
 
                 // PDF brochure must be sent as separate document
@@ -4828,11 +4986,48 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   console.log(`ℹ️ GPS de ${dev} disponible pero no solicitado`);
                 }
               } else {
-                console.error(`⚠️ No se encontró propiedad para: ${dev}`);
+                // Fallback: no encontró propiedad en DB — buscar brochure HTML como mínimo
+                console.error(`⚠️ No se encontró propiedad para: ${dev} — intentando fallback`);
+                const brochureFallbackUrl = `https://brochures-santarita.pages.dev/${dev.toLowerCase().replace(/\s+/g, '_')}`;
+                await this.meta.sendWhatsAppMessage(from,
+                  `📋 Aquí te comparto información de *${dev}*:\n${brochureFallbackUrl}\n\n_Fotos, planos y precios_`);
+                accionesHistorial.push({ accion: 'Envié brochure fallback (propiedad no en DB)', detalles: dev });
               }
             }
 
             console.log('✅ Recursos enviados de', desarrollosLista.length, 'desarrollos');
+
+            // ═══ MEMORIA: Guardar recursos enviados en notes para que Claude lo sepa ═══
+            try {
+              const { data: leadFrescoNotes } = await this.supabase.client
+                .from('leads').select('notes').eq('id', lead.id).single();
+              const notasActuales = typeof leadFrescoNotes?.notes === 'object' ? leadFrescoNotes.notes :
+                (typeof leadFrescoNotes?.notes === 'string' ? JSON.parse(leadFrescoNotes.notes || '{}') : {});
+              const recursosRecord = notasActuales.recursos_enviados || {};
+              for (const dev of desarrollosLista) {
+                const devKey = dev.toLowerCase().trim();
+                if (!recursosRecord[devKey]) {
+                  recursosRecord[devKey] = { sent_at: new Date().toISOString(), types: [] };
+                }
+                // Merge types
+                const tipos = recursosRecord[devKey].types || [];
+                for (const ah of accionesHistorial) {
+                  if (ah.detalles?.toLowerCase().includes(devKey) || devKey.includes(ah.detalles?.toLowerCase() || '')) {
+                    if (ah.accion.includes('video') && !tipos.includes('video')) tipos.push('video');
+                    if (ah.accion.includes('GPS') && !tipos.includes('GPS')) tipos.push('GPS');
+                    if (ah.accion.includes('brochure') && !tipos.includes('brochure')) tipos.push('brochure');
+                    if (ah.accion.includes('3D') && !tipos.includes('recorrido3D')) tipos.push('recorrido3D');
+                  }
+                }
+                if (tipos.length === 0) tipos.push('recursos');
+                recursosRecord[devKey].types = tipos;
+              }
+              notasActuales.recursos_enviados = recursosRecord;
+              await this.supabase.client.from('leads').update({ notes: notasActuales }).eq('id', lead.id);
+              console.log('🧠 Recursos guardados en notes.recursos_enviados');
+            } catch (e) {
+              console.error('⚠️ Error guardando recursos en notes:', e);
+            }
 
             // ═══ FIX: EMPUJAR A CITA DESPUÉS DE RECURSOS ═══
             // Verificar si NO tiene cita programada
@@ -7369,7 +7564,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
     if (debeEnviarRecursos) {
       const videosEnviados = new Set<string>();
       const matterportsEnviados = new Set<string>();
-      const MAX_RECURSOS = 4; // Máximo 4 recursos (2 videos + 2 matterports) para no saturar
+      const MAX_RECURSOS = Math.max(4, Math.min(8, (todosDesarrollos.length + todosModelos.length) * 2)); // Dinámico: 2 por desarrollo/modelo, mín 4, máx 8
       let recursosEnviados = 0;
 
       // ⏳ Pequeño delay para asegurar que el texto llegue primero
