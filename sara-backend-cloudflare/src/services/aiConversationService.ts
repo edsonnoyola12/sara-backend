@@ -2246,6 +2246,36 @@ Por WhatsApp te atiendo 24/7 🙌
         console.log(`ℹ️ Ya pedimos nombre ${nameAskCount} veces - dejando de preguntar`);
       }
 
+      // ═══ ENFORCEMENT: Auto-activar flags cuando SARA promete enviar recursos ═══
+      if (parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        const prometeVideo = respLower.includes('te envío el video') || respLower.includes('te mando el video') ||
+                             respLower.includes('envío el recorrido') || respLower.includes('te comparto el video') ||
+                             respLower.includes('aquí te va el video') || respLower.includes('envío video');
+        const prometeGPS = respLower.includes('te envío la ubicación') || respLower.includes('te mando la ubicación') ||
+                           respLower.includes('envío el gps') || respLower.includes('te comparto la ubicación') ||
+                           respLower.includes('aquí te va la ubicación') || respLower.includes('envío ubicación');
+        const prometeBrochure = respLower.includes('te envío el brochure') || respLower.includes('te envío el folleto') ||
+                                respLower.includes('te mando el brochure') || respLower.includes('envío el brochure') ||
+                                respLower.includes('te comparto el brochure') || respLower.includes('envío los planos');
+        const prometeRecursos = respLower.includes('te envío el video y recorrido') ||
+                                respLower.includes('te comparto información') ||
+                                respLower.includes('te envío info');
+
+        if ((prometeVideo || prometeRecursos) && !parsed.send_video_desarrollo) {
+          console.log('🔧 ENFORCEMENT: SARA prometió video/recursos pero NO activó flag → activando send_video_desarrollo');
+          parsed.send_video_desarrollo = true;
+        }
+        if (prometeGPS && !parsed.send_gps) {
+          console.log('🔧 ENFORCEMENT: SARA prometió GPS pero NO activó flag → activando send_gps');
+          parsed.send_gps = true;
+        }
+        if (prometeBrochure && !parsed.send_brochure) {
+          console.log('🔧 ENFORCEMENT: SARA prometió brochure pero NO activó flag → activando send_brochure');
+          parsed.send_brochure = true;
+        }
+      }
+
       return {
         intent: parsed.intent || 'otro',
         secondary_intents: secondaryIntents,
