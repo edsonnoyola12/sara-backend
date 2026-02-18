@@ -4345,23 +4345,33 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         await this.enviarRespuestaConAudioOpcional(from, respuestaLimpia, leadNotesConId);
         console.log('✅ Respuesta de Claude enviada (sin pregunta de crédito)');
 
-        // ═══ BOTONES CONTEXTUALES - Mejora UX ═══
+        // ═══ BOTONES CONTEXTUALES - Mejora UX (max 1 vez cada 5 mensajes) ═══
         try {
-          const hasAppointment = lead?.status === 'scheduled' || lead?.status === 'visit_scheduled';
-          const botones = getBotonesContextuales(analysis.intent, lead.status, hasAppointment);
+          const historial = lead.conversation_history || [];
+          const ultimosBotones = historial.slice(-10).filter((m: any) =>
+            m.role === 'assistant' && m.content?.includes('¿Qué te gustaría hacer?')
+          );
+          const mensajesDesdeUltimoBotones = ultimosBotones.length > 0
+            ? historial.slice(historial.lastIndexOf(ultimosBotones[ultimosBotones.length - 1])).length
+            : 999;
 
-          if (botones && botones.length > 0) {
-            // Pequeña pausa para que el texto llegue primero
-            await new Promise(r => setTimeout(r, 500));
-            await this.meta.sendQuickReplyButtons(
-              from,
-              '¿Qué te gustaría hacer?',
-              botones
-            );
-            console.log('📱 Botones contextuales enviados');
+          if (mensajesDesdeUltimoBotones >= 5) {
+            const hasAppointment = lead?.status === 'scheduled' || lead?.status === 'visit_scheduled';
+            const botones = getBotonesContextuales(analysis.intent, lead.status, hasAppointment);
+
+            if (botones && botones.length > 0) {
+              await new Promise(r => setTimeout(r, 500));
+              await this.meta.sendQuickReplyButtons(
+                from,
+                '¿Qué te gustaría hacer?',
+                botones
+              );
+              console.log('📱 Botones contextuales enviados');
+            }
+          } else {
+            console.log(`⏭️ Botones omitidos (solo ${mensajesDesdeUltimoBotones} msgs desde último envío, necesita 5+)`);
           }
         } catch (btnErr) {
-          // No fallar si los botones no se pueden enviar
           console.log('⚠️ No se pudieron enviar botones:', btnErr);
         }
 
@@ -4926,7 +4936,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                 }
                 const msgLowerRes = (originalMessage || message || '').toLowerCase();
                 const pidioPlanos = msgLowerRes.includes('plano') || msgLowerRes.includes('planos');
-                if (propiedadMatch.matterport_link && !pidioPlanos && analysis.send_matterport !== false) {
+                if (propiedadMatch.matterport_link && !pidioPlanos) {
                   partes.push(`🏠 *Recorrido 3D:* ${propiedadMatch.matterport_link}`);
                   recursosDesc.push('recorrido 3D');
                 }

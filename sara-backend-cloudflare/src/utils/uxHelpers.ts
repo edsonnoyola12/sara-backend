@@ -158,7 +158,7 @@ export function getBotonesContextuales(
     return [
       { id: 'btn_ver_casas', title: '🏠 Ver casas' },
       { id: 'btn_precios', title: '💰 Precios' },
-      { id: 'btn_credito', title: '🏦 Crédito' }
+      { id: 'btn_agendar', title: '📅 Agendar cita' }
     ];
   }
 
