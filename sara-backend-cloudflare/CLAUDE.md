@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-19 (Sesión 51)
+> Última actualización: 2026-02-19 (Sesión 53)
 
 ---
 
@@ -19,6 +19,7 @@
 | Frontend CRM | React + Vercel | `sara-crm-new/` (repo separado) |
 | **Telefonía (número Zac)** | **Zadarma** | Proveedor del número +524923860066 |
 | **Llamadas IA** | **Retell.ai** | `src/services/retellService.ts` - Sistema híbrido |
+| **Backups** | **Cloudflare R2** | `SARA_BACKUPS` bucket — backups semanales JSONL |
 
 ---
 
@@ -28,7 +29,7 @@
 # 1. Lee la documentación completa
 cat SARA_COMANDOS.md | head -500
 
-# 2. Verifica tests (OBLIGATORIO - 440+ tests)
+# 2. Verifica tests (OBLIGATORIO - 509+ tests)
 npm test
 
 # 3. Si falla algún test, NO hagas cambios
@@ -384,6 +385,7 @@ Protecciones implementadas:
 | `meta` / `metas` | Ver metas de ventas |
 | `status` / `salud` / `health` | Status del sistema (health monitor) |
 | `respuestas` / `respuestas ia` / `log ia` | Últimas 10 respuestas de SARA a leads |
+| `backups` / `backup` / `respaldos` | Ver historial de backups R2 |
 
 **ANÁLISIS:**
 | Comando | Función |
@@ -475,6 +477,8 @@ Protecciones implementadas:
 | `coaching [nombre]` | Consejos IA |
 | `pausar [nombre]` | Pausar lead (sin follow-ups/nurturing) |
 | `reanudar [nombre]` | Reactivar lead pausado |
+| `entregado [nombre]` | Marcar lead como entregado |
+| `delivery [nombre]` | Alias de entregado |
 
 ### Asesor Hipotecario
 | Comando | Función |
@@ -541,7 +545,7 @@ sara-backend-cloudflare/
 │   ├── utils/
 │   │   └── conversationLogic.ts
 │   └── tests/
-│       └── ...14 archivos de test
+│       └── ...17 archivos de test
 ├── wrangler.toml             # Config Cloudflare
 ├── SARA_COMANDOS.md          # Documentación detallada
 └── CLAUDE.md                 # Este archivo
@@ -652,6 +656,8 @@ Ver documentación en `docs/`:
 | `/test-comando-agencia?cmd=X&phone=Y&api_key=Z` | **QA agencia: 45 comandos** (detección + ejecución) |
 | `/test-lost-lead?phone=X&reason=Y&api_key=Z` | Marcar lead como perdido (guarda razón + status anterior en notes) |
 | `/run-health-monitor?api_key=Z` | Forzar health monitor (ping Supabase/Meta/OpenAI, guardar en `health_checks`) |
+| `/run-backup?api_key=Z` | Forzar backup R2 (conversations + leads JSONL al bucket `sara-backups`) |
+| `POST /test-load-test?api_key=Z` | Load test: simula N leads concurrentes (body: `{concurrent, desarrollos}`) |
 
 ---
 
@@ -1216,6 +1222,7 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Llamadas Retell reactivación | 10 AM Mar/Jue | llamadasReactivacionLeadsFrios | ✅ |
 | **Health Monitor** | **Cada 5 min** | healthMonitorCron (Supabase/Meta/OpenAI) | ✅ |
 | **Leads estancados (>72h)** | **9 AM L-V** | alertarLeadsEstancados | ✅ |
+| **R2 Backup semanal** | **Sábado 7 PM** | backupSemanalR2 (conversations + leads JSONL) | ✅ |
 
 ### 🔒 FLUJOS DE NEGOCIO
 
@@ -1245,13 +1252,15 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Categoría | Tests | Estado |
 |-----------|-------|--------|
 | Unit tests | 293 | ✅ |
-| Resilience tests | 49 | ✅ |
+| Resilience tests | 53 | ✅ |
 | Monitoring tests | 22 | ✅ |
-| Post-compra tests | 65 | ✅ |
+| Post-compra tests | 66 | ✅ |
+| Session 52 tests (rate limiter, edge cases, handoff) | 37 | ✅ |
+| Session 53 tests (delivery status, R2 backup, load test) | 33 | ✅ |
 | E2E Lead Journey | 7 | ✅ |
 | E2E Vendor Journey | 5 | ✅ |
 | E2E CEO Journey | 5 | ✅ |
-| **Total** | **440** | ✅ |
+| **Total** | **509** | ✅ |
 
 ### 👥 EQUIPO ACTIVO
 
@@ -5261,5 +5270,116 @@ ai_responses: id, lead_phone, lead_message, ai_response, model_used, tokens_used
 **Commits:** `e1bed0fc` (features), `35a0dc6d` (endpoint manual)
 **Deploy:** Version ID `90423cfb-c63b-4e6a-a7fc-079fd0ffc97d`
 
-**Commits:** `50e575d5` (features), `0cd4b6bf` (E2E endpoint), `e0615075` (49 tests)
-**Deploy:** Version ID `4162256f-bb3d-4de6-bee1-936d71c41916`
+---
+
+### 2026-02-19 (Sesión 52) - Meta Rate Limiter, Edge Case Handlers, Conversation Handoff
+
+**3 features implementadas:**
+
+#### Feature 1: Meta Rate Limiter (KV-based)
+
+Rate limiting para Meta API usando Cloudflare KV:
+- Límite configurable por ventana de tiempo
+- Tracking de requests con TTL automático
+- Fallback graceful si KV no disponible
+
+#### Feature 2: Edge Case Handlers
+
+Manejo mejorado de casos edge en conversaciones:
+- Detección de mensajes repetitivos del lead
+- Manejo de mensajes vacíos o solo whitespace
+- Respuestas apropiadas para formatos inesperados
+
+#### Feature 3: Conversation Handoff
+
+Sistema de transferencia de conversación a humano:
+- Detección de intención de hablar con humano
+- Notificación al vendedor asignado
+- Tracking del estado de handoff
+
+**Archivos nuevos:**
+- `src/tests/newFeatures52.test.ts` — 37 tests
+
+**Tests:** 477/477 pasando
+**Commit:** `dedccd5c`
+
+---
+
+### 2026-02-19 (Sesión 53) - Message Delivery Status, R2 Backup Semanal, Load Test
+
+**3 features implementadas:**
+
+#### Feature 1: Message Delivery Status
+
+Tracking de status de entrega de mensajes Meta (sent, delivered, read, failed):
+- Webhook handler para status updates de Meta
+- Retry automático en fallos retryable (500, 429)
+- No retry en errores permanentes (400, 401, 403, 404)
+- Vendor command `entregado {nombre}` para marcar entregas
+
+**Nuevo comando vendedor:**
+
+| Comando | Descripción |
+|---------|-------------|
+| `entregado [nombre]` | Marcar lead como entregado |
+| `delivery [nombre]` | Alias de entregado |
+| `entregas [nombre]` | Alias de entregado |
+
+#### Feature 2: R2 Backup Semanal
+
+Backup automático semanal de datos a Cloudflare R2:
+- Export de `conversation_history` (leads activos última semana) como JSONL
+- Export de `leads` activos completos como JSONL
+- Tabla `backup_log` para registro de backups
+- Retención: máximo 30 semanas (60 entries), los más viejos se borran automáticamente
+- CEO comando `backups` / `backup` / `respaldos` para ver historial
+
+**R2 Bucket:**
+- Nombre: `sara-backups`
+- Keys: `backups/conversations/{fecha}.jsonl` y `backups/leads/{fecha}.jsonl`
+- Binding: `env.SARA_BACKUPS`
+
+**SQL ejecutado:** `sql/backup_log_table.sql`
+
+```sql
+backup_log: id, fecha, tipo, file_key, row_count, size_bytes, created_at
+```
+
+**Endpoint manual:** `/run-backup?api_key=Z` — Forzar backup R2
+
+**Verificación en producción:**
+
+| Test | Resultado |
+|------|-----------|
+| `/run-backup` | ✅ 1 conversation (3KB) + 4 leads (12KB) exportados |
+| CEO `backups` | ✅ Muestra historial de backups |
+| R2 bucket | ✅ 2 archivos JSONL creados |
+| `backup_log` tabla | ✅ Registro guardado |
+
+#### Feature 3: Load Test Endpoint
+
+Endpoint para pruebas de carga simulando leads concurrentes:
+- `POST /test-load-test` con body `{ concurrent, desarrollos }`
+- Máximo 50 leads concurrentes
+- Cada lead envía 3 mensajes (contacto, desarrollo, cita)
+- Rota desarrollos por lead index
+- Genera teléfonos fake únicos (`521000000XXXX`)
+- Retorna métricas: success/fail counts, avg/max response time
+
+#### Archivos modificados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/index.ts` | Webhook status handler, delivery retry, load test endpoint |
+| `src/crons/dashboard.ts` | `backupSemanalR2()`, `getBackupLog()` |
+| `src/services/vendorCommandsService.ts` | Comando `entregado/delivery/entregas` |
+| `src/handlers/whatsapp-vendor.ts` | Handler `vendedorEntregado` |
+| `src/services/ceoCommandsService.ts` | Comando `backups/backup/respaldos` |
+| `src/routes/test.ts` | Endpoint `/run-backup` |
+| `wrangler.toml` | R2 bucket binding `SARA_BACKUPS` |
+| `sql/backup_log_table.sql` | **NUEVO** — tabla backup_log |
+| `src/tests/newFeatures53.test.ts` | **NUEVO** — 33 tests |
+
+**Tests:** 509/509 pasando (33 new + 37 session 52 + 439 existentes)
+**Commits:** `9ff87f4f` (features), `5aa932ae` (R2 binding), `3e9fa5ad` (run-backup endpoint)
+**Deploy:** Version ID `0a29609f-90da-4f73-be54-13159433bad3`
