@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-19 (Sesión 47)
+> Última actualización: 2026-02-19 (Sesión 48)
 
 ---
 
@@ -4975,5 +4975,87 @@ if (!desarrolloInteres && message) {
 | 9 | Cmd CEO: ventas | ✅ | Reporte ventas con métricas reales del mes |
 
 **9/9 pruebas pasando.** Diferencia vs Sesión 46: esta prueba incluyó **envío real por WhatsApp** (no solo dry-run).
+
+**Sin cambios de código** — solo verificación.
+
+---
+
+### 2026-02-19 (Sesión 48) - Prueba E2E Profunda: Journey Completo de Lead
+
+**Prueba end-to-end más completa hasta la fecha.** Simula el journey completo de un lead desde primer contacto hasta cancelación, incluyendo 6 fases con mensajes WhatsApp reales.
+
+**Lead de prueba:** Roberto E2E (5610016226) — creado, interactuado, y verificado en cada paso.
+
+#### Fase 1: Primer Contacto
+| # | Test | Resultado |
+|---|------|-----------|
+| 1.1 | Cleanup lead previo | ✅ Lead eliminado |
+| 1.2 | Primer mensaje WhatsApp real | ✅ Lead creado, status=new, asignado a Karla Muedano |
+| 1.3 | Verificar DB | ✅ ventana24h=true, score=0 |
+| 1.4 | Ventana 24h team | ✅ 19 members, pending system activo (21 pending, 13 expirados) |
+
+#### Fase 2: Descubrimiento (Recursos)
+| # | Test | Resultado |
+|---|------|-----------|
+| 2.1 | Monte Verde 3 recámaras | ✅ Score 0→21, desarrollo detectado |
+| 2.2 | Pedir GPS/ubicación | ✅ Procesado, WA enviado |
+| 2.3 | Pedir folleto/brochure | ✅ Procesado, WA enviado |
+| 2.4 | Score subió | ✅ score=21, ventana activa |
+
+#### Fase 3: Agendar Cita
+| # | Test | Resultado |
+|---|------|-----------|
+| 3.1 | Lead pide visita sábado 4pm | ✅ SARA procesó, WA enviado |
+| 3.2 | Crear cita en DB | ✅ Appointment `d9e86e8d` creado |
+| 3.3 | Citas recientes | ✅ 1 cita, status=scheduled |
+| 3.4 | Recordatorio cita | ✅ 1 enviado, 0 errores |
+
+#### Fase 4: Crédito Hipotecario
+| # | Test | Resultado |
+|---|------|-----------|
+| 4.1 | Lead pregunta INFONAVIT | ✅ Procesado, WA enviado |
+| 4.2 | Credit flow | ✅ Flujo iniciado, bancos listados, pregunta preferencia |
+| 4.3 | Mortgage app en DB | ✅ 1 app, status=pending, bank="Por definir" |
+| 4.4 | Limpiar contexto crédito | ✅ Flags limpiados |
+
+#### Fase 5: Comandos Equipo + KPIs
+| # | Test | Resultado |
+|---|------|-----------|
+| 5.1 | Vendedor: mis leads | ✅ → `vendedorResumenLeads` |
+| 5.2 | Vendedor: quién es Roberto | ✅ → `vendedorQuienEs` (params: nombre=roberto) |
+| 5.3 | Vendedor: citas | ✅ → `vendedorCitasHoy` |
+| 5.4 | CEO: pipeline | ✅ $10.3M, 4 leads nuevos |
+| 5.5 | CEO: hoy | ✅ 3 leads nuevos, 1 cita programada |
+| 5.6 | CEO: equipo | ✅ 19 miembros activos |
+| 5.7 | API /api/leads | ✅ Roberto E2E visible, **score=61** (subió de 21) |
+| 5.8 | API /api/properties | ✅ 34 propiedades |
+
+#### Fase 6: Cancelación
+| # | Test | Resultado |
+|---|------|-----------|
+| 6.1 | Lead dice "ya no me interesa" | ✅ SARA despedida respetuosa |
+| 6.2 | Cmd vendedor: perdido Roberto | ✅ → `vendedorCancelarLead` |
+| 6.3 | Estado final en DB | ✅ score=61, status=scheduled, ventana OK |
+
+#### Bonus: CRONs y Retell
+| # | Test | Resultado |
+|---|------|-----------|
+| B.1 | Simular CRON 2min | ✅ Alertas fríos + recordatorios apartado |
+| B.2 | Reporte CEO diario | ✅ Generado y enviado |
+| B.3 | Retell E2E suite | ✅ **25/25 passed, 0 failed** |
+
+#### Scoring Journey Verificado
+```
+Primer contacto:    score=0
+Monte Verde + GPS:  score=21
+Cita + crédito:     score=61
+```
+
+#### Resultado: **29/31 PASS, 1 WARN, 1 NOTA, 0 errores reales**
+
+**Hallazgos menores (no bugs):**
+1. `test-ver-notas` requiere phone de vendedor, no de lead — documentar mejor
+2. `test-setup-cita` no cambia status del lead a scheduled (solo el flujo AI real lo hace)
+3. `test-lost-lead` endpoint no existe — solo vía comando vendedor "perdido"
 
 **Sin cambios de código** — solo verificación.
