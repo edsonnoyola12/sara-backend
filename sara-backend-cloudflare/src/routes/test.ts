@@ -2897,6 +2897,49 @@ export async function handleTestRoutes(
       return corsResponse(JSON.stringify({ ok: true, updated: data }));
     }
 
+    // TEST: Marcar lead como perdido (lost) por teléfono
+    if (url.pathname === "/test-lost-lead") {
+      const phone = url.searchParams.get('phone');
+      const reason = url.searchParams.get('reason') || 'Marcado como perdido via test endpoint';
+      if (!phone) {
+        return corsResponse(JSON.stringify({ error: "Falta parámetro phone" }), 400);
+      }
+      const phoneSuffix = phone.replace(/\D/g, '').slice(-10);
+      const { data: lead, error: findError } = await supabase.client
+        .from('leads')
+        .select('id, name, phone, status, notes')
+        .ilike('phone', `%${phoneSuffix}`)
+        .maybeSingle();
+      if (findError) {
+        return corsResponse(JSON.stringify({ error: findError.message }), 500);
+      }
+      if (!lead) {
+        return corsResponse(JSON.stringify({ error: `No se encontró lead con teléfono ${phone}` }), 404);
+      }
+      const notas = typeof lead.notes === 'object' ? (lead.notes || {}) : {};
+      notas.lost_reason = reason;
+      notas.lost_at = new Date().toISOString();
+      notas.status_before_lost = lead.status;
+      const { error: updateError } = await supabase.client
+        .from('leads')
+        .update({
+          status: 'lost',
+          status_changed_at: new Date().toISOString(),
+          notes: notas
+        })
+        .eq('id', lead.id);
+      if (updateError) {
+        return corsResponse(JSON.stringify({ error: updateError.message }), 500);
+      }
+      return corsResponse(JSON.stringify({
+        ok: true,
+        message: `Lead "${lead.name || phone}" marcado como lost`,
+        lead_id: lead.id,
+        previous_status: lead.status,
+        reason
+      }));
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // TEST: Verificar manejo de respuestas interactivas
     // Prueba todos los mensajes con opciones 1️⃣2️⃣3️⃣ y templates
