@@ -643,6 +643,7 @@ Ver documentación en `docs/`:
 | `/test-envio-7pm?enviar=true` | Envío real del reporte 7 PM |
 | `/test-envio-7pm?enviar=true&phone=XXXX` | Envío real a un vendedor específico |
 | `/test-retell-e2e?api_key=Y` | **E2E Retell: 25 tests** (prompt, lookup, cita, tools, WhatsApp) |
+| `/test-resilience-e2e?api_key=Y` | **E2E Resilience: 12 tests** (retry queue, KV dedup, AI fallback, callbacks) |
 | `/test-comando-vendedor?cmd=X&phone=Y&api_key=Z` | **QA vendedor: 107 comandos** (detección + ejecución) |
 | `/test-comando-ceo?cmd=X&api_key=Z` | **QA CEO: 100 comandos** (detección + ejecución) |
 | `/test-comando-asesor?cmd=X&phone=Y&api_key=Z` | **QA asesor: 90 comandos** (detección + ejecución) |
