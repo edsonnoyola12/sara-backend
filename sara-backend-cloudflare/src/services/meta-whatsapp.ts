@@ -103,11 +103,21 @@ export type MessageTrackingCallback = (data: {
   contenido?: string;
 }) => Promise<void>;
 
+// Tipo para callback de mensajes fallidos (retry queue)
+export type FailedMessageCallback = (data: {
+  recipientPhone: string;
+  messageType: string;
+  payload: Record<string, any>;
+  context: string;
+  errorMessage: string;
+}) => Promise<void>;
+
 export class MetaWhatsAppService {
   private phoneNumberId: string;
   private accessToken: string;
   private apiVersion = 'v22.0';
   private trackingCallback?: MessageTrackingCallback;
+  private failedMessageCallback?: FailedMessageCallback;
 
   constructor(phoneNumberId: string, accessToken: string) {
     this.phoneNumberId = phoneNumberId;
@@ -120,6 +130,10 @@ export class MetaWhatsAppService {
    */
   setTrackingCallback(callback: MessageTrackingCallback): void {
     this.trackingCallback = callback;
+  }
+
+  setFailedMessageCallback(callback: FailedMessageCallback): void {
+    this.failedMessageCallback = callback;
   }
 
   /**
@@ -307,14 +321,31 @@ export class MetaWhatsAppService {
 
     console.log(`📤 Meta WA enviando a ${phone}: ${body.substring(0, 50)}...`);
 
-    const response = await this.fetchWithRetry(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    }, `sendMessage:${phone}`);
+    let response: Response;
+    try {
+      response = await this.fetchWithRetry(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      }, `sendMessage:${phone}`);
+    } catch (retryError: any) {
+      // All retries exhausted — enqueue for later retry
+      if (this.failedMessageCallback) {
+        try {
+          await this.failedMessageCallback({
+            recipientPhone: phone,
+            messageType: 'text',
+            payload: { body },
+            context: `sendMessage:${phone}`,
+            errorMessage: retryError?.message || String(retryError)
+          });
+        } catch (_) { /* silent */ }
+      }
+      throw retryError;
+    }
 
     const data = await response.json();
     if (!response.ok) {
@@ -1091,14 +1122,30 @@ export class MetaWhatsAppService {
 
     console.log(`📤 Enviando template "${templateName}" a ${phone}`);
 
-    const response = await this.fetchWithRetry(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    }, `sendTemplate:${templateName}:${phone}`);
+    let response: Response;
+    try {
+      response = await this.fetchWithRetry(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      }, `sendTemplate:${templateName}:${phone}`);
+    } catch (retryError: any) {
+      if (this.failedMessageCallback) {
+        try {
+          await this.failedMessageCallback({
+            recipientPhone: phone,
+            messageType: 'template',
+            payload: { templateName, languageCode, components },
+            context: `sendTemplate:${templateName}:${phone}`,
+            errorMessage: retryError?.message || String(retryError)
+          });
+        } catch (_) { /* silent */ }
+      }
+      throw retryError;
+    }
 
     const data = await response.json();
     if (!response.ok) {

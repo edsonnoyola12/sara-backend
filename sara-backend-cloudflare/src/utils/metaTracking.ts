@@ -1,6 +1,7 @@
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { SupabaseService } from '../services/supabase';
 import { createMessageTrackingService } from '../services/messageTrackingService';
+import { enqueueFailedMessage } from '../services/retryQueueService';
 
 export async function createMetaWithTracking(env: any, supabase: SupabaseService): Promise<MetaWhatsAppService> {
   const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
@@ -34,6 +35,18 @@ export async function createMetaWithTracking(env: any, supabase: SupabaseService
       categoria: data.categoria,
       contenido: data.contenido
     });
+  });
+
+  // Configurar callback para mensajes fallidos → retry queue
+  meta.setFailedMessageCallback(async (data) => {
+    await enqueueFailedMessage(
+      supabase,
+      data.recipientPhone,
+      data.messageType,
+      data.payload,
+      data.context,
+      data.errorMessage
+    );
   });
 
   return meta;

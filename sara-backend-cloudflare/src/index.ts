@@ -28,6 +28,7 @@ import { createMessageTrackingService } from './services/messageTrackingService'
 import { BusinessHoursService } from './services/businessHoursService';
 import { safeJsonParse } from './utils/safeHelpers';
 import { createMetaWithTracking } from './utils/metaTracking';
+import { processRetryQueue } from './services/retryQueueService';
 
 // CRON modules
 import {
@@ -806,6 +807,21 @@ export default {
           }
 
           console.log(`📥 Procesando mensaje de ${from}: tipo=${messageType}, texto="${text.substring(0, 50)}..."`);
+
+          // ═══ KV FAST DEDUP: Skip si ya procesamos este messageId ═══
+          if (messageId) {
+            const kvDedupKey = `wamsg:${messageId}`;
+            try {
+              const kvHit = await env.SARA_CACHE.get(kvDedupKey);
+              if (kvHit) {
+                console.log(`⏭️ KV dedup: ${messageId} already processed`);
+                return new Response('OK', { status: 200 });
+              }
+              await env.SARA_CACHE.put(kvDedupKey, '1', { expirationTtl: 86400 });
+            } catch (kvErr) {
+              console.warn('KV dedup failed, falling back to DB:', kvErr);
+            }
+          }
 
           // ═══ DEDUPLICACIÓN: Evitar procesar mensajes rápidos duplicados ═══
           const cleanPhone = from.replace(/\D/g, '');
@@ -3005,6 +3021,20 @@ export default {
         await cronHealthCheck(supabase, meta, env);
       } catch (healthError) {
         console.error('⚠️ Error en cronHealthCheck:', healthError);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // RETRY QUEUE - Re-enviar mensajes fallidos de Meta API (cada 4 min)
+    // ═══════════════════════════════════════════════════════════
+    if (mexicoMinute % 4 === 0) {
+      try {
+        const retryResult = await processRetryQueue(supabase, meta, '5610016226');
+        if (retryResult.processed > 0) {
+          console.log(`📬 Retry queue: ${retryResult.delivered} delivered, ${retryResult.failedPermanent} failed of ${retryResult.processed} processed`);
+        }
+      } catch (retryError) {
+        console.error('⚠️ Error en processRetryQueue:', retryError);
       }
     }
 

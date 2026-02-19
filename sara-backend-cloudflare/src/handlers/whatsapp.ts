@@ -15,7 +15,7 @@ import * as ceoHandlers from './whatsapp-ceo';
 import * as vendorHandlers from './whatsapp-vendor';
 import { HandlerContext } from './whatsapp-types';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
-import { enviarAlertaSistema } from '../crons/healthCheck';
+import { enviarAlertaSistema, logErrorToDB } from '../crons/healthCheck';
 import { isLikelySurveyResponse } from '../crons/nurturing';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1142,7 +1142,30 @@ export class WhatsAppHandler {
       // Si llegamos aquí, continuar a análisis con IA (delegado a aiConversationService)
       const aiService = new AIConversationService(this.supabase, this.twilio, this.meta, this.calendar, this.claude, env);
       aiService.setHandler(this);
-      const analysis = await aiService.analyzeWithAI(body, lead, properties);
+      let analysis: any;
+      try {
+        analysis = await aiService.analyzeWithAI(body, lead, properties);
+      } catch (aiError: any) {
+        console.error('❌ AI Service failed:', aiError?.message);
+
+        // 1. Fallback message to lead
+        const fullName = lead.name;
+        const nombre = fullName?.split(' ')[0];
+        const fallbackMsg = `Hola${nombre && fullName !== 'Sin nombre' && fullName !== 'Cliente' ? ' ' + nombre : ''}, gracias por tu mensaje. Estoy teniendo un problema técnico. Un asesor te contactará en breve para ayudarte.`;
+        try { await this.meta.sendWhatsAppMessage(cleanPhone, fallbackMsg); } catch (_) {}
+
+        // 2. Notify assigned vendor (24h-safe)
+        const vendor = teamMembers?.find((tm: any) => tm.id === lead.assigned_to);
+        if (vendor) {
+          const vendorMsg = `⚠️ SARA tuvo problema técnico al responder a ${lead.name || 'lead'} (${cleanPhone}).\n\nMensaje: "${body.substring(0, 200)}"\n\nContactalo directamente.`;
+          try { await enviarMensajeTeamMember(this.supabase, this.meta, vendor, vendorMsg, { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }); } catch (_) {}
+        }
+
+        // 3. Log to error_logs
+        try { await logErrorToDB(this.supabase, 'ai_service_error', aiError?.message || 'AI failed', { severity: 'critical', source: 'whatsapp:leadMessage:AI', stack: aiError?.stack, context: { leadId: lead.id, phone: cleanPhone } }); } catch (_) {}
+
+        return;
+      }
       console.log('📌 §  AI Analysis:', JSON.stringify(analysis, null, 2));
 
       // Si la IA detectó nombre, actualizar en memoria Y en DB
@@ -1227,7 +1250,7 @@ export class WhatsAppHandler {
 
     } catch (error) {
       console.error('❌ Error:', error);
-      await this.twilio.sendWhatsAppMessage(from, 'Disculpa, tuve un problema técnico. ¿Puedes repetir tu mensaje? 🙏');
+      await this.meta.sendWhatsAppMessage(from, 'Disculpa, tuve un problema técnico. ¿Puedes repetir tu mensaje? 🙏');
     }
   }
 
