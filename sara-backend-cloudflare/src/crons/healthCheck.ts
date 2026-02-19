@@ -547,3 +547,175 @@ export async function cronHealthCheck(
     console.error('❌ Error in cronHealthCheck:', e);
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HEALTH MONITOR CRON - Ping Supabase, Meta, OpenAI every 5 min
+// Saves results to health_checks table + alerts on failure
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function healthMonitorCron(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  env: { SARA_CACHE?: KVNamespace; META_PHONE_NUMBER_ID?: string; META_ACCESS_TOKEN?: string; ANTHROPIC_API_KEY?: string; OPENAI_API_KEY?: string }
+): Promise<{ supabase_ok: boolean; meta_ok: boolean; openai_ok: boolean; saved: boolean }> {
+  const result = { supabase_ok: false, meta_ok: false, openai_ok: false, saved: false };
+  const details: { service: string; ok: boolean; latency_ms: number; error?: string }[] = [];
+
+  // 1. Ping Supabase (SELECT 1)
+  try {
+    const t0 = Date.now();
+    const { error } = await supabase.client.from('leads').select('id', { count: 'exact', head: true });
+    const latency = Date.now() - t0;
+    result.supabase_ok = !error;
+    details.push({ service: 'supabase', ok: !error, latency_ms: latency, error: error?.message });
+  } catch (e: any) {
+    details.push({ service: 'supabase', ok: false, latency_ms: 0, error: e?.message });
+  }
+
+  // 2. Ping Meta API (GET phone number info)
+  try {
+    const t0 = Date.now();
+    const resp = await fetch(
+      `https://graph.facebook.com/v21.0/${env.META_PHONE_NUMBER_ID}`,
+      { headers: { Authorization: `Bearer ${env.META_ACCESS_TOKEN}` } }
+    );
+    const latency = Date.now() - t0;
+    result.meta_ok = resp.ok;
+    details.push({ service: 'meta', ok: resp.ok, latency_ms: latency, error: resp.ok ? undefined : `HTTP ${resp.status}` });
+  } catch (e: any) {
+    details.push({ service: 'meta', ok: false, latency_ms: 0, error: e?.message });
+  }
+
+  // 3. Ping OpenAI (GET /models - lightweight)
+  try {
+    const t0 = Date.now();
+    const apiKey = env.OPENAI_API_KEY;
+    if (apiKey) {
+      const resp = await fetch('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      const latency = Date.now() - t0;
+      result.openai_ok = resp.ok;
+      details.push({ service: 'openai', ok: resp.ok, latency_ms: latency, error: resp.ok ? undefined : `HTTP ${resp.status}` });
+    } else {
+      // No OpenAI key configured - skip (not critical)
+      result.openai_ok = true;
+      details.push({ service: 'openai', ok: true, latency_ms: 0, error: 'no key configured (skipped)' });
+    }
+  } catch (e: any) {
+    details.push({ service: 'openai', ok: false, latency_ms: 0, error: e?.message });
+  }
+
+  // 4. Save to health_checks table
+  try {
+    const allOk = result.supabase_ok && result.meta_ok && result.openai_ok;
+    await supabase.client.from('health_checks').insert({
+      status: allOk ? 'healthy' : 'degraded',
+      supabase_ok: result.supabase_ok,
+      meta_ok: result.meta_ok,
+      openai_ok: result.openai_ok,
+      details: details,
+    });
+    result.saved = true;
+  } catch (e) {
+    console.warn('⚠️ Could not save health check to DB:', e);
+  }
+
+  // 5. Alert on failure
+  const failedServices = details.filter(d => !d.ok).map(d => d.service);
+  if (failedServices.length > 0) {
+    const detailStr = details.map(d => `${d.ok ? '✅' : '❌'} ${d.service}: ${d.ok ? `${d.latency_ms}ms` : d.error}`).join('\n');
+    await enviarAlertaSistema(
+      meta,
+      `🚨 HEALTH MONITOR\n\nServicios caídos: ${failedServices.join(', ')}\n\n${detailStr}`,
+      env,
+      `health_monitor_${failedServices.join('_')}`
+    );
+  }
+
+  console.log(`🏥 Health monitor: supabase=${result.supabase_ok} meta=${result.meta_ok} openai=${result.openai_ok}`);
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET LAST HEALTH CHECK - For CEO "status" command
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function getLastHealthCheck(
+  supabase: SupabaseService
+): Promise<string> {
+  try {
+    const { data } = await supabase.client
+      .from('health_checks')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!data) return '⚠️ No hay health checks registrados aún.';
+
+    const ts = new Date(data.created_at);
+    const minutesAgo = Math.round((Date.now() - ts.getTime()) / 60000);
+    const details = data.details || [];
+
+    let msg = `🏥 *STATUS DEL SISTEMA*\n\n`;
+    msg += `Estado: ${data.status === 'healthy' ? '✅ SALUDABLE' : '⚠️ DEGRADADO'}\n`;
+    msg += `Última verificación: hace ${minutesAgo} min\n\n`;
+    msg += `*Servicios:*\n`;
+    msg += `${data.supabase_ok ? '✅' : '❌'} Supabase (BD)`;
+    const supDetail = details.find((d: any) => d.service === 'supabase');
+    if (supDetail) msg += ` — ${supDetail.latency_ms}ms`;
+    msg += '\n';
+    msg += `${data.meta_ok ? '✅' : '❌'} Meta (WhatsApp)`;
+    const metaDetail = details.find((d: any) => d.service === 'meta');
+    if (metaDetail) msg += ` — ${metaDetail.latency_ms}ms`;
+    msg += '\n';
+    msg += `${data.openai_ok ? '✅' : '❌'} OpenAI (TTS)`;
+    const oaiDetail = details.find((d: any) => d.service === 'openai');
+    if (oaiDetail && oaiDetail.latency_ms > 0) msg += ` — ${oaiDetail.latency_ms}ms`;
+    msg += '\n';
+
+    return msg;
+  } catch (e) {
+    return '❌ Error consultando health checks.';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET LAST AI RESPONSES - For CEO "respuestas" command
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function getLastAIResponses(
+  supabase: SupabaseService,
+  limit: number = 10
+): Promise<string> {
+  try {
+    const { data } = await supabase.client
+      .from('ai_responses')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (!data || data.length === 0) return '⚠️ No hay respuestas de IA registradas aún.';
+
+    let msg = `🤖 *ÚLTIMAS ${data.length} RESPUESTAS DE SARA*\n\n`;
+
+    for (const r of data) {
+      const ts = new Date(r.created_at);
+      const hora = ts.toLocaleTimeString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' });
+      const phone = r.lead_phone ? `...${r.lead_phone.slice(-4)}` : '??';
+      const leadMsg = (r.lead_message || '').substring(0, 60);
+      const aiResp = (r.ai_response || '').substring(0, 80);
+      const tokens = r.tokens_used || 0;
+      const timeMs = r.response_time_ms || 0;
+
+      msg += `*${hora}* | ${phone} | ${timeMs}ms | ${tokens} tok\n`;
+      msg += `📩 ${leadMsg}${leadMsg.length >= 60 ? '...' : ''}\n`;
+      msg += `🤖 ${aiResp}${aiResp.length >= 80 ? '...' : ''}\n\n`;
+    }
+
+    return msg;
+  } catch (e) {
+    return '❌ Error consultando respuestas de IA.';
+  }
+}

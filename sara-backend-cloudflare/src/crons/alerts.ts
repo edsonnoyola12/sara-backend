@@ -2205,3 +2205,76 @@ export async function alertaCitaNoConfirmada(supabase: SupabaseService, meta: Me
     console.error('Error en alertaCitaNoConfirmada:', e);
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// STALE LEAD CRON - Diario 9am: leads >72h sin contacto
+// Alerta al vendedor asignado, máximo 10 por vendedor/día
+// ═══════════════════════════════════════════════════════════════
+export async function alertarLeadsEstancados(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('⏰ Iniciando verificación de leads estancados (>72h)...');
+
+    const hace72h = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+
+    // Leads activos con >72h sin actividad
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, assigned_to, last_message_at, updated_at, created_at')
+      .not('status', 'in', '("closed","delivered","fallen","paused","lost","inactive")')
+      .lt('last_message_at', hace72h)
+      .not('assigned_to', 'is', null)
+      .order('last_message_at', { ascending: true });
+
+    if (!leads || leads.length === 0) {
+      console.log('✅ No hay leads estancados (>72h)');
+      return;
+    }
+
+    // Get team members
+    const { data: teamMembers } = await supabase.client
+      .from('team_members')
+      .select('id, name, phone, role')
+      .eq('active', true);
+
+    if (!teamMembers) return;
+    const tmMap = new Map(teamMembers.map(tm => [tm.id, tm]));
+
+    // Group by vendor, max 10 per vendor
+    const porVendedor = new Map<string, typeof leads>();
+    for (const lead of leads) {
+      if (!lead.assigned_to) continue;
+      const arr = porVendedor.get(lead.assigned_to) || [];
+      if (arr.length < 10) arr.push(lead);
+      porVendedor.set(lead.assigned_to, arr);
+    }
+
+    let totalAlertas = 0;
+    for (const [vendedorId, vendorLeads] of porVendedor) {
+      const vendedor = tmMap.get(vendedorId);
+      if (!vendedor?.phone) continue;
+
+      let msg = `⏰ *LEADS SIN CONTACTO (+72h)*\n\n`;
+      for (const lead of vendorLeads) {
+        const lastActivity = new Date(lead.last_message_at || lead.updated_at || lead.created_at);
+        const diasSin = Math.floor((Date.now() - lastActivity.getTime()) / (1000 * 60 * 60 * 24));
+        msg += `⚠️ *${lead.name || 'Sin nombre'}* — ${diasSin} días sin contacto\n`;
+        msg += `   Status: ${lead.status} | Tel: ...${(lead.phone || '').slice(-4)}\n\n`;
+      }
+      msg += `_Total: ${vendorLeads.length} leads necesitan seguimiento_`;
+
+      try {
+        await enviarMensajeTeamMember(supabase, meta, vendedor, msg, {
+          tipoMensaje: 'alerta_lead',
+          pendingKey: 'pending_alerta_lead'
+        });
+        totalAlertas += vendorLeads.length;
+      } catch (e) {
+        console.error(`Error enviando alerta estancados a ${vendedor.name}:`, e);
+      }
+    }
+
+    console.log(`⏰ Alertas de leads estancados enviadas: ${totalAlertas} leads a ${porVendedor.size} vendedores`);
+  } catch (e) {
+    console.error('Error en alertarLeadsEstancados:', e);
+  }
+}

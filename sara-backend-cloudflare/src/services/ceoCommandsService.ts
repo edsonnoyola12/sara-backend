@@ -9,6 +9,7 @@ import { SmartAlertsService } from './smartAlertsService';
 import { MarketIntelligenceService } from './marketIntelligenceService';
 import { CustomerValueService } from './customerValueService';
 import { PDFReportService } from './pdfReportService';
+import { getLastHealthCheck, getLastAIResponses } from '../crons/healthCheck';
 
 export interface CEOCommandResult {
   handled: boolean;
@@ -350,6 +351,16 @@ export class CEOCommandsService {
     const matchVideo = msgLower.match(/^(?:video|tour)\s+(.+)$/i);
     if (matchVideo) {
       return { action: 'call_handler', handlerName: 'ceoVideo', handlerParams: { desarrollo: matchVideo[1].trim() } };
+    }
+
+    // ═══ STATUS DEL SISTEMA ═══
+    if (msgLower === 'status' || msgLower === 'estado' || msgLower === 'salud' || msgLower === 'health') {
+      return { action: 'call_handler', handlerName: 'healthStatus' };
+    }
+
+    // ═══ ÚLTIMAS RESPUESTAS DE IA ═══
+    if (msgLower === 'respuestas' || msgLower === 'respuestas ia' || msgLower === 'respuestas ai' || msgLower === 'ai log' || msgLower === 'log ia') {
+      return { action: 'call_handler', handlerName: 'ultimasRespuestasAI' };
     }
 
     // ═══ NO RECONOCIDO ═══
@@ -993,6 +1004,18 @@ export class CEOCommandsService {
         // ━━━ CEO NUEVO LEAD (creación en whatsapp.ts) ━━━
         case 'ceoNuevoLead':
           return { needsExternalHandler: true };
+
+        // ═══ HEALTH STATUS ═══
+        case 'healthStatus': {
+          const statusMsg = await getLastHealthCheck(this.supabase);
+          return { message: statusMsg };
+        }
+
+        // ═══ ÚLTIMAS RESPUESTAS DE IA ═══
+        case 'ultimasRespuestasAI': {
+          const respMsg = await getLastAIResponses(this.supabase);
+          return { message: respMsg };
+        }
 
         default:
           return { error: `Handler no implementado: ${handlerName}` };

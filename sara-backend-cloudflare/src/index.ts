@@ -93,7 +93,8 @@ import {
   felicitarCumpleañosLeads,
   procesarCumpleañosLeads,
   felicitarCumpleañosEquipo,
-  alertaCitaNoConfirmada
+  alertaCitaNoConfirmada,
+  alertarLeadsEstancados
 } from './crons/alerts';
 
 // Follow-ups y Nurturing
@@ -178,7 +179,8 @@ import {
   cronHealthCheck,
   logErrorToDB,
   enviarDigestoErroresDiario,
-  enviarAlertaSistema
+  enviarAlertaSistema,
+  healthMonitorCron,
 } from './crons/healthCheck';
 
 export interface Env {
@@ -2911,6 +2913,15 @@ export default {
         console.log('🏠 Verificando aniversarios de compra...');
         await felicitarAniversarioCompra(supabase, meta);
       }
+      // Stale leads: alertar vendedores sobre leads >72h sin contacto (L-V)
+      if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+        console.log('⏰ Verificando leads estancados (>72h)...');
+        try {
+          await alertarLeadsEstancados(supabase, meta);
+        } catch (staleErr) {
+          console.error('⚠️ Error en alertarLeadsEstancados:', staleErr);
+        }
+      }
     }
 
     // 11am L-V: Follow-up automático a leads inactivos (3+ días sin responder)
@@ -3133,6 +3144,17 @@ export default {
         await cronHealthCheck(supabase, meta, env);
       } catch (healthError) {
         console.error('⚠️ Error en cronHealthCheck:', healthError);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // HEALTH MONITOR - Ping Supabase/Meta/OpenAI, save to health_checks (cada 5 min)
+    // ═══════════════════════════════════════════════════════════
+    if (mexicoMinute % 5 === 2) {
+      try {
+        await healthMonitorCron(supabase, meta, env);
+      } catch (hmError) {
+        console.error('⚠️ Error en healthMonitorCron:', hmError);
       }
     }
 

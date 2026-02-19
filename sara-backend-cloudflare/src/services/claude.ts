@@ -4,8 +4,16 @@
 
 import { retry, RetryPresets } from './retryService';
 
+export interface ClaudeChatResult {
+  text: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+}
+
 export class ClaudeService {
   private apiKey: string;
+  public lastResult: ClaudeChatResult | null = null;
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
@@ -88,6 +96,14 @@ export class ClaudeService {
       }
 
       const text = data.content?.[0]?.text || '';
+
+      // Store last result for metrics
+      this.lastResult = {
+        text,
+        model: data.model || 'claude-sonnet-4-20250514',
+        input_tokens: data.usage?.input_tokens || 0,
+        output_tokens: data.usage?.output_tokens || 0
+      };
 
       if (!text) {
         console.error('⚠️ Claude: Respuesta vacía', JSON.stringify(data).substring(0, 200));

@@ -1473,6 +1473,7 @@ RECUERDA:
 
     // Variable para guardar respuesta raw de OpenAI (accesible en catch)
     let openaiRawResponse = '';
+    const aiStartTime = Date.now();
 
     try {
       // Firma correcta: chat(history, userMsg, systemPrompt)
@@ -2374,6 +2375,25 @@ Por WhatsApp te atiendo 24/7 🙌
       if (leadPideBrochure && !parsed.send_brochure) {
         console.log('🔧 ENFORCEMENT-LEAD: Lead pidió brochure/folleto explícitamente → activando send_brochure');
         parsed.send_brochure = true;
+      }
+
+      // Log AI response to ai_responses table (fire-and-forget)
+      try {
+        const aiDuration = Date.now() - aiStartTime;
+        const claudeResult = this.claude.lastResult;
+        await this.supabase.client.from('ai_responses').insert({
+          lead_phone: lead?.phone || '',
+          lead_message: (message || '').substring(0, 500),
+          ai_response: (parsed.response || '').substring(0, 1000),
+          model_used: claudeResult?.model || 'claude-sonnet-4-20250514',
+          tokens_used: (claudeResult?.input_tokens || 0) + (claudeResult?.output_tokens || 0),
+          input_tokens: claudeResult?.input_tokens || 0,
+          output_tokens: claudeResult?.output_tokens || 0,
+          response_time_ms: aiDuration,
+          intent: parsed.intent || 'otro',
+        });
+      } catch (logErr) {
+        console.warn('⚠️ Error logging AI response:', logErr);
       }
 
       return {
