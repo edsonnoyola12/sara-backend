@@ -10,6 +10,7 @@ import { MarketIntelligenceService } from './marketIntelligenceService';
 import { CustomerValueService } from './customerValueService';
 import { PDFReportService } from './pdfReportService';
 import { getLastHealthCheck, getLastAIResponses } from '../crons/healthCheck';
+import { getBackupLog } from '../crons/dashboard';
 
 export interface CEOCommandResult {
   handled: boolean;
@@ -203,6 +204,11 @@ export class CEOCommandsService {
         msgLower === 'referidos' || msgLower === 'programa referidos' ||
         msgLower === 'clientes vip' || msgLower === 'top clientes') {
       return { action: 'call_handler', handlerName: 'valorCliente' };
+    }
+
+    // ═══ BACKUPS ═══
+    if (msgLower === 'backups' || msgLower === 'backup' || msgLower === 'respaldos') {
+      return { action: 'call_handler', handlerName: 'verBackups' };
     }
 
     // ═══ HOY (resumen del día) ═══
@@ -931,6 +937,29 @@ export class CEOCommandsService {
           const analysis = await clvService.getCLVAnalysis();
           const message = clvService.formatAnalysisForWhatsApp(analysis);
           return { message };
+        }
+
+        // ═══ VER BACKUPS ═══
+        case 'verBackups': {
+          const logs = await getBackupLog(this.supabase);
+          if (!logs || logs.length === 0) {
+            return { message: '💾 No hay backups registrados aún.' };
+          }
+          // Agrupar por fecha
+          const byFecha: Record<string, any[]> = {};
+          for (const log of logs) {
+            if (!byFecha[log.fecha]) byFecha[log.fecha] = [];
+            byFecha[log.fecha].push(log);
+          }
+          const fechas = Object.keys(byFecha).slice(0, 5);
+          const lines = fechas.map(f => {
+            const items = byFecha[f];
+            const totalRows = items.reduce((s: number, i: any) => s + (i.row_count || 0), 0);
+            const totalBytes = items.reduce((s: number, i: any) => s + (i.size_bytes || 0), 0);
+            const tipos = items.map((i: any) => i.tipo).join(', ');
+            return `📅 ${f}\n   ${tipos} — ${totalRows} registros, ${Math.round(totalBytes/1024)}KB`;
+          });
+          return { message: `💾 *Últimos Backups R2*\n\n${lines.join('\n\n')}` };
         }
 
         // ═══ REPORTE SEMANAL ═══

@@ -1017,3 +1017,106 @@ export async function exportBackup(supabase: SupabaseService): Promise<any> {
 
   return backup;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// R2 BACKUP SEMANAL - Exporta conversations y leads a R2 como JSONL
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function backupSemanalR2(
+  supabase: SupabaseService,
+  r2: R2Bucket
+): Promise<{ conversations: { key: string; rows: number; bytes: number }; leads: { key: string; rows: number; bytes: number } }> {
+  const fecha = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const hace7dias = new Date();
+  hace7dias.setDate(hace7dias.getDate() - 7);
+
+  // 1. Export conversation_history de la última semana
+  const { data: convLeads } = await supabase.client
+    .from('leads')
+    .select('id, phone, name, conversation_history, last_message_at')
+    .gte('last_message_at', hace7dias.toISOString())
+    .not('conversation_history', 'is', null);
+
+  let convJsonl = '';
+  let convRows = 0;
+  if (convLeads && convLeads.length > 0) {
+    for (const lead of convLeads) {
+      convJsonl += JSON.stringify({
+        lead_id: lead.id,
+        phone: lead.phone,
+        name: lead.name,
+        last_message_at: lead.last_message_at,
+        conversation_history: lead.conversation_history
+      }) + '\n';
+      convRows++;
+    }
+  }
+
+  const convKey = `backups/conversations/${fecha}.jsonl`;
+  const convBytes = new TextEncoder().encode(convJsonl).length;
+  await r2.put(convKey, convJsonl, { httpMetadata: { contentType: 'application/jsonl' } });
+
+  // 2. Export leads activos
+  const { data: activeLeads } = await supabase.client
+    .from('leads')
+    .select('*')
+    .not('status', 'in', '("fallen","inactive","lost")');
+
+  let leadsJsonl = '';
+  let leadsRows = 0;
+  if (activeLeads && activeLeads.length > 0) {
+    for (const lead of activeLeads) {
+      leadsJsonl += JSON.stringify(lead) + '\n';
+      leadsRows++;
+    }
+  }
+
+  const leadsKey = `backups/leads/${fecha}.jsonl`;
+  const leadsBytes = new TextEncoder().encode(leadsJsonl).length;
+  await r2.put(leadsKey, leadsJsonl, { httpMetadata: { contentType: 'application/jsonl' } });
+
+  // 3. Guardar en backup_log
+  try {
+    await supabase.client.from('backup_log').insert([
+      { fecha, tipo: 'conversations', file_key: convKey, row_count: convRows, size_bytes: convBytes },
+      { fecha, tipo: 'leads', file_key: leadsKey, row_count: leadsRows, size_bytes: leadsBytes }
+    ]);
+  } catch (_) { /* tabla puede no existir aún */ }
+
+  // 4. Retención: borrar backups > 30 (los más viejos)
+  try {
+    const { data: oldBackups } = await supabase.client
+      .from('backup_log')
+      .select('id, file_key')
+      .order('fecha', { ascending: true });
+
+    if (oldBackups && oldBackups.length > 60) { // 60 = 30 semanas × 2 tipos
+      const toDelete = oldBackups.slice(0, oldBackups.length - 60);
+      for (const old of toDelete) {
+        try { await r2.delete(old.file_key); } catch (_) {}
+      }
+      const idsToDelete = toDelete.map(o => o.id);
+      await supabase.client.from('backup_log').delete().in('id', idsToDelete);
+    }
+  } catch (_) { /* silent */ }
+
+  console.log(`💾 R2 Backup completado: ${convRows} conversations (${Math.round(convBytes/1024)}KB), ${leadsRows} leads (${Math.round(leadsBytes/1024)}KB)`);
+
+  return {
+    conversations: { key: convKey, rows: convRows, bytes: convBytes },
+    leads: { key: leadsKey, rows: leadsRows, bytes: leadsBytes }
+  };
+}
+
+export async function getBackupLog(supabase: SupabaseService): Promise<any[]> {
+  try {
+    const { data } = await supabase.client
+      .from('backup_log')
+      .select('*')
+      .order('fecha', { ascending: false })
+      .limit(10); // 5 semanas × 2 tipos
+    return data || [];
+  } catch (_) {
+    return [];
+  }
+}

@@ -285,6 +285,12 @@ export class VendorCommandsService {
       return { matched: true, handlerName: 'vendedorBotLead', handlerParams: { nombreLead: botMatch[1].trim() } };
     }
 
+    // ═══ ENTREGADO: Ver status de delivery de mensajes a un lead ═══
+    const entregadoMatch = msg.match(/^(?:entregado|delivery|entregas)\s+(.+)$/i);
+    if (entregadoMatch) {
+      return { matched: true, handlerName: 'vendedorEntregado', handlerParams: { nombreLead: entregadoMatch[1].trim() } };
+    }
+
     // ═══ NOTA / APUNTE - Agregar nota a un lead ═══
     // Formato flexible: "nota rodrigo hablé por tel", "nota Juan: le interesa", "apunte María presupuesto 2M"
     const notaMatch = msg.match(/^(?:nota|apunte|registrar)\s+([a-záéíóúñü]+)[\s:]+(.+)$/i);

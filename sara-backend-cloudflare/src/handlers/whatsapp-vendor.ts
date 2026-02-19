@@ -1867,7 +1867,7 @@ export async function routeVendorCommand(ctx: HandlerContext, handler: any,
     'recordar', 'programar', 'propiedades', 'inventario', 'asignar',
     'adelante', 'atras', 'atrás', '#cerrar', '#mas', '#más', 'apunte',
     'registrar', 'referido', 'cumple', 'email', 'correo',
-    'humano', 'bot'
+    'humano', 'bot', 'entregado', 'delivery', 'entregas'
   ];
   const firstWord = mensaje.split(/\s+/)[0];
   const looksLikeCommand = COMMAND_KEYWORDS.includes(firstWord);
@@ -1978,6 +1978,9 @@ export async function routeVendorCommand(ctx: HandlerContext, handler: any,
       break;
     case 'vendedorBotLead':
       await vendedorBotLead(ctx, from, params.nombreLead, vendedor);
+      break;
+    case 'vendedorEntregado':
+      await vendedorEntregado(ctx, from, params.nombreLead, vendedor);
       break;
 
     // ━━━ HIPOTECA Y ASESORES (interactúan con externos) ━━━
@@ -3422,6 +3425,59 @@ export async function vendedorBotLead(ctx: HandlerContext, from: string, nombreL
     `🤖 *${lead.name}* — SARA reactivada.\n\n` +
     `SARA volverá a responder automáticamente a este lead.\n\n` +
     `Usa *humano ${lead.name}* si necesitas desactivarla de nuevo.`
+  );
+}
+
+// ═══ ENTREGADO: Ver status de delivery de últimos 5 mensajes a un lead ═══
+export async function vendedorEntregado(ctx: HandlerContext, from: string, nombreLead: string, vendedor: any): Promise<void> {
+  if (!nombreLead) {
+    await ctx.twilio.sendWhatsAppMessage(from, '❌ Escribe: *entregado [nombre del lead]*');
+    return;
+  }
+
+  const { data: leads } = await ctx.supabase.client
+    .from('leads')
+    .select('id, name, phone')
+    .eq('assigned_to', vendedor.id)
+    .ilike('name', `%${nombreLead}%`)
+    .limit(5);
+
+  if (!leads || leads.length === 0) {
+    await ctx.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
+    return;
+  }
+  if (leads.length > 1) {
+    const lista = leads.map(l => `• ${l.name}`).join('\n');
+    await ctx.twilio.sendWhatsAppMessage(from, `⚠️ Encontré varios leads:\n${lista}\n\nSé más específico.`);
+    return;
+  }
+
+  const lead = leads[0];
+  const cleanPhone = lead.phone?.replace(/\D/g, '') || '';
+
+  // Buscar últimos 5 mensajes enviados a este lead
+  const { data: statuses } = await ctx.supabase.client
+    .from('message_delivery_status')
+    .select('message_id, status, timestamp, error_code, error_message')
+    .eq('recipient_phone', cleanPhone)
+    .order('timestamp', { ascending: false })
+    .limit(5);
+
+  if (!statuses || statuses.length === 0) {
+    await ctx.twilio.sendWhatsAppMessage(from, `📬 *${lead.name}*: No hay registros de delivery recientes.`);
+    return;
+  }
+
+  const statusEmoji: Record<string, string> = { sent: '📤', delivered: '✅', read: '👁️', failed: '❌' };
+  const lines = statuses.map((s: any) => {
+    const emoji = statusEmoji[s.status] || '❓';
+    const fecha = s.timestamp ? new Date(s.timestamp).toLocaleString('es-MX', { timeZone: 'America/Mexico_City', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '?';
+    const error = s.error_code ? ` (Error: ${s.error_code})` : '';
+    return `${emoji} ${s.status.toUpperCase()} - ${fecha}${error}`;
+  });
+
+  await ctx.twilio.sendWhatsAppMessage(from,
+    `📬 *Delivery status — ${lead.name}*\n\nÚltimos ${statuses.length} mensajes:\n${lines.join('\n')}`
   );
 }
 

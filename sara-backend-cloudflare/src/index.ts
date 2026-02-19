@@ -170,7 +170,7 @@ import {
 } from './crons/videos';
 
 // Dashboard - backup (status/analytics moved to routes/api-bi.ts)
-import { exportBackup } from './crons/dashboard';
+import { exportBackup, backupSemanalR2, getBackupLog } from './crons/dashboard';
 
 // Health Check - Automated monitoring and alerts
 import {
@@ -209,6 +209,7 @@ export interface Env {
   RETELL_API_KEY?: string; // API key de Retell.ai
   RETELL_AGENT_ID?: string; // ID del agente SARA en Retell
   RETELL_PHONE_NUMBER?: string; // Número de teléfono para llamadas salientes
+  SARA_BACKUPS?: R2Bucket; // R2 bucket para backups semanales
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -737,9 +738,20 @@ export default {
                 updated_at: new Date().toISOString()
               }, { onConflict: 'message_id' });
 
-              // Log especial para errores
+              // Log especial para errores + encolar en retry_queue
               if (statusType === 'failed') {
                 console.error(`❌ MENSAJE FALLIDO: ${recipientId} - Error ${errorCode}: ${errorTitle}`);
+                // Encolar en retry_queue para reintento
+                try {
+                  await enqueueFailedMessage(
+                    supabase,
+                    recipientId,
+                    'text', // tipo genérico, se resolverá en retry
+                    { body: `[Re-send from failed status: ${messageId}]`, originalMessageId: messageId },
+                    `Status webhook failed: ${errorCode}`,
+                    `Meta delivery failed: ${errorCode} - ${errorTitle}`
+                  );
+                } catch (_) { /* silent */ }
               }
             } catch (dbError) {
               // Si la tabla no existe, solo loguear
@@ -2075,6 +2087,98 @@ export default {
       }));
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // LOAD TEST: Simula N leads concurrentes (NO envía WhatsApp real)
+    // POST /test-load-test?concurrent=20&api_key=XXX
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/test-load-test' && request.method === 'POST') {
+      const concurrent = parseInt(url.searchParams.get('concurrent') || '10');
+      const maxConcurrent = Math.min(concurrent, 50); // Cap at 50
+
+      const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
+      const aiService = new AIConversationService(supabase, null, meta, null, claude, env);
+
+      // Obtener propiedades para contexto
+      const { data: props } = await supabase.client.from('properties').select('*').limit(50);
+      const properties = props || [];
+
+      const desarrollos = ['Monte Verde', 'Los Encinos', 'Distrito Falco', 'Andes', 'Miravalle'];
+      const mensajes = [
+        'hola busco casa de 3 recamaras',
+        'que tienen en {desarrollo}',
+        'quiero agendar cita el sabado a las 11'
+      ];
+
+      const results: Array<{ leadId: number; step: string; success: boolean; time_ms: number; error?: string }> = [];
+      const startTime = Date.now();
+
+      // Simular leads concurrentes
+      const promises = Array.from({ length: maxConcurrent }, async (_, i) => {
+        const leadNum = i + 1;
+        const desarrollo = desarrollos[i % desarrollos.length];
+
+        for (const msgTemplate of mensajes) {
+          const msg = msgTemplate.replace('{desarrollo}', desarrollo);
+          const stepStart = Date.now();
+
+          try {
+            const fakeLead = {
+              id: `load-test-${leadNum}`,
+              name: `Lead Test ${leadNum}`,
+              phone: `521000000${String(leadNum).padStart(4, '0')}`,
+              status: 'new',
+              score: 0,
+              notes: {},
+              conversation_history: [],
+              property_interest: null,
+              assigned_to: null
+            };
+
+            const analysis = await aiService.analyzeWithAI(msg, fakeLead, properties);
+            const elapsed = Date.now() - stepStart;
+
+            results.push({
+              leadId: leadNum,
+              step: msg.substring(0, 40),
+              success: !!analysis?.response,
+              time_ms: elapsed
+            });
+          } catch (err: any) {
+            results.push({
+              leadId: leadNum,
+              step: msg.substring(0, 40),
+              success: false,
+              time_ms: Date.now() - stepStart,
+              error: err.message?.substring(0, 100)
+            });
+          }
+        }
+      });
+
+      await Promise.all(promises);
+
+      const totalTime = Date.now() - startTime;
+      const successResults = results.filter(r => r.success);
+      const failedResults = results.filter(r => !r.success);
+      const times = successResults.map(r => r.time_ms);
+      const avgTime = times.length > 0 ? Math.round(times.reduce((a, b) => a + b, 0) / times.length) : 0;
+      const maxTime = times.length > 0 ? Math.max(...times) : 0;
+      const minTime = times.length > 0 ? Math.min(...times) : 0;
+
+      return corsResponse(JSON.stringify({
+        ok: true,
+        concurrent: maxConcurrent,
+        total_requests: results.length,
+        success: successResults.length,
+        failed: failedResults.length,
+        total_time_ms: totalTime,
+        avg_response_ms: avgTime,
+        min_response_ms: minTime,
+        max_response_ms: maxTime,
+        errors: failedResults.map(r => ({ lead: r.leadId, step: r.step, error: r.error }))
+      }));
+    }
+
     return corsResponse(JSON.stringify({ error: 'Not Found' }), 404);
     } catch (error) {
       // Capturar error en Sentry con contexto completo
@@ -2471,6 +2575,31 @@ export default {
         await archivarConversationHistory(supabase);
       } catch (e) {
         console.error('❌ Error en archival:', e);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // BACKUP SEMANAL R2 - Domingos 7 PM MX (1 AM UTC lunes)
+    // Exporta conversations + leads activos como JSONL
+    // ═══════════════════════════════════════════════════════════
+    if (event.cron === '0 1 * * *' && mexicoDay === 0) { // domingo
+      try {
+        if (env.SARA_BACKUPS) {
+          console.log('💾 Iniciando backup semanal R2...');
+          const result = await backupSemanalR2(supabase, env.SARA_BACKUPS);
+          console.log(`✅ Backup R2: ${result.conversations.rows} convs, ${result.leads.rows} leads`);
+          // Notificar al dev
+          await enviarAlertaSistema(meta,
+            `💾 *Backup Semanal R2*\n\n` +
+            `📝 Conversaciones: ${result.conversations.rows} (${Math.round(result.conversations.bytes/1024)}KB)\n` +
+            `👤 Leads activos: ${result.leads.rows} (${Math.round(result.leads.bytes/1024)}KB)`,
+            env, 'backup_r2'
+          );
+        } else {
+          console.log('⚠️ R2 no configurado, saltando backup semanal');
+        }
+      } catch (e) {
+        console.error('❌ Error en backup semanal R2:', e);
       }
     }
 
