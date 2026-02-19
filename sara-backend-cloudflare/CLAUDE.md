@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-18 (Sesión 45)
+> Última actualización: 2026-02-18 (Sesión 46)
 
 ---
 
@@ -4922,3 +4922,34 @@ if (!desarrolloInteres && message) {
 
 **Tests:** 369/369 pasando
 **Deploy:** Completado
+
+---
+
+### 2026-02-18 (Sesión 46) - Prueba E2E Real en Producción
+
+**Prueba end-to-end completa contra `sara-backend.edson-633.workers.dev`:**
+
+#### Resultados:
+
+| Prueba | Resultado | Detalles |
+|--------|-----------|----------|
+| Health Check | ✅ | Supabase (873ms), KV (506ms), Meta API (1767ms), 18 team members, 34 properties |
+| Status Dashboard | ✅ | All services healthy, CRONs activos |
+| AI Response: interés general | ✅ | Intent: solicitar_cita, respuesta coherente |
+| AI Response: Monte Verde + precio | ✅ | Desarrollo detectado: "Monte Verde", send_video_desarrollo: true |
+| AI Response: crédito hipotecario | ✅ | Intent: info_credito, info detallada de bancos y INFONAVIT |
+| AI Response: rechazo | ✅ | Despedida respetuosa, no insiste |
+| Debug Lead real | ✅ | Lead "Edson" encontrado, dentro de ventana 24h |
+| CEO comando: equipo | ✅ | 18 miembros activos listados con roles |
+| Retell E2E suite | ✅ | **25/25 tests passed**, 0 failures |
+| Vendedor comando: mis leads | ✅ | Handler detectado correctamente |
+| API /api/leads | ✅ | Retorna leads reales con data completa |
+| API /api/properties | ✅ | 34 desarrollos en catálogo |
+| API /api/diagnostico | ✅ | Equipo completo con roles |
+| Asesor error handling | ✅ | Comando no reconocido → sugiere ayuda |
+| CRON status | ✅ | Todos configurados y corriendo |
+| Error logs | ✅ | Solo 2 errores de test resueltos, sistema limpio |
+
+**16/16 pruebas E2E pasaron en producción.**
+
+**Sin cambios de código** — solo verificación.
