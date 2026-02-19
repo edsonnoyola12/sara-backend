@@ -103,6 +103,7 @@ import {
 } from '../crons/videos';
 
 import { runHealthCheck, trackError, enviarAlertaSistema, healthMonitorCron } from '../crons/healthCheck';
+import { backupSemanalR2, getBackupLog } from '../crons/dashboard';
 
 interface Env {
   SUPABASE_URL: string;
@@ -4033,6 +4034,19 @@ Mensaje: ${mensaje}`;
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       const result = await healthMonitorCron(supabase, meta, env);
       return corsResponse(JSON.stringify({ message: 'Health monitor ejecutado', ...result }));
+    }
+
+    if (url.pathname === '/run-backup') {
+      console.log('💾 Forzando backup R2...');
+      if (!env.SARA_BACKUPS) {
+        return corsResponse(JSON.stringify({ error: 'R2 bucket SARA_BACKUPS no configurado' }), 500);
+      }
+      const result = await backupSemanalR2(supabase, env.SARA_BACKUPS);
+      return corsResponse(JSON.stringify({
+        message: 'Backup R2 ejecutado',
+        conversations: { rows: result.conversations.rows, size_kb: Math.round(result.conversations.bytes / 1024) },
+        leads: { rows: result.leads.rows, size_kb: Math.round(result.leads.bytes / 1024) }
+      }, null, 2));
     }
 
     if (url.pathname === '/test-objecion') {
