@@ -1,9 +1,11 @@
 import { SupabaseService } from './supabase';
 import { CalendarService } from './calendar';
 import { TwilioService } from './twilio';
+import { MetaWhatsAppService } from './meta-whatsapp';
 import { HORARIOS } from '../handlers/constants';
 import { parseFecha as parseFechaCentral, parseFechaISO as parseFechaISOCentral, parseHoraISO as parseHoraISOCentral } from '../utils/dateParser';
 import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // INTERFACES
@@ -46,11 +48,13 @@ export class AppointmentService {
   private supabase: SupabaseService;
   private calendar: CalendarService;
   private twilio: TwilioService;
+  private meta?: MetaWhatsAppService;
 
-  constructor(supabase: SupabaseService, calendar: CalendarService, twilio: TwilioService) {
+  constructor(supabase: SupabaseService, calendar: CalendarService, twilio: TwilioService, meta?: MetaWhatsAppService) {
     this.supabase = supabase;
     this.calendar = calendar;
     this.twilio = twilio;
+    this.meta = meta;
   }
 
   // NOTA: El método principal para crear citas es crearCitaCompleta()
@@ -124,15 +128,21 @@ export class AppointmentService {
 
     const clientName = lead.name || `Cliente ${lead.phone.slice(-4)}`;
 
-    const salesMsg = `📅 *NUEVA CITA*
+    const salesMsg = `📅 *NUEVA CITA*\n\n*Cliente:* ${clientName}\n📱 ${formatPhoneForDisplay(lead.phone)}\n*Propiedad:* ${lead.property_interest || 'No especificado'}\n\n*Fecha:* ${dateFormatted}\n*Hora:* ${appointment.scheduled_time}`;
 
-*Cliente:* ${clientName}
-📱 ${formatPhoneForDisplay(lead.phone)}
-*Propiedad:* ${lead.property_interest || 'No especificado'}
-
-*Fecha:* ${dateFormatted}
-*Hora:* ${appointment.scheduled_time}`;
-
+    // Usar enviarMensajeTeamMember (24h-safe) si meta está disponible
+    if (this.meta) {
+      try {
+        await enviarMensajeTeamMember(this.supabase, this.meta, assignedTo, salesMsg, {
+          tipoMensaje: 'alerta_lead',
+          pendingKey: 'pending_alerta_lead'
+        });
+        return;
+      } catch (e) {
+        console.error('⚠️ Error en enviarMensajeTeamMember para nueva cita, fallback:', e);
+      }
+    }
+    // Fallback: raw send (legacy)
     await this.twilio.sendWhatsAppMessage(assignedTo.phone, salesMsg);
   }
 
@@ -146,11 +156,22 @@ export class AppointmentService {
 
     const clientName = appointment.leads.name || `Cliente ${appointment.leads.phone.slice(-4)}`;
 
-    const salesMsg = `🚫 *CITA CANCELADA*
+    const salesMsg = `🚫 *CITA CANCELADA*\n\nCliente: ${clientName}\nFecha: ${dateFormatted} ${appointment.scheduled_time}${reason ? `\nRazón: ${reason}` : ''}`;
 
-Cliente: ${clientName}
-Fecha: ${dateFormatted} ${appointment.scheduled_time}`;
-
+    // Usar enviarMensajeTeamMember (24h-safe) si meta está disponible
+    if (this.meta && appointment.team_members) {
+      try {
+        await enviarMensajeTeamMember(this.supabase, this.meta, appointment.team_members, salesMsg, {
+          tipoMensaje: 'alerta_lead',
+          pendingKey: 'pending_alerta_lead'
+        });
+        console.log(`✅ Vendedor notificado de cancelación (24h-safe): ${appointment.team_members.name}`);
+        return;
+      } catch (e) {
+        console.error('⚠️ Error en enviarMensajeTeamMember para cancelación, fallback a raw send:', e);
+      }
+    }
+    // Fallback: raw send (legacy)
     await this.twilio.sendWhatsAppMessage(appointment.team_members.phone, salesMsg);
   }
 

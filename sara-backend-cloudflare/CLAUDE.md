@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-15 (Sesión 44)
+> Última actualización: 2026-02-18 (Sesión 45)
 
 ---
 
@@ -4830,3 +4830,95 @@ Cada comando fue probado contra su endpoint de test (`/test-comando-*`) verifica
 **Sin cambios de código necesarios** — todos los comandos ya ruteaban correctamente.
 
 **Tests:** 369/369 pasando
+
+---
+
+### 2026-02-18 (Sesión 45) - Auditoría Bulletproof de Flujos Críticos
+
+**Auditoría completa de TODOS los flujos críticos de SARA:** respuestas, citas, envío de info, avisos de leads, cancelaciones, crédito, movimientos de lead.
+
+Se lanzaron 3 agentes de exploración en paralelo para auditar el código. Cada hallazgo fue **verificado manualmente** contra el código real. De ~12 items propuestos, 9 ya estaban implementados → solo 3 gaps reales.
+
+#### Ya funcionaba (verificado en auditoría):
+
+| Flujo | Estado | Ubicación |
+|-------|--------|-----------|
+| Enforcement SARA-side (promete enviar → flags se activan) | ✅ | `aiConversationService.ts:2310-2338` |
+| Enforcement LEAD-side (lead pide recurso → flags se activan) | ✅ | `aiConversationService.ts:2340-2378` |
+| Per-desarrollo resource tracking (`resources_sent_for` CSV) | ✅ | `aiConversationService.ts` |
+| MAX_RECURSOS dinámico | ✅ | `aiConversationService.ts` |
+| `pidioRecursosExplicito` checa TODOS los flags | ✅ | `aiConversationService.ts` |
+| Credit flow: asesor + vendor notificados al asignar | ✅ | `index.ts:980-1024` |
+| Credit reminders (24h + 2h) para ambos (asesor + vendor) | ✅ | `notificationService.ts` |
+| Fallback cuando desarrollo sin video/matterport | ✅ | `aiConversationService.ts:4990-4997` |
+| Recursos enviados tracking en notes | ✅ | `aiConversationService.ts:5030-5059` |
+| Recursos enviados display en contexto Claude | ✅ | `aiConversationService.ts:198-206` |
+| Citas pasadas en contexto Claude | ✅ | `aiConversationService.ts:503-525` |
+| Lead journey summary en contexto | ✅ | `aiConversationService.ts:243-259` |
+
+#### 3 fixes implementados:
+
+##### Fix 1: Notificación de REAGENDAMIENTO al vendedor (retell.ts)
+
+**Problema:** Cuando una cita se reagendaba via Retell, el vendedor asignado NO recibía notificación del cambio.
+
+**Fix:** Después de `crearCitaCompleta()` exitoso en el tool de reschedule, enviar notificación 24h-safe al vendedor:
+
+```typescript
+// Después de result.success en reschedule tool
+const vendorAsignado = (teamMembers || []).find(tm => tm.id === lead.assigned_to);
+if (vendorAsignado) {
+  await enviarMensajeTeamMember(supabase, meta, vendorAsignado, msgReagendar, {
+    tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+  });
+}
+```
+
+##### Fix 2: Cancelación de cita 24h-safe (appointmentService.ts)
+
+**Problema:** `notifyVendedorCancellation()` usaba raw `this.twilio.sendWhatsAppMessage()`. Si el vendedor tenía la ventana 24h cerrada, la notificación NO llegaba.
+
+**Fix:** Agregar `meta?: MetaWhatsAppService` al constructor (backward compatible). Ambos métodos (`notifyVendedorCancellation` y `notifyVendedor`) ahora intentan `enviarMensajeTeamMember()` primero, con fallback a raw send si `this.meta` no está disponible.
+
+```typescript
+// Constructor actualizado (backward compatible)
+constructor(supabase, calendar, twilio, meta?) { ... }
+
+// notifyVendedorCancellation - ahora 24h-safe:
+if (this.meta && appointment.team_members) {
+  await enviarMensajeTeamMember(this.supabase, this.meta, appointment.team_members, salesMsg, {
+    tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+  });
+}
+// Fallback: raw send (legacy, si meta no disponible)
+```
+
+##### Fix 3: Pre-detección de desarrollo desde mensaje del lead (aiConversationService.ts)
+
+**Problema:** Si Claude no extrajo `desarrolloInteres` pero el lead dijo "mándame el video de monte verde", el nombre del desarrollo no se parseaba del mensaje.
+
+**Fix:** Antes del bloque de envío de recursos, intentar extraer desarrollo del mensaje del lead:
+
+```typescript
+if (!desarrolloInteres && message) {
+  const propMatch = properties.find(p => {
+    const devName = (p.development_name || p.name || '').toLowerCase();
+    return devName && devName.length > 3 && msgLowerPre.includes(devName);
+  });
+  if (propMatch) {
+    desarrolloInteres = propMatch.development_name || propMatch.name;
+    console.log(`🔍 Pre-detección: desarrollo "${desarrolloInteres}" extraído del mensaje`);
+  }
+}
+```
+
+#### Archivos modificados:
+
+| Archivo | Cambio | Fix |
+|---------|--------|-----|
+| `src/routes/retell.ts` | Import `enviarMensajeTeamMember` + bloque de notificación reagendamiento | 1 |
+| `src/services/appointmentService.ts` | Import `MetaWhatsAppService` + `enviarMensajeTeamMember`, constructor con `meta?`, notificaciones 24h-safe con fallback | 2 |
+| `src/services/aiConversationService.ts` | Pre-detección de desarrollo del mensaje del lead | 3 |
+
+**Tests:** 369/369 pasando
+**Deploy:** Completado

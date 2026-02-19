@@ -4044,6 +4044,19 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         console.log('🔄 Usando desarrollo guardado (fallback):', desarrolloInteres);
       }
 
+      // ═══ PRE-DETECCIÓN: Extraer desarrollo del mensaje del lead si Claude no lo detectó ═══
+      if (!desarrolloInteres && message) {
+        const msgLowerPre = message.toLowerCase();
+        const propMatch = properties.find((p: any) => {
+          const devName = (p.development_name || p.name || '').toLowerCase();
+          return devName && devName.length > 3 && msgLowerPre.includes(devName);
+        });
+        if (propMatch) {
+          desarrolloInteres = propMatch.development_name || propMatch.name;
+          console.log(`🔍 Pre-detección: desarrollo "${desarrolloInteres}" extraído del mensaje del lead`);
+        }
+      }
+
       // Guardar el desarrollo en el lead si es nuevo
       if (desarrolloInteres && desarrolloInteres !== lead.property_interest) {
         try {

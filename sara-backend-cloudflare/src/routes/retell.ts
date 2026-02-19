@@ -6,6 +6,7 @@
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 
 interface Env {
   SUPABASE_URL: string;
@@ -1112,6 +1113,25 @@ CASOS ESPECIALES:
         });
 
         if (result.success) {
+          // Notificar al vendedor asignado del reagendamiento (24h-safe)
+          try {
+            const vendorAsignado = (teamMembers || []).find((tm: any) => tm.id === lead.assigned_to);
+            if (vendorAsignado) {
+              const msgReagendar = `📅 *CITA REAGENDADA*\n\n` +
+                `Cliente: ${lead.name || 'Cliente'}\n` +
+                `Antes: ${citaActual.scheduled_date} ${citaActual.scheduled_time}\n` +
+                `Ahora: ${nuevaFecha} ${nuevaHora}\n` +
+                `Desarrollo: ${citaActual.property_name || lead.property_interest || ''}`;
+              await enviarMensajeTeamMember(supabase, meta, vendorAsignado, msgReagendar, {
+                tipoMensaje: 'alerta_lead',
+                pendingKey: 'pending_alerta_lead'
+              });
+              console.log(`✅ Vendedor ${vendorAsignado.name} notificado de reagendamiento via Retell`);
+            }
+          } catch (notifErr) {
+            console.error('⚠️ Error notificando reagendamiento al vendedor:', notifErr);
+          }
+
           return new Response(JSON.stringify({
             result: `Cita reagendada. Antes: ${citaActual.scheduled_date} ${citaActual.scheduled_time}. Ahora: ${nuevaFecha} ${nuevaHora} en ${citaActual.property_name || 'el desarrollo'}. Se envió confirmación por WhatsApp.`
           }), { status: 200, headers: { 'Content-Type': 'application/json' } });
