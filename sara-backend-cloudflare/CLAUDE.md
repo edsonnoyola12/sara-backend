@@ -28,7 +28,7 @@
 # 1. Lee la documentación completa
 cat SARA_COMANDOS.md | head -500
 
-# 2. Verifica tests (OBLIGATORIO - 369+ tests)
+# 2. Verifica tests (OBLIGATORIO - 418+ tests)
 npm test
 
 # 3. Si falla algún test, NO hagas cambios
@@ -1240,10 +1240,12 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Categoría | Tests | Estado |
 |-----------|-------|--------|
 | Unit tests | 293 | ✅ |
-| Resilience tests | 33 | ✅ |
+| Resilience tests | 49 | ✅ |
+| Post-compra tests | 65 | ✅ |
 | E2E Lead Journey | 7 | ✅ |
 | E2E Vendor Journey | 5 | ✅ |
 | E2E CEO Journey | 5 | ✅ |
+| **Total** | **418** | ✅ |
 
 ### 👥 EQUIPO ACTIVO
 
@@ -5128,14 +5130,26 @@ await env.SARA_CACHE.put(kvDedupKey, '1', { expirationTtl: 86400 }); // 24h TTL
 - KV falla → fallback silencioso a DB dedup existente (try-catch)
 - DB dedup (líneas 810-884) se mantiene como safety net secundario
 
-#### Tests: 33 nuevos (402 total)
+#### Tests: 49 tests de resilience (418 total)
 
 | Categoría | Tests | Qué verifica |
 |-----------|-------|-------------|
-| Retry Queue | 13 | enqueue retryable/non-retryable, silent fail, truncation, process text/template, delivered/permanent, alert dev, empty queue |
-| AI Fallback | 8 | Nombre con/sin lead.name, meta (no twilio), vendor notification, error logging |
-| KV Dedup | 7 | Skip duplicados, write TTL, fallback on KV errors, key format |
-| Callback wiring | 5 | Imports, métodos, exports verificados |
+| **1.1 Meta API 500 → retry_queue** | 3 | text/template/image enqueued con status=pending |
+| **1.2 CRON retry exitoso** | 3 | Re-envía text/template/image, marca delivered |
+| **1.3 Tres fallos → alerta dev** | 2 | failed_permanent + alerta, incrementa attempts si < max |
+| **1.4 No duplicados** | 8 | Skip 400/401/403/404, silent DB fail, 429+network sí enqueue, truncation |
+| **2.1 AI fallback al lead** | 4 | Con/sin nombre, omite "Sin nombre", incluye handoff humano |
+| **2.2 Notificación vendedor** | 3 | Info lead, no crash si falla, no crash sin vendedor |
+| **2.3 Whisper fallback** | 3 | Transcripción falla, excepción audio, sin API key |
+| **2.4 Lead nunca sin respuesta** | 4 | Error logging, outer catch usa meta, WhatsAppHandler importable, logErrorToDB existe |
+| **3.1 KV dedup hit/miss** | 3 | Primer miss, segundo hit, flujo completo put→get |
+| **3.2 TTL y formato** | 2 | TTL=86400 (24h), key `wamsg:{id}` |
+| **3.3 IDs diferentes** | 1 | Ambos procesan independientemente |
+| **3.extra KV error fallback** | 2 | KV get/put error → falls through a DB dedup |
+| **4.1 Lead + Meta caída** | 2 | Enqueue 500 retryable, vendor alert on permanent |
+| **4.2 Meta recovery** | 1 | CRON entrega mensaje pendiente |
+| **4.3 Contadores y logging** | 2 | Error context, multi-entry counters precisos |
+| **Callback integration** | 5 | failedMessageCallback retryable/non-retryable, trackingCallback, coexistencia, createMetaWithTracking wires both |
 
 #### Archivos modificados
 
@@ -5146,15 +5160,16 @@ await env.SARA_CACHE.put(kvDedupKey, '1', { expirationTtl: 86400 }); // 24h TTL
 | `src/services/meta-whatsapp.ts` | failedMessageCallback (mismo patrón que trackingCallback) |
 | `src/utils/metaTracking.ts` | Wire failedMessageCallback |
 | `src/handlers/whatsapp.ts` | AI fallback try-catch + fix outer catch twilio→meta |
-| `src/index.ts` | KV dedup + processRetryQueue import + CRON cada 4 min |
-| `src/tests/resilience.test.ts` | **NUEVO** — 33 tests |
+| `src/index.ts` | KV dedup + processRetryQueue import + CRON cada 4 min + `/test-resilience-e2e` endpoint |
+| `src/tests/resilience.test.ts` | **NUEVO** — 49 tests (4 secciones + callbacks) |
 
 #### Verificación
 
-- ✅ 402/402 tests pasando
+- ✅ 418/418 tests pasando (49 resilience + 369 existentes)
 - ✅ Deploy exitoso
 - ✅ Tabla `retry_queue` verificada en producción (exists=true, count=0)
+- ✅ 12/12 E2E tests en producción (`/test-resilience-e2e`)
 - ✅ No hay errores en `error_logs`
 
-**Commit:** `50e575d5`
-**Deploy:** Version ID `a22c0117-069f-4a50-91ac-4dc8ae6e409b`
+**Commits:** `50e575d5` (features), `0cd4b6bf` (E2E endpoint), `e0615075` (49 tests)
+**Deploy:** Version ID `4162256f-bb3d-4de6-bee1-936d71c41916`
