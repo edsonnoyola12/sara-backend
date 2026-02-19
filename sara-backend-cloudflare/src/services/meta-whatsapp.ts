@@ -112,16 +112,71 @@ export type FailedMessageCallback = (data: {
   errorMessage: string;
 }) => Promise<void>;
 
+// Tipo para callback de rate limit (enqueue cuando se excede)
+export type RateLimitEnqueueCallback = (data: {
+  recipientPhone: string;
+  messageType: string;
+  payload: Record<string, any>;
+  context: string;
+}) => Promise<void>;
+
 export class MetaWhatsAppService {
   private phoneNumberId: string;
   private accessToken: string;
   private apiVersion = 'v22.0';
   private trackingCallback?: MessageTrackingCallback;
   private failedMessageCallback?: FailedMessageCallback;
+  private rateLimitEnqueueCallback?: RateLimitEnqueueCallback;
+  private kvNamespace?: KVNamespace;
+
+  // Meta Business API global rate limit: ~80 msgs/min (basic tier)
+  // We cap at 75 to leave headroom
+  static readonly GLOBAL_RATE_LIMIT = 75;
 
   constructor(phoneNumberId: string, accessToken: string) {
     this.phoneNumberId = phoneNumberId;
     this.accessToken = accessToken;
+  }
+
+  /**
+   * Configura el KV namespace para rate limiting global
+   */
+  setKVNamespace(kv: KVNamespace): void {
+    this.kvNamespace = kv;
+  }
+
+  /**
+   * Configura el callback para encolar mensajes cuando se excede el rate limit
+   */
+  setRateLimitEnqueueCallback(callback: RateLimitEnqueueCallback): void {
+    this.rateLimitEnqueueCallback = callback;
+  }
+
+  /**
+   * Verifica y actualiza el rate limit global usando KV.
+   * Retorna true si se puede enviar, false si se debe encolar.
+   */
+  private async checkGlobalRateLimit(): Promise<boolean> {
+    if (!this.kvNamespace) return true; // Sin KV, no limitar
+
+    try {
+      const minuteKey = `meta_rate:${Math.floor(Date.now() / 60000)}`;
+      const currentStr = await this.kvNamespace.get(minuteKey);
+      const current = currentStr ? parseInt(currentStr, 10) : 0;
+
+      if (current >= MetaWhatsAppService.GLOBAL_RATE_LIMIT) {
+        console.warn(`🚦 Meta rate limit alcanzado: ${current}/${MetaWhatsAppService.GLOBAL_RATE_LIMIT} en este minuto`);
+        return false;
+      }
+
+      // Incrementar contador (TTL 120s para cubrir el minuto + margen)
+      await this.kvNamespace.put(minuteKey, String(current + 1), { expirationTtl: 120 });
+      return true;
+    } catch (err) {
+      // Si KV falla, permitir envío (fail-open)
+      console.warn('⚠️ KV rate limit check failed, allowing send:', (err as Error).message);
+      return true;
+    }
   }
 
   /**
@@ -309,6 +364,21 @@ export class MetaWhatsAppService {
   }
 
   private async _sendSingleMessage(phone: string, body: string, bypassRateLimit: boolean): Promise<any> {
+    // 🚦 Global Meta API rate limit check (KV-based)
+    const canSend = await this.checkGlobalRateLimit();
+    if (!canSend) {
+      console.warn(`🚦 Rate limited: enqueuing text message to ${phone}`);
+      if (this.rateLimitEnqueueCallback) {
+        await this.rateLimitEnqueueCallback({
+          recipientPhone: phone,
+          messageType: 'text',
+          payload: { body },
+          context: `rateLimited:text:${phone}`
+        });
+      }
+      return { rate_limited: true, enqueued: true, phone };
+    }
+
     const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
 
     const payload = {
@@ -1058,6 +1128,21 @@ export class MetaWhatsAppService {
     if (!isTestPhoneAllowed(phone)) {
       console.log(`🧪 TEST_MODE: Bloqueado template "${templateName}" a ${phone} (no autorizado)`);
       return { test_mode_blocked: true, phone, template: templateName };
+    }
+
+    // 🚦 Global Meta API rate limit check (KV-based)
+    const canSend = await this.checkGlobalRateLimit();
+    if (!canSend) {
+      console.warn(`🚦 Rate limited: enqueuing template "${templateName}" to ${phone}`);
+      if (this.rateLimitEnqueueCallback) {
+        await this.rateLimitEnqueueCallback({
+          recipientPhone: phone,
+          messageType: 'template',
+          payload: { templateName, languageCode, components },
+          context: `rateLimited:template:${phone}`
+        });
+      }
+      return { rate_limited: true, enqueued: true, phone, template: templateName };
     }
 
     // 🚦 RATE LIMITING PARA TEMPLATES (broadcasts automáticos)

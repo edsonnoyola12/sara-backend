@@ -49,5 +49,22 @@ export async function createMetaWithTracking(env: any, supabase: SupabaseService
     );
   });
 
+  // Configurar KV para rate limiting global de Meta API
+  if (env.SARA_CACHE) {
+    meta.setKVNamespace(env.SARA_CACHE);
+  }
+
+  // Configurar callback para encolar mensajes cuando se excede el rate limit global
+  meta.setRateLimitEnqueueCallback(async (data) => {
+    await enqueueFailedMessage(
+      supabase,
+      data.recipientPhone,
+      data.messageType,
+      data.payload,
+      data.context,
+      'RATE_LIMIT: Global Meta API rate limit exceeded (75/min)'
+    );
+  });
+
   return meta;
 }

@@ -1866,7 +1866,8 @@ export async function routeVendorCommand(ctx: HandlerContext, handler: any,
     'enviar', 'cerrar', 'apartado', 'aparto', 'nuevo', 'ok', 'perdido',
     'recordar', 'programar', 'propiedades', 'inventario', 'asignar',
     'adelante', 'atras', 'atrás', '#cerrar', '#mas', '#más', 'apunte',
-    'registrar', 'referido', 'cumple', 'email', 'correo'
+    'registrar', 'referido', 'cumple', 'email', 'correo',
+    'humano', 'bot'
   ];
   const firstWord = mensaje.split(/\s+/)[0];
   const looksLikeCommand = COMMAND_KEYWORDS.includes(firstWord);
@@ -1971,6 +1972,12 @@ export async function routeVendorCommand(ctx: HandlerContext, handler: any,
       break;
     case 'vendedorReanudarLead':
       await vendedorReanudarLead(ctx, from, params.nombreLead, vendedor);
+      break;
+    case 'vendedorHumanoLead':
+      await vendedorHumanoLead(ctx, from, params.nombreLead, vendedor);
+      break;
+    case 'vendedorBotLead':
+      await vendedorBotLead(ctx, from, params.nombreLead, vendedor);
       break;
 
     // ━━━ HIPOTECA Y ASESORES (interactúan con externos) ━━━
@@ -3328,6 +3335,94 @@ export async function vendedorReanudarLead(ctx: HandlerContext, from: string, no
     .eq('id', lead.id);
 
   await ctx.twilio.sendWhatsAppMessage(from, `▶️ *${lead.name}* ha sido reactivado.\nRestaurado a: *${previousStatus}*\n\nVolverá a recibir follow-ups automáticos.`);
+}
+
+// ═══ HUMANO LEAD (desactivar IA) ═══
+export async function vendedorHumanoLead(ctx: HandlerContext, from: string, nombreLead: string, vendedor: any): Promise<void> {
+  if (!nombreLead) {
+    await ctx.twilio.sendWhatsAppMessage(from, '❌ Escribe: *humano [nombre del lead]*');
+    return;
+  }
+
+  const { data: leads } = await ctx.supabase.client
+    .from('leads')
+    .select('id, name, status, notes')
+    .eq('assigned_to', vendedor.id)
+    .ilike('name', `%${nombreLead}%`)
+    .limit(5);
+
+  if (!leads || leads.length === 0) {
+    await ctx.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
+    return;
+  }
+  if (leads.length > 1) {
+    const lista = leads.map(l => `• ${l.name} (${l.status})`).join('\n');
+    await ctx.twilio.sendWhatsAppMessage(from, `⚠️ Encontré varios leads:\n${lista}\n\nSé más específico con el nombre.`);
+    return;
+  }
+
+  const lead = leads[0];
+  const notes = typeof lead.notes === 'object' && lead.notes ? lead.notes : {};
+
+  if (notes.ai_enabled === false) {
+    await ctx.twilio.sendWhatsAppMessage(from, `⚠️ *${lead.name}* ya tiene la IA desactivada. Tú atiendes sus mensajes.\nUsa *bot ${lead.name}* para reactivar SARA.`);
+    return;
+  }
+
+  await ctx.supabase.client
+    .from('leads')
+    .update({ notes: { ...notes, ai_enabled: false, handoff_at: new Date().toISOString(), handoff_by: vendedor.id } })
+    .eq('id', lead.id);
+
+  await ctx.twilio.sendWhatsAppMessage(from,
+    `🧑 *${lead.name}* — IA desactivada.\n\n` +
+    `SARA ya NO responderá a este lead. Tú recibirás sus mensajes y debes atenderlo directamente.\n\n` +
+    `Usa *bot ${lead.name}* para reactivar a SARA.`
+  );
+}
+
+// ═══ BOT LEAD (reactivar IA) ═══
+export async function vendedorBotLead(ctx: HandlerContext, from: string, nombreLead: string, vendedor: any): Promise<void> {
+  if (!nombreLead) {
+    await ctx.twilio.sendWhatsAppMessage(from, '❌ Escribe: *bot [nombre del lead]*');
+    return;
+  }
+
+  const { data: leads } = await ctx.supabase.client
+    .from('leads')
+    .select('id, name, status, notes')
+    .eq('assigned_to', vendedor.id)
+    .ilike('name', `%${nombreLead}%`)
+    .limit(5);
+
+  if (!leads || leads.length === 0) {
+    await ctx.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
+    return;
+  }
+  if (leads.length > 1) {
+    const lista = leads.map(l => `• ${l.name} (${l.status})`).join('\n');
+    await ctx.twilio.sendWhatsAppMessage(from, `⚠️ Encontré varios leads:\n${lista}\n\nSé más específico con el nombre.`);
+    return;
+  }
+
+  const lead = leads[0];
+  const notes = typeof lead.notes === 'object' && lead.notes ? lead.notes : {};
+
+  if (notes.ai_enabled !== false) {
+    await ctx.twilio.sendWhatsAppMessage(from, `⚠️ *${lead.name}* ya tiene SARA activada.`);
+    return;
+  }
+
+  await ctx.supabase.client
+    .from('leads')
+    .update({ notes: { ...notes, ai_enabled: true, handoff_at: undefined, handoff_by: undefined, bot_reactivated_at: new Date().toISOString() } })
+    .eq('id', lead.id);
+
+  await ctx.twilio.sendWhatsAppMessage(from,
+    `🤖 *${lead.name}* — SARA reactivada.\n\n` +
+    `SARA volverá a responder automáticamente a este lead.\n\n` +
+    `Usa *humano ${lead.name}* si necesitas desactivarla de nuevo.`
+  );
 }
 
 export async function vendedorAgendarCita(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, nombre: string): Promise<void> {

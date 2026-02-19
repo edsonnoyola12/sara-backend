@@ -274,6 +274,17 @@ export class VendorCommandsService {
       return { matched: true, handlerName: 'vendedorReanudarLead', handlerParams: { nombreLead: reanudarMatch[1].trim() } };
     }
 
+    // ═══ HANDOFF: HUMANO / BOT ═══
+    // Formato: "humano Juan" → desactiva IA, "bot Juan" → reactiva IA
+    const humanoMatch = msg.match(/^humano\s+(.+)$/i);
+    if (humanoMatch) {
+      return { matched: true, handlerName: 'vendedorHumanoLead', handlerParams: { nombreLead: humanoMatch[1].trim() } };
+    }
+    const botMatch = msg.match(/^bot\s+(.+)$/i);
+    if (botMatch) {
+      return { matched: true, handlerName: 'vendedorBotLead', handlerParams: { nombreLead: botMatch[1].trim() } };
+    }
+
     // ═══ NOTA / APUNTE - Agregar nota a un lead ═══
     // Formato flexible: "nota rodrigo hablé por tel", "nota Juan: le interesa", "apunte María presupuesto 2M"
     const notaMatch = msg.match(/^(?:nota|apunte|registrar)\s+([a-záéíóúñü]+)[\s:]+(.+)$/i);

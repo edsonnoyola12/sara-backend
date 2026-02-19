@@ -33,6 +33,7 @@ const RETRYABLE_ERRORS = [
   'network error',
   'fetch failed',
   'Failed to fetch',
+  'rate_limit',  // Meta API global rate limit exceeded → retry later
 ];
 
 // Status codes que SÍ deben reintentarse

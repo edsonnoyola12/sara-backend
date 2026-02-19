@@ -957,6 +957,13 @@ export default {
           }
           // ═══ FIN AVISO FUERA DE HORARIO ═══
 
+          // ═══ MANEJO DE MENSAJES VACÍOS / WHITESPACE ═══
+          // Si el mensaje es puramente de texto pero vacío o solo whitespace, ignorar
+          if (messageType === 'text' && (!text || !text.trim())) {
+            console.log('⏭️ Mensaje vacío/whitespace recibido, ignorando');
+            return new Response('OK', { status: 200 });
+          }
+
           // ═══ MANEJO DE IMÁGENES PARA FLUJO DE CRÉDITO ═══
           if (messageType === 'image' || messageType === 'document') {
             console.log(`📸 Mensaje de tipo ${messageType} recibido`);
@@ -1147,6 +1154,16 @@ export default {
               return new Response('OK', { status: 200 });
             }
 
+            // ═══ RESPUESTA GENÉRICA PARA DOCUMENTOS (PDF/Word/etc) ═══
+            if (messageType === 'document') {
+              const docName = message.document?.filename || 'documento';
+              console.log(`📄 Documento genérico recibido: ${docName}`);
+              await meta.sendWhatsAppMessage(from,
+                `📄 Recibimos tu documento "${docName}".\n\n` +
+                `Un asesor lo revisará y te contactará. ¡Gracias!`);
+              return new Response('OK', { status: 200 });
+            }
+
             // Respuesta genérica para otras imágenes
             if (!text && !caption) {
               await meta.sendWhatsAppMessage(from,
@@ -1223,24 +1240,40 @@ export default {
 
           // ═══ MANEJO DE STICKERS Y GIFS ═══
           if (messageType === 'sticker') {
-            console.log(`😄 Sticker recibido`);
-
-            // Respuesta amigable a stickers
-            await meta.sendWhatsAppMessage(from,
-              '😄 ¡Me encanta tu sticker! Soy SARA de Grupo Santa Rita.\n\n¿Buscas casa en Zacatecas? Tengo opciones increíbles desde $1.5 millones 🏠\n\n¿Qué tipo de casa te interesa?');
+            console.log(`😄 Sticker recibido - ignorando silenciosamente`);
             return new Response('OK', { status: 200 });
           }
           // ═══ FIN MANEJO DE STICKERS ═══
 
           // ═══ MANEJO DE UBICACIÓN ═══
           if (messageType === 'location') {
-            console.log(`📍 Ubicación recibida`);
-
             const lat = message.location?.latitude;
             const lon = message.location?.longitude;
+            const locName = message.location?.name || '';
+            const locAddress = message.location?.address || '';
+            console.log(`📍 Ubicación recibida: lat=${lat}, lon=${lon}, name=${locName}`);
+
+            // Guardar ubicación en lead.notes
+            try {
+              const cleanPhoneLoc = from.replace(/\D/g, '');
+              const { data: leadLoc } = await supabase.client
+                .from('leads')
+                .select('id, notes')
+                .or(`phone.eq.${cleanPhoneLoc},phone.like.%${cleanPhoneLoc.slice(-10)}`)
+                .maybeSingle();
+              if (leadLoc) {
+                const locNotes = typeof leadLoc.notes === 'object' && leadLoc.notes ? leadLoc.notes : {};
+                await supabase.client.from('leads').update({
+                  notes: { ...locNotes, location: { lat, lon, name: locName, address: locAddress, saved_at: new Date().toISOString() } }
+                }).eq('id', leadLoc.id);
+                console.log(`📍 Ubicación guardada en lead ${leadLoc.id}`);
+              }
+            } catch (locErr) {
+              console.error('Error guardando ubicación:', locErr);
+            }
 
             await meta.sendWhatsAppMessage(from,
-              `📍 ¡Gracias por compartir tu ubicación!\n\nNuestros desarrollos están en *Zacatecas, México*. Tenemos casas en varias zonas:\n\n🏘️ *Monte Verde* - Zona sur\n🏘️ *Los Encinos* - Zona centro\n🏘️ *Miravalle* - Zona premium\n🏘️ *Distrito Falco* - Zona exclusiva\n\n¿Te gustaría conocer cuál te queda más cerca o cuál se ajusta mejor a tu presupuesto?`);
+              `📍 ¡Gracias por tu ubicación!\n\nNuestros desarrollos están en *Zacatecas, México*:\n\n🏘️ *Monte Verde* - Desde $1.6M\n🏘️ *Los Encinos* - Desde $3.0M\n🏘️ *Miravalle* - Desde $3.0M\n🏘️ *Distrito Falco* - Desde $3.7M\n\n¿Cuál te gustaría conocer?`);
             return new Response('OK', { status: 200 });
           }
           // ═══ FIN MANEJO DE UBICACIÓN ═══
@@ -1266,20 +1299,78 @@ export default {
 
           // ═══ MANEJO DE VIDEO ═══
           if (messageType === 'video') {
-            console.log(`🎬 Video recibido`);
+            const videoSizeBytes = message.video?.file_size || 0;
+            const videoSizeMB = videoSizeBytes / (1024 * 1024);
+            console.log(`🎬 Video recibido (${videoSizeMB.toFixed(1)} MB)`);
 
-            await meta.sendWhatsAppMessage(from,
-              '🎬 ¡Gracias por el video! Por ahora trabajo mejor con mensajes de texto.\n\n¿Buscas casa en Zacatecas? Cuéntame qué tipo de casa necesitas y te muestro nuestras opciones 🏠');
+            if (videoSizeMB > 20) {
+              await meta.sendWhatsAppMessage(from,
+                '🎬 Recibimos tu video pero es muy pesado. ¿Puedes enviarnos fotos o un mensaje de texto? Así te podemos ayudar más rápido 📸');
+            } else {
+              await meta.sendWhatsAppMessage(from,
+                '🎬 ¡Gracias por el video! Trabajo mejor con mensajes de texto.\n\n¿Buscas casa en Zacatecas? Cuéntame qué necesitas y te muestro opciones 🏠');
+            }
             return new Response('OK', { status: 200 });
           }
           // ═══ FIN MANEJO DE VIDEO ═══
 
           // ═══ MANEJO DE CONTACTOS ═══
           if (messageType === 'contacts') {
-            console.log(`👤 Contacto compartido`);
+            const contacts = message.contacts || [];
+            const contactInfo = contacts[0];
+            const contactName = contactInfo?.name?.formatted_name || contactInfo?.name?.first_name || '';
+            const contactPhone = contactInfo?.phones?.[0]?.phone || contactInfo?.phones?.[0]?.wa_id || '';
+            console.log(`👤 Contacto compartido: ${contactName} ${contactPhone}`);
 
-            await meta.sendWhatsAppMessage(from,
-              '👤 ¡Gracias por compartir el contacto! Si es alguien que busca casa, con gusto lo puedo atender.\n\n¿Te gustaría que le escriba directamente o prefieres darle mi número para que me contacte?');
+            // Si tiene teléfono válido, crear lead referido
+            if (contactPhone) {
+              try {
+                const cleanContactPhone = contactPhone.replace(/\D/g, '');
+                if (cleanContactPhone.length >= 10) {
+                  // Verificar si ya existe
+                  const { data: existingLead } = await supabase.client
+                    .from('leads')
+                    .select('id, name')
+                    .or(`phone.eq.${cleanContactPhone},phone.like.%${cleanContactPhone.slice(-10)}`)
+                    .maybeSingle();
+
+                  if (!existingLead) {
+                    // Crear lead referido
+                    const cleanPhoneRef = from.replace(/\D/g, '');
+                    const { data: referrer } = await supabase.client
+                      .from('leads')
+                      .select('id, name')
+                      .or(`phone.eq.${cleanPhoneRef},phone.like.%${cleanPhoneRef.slice(-10)}`)
+                      .maybeSingle();
+
+                    await supabase.client.from('leads').insert({
+                      phone: cleanContactPhone,
+                      name: contactName || 'Referido',
+                      status: 'new',
+                      source: 'referral',
+                      notes: { referido_por: referrer?.name || from, referido_por_phone: from, created_via: 'shared_contact' }
+                    });
+                    console.log(`✅ Lead referido creado: ${contactName} (${cleanContactPhone})`);
+
+                    await meta.sendWhatsAppMessage(from,
+                      `👤 ¡Registré a *${contactName || 'tu contacto'}*! Le escribiré para ofrecerle nuestras casas.\n\n¡Gracias por la referencia! 🏠`);
+                  } else {
+                    await meta.sendWhatsAppMessage(from,
+                      `👤 *${existingLead.name || contactName}* ya está registrado con nosotros. ¡Gracias por compartirlo!`);
+                  }
+                } else {
+                  await meta.sendWhatsAppMessage(from,
+                    '👤 ¡Gracias por compartir el contacto! Si busca casa, dile que nos escriba por WhatsApp 🏠');
+                }
+              } catch (contactErr) {
+                console.error('Error procesando contacto compartido:', contactErr);
+                await meta.sendWhatsAppMessage(from,
+                  '👤 ¡Gracias por compartir el contacto! Si busca casa, con gusto lo atendemos 🏠');
+              }
+            } else {
+              await meta.sendWhatsAppMessage(from,
+                '👤 ¡Gracias por compartir el contacto! Si busca casa, dile que nos escriba por WhatsApp 🏠');
+            }
             return new Response('OK', { status: 200 });
           }
           // ═══ FIN MANEJO DE CONTACTOS ═══

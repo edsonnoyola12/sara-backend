@@ -363,6 +363,11 @@ export class CEOCommandsService {
       return { action: 'call_handler', handlerName: 'ultimasRespuestasAI' };
     }
 
+    // ═══ HANDOFFS (leads con IA desactivada) ═══
+    if (msgLower === 'handoffs' || msgLower === 'handoff' || msgLower === 'humanos' || msgLower === 'sin ia' || msgLower === 'sin bot') {
+      return { action: 'call_handler', handlerName: 'handoffs' };
+    }
+
     // ═══ NO RECONOCIDO ═══
     return {
       action: 'not_recognized',
@@ -1015,6 +1020,36 @@ export class CEOCommandsService {
         case 'ultimasRespuestasAI': {
           const respMsg = await getLastAIResponses(this.supabase);
           return { message: respMsg };
+        }
+
+        // ═══ HANDOFFS (leads con IA desactivada) ═══
+        case 'handoffs': {
+          const { data: leadsHandoff } = await this.supabase.client
+            .from('leads')
+            .select('name, phone, status, notes, assigned_to, team_members!leads_assigned_to_fkey(name)')
+            .not('notes', 'is', null)
+            .order('updated_at', { ascending: false });
+
+          const handoffLeads = (leadsHandoff || []).filter((l: any) => {
+            const n = typeof l.notes === 'object' ? l.notes : {};
+            return n.ai_enabled === false;
+          });
+
+          if (handoffLeads.length === 0) {
+            return { message: '✅ Todos los leads tienen SARA activada. No hay handoffs activos.' };
+          }
+
+          let msg = `🧑 *Leads con IA desactivada (${handoffLeads.length}):*\n\n`;
+          for (const l of handoffLeads.slice(0, 15)) {
+            const vendedor = (l as any).team_members?.name || 'Sin asignar';
+            const desde = l.notes?.handoff_at ? new Date(l.notes.handoff_at).toLocaleDateString('es-MX') : '?';
+            msg += `• *${l.name}* (${l.status}) — Vendedor: ${vendedor} — Desde: ${desde}\n`;
+          }
+          if (handoffLeads.length > 15) {
+            msg += `\n_...y ${handoffLeads.length - 15} más_`;
+          }
+          msg += `\n\nUsa *bot [nombre]* para reactivar SARA en un lead.`;
+          return { message: msg };
         }
 
         default:

@@ -1139,6 +1139,35 @@ export class WhatsAppHandler {
         await this.supabase.client.from('leads').update(leadMsgResult.updateLead).eq('id', lead.id);
       }
 
+      // ═══ HANDOFF CHECK: Si ai_enabled=false, skip Claude y notificar vendedor ═══
+      const handoffNotes = typeof lead.notes === 'object' && lead.notes ? lead.notes : {};
+      if (handoffNotes.ai_enabled === false) {
+        console.log(`🧑 Lead ${lead.name} tiene IA desactivada (handoff) — skip Claude`);
+
+        // Guardar mensaje en conversation_history
+        try {
+          const { data: histLead } = await this.supabase.client
+            .from('leads').select('conversation_history').eq('id', lead.id).single();
+          const history = Array.isArray(histLead?.conversation_history) ? histLead.conversation_history : [];
+          history.push({ role: 'user', content: body, timestamp: new Date().toISOString() });
+          await this.supabase.client.from('leads').update({ conversation_history: history }).eq('id', lead.id);
+        } catch (_) {}
+
+        // Notificar vendedor asignado
+        const assignedVendor = teamMembers?.find((tm: any) => tm.id === lead.assigned_to);
+        if (assignedVendor) {
+          const handoffMsg = `💬 *Mensaje de ${lead.name || 'lead'}* (IA desactivada):\n\n"${body.substring(0, 500)}"\n\n📱 ${cleanPhone}\nUsa *bot ${lead.name}* para reactivar SARA.`;
+          try {
+            await enviarMensajeTeamMember(this.supabase, this.meta, assignedVendor, handoffMsg, {
+              tipoMensaje: 'alerta_lead',
+              pendingKey: 'pending_alerta_lead'
+            });
+          } catch (_) {}
+        }
+
+        return; // No enviar respuesta automática al lead
+      }
+
       // Si llegamos aquí, continuar a análisis con IA (delegado a aiConversationService)
       const aiService = new AIConversationService(this.supabase, this.twilio, this.meta, this.calendar, this.claude, env);
       aiService.setHandler(this);
