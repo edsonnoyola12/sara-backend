@@ -5429,6 +5429,6 @@ Endpoint para pruebas de carga simulando leads concurrentes:
 | CRM | https://sara-crm-new.vercel.app |
 | Videos | https://sara-videos.onrender.com |
 
-**Deploy final:** Version ID `5580d414-f300-4db6-823d-cc5f38eac096`
+**Deploy final:** Version ID `e99351db-2383-4ea9-9786-317bf541cb55`
 
 **Sistema 100% completo y operativo — Última verificación: 2026-02-19 (Sesión 53)**
