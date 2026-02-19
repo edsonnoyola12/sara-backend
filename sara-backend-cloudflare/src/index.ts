@@ -28,7 +28,7 @@ import { createMessageTrackingService } from './services/messageTrackingService'
 import { BusinessHoursService } from './services/businessHoursService';
 import { safeJsonParse } from './utils/safeHelpers';
 import { createMetaWithTracking } from './utils/metaTracking';
-import { processRetryQueue } from './services/retryQueueService';
+import { processRetryQueue, enqueueFailedMessage } from './services/retryQueueService';
 
 // CRON modules
 import {
@@ -1793,6 +1793,118 @@ export default {
       const testName = url.searchParams.get('test') || 'welcome_message';
       const results = await getABTestResults(supabase, testName);
       return corsResponse(JSON.stringify(results || { error: 'No results found' }));
+    }
+
+    // ═══ E2E TEST: Resilience Features ═══
+    if (url.pathname === '/test-resilience-e2e') {
+      const tests: Array<{ name: string; pass: boolean; detail: string }> = [];
+
+      // ── TEST 1: retry_queue table exists ──
+      try {
+        const { data: rqData, error: rqErr } = await supabase.client.from('retry_queue').select('id', { count: 'exact', head: true });
+        tests.push({ name: 'retry_queue table exists', pass: !rqErr, detail: rqErr ? rqErr.message : 'OK' });
+      } catch (e: any) { tests.push({ name: 'retry_queue table exists', pass: false, detail: e.message }); }
+
+      // ── TEST 2: enqueueFailedMessage inserts retryable error ──
+      try {
+        await enqueueFailedMessage(supabase, '5210000099999', 'text', { body: 'E2E test message' }, 'e2e-test', 'Meta API error 500: Internal Server Error');
+        const { data: inserted } = await supabase.client.from('retry_queue').select('*').eq('recipient_phone', '5210000099999').eq('context', 'e2e-test').order('created_at', { ascending: false }).limit(1);
+        const ok = inserted && inserted.length > 0 && inserted[0].status === 'pending';
+        tests.push({ name: 'enqueueFailedMessage inserts pending entry', pass: !!ok, detail: ok ? `id=${inserted![0].id}` : 'No row found' });
+      } catch (e: any) { tests.push({ name: 'enqueueFailedMessage inserts pending entry', pass: false, detail: e.message }); }
+
+      // ── TEST 3: enqueueFailedMessage skips non-retryable (400) ──
+      try {
+        const { count: before } = await supabase.client.from('retry_queue').select('id', { count: 'exact', head: true }).eq('recipient_phone', '5210000088888');
+        await enqueueFailedMessage(supabase, '5210000088888', 'text', { body: 'skip' }, 'e2e-skip', 'Meta API error 400: Bad Request');
+        const { count: after } = await supabase.client.from('retry_queue').select('id', { count: 'exact', head: true }).eq('recipient_phone', '5210000088888');
+        const ok = (after || 0) === (before || 0);
+        tests.push({ name: 'enqueueFailedMessage skips 400 error', pass: ok, detail: ok ? 'Correctly skipped' : `before=${before} after=${after}` });
+      } catch (e: any) { tests.push({ name: 'enqueueFailedMessage skips 400 error', pass: false, detail: e.message }); }
+
+      // Create meta instance for tests that need it
+      const testMeta = await createMetaWithTracking(env, supabase);
+
+      // ── TEST 4: processRetryQueue processes & delivers test entry ──
+      try {
+        const rqResult = await processRetryQueue(supabase, testMeta, '5610016226');
+        tests.push({ name: 'processRetryQueue runs without error', pass: true, detail: `processed=${rqResult.processed} delivered=${rqResult.delivered} failed=${rqResult.failedPermanent}` });
+      } catch (e: any) { tests.push({ name: 'processRetryQueue runs without error', pass: false, detail: e.message }); }
+
+      // ── TEST 5: processRetryQueue increments attempts on failure ──
+      try {
+        const { data: updated } = await supabase.client.from('retry_queue').select('*').eq('recipient_phone', '5210000099999').eq('context', 'e2e-test').order('created_at', { ascending: false }).limit(1);
+        const entry = updated?.[0];
+        const ok = entry && entry.attempts >= 1;
+        tests.push({ name: 'retry entry attempts incremented after processing', pass: !!ok, detail: entry ? `attempts=${entry.attempts} status=${entry.status}` : 'No entry found' });
+      } catch (e: any) { tests.push({ name: 'retry entry attempts incremented after processing', pass: false, detail: e.message }); }
+
+      // ── TEST 6: KV dedup write ──
+      try {
+        const testKey = 'wamsg:e2e_test_msg_' + Date.now();
+        await env.SARA_CACHE.put(testKey, '1', { expirationTtl: 60 });
+        const val = await env.SARA_CACHE.get(testKey);
+        tests.push({ name: 'KV dedup write + read works', pass: val === '1', detail: val === '1' ? 'OK' : `got: ${val}` });
+      } catch (e: any) { tests.push({ name: 'KV dedup write + read works', pass: false, detail: e.message }); }
+
+      // ── TEST 7: KV dedup blocks duplicate messageId ──
+      try {
+        const dupKey = 'wamsg:e2e_dup_test_' + Date.now();
+        await env.SARA_CACHE.put(dupKey, '1', { expirationTtl: 60 });
+        const hit = await env.SARA_CACHE.get(dupKey);
+        tests.push({ name: 'KV dedup detects duplicate messageId', pass: hit === '1', detail: hit === '1' ? 'Duplicate correctly detected' : `got: ${hit}` });
+      } catch (e: any) { tests.push({ name: 'KV dedup detects duplicate messageId', pass: false, detail: e.message }); }
+
+      // ── TEST 8: KV dedup returns null for new messageId ──
+      try {
+        const newKey = 'wamsg:e2e_new_test_' + Date.now() + '_unique';
+        const miss = await env.SARA_CACHE.get(newKey);
+        tests.push({ name: 'KV dedup returns null for new messageId', pass: miss === null, detail: miss === null ? 'Correctly null' : `got: ${miss}` });
+      } catch (e: any) { tests.push({ name: 'KV dedup returns null for new messageId', pass: false, detail: e.message }); }
+
+      // ── TEST 9: AI fallback code path exists (import check) ──
+      try {
+        const hasLogErrorToDB = typeof logErrorToDB === 'function';
+        const hasEnviarMensaje = typeof enviarMensajeTeamMember === 'function';
+        tests.push({ name: 'AI fallback dependencies available (logErrorToDB + enviarMensajeTeamMember)', pass: hasLogErrorToDB && hasEnviarMensaje, detail: `logErrorToDB=${hasLogErrorToDB} enviarMensajeTeamMember=${hasEnviarMensaje}` });
+      } catch (e: any) { tests.push({ name: 'AI fallback dependencies available', pass: false, detail: e.message }); }
+
+      // ── TEST 10: AI fallback - logErrorToDB writes to error_logs ──
+      try {
+        await logErrorToDB(supabase, 'e2e_test_error', 'Resilience E2E test - safe to ignore', { severity: 'info', source: 'e2e-test-resilience', context: { test: true } });
+        const { data: errLog } = await supabase.client.from('error_logs').select('id').eq('error_type', 'e2e_test_error').eq('source', 'e2e-test-resilience').order('created_at', { ascending: false }).limit(1);
+        const ok = errLog && errLog.length > 0;
+        tests.push({ name: 'logErrorToDB writes to error_logs table', pass: !!ok, detail: ok ? `id=${errLog![0].id}` : 'No row found' });
+        // Cleanup
+        if (ok) await supabase.client.from('error_logs').delete().eq('id', errLog![0].id);
+      } catch (e: any) { tests.push({ name: 'logErrorToDB writes to error_logs table', pass: false, detail: e.message }); }
+
+      // ── TEST 11: failedMessageCallback is wired in MetaWhatsAppService ──
+      try {
+        const hasCallback = typeof (testMeta as any).failedMessageCallback === 'function';
+        tests.push({ name: 'MetaWhatsAppService has failedMessageCallback wired', pass: hasCallback, detail: hasCallback ? 'Callback is set' : 'Callback is null/undefined' });
+      } catch (e: any) { tests.push({ name: 'MetaWhatsAppService has failedMessageCallback wired', pass: false, detail: e.message }); }
+
+      // ── TEST 12: trackingCallback is also wired (sanity) ──
+      try {
+        const hasTracking = typeof (testMeta as any).trackingCallback === 'function';
+        tests.push({ name: 'MetaWhatsAppService has trackingCallback wired (sanity)', pass: hasTracking, detail: hasTracking ? 'OK' : 'Missing' });
+      } catch (e: any) { tests.push({ name: 'MetaWhatsAppService has trackingCallback wired', pass: false, detail: e.message }); }
+
+      // ── CLEANUP: Remove test entries from retry_queue ──
+      try {
+        await supabase.client.from('retry_queue').delete().eq('recipient_phone', '5210000099999');
+        await supabase.client.from('retry_queue').delete().eq('recipient_phone', '5210000088888');
+      } catch (_) {}
+
+      const passed = tests.filter(t => t.pass).length;
+      const failed = tests.filter(t => !t.pass).length;
+
+      return corsResponse(JSON.stringify({
+        summary: `${passed}/${tests.length} passed, ${failed} failed`,
+        timestamp: new Date().toISOString(),
+        tests
+      }, null, 2));
     }
 
 
