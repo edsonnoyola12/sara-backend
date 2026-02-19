@@ -97,6 +97,7 @@ npm test
 | `src/services/surveyService.ts` | ~300 | Servicio de encuestas |
 | `src/services/encuestasService.ts` | ~200 | Envío y procesamiento encuestas |
 | `src/services/messageQueueService.ts` | ~200 | Cola de mensajes (preparación futura) |
+| `src/services/retryQueueService.ts` | ~130 | Retry queue para mensajes Meta fallidos |
 | `src/utils/teamMessaging.ts` | ~510 | Sistema híbrido mensajes + llamadas + templateOverride |
 | `src/utils/safeHelpers.ts` | ~45 | safeJsonParse, safeSupabaseWrite, sanitizeForPrompt |
 
@@ -538,7 +539,7 @@ sara-backend-cloudflare/
 │   ├── utils/
 │   │   └── conversationLogic.ts
 │   └── tests/
-│       └── ...13 archivos de test
+│       └── ...14 archivos de test
 ├── wrangler.toml             # Config Cloudflare
 ├── SARA_COMANDOS.md          # Documentación detallada
 └── CLAUDE.md                 # Este archivo
@@ -1237,7 +1238,8 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 
 | Categoría | Tests | Estado |
 |-----------|-------|--------|
-| Unit tests | 260 | ✅ |
+| Unit tests | 293 | ✅ |
+| Resilience tests | 33 | ✅ |
 | E2E Lead Journey | 7 | ✅ |
 | E2E Vendor Journey | 5 | ✅ |
 | E2E CEO Journey | 5 | ✅ |
@@ -5060,3 +5062,98 @@ Cita + crédito:     score=61
 3. `test-lost-lead` endpoint agregado en Sesión 49 — `GET /test-lost-lead?phone=X&reason=Y&api_key=Z`
 
 **Sin cambios de código** — solo verificación.
+
+---
+
+### 2026-02-19 (Sesión 50) - 3 Resilience Features: Retry Queue, AI Fallback, KV Dedup
+
+**3 gaps críticos identificados y resueltos:**
+1. Si Meta API falla después de 3 retries → mensajes se perdían para siempre
+2. Si Claude API falla → leads no recibían respuesta
+3. Webhook dedup usaba queries costosas a DB cuando KV está disponible
+
+#### Feature 1: Retry Queue (Persistencia de Mensajes Fallidos)
+
+**SQL:** `sql/retry_queue.sql` — tabla `retry_queue` en Supabase (ejecutado y verificado)
+
+**Servicio:** `src/services/retryQueueService.ts` (NUEVO)
+
+| Función | Descripción |
+|---------|-------------|
+| `enqueueFailedMessage()` | Inserta en `retry_queue` con status=pending. Solo errores retryable (5xx, 429). Skippea 400/401/403/404. Nunca lanza excepción |
+| `processRetryQueue()` | Query pending + attempts < max. Re-envía (text→sendWhatsAppMessage, template→sendTemplate). Success→delivered. Max attempts→failed_permanent + alerta dev |
+
+**Callback en MetaWhatsAppService:** Patrón idéntico a `trackingCallback`:
+- `setFailedMessageCallback(cb)` en `meta-whatsapp.ts`
+- Wraps en `_sendSingleMessage` y `sendTemplate` — si `fetchWithRetry` falla, llama callback antes de re-throw
+- Wired en `metaTracking.ts` junto al tracking existente
+
+**CRON:** Cada 4 min (`mexicoMinute % 4 === 0`) en handler `*/2 * * * *`
+- Procesa hasta 10 mensajes pendientes por ciclo
+- Alerta dev (5610016226) en fallo permanente
+
+**Estados del ciclo:**
+```
+Meta falla → enqueue(pending) → CRON retry → delivered | failed_permanent → alerta dev
+```
+
+#### Feature 2: AI Fallback (Respuesta Garantizada al Lead)
+
+**Cambio en `src/handlers/whatsapp.ts`:**
+
+Wrap de `analyzeWithAI` (línea 1145) en try-catch:
+
+| Acción | Detalle |
+|--------|---------|
+| 1. Fallback al lead | `"Hola [nombre], gracias por tu mensaje. Estoy teniendo un problema técnico. Un asesor te contactará en breve."` |
+| 2. Notificar vendedor | Via `enviarMensajeTeamMember()` (24h-safe) con mensaje + extracto del lead |
+| 3. Log error | `logErrorToDB()` con severity=critical, source, stack, leadId |
+
+**Nombre inteligente:** Usa `lead.name` pero omite si es "Sin nombre" o "Cliente"
+
+**Fix adicional:** Outer catch (línea ~1252) corregido: `this.twilio.sendWhatsAppMessage` → `this.meta.sendWhatsAppMessage`
+
+#### Feature 3: KV Webhook Dedup
+
+**Cambio en `src/index.ts`:** Después de extraer `messageId`, antes del dedup DB existente:
+
+```typescript
+const kvDedupKey = `wamsg:${messageId}`;
+const kvHit = await env.SARA_CACHE.get(kvDedupKey);
+if (kvHit) return new Response('OK', { status: 200 }); // Skip
+await env.SARA_CACHE.put(kvDedupKey, '1', { expirationTtl: 86400 }); // 24h TTL
+```
+
+- KV falla → fallback silencioso a DB dedup existente (try-catch)
+- DB dedup (líneas 810-884) se mantiene como safety net secundario
+
+#### Tests: 33 nuevos (402 total)
+
+| Categoría | Tests | Qué verifica |
+|-----------|-------|-------------|
+| Retry Queue | 13 | enqueue retryable/non-retryable, silent fail, truncation, process text/template, delivered/permanent, alert dev, empty queue |
+| AI Fallback | 8 | Nombre con/sin lead.name, meta (no twilio), vendor notification, error logging |
+| KV Dedup | 7 | Skip duplicados, write TTL, fallback on KV errors, key format |
+| Callback wiring | 5 | Imports, métodos, exports verificados |
+
+#### Archivos modificados
+
+| Archivo | Cambio |
+|---------|--------|
+| `sql/retry_queue.sql` | **NUEVO** — tabla + índices |
+| `src/services/retryQueueService.ts` | **NUEVO** — enqueue + process |
+| `src/services/meta-whatsapp.ts` | failedMessageCallback (mismo patrón que trackingCallback) |
+| `src/utils/metaTracking.ts` | Wire failedMessageCallback |
+| `src/handlers/whatsapp.ts` | AI fallback try-catch + fix outer catch twilio→meta |
+| `src/index.ts` | KV dedup + processRetryQueue import + CRON cada 4 min |
+| `src/tests/resilience.test.ts` | **NUEVO** — 33 tests |
+
+#### Verificación
+
+- ✅ 402/402 tests pasando
+- ✅ Deploy exitoso
+- ✅ Tabla `retry_queue` verificada en producción (exists=true, count=0)
+- ✅ No hay errores en `error_logs`
+
+**Commit:** `50e575d5`
+**Deploy:** Version ID `a22c0117-069f-4a50-91ac-4dc8ae6e409b`
