@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-19 (Sesión 48)
+> Última actualización: 2026-02-19 (Sesión 51)
 
 ---
 
@@ -28,7 +28,7 @@
 # 1. Lee la documentación completa
 cat SARA_COMANDOS.md | head -500
 
-# 2. Verifica tests (OBLIGATORIO - 418+ tests)
+# 2. Verifica tests (OBLIGATORIO - 440+ tests)
 npm test
 
 # 3. Si falla algún test, NO hagas cambios
@@ -382,6 +382,8 @@ Protecciones implementadas:
 | `reporte semanal` | Reporte semanal |
 | `reporte mensual` | Reporte mensual |
 | `meta` / `metas` | Ver metas de ventas |
+| `status` / `salud` / `health` | Status del sistema (health monitor) |
+| `respuestas` / `respuestas ia` / `log ia` | Últimas 10 respuestas de SARA a leads |
 
 **ANÁLISIS:**
 | Comando | Función |
@@ -615,7 +617,7 @@ Ver documentación en `docs/`:
 - `FLUJOS_CRITICOS.md` - **Horario completo de mensajes + 7 flujos críticos + reglas de oro**
 - `architecture.md` - Diagramas de arquitectura
 - `api-reference.md` - Referencia de APIs internas
-- `database-schema.md` - Schemas de Supabase (10 tablas)
+- `database-schema.md` - Schemas de Supabase (12 tablas)
 
 ---
 
@@ -649,6 +651,7 @@ Ver documentación en `docs/`:
 | `/test-comando-asesor?cmd=X&phone=Y&api_key=Z` | **QA asesor: 90 comandos** (detección + ejecución) |
 | `/test-comando-agencia?cmd=X&phone=Y&api_key=Z` | **QA agencia: 45 comandos** (detección + ejecución) |
 | `/test-lost-lead?phone=X&reason=Y&api_key=Z` | Marcar lead como perdido (guarda razón + status anterior en notes) |
+| `/run-health-monitor?api_key=Z` | Forzar health monitor (ping Supabase/Meta/OpenAI, guardar en `health_checks`) |
 
 ---
 
@@ -1211,6 +1214,8 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Check-in mantenimiento | Sábado 10am | checkInMantenimiento | ✅ |
 | Llamadas Retell post-visita | 11 AM L-V | llamadasSeguimientoPostVisita | ✅ |
 | Llamadas Retell reactivación | 10 AM Mar/Jue | llamadasReactivacionLeadsFrios | ✅ |
+| **Health Monitor** | **Cada 5 min** | healthMonitorCron (Supabase/Meta/OpenAI) | ✅ |
+| **Leads estancados (>72h)** | **9 AM L-V** | alertarLeadsEstancados | ✅ |
 
 ### 🔒 FLUJOS DE NEGOCIO
 
@@ -1241,11 +1246,12 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 |-----------|-------|--------|
 | Unit tests | 293 | ✅ |
 | Resilience tests | 49 | ✅ |
+| Monitoring tests | 22 | ✅ |
 | Post-compra tests | 65 | ✅ |
 | E2E Lead Journey | 7 | ✅ |
 | E2E Vendor Journey | 5 | ✅ |
 | E2E CEO Journey | 5 | ✅ |
-| **Total** | **418** | ✅ |
+| **Total** | **440** | ✅ |
 
 ### 👥 EQUIPO ACTIVO
 
@@ -5170,6 +5176,90 @@ await env.SARA_CACHE.put(kvDedupKey, '1', { expirationTtl: 86400 }); // 24h TTL
 - ✅ Tabla `retry_queue` verificada en producción (exists=true, count=0)
 - ✅ 12/12 E2E tests en producción (`/test-resilience-e2e`)
 - ✅ No hay errores en `error_logs`
+
+**Commits:** `50e575d5` (features), `0cd4b6bf` (E2E endpoint), `e0615075` (49 tests)
+**Deploy:** Version ID `4162256f-bb3d-4de6-bee1-936d71c41916`
+
+---
+
+### 2026-02-19 (Sesión 51) - Health Monitor, AI Response Log, Stale Lead Alerts
+
+**3 features de monitoreo y observabilidad implementadas:**
+
+#### Feature 1: Health Monitor CRON (cada 5 min)
+
+| Servicio | Ping | Acción si falla |
+|----------|------|-----------------|
+| Supabase | `SELECT count(*) FROM leads` | WhatsApp alert al dev |
+| Meta API | `GET /v21.0/{phone_id}` con token | WhatsApp alert al dev |
+| OpenAI | `GET /v1/models` (si hay key) | WhatsApp alert al dev |
+
+- Guarda resultado en tabla `health_checks` (status, latencia por servicio, details JSONB)
+- Alerta via `enviarAlertaSistema()` con dedup por combo de servicios caídos
+- CEO comando `status` / `salud` / `health` → muestra último health check con latencias
+
+#### Feature 2: AI Response Log
+
+Cada respuesta de SARA a un lead se guarda automáticamente en tabla `ai_responses`:
+
+| Campo | Descripción |
+|-------|-------------|
+| `lead_phone` | Teléfono del lead |
+| `lead_message` | Mensaje del lead (truncado 500 chars) |
+| `ai_response` | Respuesta de SARA (truncado 1000 chars) |
+| `model_used` | Modelo Claude usado |
+| `tokens_used` | Total tokens (input + output) |
+| `input_tokens` / `output_tokens` | Desglose de tokens |
+| `response_time_ms` | Latencia de la respuesta |
+| `intent` | Intent detectado |
+
+- CEO comando `respuestas` / `respuestas ia` / `log ia` → últimas 10 respuestas con preview
+- Insert fire-and-forget (nunca bloquea el flujo principal)
+- `ClaudeService.lastResult` captura metadata del API response
+
+#### Feature 3: Stale Lead CRON (9 AM L-V)
+
+- Busca leads con `last_message_at` > 72 horas
+- Excluye status: closed, delivered, fallen, paused, lost, inactive
+- Agrupa por vendedor asignado, máximo 10 alertas por vendedor
+- Envía via `enviarMensajeTeamMember()` (24h-safe) con `tipoMensaje: 'alerta_lead'`
+
+#### Tablas SQL nuevas
+
+```sql
+-- Ejecutar en Supabase Dashboard → SQL Editor
+-- Archivo: sql/health_checks_and_ai_responses.sql
+health_checks: id, status, supabase_ok, meta_ok, openai_ok, details (JSONB), created_at
+ai_responses: id, lead_phone, lead_message, ai_response, model_used, tokens_used, input_tokens, output_tokens, response_time_ms, intent, created_at
+```
+
+#### Archivos modificados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/services/claude.ts` | `ClaudeChatResult` interface + `lastResult` field |
+| `src/services/aiConversationService.ts` | AI response logging insert (fire-and-forget) |
+| `src/crons/healthCheck.ts` | `healthMonitorCron()`, `getLastHealthCheck()`, `getLastAIResponses()` |
+| `src/crons/alerts.ts` | `alertarLeadsEstancados()` |
+| `src/services/ceoCommandsService.ts` | CEO commands: `status`, `respuestas` (detección + ejecución) |
+| `src/index.ts` | Health monitor CRON cada 5 min + stale leads CRON 9 AM L-V |
+| `src/routes/test.ts` | Endpoint `/run-health-monitor` |
+| `sql/health_checks_and_ai_responses.sql` | **NUEVO** — SQL para 2 tablas |
+| `src/tests/monitoring.test.ts` | **NUEVO** — 22 tests |
+
+#### Verificación en producción
+
+| Test | Resultado |
+|------|-----------|
+| `/health` | ✅ allPassed, 19 team members, 34 properties |
+| `/test-ai-response` (hola busco casa) | ✅ 9.6s, intent `interes_desarrollo`, logueado en `ai_responses` |
+| `/run-health-monitor` | ✅ Supabase OK (190ms), Meta OK (954ms), OpenAI OK (442ms), saved=true |
+| CEO `status` | ✅ "SALUDABLE — hace 0 min" con latencia por servicio |
+| CEO `respuestas` | ✅ 1 respuesta logueada (9298ms, 16315 tokens) |
+
+**Tests:** 440/440 pasando (22 monitoring + 49 resilience + 369 existentes)
+**Commits:** `e1bed0fc` (features), `35a0dc6d` (endpoint manual)
+**Deploy:** Version ID `90423cfb-c63b-4e6a-a7fc-079fd0ffc97d`
 
 **Commits:** `50e575d5` (features), `0cd4b6bf` (E2E endpoint), `e0615075` (49 tests)
 **Deploy:** Version ID `4162256f-bb3d-4de6-bee1-936d71c41916`
