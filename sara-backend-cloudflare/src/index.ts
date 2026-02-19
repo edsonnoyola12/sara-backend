@@ -1976,6 +1976,7 @@ export default {
           '/run-mantenimiento',
           '/run-referidos',
           '/run-nps',
+          '/run-health-monitor',
           '/health',
           '/backup',
           '/ab-results'

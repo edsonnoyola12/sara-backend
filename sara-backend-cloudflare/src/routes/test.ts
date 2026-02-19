@@ -102,7 +102,7 @@ import {
   generarVideoSemanalLogros,
 } from '../crons/videos';
 
-import { runHealthCheck, trackError, enviarAlertaSistema } from '../crons/healthCheck';
+import { runHealthCheck, trackError, enviarAlertaSistema, healthMonitorCron } from '../crons/healthCheck';
 
 interface Env {
   SUPABASE_URL: string;
@@ -4026,6 +4026,13 @@ Mensaje: ${mensaje}`;
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       await checkInMantenimiento(supabase, meta);
       return corsResponse(JSON.stringify({ message: 'Check-in de mantenimiento ejecutado.' }));
+    }
+
+    if (url.pathname === '/run-health-monitor') {
+      console.log('🏥 Forzando health monitor...');
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      const result = await healthMonitorCron(supabase, meta, env);
+      return corsResponse(JSON.stringify({ message: 'Health monitor ejecutado', ...result }));
     }
 
     if (url.pathname === '/test-objecion') {
