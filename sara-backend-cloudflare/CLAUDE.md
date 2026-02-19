@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-18 (Sesión 46)
+> Última actualización: 2026-02-19 (Sesión 47)
 
 ---
 
@@ -4951,5 +4951,29 @@ if (!desarrolloInteres && message) {
 | Error logs | ✅ | Solo 2 errores de test resueltos, sistema limpio |
 
 **16/16 pruebas E2E pasaron en producción.**
+
+**Sin cambios de código** — solo verificación.
+
+---
+
+### 2026-02-19 (Sesión 47) - Prueba E2E Real con Envío WhatsApp
+
+**Prueba end-to-end completa contra producción, incluyendo envío real de WhatsApp:**
+
+#### Resultados:
+
+| # | Prueba | Resultado | Detalles |
+|---|--------|-----------|----------|
+| 1 | Health Check | ✅ | Supabase 53ms, KV 332ms, Meta API 1094ms (token válido), 18 team members, 34 propiedades |
+| 2 | AI Response: Monte Verde 3 rec | ✅ | Intent `interes_desarrollo`, desarrollo detectado, modelos con precios reales, `send_video_desarrollo: true`, 7.6s |
+| 3 | Lead REAL WhatsApp | ✅ | Mensaje enviado a 5610016226, lead "Edson" actualizado en DB, score 21, asignado a Karla Muedano |
+| 4 | Debug Lead DB | ✅ | `dentroVentana24h: true`, `last_message_at` actualizado, datos consistentes |
+| 5 | AI Response: agendar cita | ✅ | Intent `solicitar_cita`, Monte Verde detectado, pregunta horario sábado |
+| 6 | AI Response: crédito | ✅ | Intent `info_credito`, opciones INFONAVIT/bancario/cofinanciamiento |
+| 7 | Cmd vendedor: mis leads | ✅ | Ruteo correcto a `vendedorResumenLeads` |
+| 8 | Cmd CEO: pipeline | ✅ | Pipeline $7.8M, 3 leads nuevos, tasa cierre 0% |
+| 9 | Cmd CEO: ventas | ✅ | Reporte ventas con métricas reales del mes |
+
+**9/9 pruebas pasando.** Diferencia vs Sesión 46: esta prueba incluyó **envío real por WhatsApp** (no solo dry-run).
 
 **Sin cambios de código** — solo verificación.
