@@ -646,6 +646,7 @@ Ver documentación en `docs/`:
 | `/test-comando-ceo?cmd=X&api_key=Z` | **QA CEO: 100 comandos** (detección + ejecución) |
 | `/test-comando-asesor?cmd=X&phone=Y&api_key=Z` | **QA asesor: 90 comandos** (detección + ejecución) |
 | `/test-comando-agencia?cmd=X&phone=Y&api_key=Z` | **QA agencia: 45 comandos** (detección + ejecución) |
+| `/test-lost-lead?phone=X&reason=Y&api_key=Z` | Marcar lead como perdido (guarda razón + status anterior en notes) |
 
 ---
 
@@ -5056,6 +5057,6 @@ Cita + crédito:     score=61
 **Hallazgos menores (no bugs):**
 1. `test-ver-notas` requiere phone de vendedor, no de lead — documentar mejor
 2. `test-setup-cita` no cambia status del lead a scheduled (solo el flujo AI real lo hace)
-3. `test-lost-lead` endpoint no existe — solo vía comando vendedor "perdido"
+3. `test-lost-lead` endpoint agregado en Sesión 49 — `GET /test-lost-lead?phone=X&reason=Y&api_key=Z`
 
 **Sin cambios de código** — solo verificación.
