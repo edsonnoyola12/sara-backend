@@ -2819,8 +2819,8 @@ export async function handleTestRoutes(
       return corsResponse(JSON.stringify({ ok: true, message: "Leads fríos ejecutado - revisa logs" }));
     }
 
-    // TEST: Desactivar team member por teléfono (para pruebas)
-    if (url.pathname === "/test-disable-team-member") {
+    // TEST: Activar/Desactivar team member por teléfono (para pruebas)
+    if (url.pathname === "/test-disable-team-member" || url.pathname === "/test-toggle-team-member") {
       const phone = url.searchParams.get('phone');
       if (!phone) return corsResponse(JSON.stringify({ error: "Falta phone" }), 400);
       const phoneSuffix = phone.replace(/\D/g, '').slice(-10);
@@ -2830,9 +2830,10 @@ export async function handleTestRoutes(
         .ilike('phone', `%${phoneSuffix}`)
         .single();
       if (findErr || !member) return corsResponse(JSON.stringify({ error: "No encontrado", phoneSuffix }), 404);
-      const { error } = await supabase.client.from('team_members').update({ active: false }).eq('id', member.id);
+      const setActive = url.searchParams.get('active') === 'true' ? true : url.searchParams.get('active') === 'false' ? false : !member.active;
+      const { error } = await supabase.client.from('team_members').update({ active: setActive }).eq('id', member.id);
       if (error) return corsResponse(JSON.stringify({ error: error.message }), 500);
-      return corsResponse(JSON.stringify({ ok: true, message: `${member.name} desactivado`, member }));
+      return corsResponse(JSON.stringify({ ok: true, message: `${member.name} ${setActive ? 'activado' : 'desactivado'}`, member: { ...member, active: setActive } }));
     }
 
     // TEST: Actualizar status de lead (para pruebas)
