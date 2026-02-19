@@ -60,10 +60,9 @@ binding = "SARA_CACHE"
 id = "e4dece3a573c470dab91996f9f4879b8"
 
 # R2 Bucket para backups semanales
-# Descomentar cuando R2 esté habilitado en Cloudflare Dashboard
-# [[r2_buckets]]
-# binding = "SARA_BACKUPS"
-# bucket_name = "sara-backups"
+[[r2_buckets]]
+binding = "SARA_BACKUPS"
+bucket_name = "sara-backups"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # STAGING - Environment de pruebas
