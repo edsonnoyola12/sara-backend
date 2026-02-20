@@ -14,6 +14,7 @@ import { AsesorCommandsService } from '../services/asesorCommandsService';
 import { VendorCommandsService } from '../services/vendorCommandsService';
 import { BridgeService } from '../services/bridgeService';
 import { OfferTrackingService } from '../services/offerTrackingService';
+import { createSLAMonitoring } from '../services/slaMonitoringService';
 
 // ═══════════════════════════════════════════════════════════════
 // HANDLE CEO MESSAGE (entry point)
@@ -185,6 +186,14 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
           // Enviar mensaje con formato igual que cuando el lead responde
           const msgFormateado = `💬 *${nombreCEO}:*\n${body}`;
           await ctx.meta.sendWhatsAppMessage(leadPhone, msgFormateado);
+
+          // ═══ SLA: CEO responded to lead via bridge ═══
+          if (activeBridge.lead_id && ctx.env?.SARA_CACHE) {
+            try {
+              const sla = createSLAMonitoring(ctx.env.SARA_CACHE);
+              await sla.trackVendorResponse(activeBridge.lead_id, ceo.id);
+            } catch (slaErr) { console.error('⚠️ SLA CEO bridge track error (non-blocking):', slaErr); }
+          }
 
           // Actualizar last_activity (re-read fresh notes to avoid stale overwrite)
           const { data: freshBridge } = await ctx.supabase.client

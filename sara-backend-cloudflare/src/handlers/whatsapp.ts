@@ -17,6 +17,7 @@ import { HandlerContext } from './whatsapp-types';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { enviarAlertaSistema, logErrorToDB } from '../crons/healthCheck';
 import { isLikelySurveyResponse } from '../crons/nurturing';
+import { createSLAMonitoring } from '../services/slaMonitoringService';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MÓDULOS REFACTORIZADOS
@@ -941,6 +942,31 @@ export class WhatsAppHandler {
         console.log(`✅ last_message_at + last_activity_at actualizado para lead ${lead.id}`);
       } catch (e) {
         console.error('⚠️ Error actualizando last_message_at:', e);
+      }
+
+      // ═══ SLA TRACKING: Registrar mensaje entrante de lead ═══
+      if (lead.assigned_to && this.env?.SARA_CACHE) {
+        try {
+          const sla = createSLAMonitoring(this.env.SARA_CACHE);
+          const { data: vendorSla } = await this.supabase.client
+            .from('team_members')
+            .select('id, name, phone')
+            .eq('id', lead.assigned_to)
+            .maybeSingle();
+          if (vendorSla) {
+            await sla.trackIncomingMessage({
+              id: lead.id,
+              name: lead.name || 'Sin nombre',
+              phone: from,
+              vendorId: vendorSla.id,
+              vendorName: vendorSla.name || '',
+              vendorPhone: vendorSla.phone || '',
+              isFirstMessage: !lead.last_message_at
+            });
+          }
+        } catch (slaErr) {
+          console.error('⚠️ SLA tracking error (non-blocking):', slaErr);
+        }
       }
 
       // ═══ PRIMERO: DETECTAR SI LEAD QUIERE CONTACTAR ASESOR/VENDEDOR ═══

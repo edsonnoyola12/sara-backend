@@ -29,6 +29,9 @@ import { BusinessHoursService } from './services/businessHoursService';
 import { safeJsonParse } from './utils/safeHelpers';
 import { createMetaWithTracking } from './utils/metaTracking';
 import { processRetryQueue, enqueueFailedMessage } from './services/retryQueueService';
+import { createLeadAttribution } from './services/leadAttributionService';
+import { createSLAMonitoring } from './services/slaMonitoringService';
+import { createLeadDeduplication } from './services/leadDeduplicationService';
 
 // CRON modules
 import {
@@ -1678,6 +1681,20 @@ export default {
           } else {
             console.log(`✅ Lead creado: ${nuevoLead.id} - ${leadName}`);
 
+            // ═══ ATTRIBUTION TRACKING (auto-wire) ═══
+            try {
+              const attribution = createLeadAttribution(env.SARA_CACHE);
+              await attribution.trackLead(nuevoLead.id, leadPhone || '', {
+                utm_source: 'facebook',
+                utm_medium: 'paid_social',
+                utm_campaign: formId ? `form_${formId}` : undefined,
+                utm_content: pageId ? `page_${pageId}` : undefined,
+              }, leadName);
+              console.log(`📊 Attribution tracked: facebook_ads → ${nuevoLead.id}`);
+            } catch (attrErr) {
+              console.error('⚠️ Attribution tracking error (non-blocking):', attrErr);
+            }
+
             // Notificar al vendedor asignado
             if (vendedorAsignado?.phone) {
               const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
@@ -2588,6 +2605,52 @@ export default {
     }
 
     // ═══════════════════════════════════════════════════════════
+    // DEDUP SCAN - Escanear leads duplicados diario 7 PM MX
+    // ═══════════════════════════════════════════════════════════
+    if (event.cron === '0 1 * * *') {
+      try {
+        const dedup = createLeadDeduplication();
+        const { data: activeLeads } = await supabase.client
+          .from('leads')
+          .select('id, phone, name, email, status, created_at, assigned_to')
+          .not('status', 'in', '("lost","inactive","fallen")')
+          .order('created_at', { ascending: false })
+          .limit(500);
+        if (activeLeads && activeLeads.length > 10) {
+          const duplicates = dedup.findDuplicates(activeLeads);
+          const highConfidence = duplicates.filter(d => d.confidence >= 0.7);
+          if (highConfidence.length > 0) {
+            console.log(`🔍 Dedup scan: ${highConfidence.length} potential duplicates found`);
+            // Flag top 10 in leads notes
+            for (const dup of highConfidence.slice(0, 10)) {
+              const lead1Id = dup.lead1?.id;
+              const lead2Id = dup.lead2?.id;
+              if (lead1Id && lead2Id) {
+                await supabase.client.from('leads').update({
+                  notes: supabase.client.rpc ? undefined : undefined // just flag in console for now
+                }).eq('id', 'SKIP'); // no-op, just logging
+                console.log(`  ⚠️ ${dup.lead1?.name || dup.lead1?.phone} ↔ ${dup.lead2?.name || dup.lead2?.phone} (${Math.round(dup.confidence * 100)}% ${dup.matchType})`);
+              }
+            }
+            // Notify dev
+            await meta.sendWhatsAppMessage('5610016226',
+              `🔍 *Dedup Scan Diario*\n\n` +
+              `Encontrados ${highConfidence.length} posibles duplicados:\n\n` +
+              highConfidence.slice(0, 5).map((d, i) =>
+                `${i + 1}. ${d.lead1?.name || d.lead1?.phone || '?'} ↔ ${d.lead2?.name || d.lead2?.phone || '?'} (${Math.round(d.confidence * 100)}%)`
+              ).join('\n') +
+              `\n\n_Revisa en CRM → Leads → Duplicados_`
+            );
+          } else {
+            console.log('🔍 Dedup scan: no duplicates found');
+          }
+        }
+      } catch (dedupErr) {
+        console.error('⚠️ Dedup scan error (non-blocking):', dedupErr);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // BACKUP SEMANAL R2 - Domingos 7 PM MX (1 AM UTC lunes)
     // Exporta conversations + leads activos como JSONL
     // ═══════════════════════════════════════════════════════════
@@ -3414,6 +3477,33 @@ export default {
         }
       } catch (deliveryError) {
         console.error('⚠️ Error en verificarDeliveryTeamMessages:', deliveryError);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // SLA CHECK - Verificar respuestas pendientes de vendedores (cada 5 min, horario laboral)
+    // ═══════════════════════════════════════════════════════════
+    if (mexicoMinute % 5 === 0 && mexicoHour >= 9 && mexicoHour < 19) {
+      try {
+        const sla = createSLAMonitoring(env.SARA_CACHE);
+        const slaResult = await sla.checkPendingResponses();
+        const totalIssues = (slaResult.warnings?.length || 0) + (slaResult.breaches?.length || 0) + (slaResult.escalations?.length || 0);
+        if (totalIssues > 0) {
+          console.log(`⏱️ SLA issues: ${slaResult.warnings?.length || 0} warnings, ${slaResult.breaches?.length || 0} breaches, ${slaResult.escalations?.length || 0} escalations`);
+          // Alert vendors for breaches
+          for (const breach of (slaResult.breaches || [])) {
+            if (breach.vendorPhone) {
+              try {
+                await meta.sendWhatsAppMessage(breach.vendorPhone,
+                  `⏱️ *SLA Alert:* Lead *${breach.leadName || 'Sin nombre'}* lleva ${breach.waitMinutes || '?'} min sin respuesta.\n\n` +
+                  `📱 Responde cuanto antes para mantener tu SLA.`
+                );
+              } catch (alertErr) { console.error('⚠️ SLA alert send error:', alertErr); }
+            }
+          }
+        }
+      } catch (slaErr) {
+        console.error('⚠️ SLA check error (non-blocking):', slaErr);
       }
     }
 

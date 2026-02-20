@@ -1,4 +1,5 @@
 import { SupabaseService } from './supabase';
+import { checkDuplicate } from './leadDeduplicationService';
 
 // Fallback ID si no hay vendedores disponibles
 const FALLBACK_VENDEDOR_ID = '7bb05214-826c-4d1b-a418-228b8d77bd64'; // Vendedor Test
@@ -145,6 +146,34 @@ export class LeadManagementService {
       })
       .select()
       .single();
+
+    // ═══ DEDUP CHECK: Flag potential duplicates (non-blocking) ═══
+    if (newLead) {
+      try {
+        const { data: recentLeads } = await this.supabase.client
+          .from('leads')
+          .select('id, phone, name, email, status, created_at, assigned_to')
+          .neq('id', newLead.id)
+          .order('created_at', { ascending: false })
+          .limit(200);
+        if (recentLeads && recentLeads.length > 0) {
+          const match = checkDuplicate(newLead, recentLeads);
+          if (match && match.confidence >= 0.5) {
+            const existingId = match.lead2?.id || match.lead1?.id;
+            await this.supabase.client.from('leads').update({
+              notes: {
+                ...(typeof newLead.notes === 'object' ? newLead.notes : {}),
+                potential_duplicate: { matchId: existingId, confidence: match.confidence, reasons: match.reasons, action: match.suggestedAction }
+              }
+            }).eq('id', newLead.id);
+            console.log(`⚠️ Potential duplicate detected: ${newLead.id} ↔ ${existingId} (${Math.round(match.confidence * 100)}%)`);
+          }
+        }
+      } catch (dedupErr) {
+        console.error('⚠️ Dedup check error (non-blocking):', dedupErr);
+      }
+    }
+
     return { lead: newLead, isNew: true, assignedVendedorId: vendedorId };
   }
 

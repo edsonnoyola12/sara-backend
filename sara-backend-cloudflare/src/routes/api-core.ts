@@ -7,6 +7,8 @@ import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { CalendarService } from '../services/calendar';
 import { createLeadDeduplication } from '../services/leadDeduplicationService';
+import { createLeadAttribution } from '../services/leadAttributionService';
+import { createSLAMonitoring } from '../services/slaMonitoringService';
 import { getAvailableVendor } from '../services/leadManagementService';
 import { logErrorToDB, enviarDigestoErroresDiario } from '../crons/healthCheck';
 
@@ -557,8 +559,19 @@ ${statusAnterior} → ${statusNuevo}
         } catch (e) {
           console.error('⚠️ Error notificando cambio de status:', e);
         }
+
+        // ═══ ATTRIBUTION: Track conversion when closed/delivered ═══
+        if (['closed', 'delivered', 'closed_won'].includes(body.status)) {
+          try {
+            const attribution = createLeadAttribution(env.SARA_CACHE);
+            await attribution.trackConversion(id!, body.price || 0);
+            console.log(`📊 Attribution conversion tracked: ${id} → ${body.status}`);
+          } catch (attrErr) {
+            console.error('⚠️ Attribution conversion error (non-blocking):', attrErr);
+          }
+        }
       }
-      
+
       // Si cambió el vendedor asignado, notificar al nuevo
       if (data && body.assigned_to && oldLead?.assigned_to !== body.assigned_to) {
         try {

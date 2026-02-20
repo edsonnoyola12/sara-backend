@@ -12,6 +12,7 @@ import { deliverPendingMessage, parseNotasSafe, formatPhoneForDisplay } from './
 import { AppointmentService } from '../services/appointmentService';
 import { safeJsonParse } from '../utils/safeHelpers';
 import { formatVendorFeedback } from './whatsapp-utils';
+import { createSLAMonitoring } from '../services/slaMonitoringService';
 
 export async function handleVendedorMessage(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, teamMembers: any[]): Promise<void> {
   const mensaje = body.toLowerCase().trim();
@@ -694,6 +695,14 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
 
         const msgFormateado = `💬 *${nombreVendedor}:*\n${body}`;
         await ctx.meta.sendWhatsAppMessage(leadPhone, msgFormateado);
+
+        // ═══ SLA: Vendor responded to lead via bridge ═══
+        if (activeBridge.lead_id && ctx.env?.SARA_CACHE) {
+          try {
+            const sla = createSLAMonitoring(ctx.env.SARA_CACHE);
+            await sla.trackVendorResponse(activeBridge.lead_id, vendedor.id);
+          } catch (slaErr) { console.error('⚠️ SLA bridge track error (non-blocking):', slaErr); }
+        }
 
         // Actualizar last_activity
         notasVendedor.active_bridge.last_activity = new Date().toISOString();
@@ -1879,6 +1888,14 @@ export async function routeVendorCommand(ctx: HandlerContext, handler: any,
 
     // Enviar el mensaje personalizado del vendedor al lead
     await ctx.meta.sendWhatsAppMessage(leadPendiente.phone, body);
+
+    // ═══ SLA: Vendor responded to lead via sugerencia pendiente ═══
+    if (leadPendiente.id && ctx.env?.SARA_CACHE) {
+      try {
+        const sla = createSLAMonitoring(ctx.env.SARA_CACHE);
+        await sla.trackVendorResponse(leadPendiente.id, vendedor.id);
+      } catch (slaErr) { console.error('⚠️ SLA sugerencia track error (non-blocking):', slaErr); }
+    }
 
     // Limpiar la sugerencia pendiente de ESTE lead
     delete notasActuales.sugerencia_pendiente;
