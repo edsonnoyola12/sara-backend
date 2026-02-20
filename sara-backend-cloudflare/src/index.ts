@@ -401,6 +401,7 @@ function requiresAuth(pathname: string): boolean {
     /^\/api\/surveys/,                       // Encuestas (CRM)
     /^\/api\/send-surveys/,                  // Enviar encuestas (CRM)
     /^\/api\/error-logs/,                    // Error logs (CRM Sistema)
+    /^\/api\/sla/,                           // SLA Monitoring (CRM)
   ];
 
   for (const pattern of crmPublicPatterns) {
@@ -468,12 +469,13 @@ async function checkPendingSurveyResponse(
       await meta.sendWhatsAppMessage(phone, respuesta);
 
       // Actualizar encuesta en DB
-      await supabase.client.from('surveys').update({
+      const { error: surveyErr1 } = await supabase.client.from('surveys').update({
         status: 'answered',
         nps_score: score,
         answered_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       }).eq('id', survey.id);
+      if (surveyErr1) console.error('⚠️ Error actualizando encuesta NPS:', surveyErr1.message);
 
       console.log(`📋 Encuesta CRM NPS procesada: ${nombre} = ${score}/10 (${categoria})`);
       return true;
@@ -487,12 +489,13 @@ async function checkPendingSurveyResponse(
         const rating = parseInt(matchRating[1]);
         await meta.sendWhatsAppMessage(phone, `Gracias por tu calificacion ${primerNombre}! ${rating >= 4 ? 'Nos alegra que hayas tenido una buena experiencia.' : 'Tomaremos en cuenta tu opinion para mejorar.'}\n\nHay algo mas que quieras compartirnos?`);
 
-        await supabase.client.from('surveys').update({
+        const { error: surveyErr2 } = await supabase.client.from('surveys').update({
           status: 'awaiting_feedback',
           rating,
           answered_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         }).eq('id', survey.id);
+        if (surveyErr2) console.error('⚠️ Error actualizando encuesta rating:', surveyErr2.message);
 
         console.log(`📋 Encuesta CRM rating procesada: ${nombre} = ${rating}/5`);
         return true;
@@ -501,11 +504,12 @@ async function checkPendingSurveyResponse(
         // Es feedback de texto
         await meta.sendWhatsAppMessage(phone, `Gracias por tu comentario ${primerNombre}! Lo tomaremos muy en cuenta.`);
 
-        await supabase.client.from('surveys').update({
+        const { error: surveyErr3 } = await supabase.client.from('surveys').update({
           status: 'answered',
           feedback: mensaje,
           updated_at: new Date().toISOString()
         }).eq('id', survey.id);
+        if (surveyErr3) console.error('⚠️ Error actualizando encuesta feedback:', surveyErr3.message);
 
         console.log(`📋 Encuesta CRM feedback procesado: ${nombre}`);
         return true;
@@ -1360,14 +1364,15 @@ export default {
                       .or(`phone.eq.${cleanPhoneRef},phone.like.%${cleanPhoneRef.slice(-10)}`)
                       .maybeSingle();
 
-                    await supabase.client.from('leads').insert({
+                    const { error: refInsertErr } = await supabase.client.from('leads').insert({
                       phone: cleanContactPhone,
                       name: contactName || 'Referido',
                       status: 'new',
                       source: 'referral',
                       notes: { referido_por: referrer?.name || from, referido_por_phone: from, created_via: 'shared_contact' }
                     });
-                    console.log(`✅ Lead referido creado: ${contactName} (${cleanContactPhone})`);
+                    if (refInsertErr) console.error('⚠️ Error creando lead referido:', refInsertErr.message);
+                    else console.log(`✅ Lead referido creado: ${contactName} (${cleanContactPhone})`);
 
                     await meta.sendWhatsAppMessage(from,
                       `👤 ¡Registré a *${contactName || 'tu contacto'}*! Le escribiré para ofrecerle nuestras casas.\n\n¡Gracias por la referencia! 🏠`);
@@ -1643,10 +1648,11 @@ export default {
           if (existingLead) {
             console.error(`⚠️ Lead ya existe: ${existingLead.id}`);
             // Actualizar con datos de Facebook si es más reciente
-            await supabase.client.from('leads').update({
+            const { error: fbUpdateErr } = await supabase.client.from('leads').update({
               source: 'facebook_ads',
               notes: `${existingLead.notes || ''}\n---\nActualizado desde Facebook Lead ${leadgenId} el ${new Date().toLocaleString('es-MX')}`
             }).eq('id', existingLead.id);
+            if (fbUpdateErr) console.error('⚠️ Error actualizando lead de Facebook:', fbUpdateErr.message);
 
             return new Response('OK', { status: 200 });
           }
@@ -2626,9 +2632,6 @@ export default {
               const lead1Id = dup.lead1?.id;
               const lead2Id = dup.lead2?.id;
               if (lead1Id && lead2Id) {
-                await supabase.client.from('leads').update({
-                  notes: supabase.client.rpc ? undefined : undefined // just flag in console for now
-                }).eq('id', 'SKIP'); // no-op, just logging
                 console.log(`  ⚠️ ${dup.lead1?.name || dup.lead1?.phone} ↔ ${dup.lead2?.name || dup.lead2?.phone} (${Math.round(dup.confidence * 100)}% ${dup.matchType})`);
               }
             }

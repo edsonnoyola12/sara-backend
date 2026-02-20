@@ -18,15 +18,17 @@ export class AppointmentConfirmation {
   ): Promise<{ success: boolean; message: string }> {
     try {
       // Obtener lead
-      const lead = await this.supabase.client
+      const { data: leadData, error: leadErr } = await this.supabase.client
         .from('leads')
         .select('*')
         .eq('id', leadId)
         .single();
 
-      if (!lead.data) {
+      if (leadErr || !leadData) {
+        if (leadErr) console.error('⚠️ Error fetching lead for appointment:', leadErr.message);
         return { success: false, message: 'Lead no encontrado' };
       }
+      const lead = { data: leadData };
 
       // Obtener vendedor con menos citas (round-robin simple)
       const { data: salespeople } = await this.supabase.client

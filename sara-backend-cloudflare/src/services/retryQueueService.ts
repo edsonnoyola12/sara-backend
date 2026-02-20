@@ -40,7 +40,7 @@ export async function enqueueFailedMessage(
       return;
     }
 
-    await supabase.client.from('retry_queue').insert({
+    const { error: insertErr } = await supabase.client.from('retry_queue').insert({
       recipient_phone: recipientPhone,
       message_type: messageType,
       payload,
@@ -50,8 +50,8 @@ export async function enqueueFailedMessage(
       attempts: 0,
       max_attempts: 3
     });
-
-    console.log(`📥 Retry queue: enqueued ${messageType} to ${recipientPhone}`);
+    if (insertErr) console.error('⚠️ Retry queue insert error:', insertErr.message);
+    else console.log(`📥 Retry queue: enqueued ${messageType} to ${recipientPhone}`);
   } catch (err) {
     console.error('❌ Retry queue enqueue failed (silent):', (err as Error).message);
   }
@@ -108,10 +108,11 @@ export async function processRetryQueue(
       }
 
       // Success
-      await supabase.client
+      const { error: deliverErr } = await supabase.client
         .from('retry_queue')
         .update({ status: 'delivered', resolved_at: new Date().toISOString(), attempts: newAttempts, last_attempt_at: new Date().toISOString() })
         .eq('id', entry.id);
+      if (deliverErr) console.error('⚠️ Retry queue deliver update error:', deliverErr.message);
       result.delivered++;
       console.log(`✅ Retry queue: delivered ${entry.message_type} to ${entry.recipient_phone} (attempt ${newAttempts})`);
 
@@ -120,10 +121,11 @@ export async function processRetryQueue(
 
       if (newAttempts >= entry.max_attempts) {
         // Permanent failure
-        await supabase.client
+        const { error: permFailErr } = await supabase.client
           .from('retry_queue')
           .update({ status: 'failed_permanent', resolved_at: new Date().toISOString(), attempts: newAttempts, last_attempt_at: new Date().toISOString(), last_error: errMsg.substring(0, 500) })
           .eq('id', entry.id);
+        if (permFailErr) console.error('⚠️ Retry queue permanent fail update error:', permFailErr.message);
         result.failedPermanent++;
 
         // Alert dev
@@ -140,10 +142,11 @@ export async function processRetryQueue(
         console.error(`❌ Retry queue: permanent failure for ${entry.recipient_phone} after ${newAttempts} attempts`);
       } else {
         // Update attempts, keep pending
-        await supabase.client
+        const { error: retryErr } = await supabase.client
           .from('retry_queue')
           .update({ attempts: newAttempts, last_attempt_at: new Date().toISOString(), last_error: errMsg.substring(0, 500) })
           .eq('id', entry.id);
+        if (retryErr) console.error('⚠️ Retry queue attempt update error:', retryErr.message);
       }
     }
   }

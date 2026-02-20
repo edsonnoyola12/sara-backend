@@ -4133,9 +4133,7 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
     // SLA MONITORING - Monitoreo de tiempos de respuesta
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/sla' || url.pathname.startsWith('/api/sla/')) {
-      const authError = checkApiAuth(request, env);
-      if (authError) return authError;
-
+      // Auth removed - CRM accesses these endpoints via crmPublicPatterns
       const sla = createSLAMonitoring(env.SARA_CACHE);
 
       // GET /api/sla - Obtener configuración actual

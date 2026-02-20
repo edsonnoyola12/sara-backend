@@ -8,7 +8,8 @@ export class SupabaseService {
   }
 
   async getLeadByPhone(phone: string) {
-    const { data } = await this.client.from('leads').select('*').eq('phone', phone).single();
+    const { data, error } = await this.client.from('leads').select('*').eq('phone', phone).single();
+    if (error && error.code !== 'PGRST116') console.error('⚠️ getLeadByPhone error:', error.message);
     return data;
   }
 
@@ -40,12 +41,14 @@ export class SupabaseService {
   }
 
   async getLeadById(id: string) {
-    const { data } = await this.client.from('leads').select('*').eq('id', id).single();
+    const { data, error } = await this.client.from('leads').select('*').eq('id', id).single();
+    if (error && error.code !== 'PGRST116') console.error('⚠️ getLeadById error:', error.message);
     return data;
   }
 
   async getTeamMemberByPhone(phone: string) {
-    const { data } = await this.client.from('team_members').select('*').eq('phone', phone).single();
+    const { data, error } = await this.client.from('team_members').select('*').eq('phone', phone).single();
+    if (error && error.code !== 'PGRST116') console.error('⚠️ getTeamMemberByPhone error:', error.message);
     return data;
   }
 }

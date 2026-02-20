@@ -41,10 +41,12 @@ export async function handlePromotionRoutes(
     // 2. Obtener leads con campos adicionales para segmentación avanzada
     let leads: any[] = [];
     if (body.lead_ids && body.lead_ids.length > 0) {
-      const { data } = await supabase.client.from('leads').select('id, name, phone, lead_score, score, status, source, property_interest, assigned_to').in('id', body.lead_ids);
+      const { data, error: leadsErr } = await supabase.client.from('leads').select('id, name, phone, lead_score, score, status, source, property_interest, assigned_to').in('id', body.lead_ids);
+      if (leadsErr) console.error('⚠️ Error fetching leads for promotion:', leadsErr.message);
       leads = (data || []).filter((l: any) => l.phone);
     } else {
-      const { data: allLeads } = await supabase.client.from('leads').select('id, name, phone, lead_score, score, status, source, property_interest, assigned_to');
+      const { data: allLeads, error: allErr } = await supabase.client.from('leads').select('id, name, phone, lead_score, score, status, source, property_interest, assigned_to');
+      if (allErr) console.error('⚠️ Error fetching all leads for promotion:', allErr.message);
       leads = (allLeads || []).filter((l: any) => l.phone);
 
       const seg = body.segment;
@@ -81,6 +83,13 @@ export async function handlePromotionRoutes(
     }
 
     if (leads.length === 0) return corsResponse(JSON.stringify({ success: false, error: 'No hay leads' }), 400);
+
+    // Limitar a máximo 500 leads por broadcast para evitar timeout
+    const MAX_BROADCAST = 500;
+    if (leads.length > MAX_BROADCAST) {
+      console.warn(`⚠️ Broadcast limitado a ${MAX_BROADCAST} de ${leads.length} leads`);
+      leads = leads.slice(0, MAX_BROADCAST);
+    }
 
     let sent = 0, errors = 0;
 
