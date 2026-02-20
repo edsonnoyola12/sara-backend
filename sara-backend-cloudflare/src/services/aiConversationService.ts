@@ -597,6 +597,12 @@ El cliente está RESPONDIENDO a ese mensaje. Debes:
         'followup_inactivo': 'un follow-up automático (estaba inactivo unos días)',
         'remarketing': 'un mensaje de remarketing (llevaba tiempo sin contacto)',
         'recordatorio_cita': 'un recordatorio de su cita programada',
+        'referidos': 'una solicitud de referidos (es cliente satisfecho)',
+        'nps': 'una encuesta NPS (Net Promoter Score del 0 al 10)',
+        'post_entrega': 'un seguimiento post-entrega de su casa (llaves, escrituras, servicios)',
+        'satisfaccion_casa': 'una encuesta de satisfacción con su casa (calificación 1-4)',
+        'mantenimiento': 'un check-in de mantenimiento preventivo de su casa',
+        'checkin_60d': 'un check-in a los 60 días de haber comprado su casa',
       };
       const tipoDesc = tipoMap[reactivacion.type] || `un mensaje automático (${reactivacion.type})`;
       reactivacionContext = `
@@ -625,6 +631,12 @@ Debes:
         'followup_inactivo': 'follow-up automático (estaba inactivo)',
         'remarketing': 'mensaje de remarketing (sin contacto reciente)',
         'recordatorio_cita': 'recordatorio de cita programada',
+        'referidos': 'solicitud de referidos (cliente satisfecho)',
+        'nps': 'encuesta NPS (0-10)',
+        'post_entrega': 'seguimiento post-entrega (llaves, escrituras, servicios)',
+        'satisfaccion_casa': 'encuesta satisfacción casa (1-4)',
+        'mantenimiento': 'check-in mantenimiento preventivo',
+        'checkin_60d': 'check-in 60 días post-compra',
       };
       const tipoDesc = tipoMap[pending.type] || pending.type;
       reactivacionContext = `

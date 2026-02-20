@@ -1187,6 +1187,83 @@ export class LeadMessageService {
         }
         break;
 
+      case 'referidos':
+        if (esPositiva) {
+          respuesta = `¡Excelente ${nombreLead}! 🎁\n\n` +
+                      `Comparte el nombre y teléfono de tu referido y yo me encargo de contactarlo.\n\n` +
+                      `Recuerda: *ambos reciben un regalo especial* si tu referido compra. 🏠`;
+        } else if (esNegativa) {
+          respuesta = `¡Sin problema ${nombreLead}! Si en el futuro alguien te pregunta por casas, aquí estamos. 😊`;
+        } else {
+          respuesta = `¡Gracias por responder ${nombreLead}! 🏠\n\n` +
+                      `Si tienes algún familiar o amigo buscando casa, solo pásame su nombre y número. ¡Sin compromiso!`;
+        }
+        break;
+
+      case 'nps':
+        if (esPositiva || esNeutra) {
+          respuesta = `¡Muchas gracias por tu calificación ${nombreLead}! 🙏\n\n` +
+                      `Tu opinión nos ayuda a seguir mejorando. Si hay algo específico que podamos mejorar, no dudes en escribirnos.`;
+        } else {
+          respuesta = `Gracias por tu honestidad ${nombreLead}. 🙏\n\n` +
+                      `Lamentamos que tu experiencia no haya sido la mejor. Tu asesor te contactará para ver cómo podemos mejorar.`;
+          notifyVendor = true;
+        }
+        break;
+
+      case 'post_entrega':
+        if (esPositiva) {
+          respuesta = `¡Qué bueno que todo está en orden ${nombreLead}! 🏠🔑\n\n` +
+                      `¡Bienvenido a la familia Santa Rita! Si necesitas algo en el futuro, aquí estamos.`;
+        } else if (esNegativa) {
+          respuesta = `Gracias por avisarnos ${nombreLead}. 🔧\n\n` +
+                      `Tu asesor te contactará lo antes posible para resolver cualquier pendiente.`;
+          notifyVendor = true;
+        } else {
+          respuesta = `¡Gracias por tu respuesta ${nombreLead}! 🏠\n\n` +
+                      `Si necesitas ayuda con algo de tu nueva casa, no dudes en escribirme.`;
+        }
+        break;
+
+      case 'satisfaccion_casa':
+        if (esPositiva) {
+          respuesta = `¡Nos da mucho gusto que estés contento con tu casa ${nombreLead}! 🏠💙\n\n` +
+                      `¡Gracias por confiar en Grupo Santa Rita!`;
+        } else if (esNegativa) {
+          respuesta = `Lamentamos escuchar eso ${nombreLead}. 😔\n\n` +
+                      `Tu asesor se pondrá en contacto contigo para atender cualquier situación. Queremos que estés 100% satisfecho.`;
+          notifyVendor = true;
+        } else {
+          respuesta = `¡Gracias por tu opinión ${nombreLead}! 🏠\n\n` +
+                      `Tu retroalimentación es muy valiosa para nosotros. Si hay algo por mejorar, cuéntanos.`;
+        }
+        break;
+
+      case 'mantenimiento':
+        if (esPositiva) {
+          respuesta = `¡Perfecto ${nombreLead}! 🏠✅\n\n` +
+                      `Qué bueno que todo está en orden. Recuerda que el mantenimiento preventivo alarga la vida de tu hogar. ¡Felicidades!`;
+        } else if (esNegativa) {
+          respuesta = `Entendido ${nombreLead}. 🔧\n\n` +
+                      `Te paso contacto de proveedores de confianza para lo que necesites. Tu asesor te contactará.`;
+          notifyVendor = true;
+        } else {
+          respuesta = `¡Gracias por responder ${nombreLead}! 🏠\n\n` +
+                      `Si necesitas recomendación de proveedores para mantenimiento, con gusto te ayudo.`;
+        }
+        break;
+
+      case 'checkin_60d':
+        if (esPositiva || esNeutra) {
+          respuesta = `¡Qué gusto saber que todo va bien ${nombreLead}! 🏡😊\n\n` +
+                      `Disfruta tu hogar. Si necesitas algo, aquí estamos para ayudarte.`;
+        } else {
+          respuesta = `Gracias por compartir ${nombreLead}. 🏡\n\n` +
+                      `Tu asesor te contactará para ver cómo podemos ayudarte.`;
+          notifyVendor = true;
+        }
+        break;
+
       default:
         // Respuesta genérica
         if (esPositiva) {
@@ -1231,7 +1308,13 @@ export class LeadMessageService {
       'seguimiento_credito': '🏦 Seguimiento crédito hipotecario',
       'followup_inactivo': '📬 Follow-up lead inactivo',
       'remarketing': '📣 Remarketing lead frío',
-      'recordatorio_cita': '📅 Recordatorio de cita'
+      'recordatorio_cita': '📅 Recordatorio de cita',
+      'referidos': '🤝 Solicitud de referidos',
+      'nps': '📊 Encuesta NPS',
+      'post_entrega': '🔑 Seguimiento post-entrega',
+      'satisfaccion_casa': '🏡 Encuesta satisfacción casa',
+      'mantenimiento': '🔧 Check-in mantenimiento',
+      'checkin_60d': '📅 Check-in 60 días post-venta'
     };
     return labels[tipo] || '📩 Mensaje automático';
   }

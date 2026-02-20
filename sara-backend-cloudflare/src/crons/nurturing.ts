@@ -716,7 +716,12 @@ Solo responde con el nombre y teléfono de quien creas que le interese, y yo me 
           historial_pedidos_referidos: [
             ...((notas as any)?.historial_pedidos_referidos || []).slice(-4),
             { fecha: hoyStr, dias_desde_compra: diasDesdeCompra }
-          ]
+          ],
+          pending_auto_response: {
+            type: 'referidos',
+            sent_at: new Date().toISOString(),
+            vendedor_id: cliente.assigned_to
+          }
         };
 
         await supabase.client
@@ -853,7 +858,12 @@ Tu respuesta nos ayuda a mejorar 🙏`;
           surveys_sent: [
             ...((notas.surveys_sent || []).slice(-9)),
             { type: 'nps', sent_at: ahora }
-          ]
+          ],
+          pending_auto_response: {
+            type: 'nps',
+            sent_at: ahora,
+            vendedor_id: (cliente as any).assigned_to
+          }
         };
 
         await supabase.client
@@ -1079,7 +1089,12 @@ Si hay algo pendiente o algún detalle por resolver, responde y te ayudamos de i
           surveys_sent: [
             ...((notas.surveys_sent || []).slice(-9)),
             { type: 'post_entrega', sent_at: ahora }
-          ]
+          ],
+          pending_auto_response: {
+            type: 'post_entrega',
+            sent_at: ahora,
+            vendedor_id: cliente.assigned_to
+          }
         };
 
         await supabase.client
@@ -1308,7 +1323,12 @@ Tu opinión nos ayuda a mejorar 🙏`;
           surveys_sent: [
             ...((notas.surveys_sent || []).slice(-9)),
             { type: 'satisfaccion_casa', sent_at: ahora }
-          ]
+          ],
+          pending_auto_response: {
+            type: 'satisfaccion_casa',
+            sent_at: ahora,
+            vendedor_id: cliente.assigned_to
+          }
         };
 
         await supabase.client
@@ -1572,7 +1592,12 @@ Responde *SÍ* si todo está bien o *AYUDA* si necesitas contactos de proveedore
           surveys_sent: [
             ...((notas.surveys_sent || []).slice(-9)),
             { type: 'mantenimiento', sent_at: ahora }
-          ]
+          ],
+          pending_auto_response: {
+            type: 'mantenimiento',
+            sent_at: ahora,
+            vendedor_id: cliente.assigned_to
+          }
         };
 
         await supabase.client
@@ -1773,7 +1798,16 @@ Estamos aquí para lo que necesites 😊`;
           await supabase.client
             .from('leads')
             .update({
-              notes: { ...notas, checkin_60d_sent: true, checkin_60d_date: ahora.toISOString() }
+              notes: {
+                ...notas,
+                checkin_60d_sent: true,
+                checkin_60d_date: ahora.toISOString(),
+                pending_auto_response: {
+                  type: 'checkin_60d',
+                  sent_at: ahora.toISOString(),
+                  vendedor_id: cliente.assigned_to
+                }
+              }
             })
             .eq('id', cliente.id);
 
