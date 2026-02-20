@@ -788,11 +788,13 @@ Usa emojis con moderación: máximo 1-2 por mensaje, solo donde sumen emoción.
 - Crédito: Se tramita en la visita con el equipo de ventas (NUNCA dar teléfonos de asesores directamente)
 
 **TIEMPOS DE ENTREGA POR DESARROLLO:**
-- Monte Verde: 3 meses (Casas: Acacia, Eucalipto, Olivo, Fresno)
-- Los Encinos: 3 meses (Casas: Encino Verde, Encino Blanco, Encino Dorado, Encino Descendente, Duque)
-- Miravalle: 3 meses (Casas: Bilbao, Viscaya)
-- Distrito Falco: 4 meses (Casas: Mirlo, Chipre, Colibrí, Calandria)
-- Priv. Andes: 3 meses (Casas: Dalia, Gardenia, Lavanda, Laurel)
+- Monte Verde: 3 meses (Casas: Acacia [2rec], Eucalipto [2rec], Olivo, Fresno, Fresno 2)
+- Los Encinos: 3 meses (Casas: Encino Blanco, Encino Verde, Encino Dorado, Roble, Maple, Nogal, Sabino)
+- Miravalle: 3 meses (Casas: Vizcaya, Bilbao 7M, Casa Habitacion 6m/7m | Deptos: Departamento 6m/7m [2rec])
+- Distrito Falco: 4 meses (Casas: Proyecto Especial, Chipre Light, Colibri Light, Colibri, Chipre, Mirlo, Calandria)
+- Priv. Andes: 3 meses (Casas: Laurel [2rec], Dalia [2rec], Gardenia, Lavanda)
+- Alpes: 3 meses (Casa: Dalia Alpes [2rec])
+- Paseo Colorines: 3 meses (Casas: Prototipo 6M, Prototipo 7M)
 
 **DOCUMENTACIÓN REQUERIDA:**
 - INE vigente
@@ -977,9 +979,10 @@ Si el cliente menciona:
    - Nogal: 3 rec + vestidor, 152m², $3.61M
    - Sabino: 3 rec + vestidor, 155m², $3.79M (la más amplia)
 
-3. **Miravalle** - Casas de 3 plantas con roof garden, desde $3.0M
-   - Bilbao 7M: 3 rec + estudio + roof garden, 242m², $4.10M
-   - Casa Habitación 7m: 3 rec, 4 baños, 232m², $4.35M
+3. **Miravalle** - Casas de 3 plantas con roof garden, desde $3.5M
+   - Vizcaya: 3 rec, 210m², $3.51M
+   - Bilbao 7M: 3 rec + roof garden, 242m², $4.11M
+   - Casa Habitacion 7m: 3 rec, 232m², $4.35M
 
 Respuesta sugerida:
 "¡Tengo opciones amplias para familias! 👨‍👩‍👧‍👦
@@ -1018,7 +1021,7 @@ Si el cliente quiere comparar desarrollos:
 **POR TAMAÑO:**
 - 2 recámaras: Monte Verde (Acacia), Andes (Laurel, Dalia)
 - 3 recámaras: Todos los desarrollos
-- 4 recámaras: Distrito Falco, Los Encinos, Miravalle
+- 3 rec + estudio/amplias: Distrito Falco (Chipre, Mirlo), Miravalle (Bilbao 7M)
 
 **POR AMENIDADES:**
 - Con alberca: SOLO Andes
@@ -1315,7 +1318,7 @@ Ejemplo:
 Cliente: "Tengo un presupuesto de 3 millones, dame opciones"
 Respuesta en "response":
 "Con 3 millones estás en una muy buena posición, [nombre] 😊
-En Zacatecas te puedo recomendar *Los Encinos*, donde modelos como Ascendente te dan 3 recámaras, cochera para 2 autos y un entorno muy familiar.
+En Zacatecas te puedo recomendar *Los Encinos*, donde modelos como Encino Verde te dan 3 recámaras, cochera para 2 autos y un entorno muy familiar.
 También está *Miravalle*, más premium, con casas de 3 niveles y terraza para reuniones.
 Si prefieres Guadalupe, *Andes* es excelente por ubicación y relación precio-beneficio.
 ¿Te gustaría que te detalle primero Zacatecas o Guadalupe?"
@@ -2643,17 +2646,17 @@ Por WhatsApp te atiendo 24/7 🙌
           if (presupuesto >= 3) {
             fallbackResponse = `${lead.name}, con ${presupuesto}M estás en excelente posición 😊
 
-En Zacatecas te recomiendo *Los Encinos* (modelo Ascendente: 3 rec, 210m², terraza) o *Miravalle* (Bilbao/Vizcaya: 3 niveles, roof garden).
+En Zacatecas te recomiendo *Los Encinos* (modelo Nogal: 3 rec, 152m², desde $3.6M) o *Miravalle* (Bilbao 7M: 3 niveles, roof garden, $4.1M).
 
-En Guadalupe, *Distrito Falco* tiene modelos premium como Halcón con 4 rec y acabados de lujo.
+En Guadalupe, *Distrito Falco* tiene modelos premium como Chipre (3 rec, 224m², $5.1M).
 
 ¿Te gustaría que te detalle primero Zacatecas o Guadalupe?`;
           } else if (presupuesto >= 2) {
             fallbackResponse = `${lead.name}, con ${presupuesto}M tienes muy buenas opciones 😊
 
-En Zacatecas: *Monte Verde* (Fresno/Olivo: 3 rec, áreas verdes) o *Los Encinos* (Descendente: 3 plantas, terraza).
+En Zacatecas: *Monte Verde* (Fresno/Olivo: 3 rec, áreas verdes) o *Los Encinos* (Encino Blanco: 3 rec, desde $3.0M).
 
-En Guadalupe: *Andes* es excelente por ubicación y precio, modelos como Aconcagua te dan 3 rec con jardín.
+En Guadalupe: *Andes* es excelente por ubicación y precio, modelos como Gardenia te dan 3 rec desde $2.3M.
 
 ¿Cuál zona te llama más la atención?`;
           } else {
@@ -3013,7 +3016,8 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
           props.forEach(p => {
             // Usar precio equipado por defecto
             const precioEquipada = p.price_equipped || p.price;
-            const precio = precioEquipada ? `$${(Number(precioEquipada)/1000000).toFixed(1)}M equipada` : '';
+            const esEquipada = !!p.price_equipped;
+            const precio = precioEquipada ? `$${(Number(precioEquipada)/1000000).toFixed(1)}M${esEquipada ? ' equipada' : ''}` : '';
             const plantas = p.floors === 1 ? '1 planta' : `${p.floors} plantas`;
             const extras = [];
             if (p.has_study) extras.push('estudio');
@@ -3021,7 +3025,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             if (p.has_roof_garden) extras.push('roof garden');
             if (p.has_garden) extras.push('jardín');
 
-            catalogo += `• ${p.name}: ${precio} | ${p.bedrooms} rec, ${p.bathrooms || '?'} baños | ${p.area_m2}m²`;
+            catalogo += `• ${p.name}: ${precio} | ${p.bedrooms} rec, ${p.bathrooms || '?'} baños | ${p.area_m2}m² | ${plantas}`;
             if (extras.length > 0) catalogo += ` | ${extras.join(', ')}`;
             // Agregar precio sin equipo entre paréntesis si es diferente
             if (p.price && p.price_equipped && Number(p.price) !== Number(p.price_equipped)) {
