@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-20 (Sesión 54)
+> Última actualización: 2026-02-20 (Sesión 55)
 
 ---
 
@@ -29,7 +29,7 @@
 # 1. Lee la documentación completa
 cat SARA_COMANDOS.md | head -500
 
-# 2. Verifica tests (OBLIGATORIO - 509+ tests)
+# 2. Verifica tests (OBLIGATORIO - 515+ tests)
 npm test
 
 # 3. Si falla algún test, NO hagas cambios
@@ -1257,10 +1257,11 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Post-compra tests | 66 | ✅ |
 | Session 52 tests (rate limiter, edge cases, handoff) | 37 | ✅ |
 | Session 53 tests (delivery status, R2 backup, load test) | 33 | ✅ |
+| Session 54-55 tests (survey fixes, template context) | 6 | ✅ |
 | E2E Lead Journey | 7 | ✅ |
 | E2E Vendor Journey | 5 | ✅ |
 | E2E CEO Journey | 5 | ✅ |
-| **Total** | **509** | ✅ |
+| **Total** | **515** | ✅ |
 
 ### 👥 EQUIPO ACTIVO
 
@@ -5501,4 +5502,106 @@ Mejora a la vista Equipo existente con toggle Tarjetas/Rendimiento:
 | CRM | https://sara-crm-new.vercel.app |
 | Videos | https://sara-videos.onrender.com |
 
-**Sistema 100% completo y operativo — Última verificación: 2026-02-20 (Sesión 54)**
+---
+
+### 2026-02-20 (Sesión 55) - Template Response Context + Follow-up Fallthrough Fixes
+
+**Auditoría completa de los 15 templates que SARA envía a leads + fixes de respuestas que caían al IA sin contexto.**
+
+#### Fix 1: Follow-up Fallthrough Fixes (commit `2ac07737`)
+
+**Problema:** Cuando un lead respondía a ciertos templates (no-show reagendar, encuesta satisfacción), la respuesta "caía" al flujo genérico de IA en vez de ser capturada por el handler correcto.
+
+| Template | Bug | Fix |
+|----------|-----|-----|
+| `reagendar_noshow` | Respuesta no capturada | Nuevo handler `pending_noshow_reagendar` en `whatsapp-utils.ts` con `buscarLeadConFlag()` |
+| `encuesta_satisfaccion_casa` | Calificación 3-4 (mala) no pedía feedback | Nuevo flag `esperando_feedback_satisfaction_survey` en `whatsapp.ts` |
+| Cleanup de flags | Flags de feedback viejos no se limpiaban | `esperando_feedback_satisfaction_survey` agregado a feedbackFlags y cleanup en `nurturing.ts` |
+
+**Archivos:** `whatsapp.ts`, `whatsapp-utils.ts`, `nurturing.ts`
+
+#### Fix 2: Template Context para IA (commit `db54f70f`)
+
+**Problema encontrado en auditoría de 15 templates:** Cuando CRONs envían templates de re-engagement, follow-up, crédito, etc., los mensajes NO se guardan en `conversation_history`. Si el lead responde con una solicitud específica (ej: "mándame precios"), `checkAutoMessageResponse()` pasa a IA con `continue_to_ai` y guarda `reactivado_solicitud` en notes — pero la IA NUNCA leía ese campo. Resultado: SARA respondía sin saber que el lead estaba respondiendo a un template.
+
+**Solución: `reactivacionContext`** — Mismo patrón que `broadcastContext`:
+
+| Componente | Archivo | Cambio |
+|------------|---------|--------|
+| `reactivacionContext` | `aiConversationService.ts` | Lee `reactivado_solicitud` y `pending_auto_response` de notes → inyecta contexto en prompt Claude |
+| `pending_auto_response` para `info_credito` | `followups.ts` | Template `info_credito` ahora guarda `pending_auto_response` con type `seguimiento_credito` |
+| Handler `seguimiento_credito` | `leadMessageService.ts` | Nuevo case en switch de `checkAutoMessageResponse` con respuestas positiva/negativa/neutral |
+
+**Tipos de reactivación soportados:**
+
+| Tipo | Descripción |
+|------|-------------|
+| `lead_frio` | Mensaje de seguimiento (lead frío/re-engagement) |
+| `reengagement` | Mensaje de seguimiento (lead frío/re-engagement) |
+| `cumpleanos` | Felicitación de cumpleaños |
+| `aniversario` | Felicitación de aniversario de compra |
+| `postventa` | Seguimiento post-venta |
+| `recordatorio_pago` | Recordatorio de pago |
+| `seguimiento_credito` | Seguimiento de solicitud de crédito hipotecario |
+
+**Auditoría completa de templates (15 total):**
+
+| Template | Handler Respuesta | Estado |
+|----------|-------------------|--------|
+| `recordatorio_cita_24h` | SARA IA con citaExistenteInfo | ✅ |
+| `recordatorio_cita_2h` | SARA IA con citaExistenteInfo | ✅ |
+| `appointment_confirmation_v2` | Handler línea 777-815 | ✅ |
+| `reagendar_noshow` | Handler `pending_noshow_reagendar` | ✅ (Fixed) |
+| `encuesta_post_visita` | Handler encuestas línea 11370+ | ✅ |
+| `seguimiento_lead` (reengagement) | `checkAutoMessageResponse()` + `reactivacionContext` | ✅ (Fixed) |
+| `seguimiento_lead` (24h) | `checkAutoMessageResponse()` + `reactivacionContext` | ✅ (Fixed) |
+| `feliz_cumple` | `pending_birthday_response` handler | ✅ |
+| `info_credito` | `checkAutoMessageResponse()` + `reactivacionContext` | ✅ (Fixed) |
+| `seguimiento_post_entrega` | Handler `esperando_respuesta_entrega` | ✅ |
+| `encuesta_satisfaccion_casa` | Handler + feedback flag | ✅ (Fixed) |
+| `referidos_postventa` | Regex handler | ✅ |
+| NPS | Handler `esperando_respuesta_nps` | ✅ |
+| `promo_desarrollo` | `broadcastContext` | ✅ |
+| `invitacion_evento` | No se envía actualmente | ✅ (N/A) |
+
+**Archivos modificados:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/services/aiConversationService.ts` | `reactivacionContext` (~45 líneas) inyectado en prompt |
+| `src/crons/followups.ts` | `pending_auto_response` en `info_credito` template send |
+| `src/services/leadMessageService.ts` | Handler `seguimiento_credito` + label en `getTipoMensajeLabel` |
+| `src/handlers/whatsapp.ts` | Flag `esperando_feedback_satisfaction_survey` |
+| `src/handlers/whatsapp-utils.ts` | Handler `pending_noshow_reagendar` + `buscarLeadConFlag()` |
+| `src/crons/nurturing.ts` | Cleanup de `esperando_feedback_satisfaction_survey` |
+
+**Tests:** 515/515 pasando
+**Commits:** `2ac07737` (fallthrough fixes), `db54f70f` (template context)
+**Deploy:** Version ID `ecba219e`
+
+---
+
+**Estado final del sistema:**
+
+| Métrica | Valor |
+|---------|-------|
+| Tests | 515/515 ✅ |
+| Test files | 17 |
+| Servicios | 85+ |
+| Comandos verificados | 342/342 (4 roles) |
+| CRONs activos | 25+ |
+| Capas de resilience | 9 |
+| Templates WA aprobados | 3 |
+| Propiedades en catálogo | 38 |
+| Desarrollos | 7 (Monte Verde, Andes, Falco, Encinos, Miravalle, Colorines, Citadella) |
+| **CRM UX/UI Rounds** | **8 completados** |
+
+**URLs de producción:**
+
+| Servicio | URL |
+|----------|-----|
+| Backend | https://sara-backend.edson-633.workers.dev |
+| CRM | https://sara-crm-new.vercel.app |
+| Videos | https://sara-videos.onrender.com |
+
+**Sistema 100% completo y operativo — Última verificación: 2026-02-20 (Sesión 55)**
