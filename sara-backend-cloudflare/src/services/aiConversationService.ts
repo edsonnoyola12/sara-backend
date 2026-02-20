@@ -1905,7 +1905,11 @@ Excelente plusvalía y muy tranquilo. *¿Te gustaría visitarlo? ¿Qué día pue
       const yaComproOtroLado =
         (msgLowerCallback.includes('ya compr') && (msgLowerCallback.includes('otro lado') || msgLowerCallback.includes('otra'))) ||
         msgLowerCallback.includes('ya tengo casa') ||
-        msgLowerCallback.includes('ya adquir');
+        msgLowerCallback.includes('ya adquir') ||
+        (msgLowerCallback.includes('encontr') && msgLowerCallback.includes('otra opci')) ||
+        (msgLowerCallback.includes('me decid') && msgLowerCallback.includes('por otra')) ||
+        (msgLowerCallback.includes('ya eleg') && msgLowerCallback.includes('otra')) ||
+        (msgLowerCallback.includes('ya firm') && msgLowerCallback.includes('otra'));
 
       if (yaComproOtroLado && parsed.response) {
         const respLower = parsed.response.toLowerCase();

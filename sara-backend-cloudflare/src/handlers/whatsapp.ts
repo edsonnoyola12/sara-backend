@@ -216,8 +216,11 @@ export class WhatsAppHandler {
 
       if (esTeamMember) {
         console.log(`🛡️ TEAM MEMBER DETECTADO TEMPRANO: ${cleanPhone} - saltando procesamiento de lead`);
-        // Saltar todo el procesamiento de lead y ir directo a la sección de vendedor (línea ~860)
-        // El código de vendedor está más abajo, así que continuamos pero marcamos que NO es lead
+        // Si getOrCreateLead creó un lead fantasma (race condition con skipTeamCheck=true), eliminarlo
+        if (leadResult.isNew && leadResult.lead?.id) {
+          console.log(`🧹 Eliminando lead fantasma ${leadResult.lead.id} (era team member)`);
+          await this.supabase.client.from('leads').delete().eq('id', leadResult.lead.id);
+        }
       }
 
       // Si es team member PERO tiene encuesta pendiente como lead, procesar encuesta PRIMERO
