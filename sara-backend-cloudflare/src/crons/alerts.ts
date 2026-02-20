@@ -1313,12 +1313,21 @@ export async function remarketingLeadsFrios(supabase: SupabaseService, meta: Met
       try {
         await meta.sendWhatsAppMessage(lead.phone, mensaje);
 
-        // Marcar como enviado
+        // Marcar como enviado + pending_auto_response
+        const notesActuales = typeof lead.notes === 'object' && lead.notes ? lead.notes : {};
         await supabase.client
           .from('leads')
           .update({
             remarketing_sent: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
+            notes: {
+              ...notesActuales,
+              pending_auto_response: {
+                type: 'remarketing',
+                sent_at: new Date().toISOString(),
+                vendedor_id: lead.assigned_to
+              }
+            }
           })
           .eq('id', lead.id);
 
@@ -1419,7 +1428,15 @@ export async function followUpLeadsInactivos(supabase: SupabaseService, meta: Me
         await supabase.client
           .from('leads')
           .update({
-            notes: { ...notesActuales, last_auto_followup: ahora.toISOString() },
+            notes: {
+              ...notesActuales,
+              last_auto_followup: ahora.toISOString(),
+              pending_auto_response: {
+                type: 'followup_inactivo',
+                sent_at: ahora.toISOString(),
+                vendedor_id: lead.assigned_to
+              }
+            },
             last_interaction: ahora.toISOString()
           })
           .eq('id', lead.id);

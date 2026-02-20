@@ -1159,6 +1159,34 @@ export class LeadMessageService {
         }
         break;
 
+      case 'followup_inactivo':
+      case 'remarketing':
+        if (esPositiva) {
+          respuesta = `¡Qué gusto ${nombreLead}! 😊\n\n` +
+                      `Me alegra que sigas interesado. Tenemos casas desde $1.6M con excelentes opciones de financiamiento.\n\n` +
+                      `*¿Qué día te funciona para una visita?* 🏠`;
+          updateLead = { status: 'contacted', notes: { ...notasLead, reactivado: new Date().toISOString() } };
+        } else if (esNegativa) {
+          respuesta = `¡Claro ${nombreLead}! Sin presión. Solo una pregunta: ¿ya encontraste casa o sigues buscando? 🏠`;
+        } else {
+          respuesta = `¡Gracias por responder ${nombreLead}! 😊\n\n` +
+                      `¿Te gustaría conocer las opciones disponibles? Puedo agendar una visita sin compromiso.`;
+        }
+        break;
+
+      case 'recordatorio_cita':
+        if (esPositiva) {
+          const citaDesarrollo = (notasLead.pending_auto_response as any)?.desarrollo || 'nuestro desarrollo';
+          respuesta = `¡Perfecto ${nombreLead}! 🏠\n\n` +
+                      `Te esperamos en ${citaDesarrollo}. Si necesitas la ubicación, con gusto te la envío. 📍`;
+        } else if (esNegativa) {
+          respuesta = `Entendido ${nombreLead}. ¿Te gustaría reagendar para otro día? Puedo buscarte un horario que te funcione mejor. 📅`;
+        } else {
+          respuesta = `¡Gracias por confirmar ${nombreLead}! 😊\n\n` +
+                      `Si tienes alguna pregunta antes de tu visita, aquí estoy para ayudarte.`;
+        }
+        break;
+
       default:
         // Respuesta genérica
         if (esPositiva) {
@@ -1200,7 +1228,10 @@ export class LeadMessageService {
       'cumpleanos': '🎂 Felicitación cumpleaños',
       'postventa': '📦 Seguimiento post-venta',
       'recordatorio_pago': '💰 Recordatorio de pago',
-      'seguimiento_credito': '🏦 Seguimiento crédito hipotecario'
+      'seguimiento_credito': '🏦 Seguimiento crédito hipotecario',
+      'followup_inactivo': '📬 Follow-up lead inactivo',
+      'remarketing': '📣 Remarketing lead frío',
+      'recordatorio_cita': '📅 Recordatorio de cita'
     };
     return labels[tipo] || '📩 Mensaje automático';
   }

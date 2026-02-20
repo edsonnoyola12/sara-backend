@@ -594,6 +594,9 @@ El cliente está RESPONDIENDO a ese mensaje. Debes:
         'postventa': 'un mensaje de seguimiento post-venta',
         'recordatorio_pago': 'un recordatorio de pago',
         'seguimiento_credito': 'un seguimiento de su solicitud de crédito hipotecario',
+        'followup_inactivo': 'un follow-up automático (estaba inactivo unos días)',
+        'remarketing': 'un mensaje de remarketing (llevaba tiempo sin contacto)',
+        'recordatorio_cita': 'un recordatorio de su cita programada',
       };
       const tipoDesc = tipoMap[reactivacion.type] || `un mensaje automático (${reactivacion.type})`;
       reactivacionContext = `
@@ -619,6 +622,9 @@ Debes:
         'aniversario': 'felicitación de aniversario',
         'postventa': 'seguimiento post-venta',
         'seguimiento_credito': 'seguimiento de crédito hipotecario',
+        'followup_inactivo': 'follow-up automático (estaba inactivo)',
+        'remarketing': 'mensaje de remarketing (sin contacto reciente)',
+        'recordatorio_cita': 'recordatorio de cita programada',
       };
       const tipoDesc = tipoMap[pending.type] || pending.type;
       reactivacionContext = `

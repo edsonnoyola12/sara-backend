@@ -1592,11 +1592,26 @@ export async function enviarFelicitacionesCumple(supabase: SupabaseService, meta
         await meta.sendTemplate(lead.phone, 'feliz_cumple', 'es_MX', templateComponents);
         console.log(`🎂 Felicitación (template) enviada a ${lead.name}`);
 
-        // Marcar como felicitado
+        // Marcar como felicitado + pending_auto_response
         const notasActuales = lead.notes || {};
         const nuevasNotas = typeof notasActuales === 'object'
-          ? { ...notasActuales, [`cumple_felicitado_${añoActual}`]: true }
-          : { [`cumple_felicitado_${añoActual}`]: true };
+          ? {
+              ...notasActuales,
+              [`cumple_felicitado_${añoActual}`]: true,
+              pending_auto_response: {
+                type: 'cumpleanos',
+                sent_at: new Date().toISOString(),
+                vendedor_id: lead.assigned_to
+              }
+            }
+          : {
+              [`cumple_felicitado_${añoActual}`]: true,
+              pending_auto_response: {
+                type: 'cumpleanos',
+                sent_at: new Date().toISOString(),
+                vendedor_id: lead.assigned_to
+              }
+            };
 
         await supabase.client
           .from('leads')
@@ -1617,11 +1632,26 @@ export async function enviarFelicitacionesCumple(supabase: SupabaseService, meta
           await meta.sendWhatsAppMessage(lead.phone, mensajeFallback);
           console.log(`🎂 Felicitación (fallback) enviada a ${lead.name}`);
 
-          // Marcar como felicitado
+          // Marcar como felicitado + pending_auto_response
           const notasActuales = lead.notes || {};
           const nuevasNotas = typeof notasActuales === 'object'
-            ? { ...notasActuales, [`cumple_felicitado_${añoActual}`]: true }
-            : { [`cumple_felicitado_${añoActual}`]: true };
+            ? {
+                ...notasActuales,
+                [`cumple_felicitado_${añoActual}`]: true,
+                pending_auto_response: {
+                  type: 'cumpleanos',
+                  sent_at: new Date().toISOString(),
+                  vendedor_id: lead.assigned_to
+                }
+              }
+            : {
+                [`cumple_felicitado_${añoActual}`]: true,
+                pending_auto_response: {
+                  type: 'cumpleanos',
+                  sent_at: new Date().toISOString(),
+                  vendedor_id: lead.assigned_to
+                }
+              };
 
           await supabase.client
             .from('leads')

@@ -177,6 +177,37 @@ export class NotificationService {
               }
             }
 
+            // Marcar pending_auto_response en lead notes para contexto
+            if (cita.lead_id) {
+              try {
+                const { data: leadData } = await this.supabase.client
+                  .from('leads')
+                  .select('notes')
+                  .eq('id', cita.lead_id)
+                  .maybeSingle();
+                const leadNotes = typeof leadData?.notes === 'object' && leadData?.notes ? leadData.notes : {};
+                await this.supabase.client
+                  .from('leads')
+                  .update({
+                    notes: {
+                      ...leadNotes,
+                      pending_auto_response: {
+                        type: 'recordatorio_cita',
+                        sent_at: new Date().toISOString(),
+                        vendedor_id: (cita as any).vendedor_id,
+                        cita_date: cita.scheduled_date,
+                        cita_time: cita.scheduled_time,
+                        desarrollo: cita.property_name
+                      }
+                    }
+                  })
+                  .eq('id', cita.lead_id);
+              } catch (noteErr) {
+                // No crítico
+                console.log(`⚠️ No se pudo marcar pending_auto_response en lead ${cita.lead_id}`);
+              }
+            }
+
             enviados++;
             console.log(`📅 Recordatorio 24h enviado a ${cita.lead_name}`);
           } catch (e) {
@@ -396,6 +427,36 @@ export class NotificationService {
                 }
               } catch (ttsErr) {
                 console.log(`⚠️ TTS recordatorio 2h falló (no crítico):`, ttsErr);
+              }
+            }
+
+            // Marcar pending_auto_response en lead notes para contexto
+            if (cita.lead_id) {
+              try {
+                const { data: leadData } = await this.supabase.client
+                  .from('leads')
+                  .select('notes')
+                  .eq('id', cita.lead_id)
+                  .maybeSingle();
+                const leadNotes = typeof leadData?.notes === 'object' && leadData?.notes ? leadData.notes : {};
+                await this.supabase.client
+                  .from('leads')
+                  .update({
+                    notes: {
+                      ...leadNotes,
+                      pending_auto_response: {
+                        type: 'recordatorio_cita',
+                        sent_at: new Date().toISOString(),
+                        vendedor_id: (cita as any).vendedor_id,
+                        cita_date: cita.scheduled_date,
+                        cita_time: cita.scheduled_time,
+                        desarrollo: cita.property_name
+                      }
+                    }
+                  })
+                  .eq('id', cita.lead_id);
+              } catch (noteErr) {
+                // No crítico
               }
             }
 
