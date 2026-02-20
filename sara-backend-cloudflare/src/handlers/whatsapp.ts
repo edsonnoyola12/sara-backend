@@ -715,6 +715,13 @@ export class WhatsAppHandler {
 
             // Limpiar pending_satisfaction_survey
             delete notasLead.pending_satisfaction_survey;
+
+            // Para ratings malos (3-4), activar flag de feedback para capturar follow-up
+            if (respuesta === '3' || respuesta === '4') {
+              notasLead.esperando_feedback_satisfaction_survey = true;
+              notasLead.esperando_feedback_satisfaction_survey_at = new Date().toISOString();
+            }
+
             await this.supabase.client
               .from('leads')
               .update({ notes: notasLead })

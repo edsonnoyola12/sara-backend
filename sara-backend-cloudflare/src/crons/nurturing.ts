@@ -1810,6 +1810,8 @@ export async function limpiarFlagsEncuestasExpirados(
       { flag: 'esperando_feedback_entrega', at: 'esperando_feedback_entrega_at' },
       { flag: 'esperando_feedback_satisfaccion', at: 'esperando_feedback_satisfaccion_at' },
       { flag: 'esperando_feedback_mantenimiento', at: 'esperando_feedback_mantenimiento_at' },
+      { flag: 'esperando_feedback_satisfaction_survey', at: 'esperando_feedback_satisfaction_survey_at' },
+      { flag: 'pending_noshow_reagendar', at: '' },
       { flag: 'pending_client_survey', at: '' },
       { flag: 'pending_satisfaction_survey', at: '' },
     ];
@@ -1897,12 +1899,13 @@ export async function procesarFeedbackEncuesta(
 ): Promise<boolean> {
   const notas = typeof lead.notes === 'object' ? lead.notes : {};
 
-  // Check all 4 feedback flags
+  // Check all feedback flags (4 CRON surveys + 1 post-visit satisfaction)
   const feedbackFlags = [
     { flag: 'esperando_feedback_nps', at: 'esperando_feedback_nps_at', tipo: 'nps', noteKey: 'nps_feedback' },
     { flag: 'esperando_feedback_entrega', at: 'esperando_feedback_entrega_at', tipo: 'entrega', noteKey: 'entrega_feedback' },
     { flag: 'esperando_feedback_satisfaccion', at: 'esperando_feedback_satisfaccion_at', tipo: 'satisfaccion', noteKey: 'satisfaccion_casa_feedback' },
     { flag: 'esperando_feedback_mantenimiento', at: 'esperando_feedback_mantenimiento_at', tipo: 'mantenimiento', noteKey: 'mantenimiento_feedback' },
+    { flag: 'esperando_feedback_satisfaction_survey', at: 'esperando_feedback_satisfaction_survey_at', tipo: 'satisfaction_survey', noteKey: 'satisfaction_survey_feedback' },
   ];
 
   for (const { flag, at, tipo, noteKey } of feedbackFlags) {

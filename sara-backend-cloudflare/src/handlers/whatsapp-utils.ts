@@ -1309,6 +1309,43 @@ export async function procesarRespuestaEncuesta(ctx: HandlerContext, phone: stri
       return respuestaParaLead;
     }
 
+    // Primero: capturar follow-up de reagendamiento (lead respondió a "¿qué día te funciona?")
+    const leadConReagendar = await buscarLeadConFlag(ctx, phone, 'pending_noshow_reagendar');
+    if (leadConReagendar) {
+      const notas = typeof leadConReagendar.notes === 'object' ? leadConReagendar.notes : {};
+      const reagendarCtx = notas.pending_noshow_reagendar;
+
+      // TTL check: 48h
+      if (reagendarCtx?.set_at) {
+        const horasDesde = (Date.now() - new Date(reagendarCtx.set_at).getTime()) / (1000 * 60 * 60);
+        if (horasDesde > 48) {
+          delete notas.pending_noshow_reagendar;
+          await ctx.supabase.client.from('leads').update({ notes: notas }).eq('id', leadConReagendar.id);
+        } else {
+          console.log(`📋 NO-SHOW REAGENDAR: Lead ${leadConReagendar.name} respondió con disponibilidad`);
+
+          // Reenviar al vendedor
+          if (reagendarCtx.vendedor_phone) {
+            const nombreLead = leadConReagendar.name?.split(' ')[0] || 'El cliente';
+            await ctx.meta.sendWhatsAppMessage(reagendarCtx.vendedor_phone,
+              `📅 *${nombreLead}* indicó su disponibilidad para reagendar:\n\n` +
+              `"${mensaje}"\n\n` +
+              `📱 ${leadConReagendar.phone}\n` +
+              `🏠 ${reagendarCtx.property || 'Sin propiedad'}\n\n` +
+              `⚡ *Contáctalo para confirmar la nueva cita*`
+            );
+          }
+
+          // Limpiar flag y responder al lead
+          delete notas.pending_noshow_reagendar;
+          await ctx.supabase.client.from('leads').update({ notes: notas }).eq('id', leadConReagendar.id);
+
+          const nombreCorto = leadConReagendar.name?.split(' ')[0] || 'Hola';
+          return `¡Perfecto ${nombreCorto}! 📅\n\nLe paso tu disponibilidad a ${reagendarCtx.vendedor_name || 'tu asesor'}. Te confirmará la cita en breve. 👍`;
+        }
+      }
+    }
+
     const leadConNoShow = await buscarLeadConNoShowPendiente(ctx, phone);
     if (leadConNoShow) {
       const notas = typeof leadConNoShow.notes === 'object' ? leadConNoShow.notes : {};
@@ -1338,6 +1375,13 @@ export async function procesarRespuestaEncuesta(ctx: HandlerContext, phone: stri
               mensaje: mensaje,
               responded_at: new Date().toISOString(),
               original_context: noShowContext
+            },
+            // Flag para capturar follow-up (ej: "sábado 3pm") y reenviar al vendedor
+            pending_noshow_reagendar: {
+              vendedor_phone: noShowContext?.vendedor_phone,
+              vendedor_name: noShowContext?.vendedor_name,
+              property: noShowContext?.property,
+              set_at: new Date().toISOString()
             }
           }
         })
@@ -1726,6 +1770,31 @@ export async function buscarLeadConNoShowPendiente(ctx: HandlerContext, phone: s
     return null;
   } catch (err) {
     console.error('Error buscando lead con no-show pendiente:', err);
+    return null;
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// HELPER: buscarLeadConFlag - busca lead por teléfono con un flag específico en notes
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export async function buscarLeadConFlag(ctx: HandlerContext, phone: string, flag: string): Promise<any | null> {
+  try {
+    const phoneSuffix = phone.replace(/\D/g, '').slice(-10);
+    const { data: leads } = await ctx.supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, assigned_to')
+      .or(`phone.ilike.%${phoneSuffix},whatsapp_phone.ilike.%${phoneSuffix}`);
+
+    if (!leads || leads.length === 0) return null;
+
+    for (const lead of leads) {
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      if (notas[flag]) return lead;
+    }
+    return null;
+  } catch (err) {
+    console.error(`Error buscando lead con flag ${flag}:`, err);
     return null;
   }
 }
