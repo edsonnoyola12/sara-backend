@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-19 (Sesión 53)
+> Última actualización: 2026-02-20 (Sesión 54)
 
 ---
 
@@ -3835,6 +3835,8 @@ Después de cada respuesta de IA, ahora se guardan en `lead.notes`:
 | CEO/Admin | ✅ | 2026-02-02 |
 | **Métricas de Mensajes** | ✅ | 2026-02-05 |
 | **Encuestas (Enviar + Resultados)** | ✅ | 2026-02-05 |
+| **SARA Intelligence (IA Responses, Health, Delivery)** | ✅ | 2026-02-20 |
+| **Team Scorecards (Rendimiento vendedores)** | ✅ | 2026-02-20 |
 
 ### Endpoints CRM Públicos
 
@@ -5407,6 +5409,75 @@ Endpoint para pruebas de carga simulando leads concurrentes:
 
 **Lo único opcional que NO existe:** Web push notifications en el dashboard (campana con contador). No es blocker porque SARA notifica todo por WhatsApp.
 
+---
+
+### 2026-02-20 (Sesión 54) - CRM UX/UI Round 8: SARA Intelligence Dashboard + Team Scorecards
+
+**Repo:** `sara-crm-new` (React + Vercel)
+**Archivos modificados:** `src/App.tsx` (+554/-11), `src/index.css` (+65)
+**Commit:** `f05b8f8 feat: UX/UI round 8 — SARA Intelligence Dashboard + Team Scorecards`
+
+#### Feature 1: SARA Intelligence Dashboard
+
+Nueva vista `sara-ai` en el CRM que surfacea datos del backend que antes no tenían UI:
+
+| Tab | Contenido | Fuente Supabase |
+|-----|-----------|-----------------|
+| **Respuestas IA** | 4 KPIs (total, avg time, avg tokens, top intent), Response Time AreaChart, Intent PieChart, searchable/expandable log table con filtro de días (1d/3d/7d/30d) | `ai_responses` |
+| **Salud** | Health status card (green/red), Latency LineChart (3 líneas: Supabase/Meta/OpenAI), Uptime grid (últimos 48 checks como cuadros de color) | `health_checks` |
+| **Delivery** | 4 KPIs (pendientes, entregados, fallidos, tasa éxito), Retry queue table con status badges, empty state | `retry_queue` |
+
+- Sidebar item "SARA IA" con ícono Lightbulb, entre Sistema y Configuracion
+- Solo visible para roles admin (permisos.puedeVerSeccion('sistema'))
+- Day filter chips controlan el rango de datos
+- Log table rows expandibles (click para ver mensaje completo + respuesta completa)
+- Intent badges con colores por tipo
+
+#### Feature 2: Team Scorecards
+
+Mejora a la vista Equipo existente con toggle Tarjetas/Rendimiento:
+
+| Componente | Descripción |
+|------------|-------------|
+| **Toggle** | Botones "Tarjetas" / "Rendimiento" en header del Equipo |
+| **Rank Medals** | #1 oro, #2 plata, #3 bronce, #4+ número plain |
+| **4 Métricas** | Leads Activos, Citas Este Mes, Cerrados, Conversion Rate |
+| **Goal Ring** | SVG donut 60x60 mostrando progreso vs meta mensual (color: green >=100%, blue >=50%, amber <50%) |
+| **Sparkline** | Mini Recharts LineChart 7 días (leads creados por día) |
+| **Ranking** | Ordenado por cerrados desc, luego leads activos como tiebreaker |
+
+- Solo muestra vendedores activos (role === 'vendedor' && active)
+- Datos computados con useMemo desde leads, appointments, vendorGoals existentes
+- Sin nuevos endpoints backend necesarios — todo via Supabase direct queries
+
+#### CRM UX/UI Rounds Completados (1-8)
+
+| Round | Sesión | Features |
+|-------|--------|----------|
+| 1 | - | Layout base, sidebar, dark theme |
+| 2 | - | Leads table, filters, search |
+| 3 | - | Calendar, appointments, pipeline |
+| 4 | - | Marketing dashboard, KPIs |
+| 5 | - | Dashboard charts, advanced filters, kanban |
+| 6 | - | Reportes CEO, Hipotecas Pro, Calendar Week, Error Logs |
+| 7 | - | Lead Detail Pro (score donut, timeline, quick actions), Notification Drawer |
+| **8** | **54** | **SARA Intelligence Dashboard (3 tabs) + Team Scorecards (rankings, goal rings, sparklines)** |
+
+#### Verificación en Producción
+
+| Check | Resultado |
+|-------|-----------|
+| TypeScript (`tsc --noEmit`) | ✅ Sin errores |
+| Vite build | ✅ 1,313 kB JS, 78 kB CSS |
+| SARA IA > Respuestas IA | ✅ 5 respuestas reales, KPIs, charts |
+| SARA IA > Salud | ✅ Sistema Saludable, uptime 100% |
+| SARA IA > Delivery | ✅ Cola vacía, 100% tasa éxito |
+| Equipo > Tarjetas | ✅ Vista original intacta |
+| Equipo > Rendimiento | ✅ 8 vendedores con scorecards |
+| Vercel deploy | ✅ Auto-deployed from push to main |
+
+---
+
 **Estado final del sistema:**
 
 | Métrica | Valor |
@@ -5420,6 +5491,7 @@ Endpoint para pruebas de carga simulando leads concurrentes:
 | Templates WA aprobados | 3 |
 | Propiedades en catálogo | 38 |
 | Desarrollos | 7 (Monte Verde, Andes, Falco, Encinos, Miravalle, Colorines, Citadella) |
+| **CRM UX/UI Rounds** | **8 completados** |
 
 **URLs de producción:**
 
@@ -5429,6 +5501,4 @@ Endpoint para pruebas de carga simulando leads concurrentes:
 | CRM | https://sara-crm-new.vercel.app |
 | Videos | https://sara-videos.onrender.com |
 
-**Deploy final:** Version ID `e99351db-2383-4ea9-9786-317bf541cb55`
-
-**Sistema 100% completo y operativo — Última verificación: 2026-02-19 (Sesión 53)**
+**Sistema 100% completo y operativo — Última verificación: 2026-02-20 (Sesión 54)**
