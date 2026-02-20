@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-20 (Sesión 56)
+> Última actualización: 2026-02-20 (Sesión 57)
 
 ---
 
@@ -5653,6 +5653,60 @@ Mejora a la vista Equipo existente con toggle Tarjetas/Rendimiento:
 
 ---
 
+### 2026-02-20 (Sesión 57) - pending_auto_response para CRONs Post-Venta (nurturing.ts)
+
+**Auditoría de CRONs post-venta en `nurturing.ts`. Se encontraron 6 funciones que envían mensajes a clientes post-compra sin marcar `pending_auto_response`, causando que respuestas no-estrictas caigan a IA genérica sin contexto.**
+
+#### Gaps encontrados y corregidos:
+
+| CRON | Tipo | Cuándo se envía | Handler |
+|------|------|-----------------|---------|
+| `solicitarReferidos()` | `referidos` | Miércoles 11am, 30-90 días post-venta | Nuevo case en switch |
+| `enviarEncuestaNPS()` | `nps` | Viernes 10am, 7-30 días post-visita/venta | Nuevo case (complementa regex estricto) |
+| `seguimientoPostEntrega()` | `post_entrega` | Lun/Jue 10am, 3-7 días post-delivered | Nuevo case (complementa `esperando_respuesta_entrega`) |
+| `encuestaSatisfaccionCasa()` | `satisfaccion_casa` | Martes 11am, 3-6 meses post-delivered | Nuevo case (complementa regex 1-4) |
+| `checkInMantenimiento()` | `mantenimiento` | Sábado 10am, ~1 año post-delivered | Nuevo case (complementa SÍ/AYUDA) |
+| `checkIn60Dias()` | `checkin_60d` | Jueves 11am, 60 días post-venta | Nuevo case (no tenía handler) |
+
+**Problema:** Estos CRONs tenían handlers de encuesta con regex estrictos (ej: NPS solo acepta `^\d{1,2}$`). Si el cliente respondía "todo bien gracias" o "mi vecino busca casa", no matcheaba el regex → caía a IA genérica sin saber a qué respondía.
+
+**Solución:** `pending_auto_response` actúa como safety net — si el handler estricto no matchea, `checkAutoMessageResponse()` captura la respuesta con contexto.
+
+#### Archivos modificados:
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/crons/nurturing.ts` | +`pending_auto_response` en 6 funciones (referidos, nps, post_entrega, satisfaccion_casa, mantenimiento, checkin_60d) |
+| `src/services/leadMessageService.ts` | +6 cases en `checkAutoMessageResponse` switch + 6 labels en `getTipoMensajeLabel` |
+| `src/services/aiConversationService.ts` | +6 tipos en ambos `tipoMap` de `reactivacionContext` |
+
+#### Tipos de `pending_auto_response` ahora soportados (16 total):
+
+| Tipo | Descripción | Origen |
+|------|-------------|--------|
+| `lead_frio` | Re-engagement lead frío | `followups.ts` |
+| `reengagement` | Re-engagement directo | `followups.ts` |
+| `cumpleanos` | Felicitación de cumpleaños | `followups.ts` |
+| `aniversario` | Aniversario de compra | `maintenance.ts` |
+| `postventa` | Seguimiento post-venta | `nurturing.ts` |
+| `recordatorio_pago` | Recordatorio de pago | `alerts.ts` |
+| `seguimiento_credito` | Seguimiento crédito hipotecario | `followups.ts` |
+| `followup_inactivo` | Follow-up lead inactivo (3-30d) | `alerts.ts` |
+| `remarketing` | Remarketing lead frío (30-90d) | `alerts.ts` |
+| `recordatorio_cita` | Recordatorio de cita 24h/2h | `notificationService.ts` |
+| **`referidos`** | Solicitud de referidos | `nurturing.ts` **(NUEVO)** |
+| **`nps`** | Encuesta NPS (0-10) | `nurturing.ts` **(NUEVO)** |
+| **`post_entrega`** | Seguimiento post-entrega | `nurturing.ts` **(NUEVO)** |
+| **`satisfaccion_casa`** | Encuesta satisfacción casa (1-4) | `nurturing.ts` **(NUEVO)** |
+| **`mantenimiento`** | Check-in mantenimiento preventivo | `nurturing.ts` **(NUEVO)** |
+| **`checkin_60d`** | Check-in 60 días post-compra | `nurturing.ts` **(NUEVO)** |
+
+**Tests:** 515/515 pasando
+**Commit:** `91316f1e`
+**Deploy:** Version ID `0eabe8d5`
+
+---
+
 **Estado final del sistema:**
 
 | Métrica | Valor |
@@ -5666,7 +5720,7 @@ Mejora a la vista Equipo existente con toggle Tarjetas/Rendimiento:
 | Templates WA aprobados | 3 |
 | Propiedades en catálogo | 38 |
 | Desarrollos | 7 (Monte Verde, Andes, Falco, Encinos, Miravalle, Colorines, Citadella) |
-| **pending_auto_response types** | **10** |
+| **pending_auto_response types** | **16** |
 | **CRM UX/UI Rounds** | **8 completados** |
 
 **URLs de producción:**
