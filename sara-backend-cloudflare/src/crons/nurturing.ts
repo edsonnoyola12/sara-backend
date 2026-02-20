@@ -983,10 +983,12 @@ Un asesor te contactará pronto.`;
   // Enviar respuesta al cliente
   await meta.sendWhatsAppMessage(lead.phone, respuesta);
 
-  // Guardar en notas
+  // Guardar en notas — set feedback flag para capturar mensaje de seguimiento
   const notasActualizadas = {
     ...notas,
     esperando_respuesta_nps: false,
+    esperando_feedback_nps: true,
+    esperando_feedback_nps_at: new Date().toISOString(),
     nps_score: score,
     nps_categoria: categoria,
     nps_respondido: new Date().toISOString()
@@ -1187,10 +1189,12 @@ Recuerda que estamos aquí si necesitas algo. ¡Disfruta tu nuevo hogar! 🏠✨
 
   await meta.sendWhatsAppMessage(lead.phone, respuesta);
 
-  // Actualizar notas
+  // Actualizar notas — set feedback flag para capturar mensaje de seguimiento
   const notasActualizadas = {
     ...notas,
     esperando_respuesta_entrega: false,
+    esperando_feedback_entrega: true,
+    esperando_feedback_entrega_at: new Date().toISOString(),
     respuesta_entrega: mensaje,
     entrega_problema: requiereAtencion,
     entrega_respondido: new Date().toISOString()
@@ -1441,10 +1445,12 @@ Estamos para ayudarte. 🤝`;
 
   await meta.sendWhatsAppMessage(lead.phone, respuesta);
 
-  // Actualizar notas
+  // Actualizar notas — set feedback flag para capturar mensaje de seguimiento
   const notasActualizadas = {
     ...notas,
     esperando_respuesta_satisfaccion_casa: false,
+    esperando_feedback_satisfaccion: true,
+    esperando_feedback_satisfaccion_at: new Date().toISOString(),
     satisfaccion_casa_calificacion: calificacion,
     satisfaccion_casa_categoria: categoria,
     satisfaccion_casa_respondido: new Date().toISOString(),
@@ -1666,10 +1672,12 @@ Recuerda que el mantenimiento preventivo alarga la vida de tu inversión.
 
   await meta.sendWhatsAppMessage(lead.phone, respuesta);
 
-  // Actualizar notas
+  // Actualizar notas — set feedback flag para capturar mensaje de seguimiento
   const notasActualizadas = {
     ...notas,
     esperando_respuesta_mantenimiento: false,
+    esperando_feedback_mantenimiento: true,
+    esperando_feedback_mantenimiento_at: new Date().toISOString(),
     respuesta_mantenimiento: mensaje,
     necesita_proveedores: necesitaProveedores,
     mantenimiento_respondido: new Date().toISOString()
@@ -1798,6 +1806,10 @@ export async function limpiarFlagsEncuestasExpirados(
       { flag: 'esperando_respuesta_entrega', at: 'esperando_respuesta_entrega_at' },
       { flag: 'esperando_respuesta_satisfaccion_casa', at: 'esperando_respuesta_satisfaccion_casa_at' },
       { flag: 'esperando_respuesta_mantenimiento', at: 'esperando_respuesta_mantenimiento_at' },
+      { flag: 'esperando_feedback_nps', at: 'esperando_feedback_nps_at' },
+      { flag: 'esperando_feedback_entrega', at: 'esperando_feedback_entrega_at' },
+      { flag: 'esperando_feedback_satisfaccion', at: 'esperando_feedback_satisfaccion_at' },
+      { flag: 'esperando_feedback_mantenimiento', at: 'esperando_feedback_mantenimiento_at' },
       { flag: 'pending_client_survey', at: '' },
       { flag: 'pending_satisfaction_survey', at: '' },
     ];
@@ -1869,4 +1881,62 @@ export async function limpiarFlagsEncuestasExpirados(
     console.error('Error en limpiarFlagsEncuestasExpirados:', e);
     return { limpiados: 0, leadsAfectados: 0 };
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// PROCESAR FEEDBACK POST-ENCUESTA
+// Captura el mensaje de seguimiento después de que el lead
+// respondió a una encuesta (NPS, satisfacción, entrega, mantenimiento).
+// Sin esto, el mensaje caía al flujo normal de IA.
+// ═══════════════════════════════════════════════════════════
+export async function procesarFeedbackEncuesta(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  lead: any,
+  mensaje: string
+): Promise<boolean> {
+  const notas = typeof lead.notes === 'object' ? lead.notes : {};
+
+  // Check all 4 feedback flags
+  const feedbackFlags = [
+    { flag: 'esperando_feedback_nps', at: 'esperando_feedback_nps_at', tipo: 'nps', noteKey: 'nps_feedback' },
+    { flag: 'esperando_feedback_entrega', at: 'esperando_feedback_entrega_at', tipo: 'entrega', noteKey: 'entrega_feedback' },
+    { flag: 'esperando_feedback_satisfaccion', at: 'esperando_feedback_satisfaccion_at', tipo: 'satisfaccion', noteKey: 'satisfaccion_casa_feedback' },
+    { flag: 'esperando_feedback_mantenimiento', at: 'esperando_feedback_mantenimiento_at', tipo: 'mantenimiento', noteKey: 'mantenimiento_feedback' },
+  ];
+
+  for (const { flag, at, tipo, noteKey } of feedbackFlags) {
+    if (!(notas as any)?.[flag]) continue;
+
+    // TTL check: if flag is older than 48h, auto-clean and skip
+    const flagSetAt = (notas as any)?.[at];
+    if (flagSetAt) {
+      const horasDesde = (Date.now() - new Date(flagSetAt).getTime()) / (1000 * 60 * 60);
+      if (horasDesde > 48) {
+        const cleanNotas = { ...notas };
+        delete (cleanNotas as any)[flag];
+        delete (cleanNotas as any)[at];
+        await supabase.client.from('leads').update({ notes: cleanNotas }).eq('id', lead.id);
+        continue;
+      }
+    }
+
+    // We have an active feedback flag — capture the message
+    const nombre = lead.name?.split(' ')[0] || 'amigo';
+    await meta.sendWhatsAppMessage(lead.phone, `¡Gracias por tu comentario, ${nombre}! Lo tomaremos muy en cuenta. 🙏`);
+
+    // Clear the feedback flag and save the feedback
+    const notasActualizadas = { ...notas };
+    delete (notasActualizadas as any)[flag];
+    delete (notasActualizadas as any)[at];
+    (notasActualizadas as any)[noteKey] = mensaje;
+    (notasActualizadas as any)[`${noteKey}_at`] = new Date().toISOString();
+
+    await supabase.client.from('leads').update({ notes: notasActualizadas }).eq('id', lead.id);
+
+    console.log(`💬 Feedback ${tipo} capturado para ${lead.name}: "${mensaje.substring(0, 60)}"`);
+    return true;
+  }
+
+  return false;
 }

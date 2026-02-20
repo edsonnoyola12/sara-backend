@@ -149,7 +149,8 @@ import {
   procesarRespuestaMantenimiento,
   isLikelySurveyResponse,
   checkIn60Dias,
-  limpiarFlagsEncuestasExpirados
+  limpiarFlagsEncuestasExpirados,
+  procesarFeedbackEncuesta
 } from './crons/nurturing';
 
 // Maintenance - Bridge, followups, stagnant leads, anniversaries
@@ -1469,6 +1470,13 @@ export default {
                 const mantenimientoProcessed = await procesarRespuestaMantenimiento(supabase, meta, leadHot, text);
                 if (mantenimientoProcessed) {
                   console.log(`🔧 Respuesta mantenimiento procesada para ${leadHot.name} - NO enviar respuesta genérica`);
+                  return new Response('OK', { status: 200 });
+                }
+
+                // TERCERO: Capturar feedback post-encuesta (mensaje de seguimiento después de calificar)
+                const feedbackProcessed = await procesarFeedbackEncuesta(supabase, meta, leadHot, text);
+                if (feedbackProcessed) {
+                  console.log(`💬 Feedback post-encuesta capturado para ${leadHot.name} - NO enviar respuesta genérica`);
                   return new Response('OK', { status: 200 });
                 }
 

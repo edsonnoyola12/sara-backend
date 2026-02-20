@@ -687,3 +687,206 @@ Tu opinión nos ayuda a mejorar 🙏`;
     });
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FEEDBACK POST-ENCUESTA (Two-step capture)
+// After scoring, follow-up messages should be captured as feedback
+// ═══════════════════════════════════════════════════════════════════════════
+describe('FEEDBACK POST-ENCUESTA', () => {
+  describe('procesarFeedbackEncuesta captures follow-up messages', () => {
+    it('debe capturar feedback cuando esperando_feedback_satisfaccion es true', async () => {
+      const { procesarFeedbackEncuesta } = await import('../crons/nurturing');
+      const updateFn = vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: null, error: null })
+      });
+      const mockSupabase = {
+        client: {
+          from: vi.fn().mockReturnValue({
+            update: updateFn,
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({ data: null, error: null })
+            })
+          })
+        }
+      };
+      const mockMeta = {
+        sendWhatsAppMessage: vi.fn().mockResolvedValue({ messages: [{ id: 'wamid.test' }] })
+      };
+
+      const lead = {
+        id: 'lead-1',
+        name: 'Roberto E2E',
+        phone: '5610016226',
+        notes: {
+          esperando_feedback_satisfaccion: true,
+          esperando_feedback_satisfaccion_at: new Date().toISOString(),
+          satisfaccion_casa_calificacion: 1,
+          satisfaccion_casa_categoria: 'excelente'
+        }
+      };
+
+      const result = await procesarFeedbackEncuesta(mockSupabase as any, mockMeta as any, lead, 'Excelente servicio de Karla');
+      expect(result).toBe(true);
+      expect(mockMeta.sendWhatsAppMessage).toHaveBeenCalledWith('5610016226', expect.stringContaining('Gracias por tu comentario'));
+      // Verify flag was cleared and feedback saved
+      expect(updateFn).toHaveBeenCalled();
+      const notesArg = updateFn.mock.calls[0][0].notes;
+      expect(notesArg.esperando_feedback_satisfaccion).toBeUndefined();
+      expect(notesArg.satisfaccion_casa_feedback).toBe('Excelente servicio de Karla');
+    });
+
+    it('debe capturar feedback NPS', async () => {
+      const { procesarFeedbackEncuesta } = await import('../crons/nurturing');
+      const updateFn = vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: null, error: null })
+      });
+      const mockSupabase = {
+        client: {
+          from: vi.fn().mockReturnValue({ update: updateFn })
+        }
+      };
+      const mockMeta = {
+        sendWhatsAppMessage: vi.fn().mockResolvedValue({ messages: [{ id: 'wamid.test' }] })
+      };
+
+      const lead = {
+        id: 'lead-2',
+        name: 'Test Lead',
+        phone: '5210000000001',
+        notes: {
+          esperando_feedback_nps: true,
+          esperando_feedback_nps_at: new Date().toISOString(),
+          nps_score: 10
+        }
+      };
+
+      const result = await procesarFeedbackEncuesta(mockSupabase as any, mockMeta as any, lead, 'Todo perfecto gracias');
+      expect(result).toBe(true);
+      const notesArg = updateFn.mock.calls[0][0].notes;
+      expect(notesArg.nps_feedback).toBe('Todo perfecto gracias');
+      expect(notesArg.esperando_feedback_nps).toBeUndefined();
+    });
+
+    it('debe retornar false si no hay ningún flag de feedback', async () => {
+      const { procesarFeedbackEncuesta } = await import('../crons/nurturing');
+      const mockSupabase = { client: { from: vi.fn() } };
+      const mockMeta = { sendWhatsAppMessage: vi.fn() };
+
+      const lead = { id: 'lead-3', name: 'Normal Lead', phone: '5210000000002', notes: {} };
+      const result = await procesarFeedbackEncuesta(mockSupabase as any, mockMeta as any, lead, 'hola busco casa');
+      expect(result).toBe(false);
+      expect(mockMeta.sendWhatsAppMessage).not.toHaveBeenCalled();
+    });
+
+    it('debe auto-limpiar flag expirado (>48h) y retornar false', async () => {
+      const { procesarFeedbackEncuesta } = await import('../crons/nurturing');
+      const updateFn = vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: null, error: null })
+      });
+      const mockSupabase = {
+        client: {
+          from: vi.fn().mockReturnValue({ update: updateFn })
+        }
+      };
+      const mockMeta = { sendWhatsAppMessage: vi.fn() };
+
+      const lead = {
+        id: 'lead-4',
+        name: 'Old Lead',
+        phone: '5210000000003',
+        notes: {
+          esperando_feedback_entrega: true,
+          esperando_feedback_entrega_at: new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString() // 72h ago
+        }
+      };
+
+      const result = await procesarFeedbackEncuesta(mockSupabase as any, mockMeta as any, lead, 'algun comentario');
+      expect(result).toBe(false);
+      expect(mockMeta.sendWhatsAppMessage).not.toHaveBeenCalled();
+      // Flag should be cleaned
+      expect(updateFn).toHaveBeenCalled();
+    });
+  });
+
+  describe('Survey processors set feedback flags', () => {
+    it('procesarRespuestaSatisfaccionCasa debe setear esperando_feedback_satisfaccion', async () => {
+      const { procesarRespuestaSatisfaccionCasa } = await import('../crons/nurturing');
+      const updateFn = vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: null, error: null })
+      });
+      const mockSupabase = {
+        client: {
+          from: vi.fn().mockReturnValue({
+            update: updateFn,
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({ data: null, error: null })
+              })
+            })
+          })
+        }
+      };
+      const mockMeta = {
+        sendWhatsAppMessage: vi.fn().mockResolvedValue({ messages: [{ id: 'wamid.test' }] })
+      };
+
+      const lead = {
+        id: 'lead-5',
+        name: 'Test',
+        phone: '5210000000005',
+        status: 'delivered',
+        notes: {
+          esperando_respuesta_satisfaccion_casa: true,
+          esperando_respuesta_satisfaccion_casa_at: new Date().toISOString()
+        }
+      };
+
+      const result = await procesarRespuestaSatisfaccionCasa(mockSupabase as any, mockMeta as any, lead, '1');
+      expect(result).toBe(true);
+      const notesArg = updateFn.mock.calls[0][0].notes;
+      expect(notesArg.esperando_respuesta_satisfaccion_casa).toBe(false);
+      expect(notesArg.esperando_feedback_satisfaccion).toBe(true);
+      expect(notesArg.esperando_feedback_satisfaccion_at).toBeDefined();
+    });
+
+    it('procesarRespuestaNPS debe setear esperando_feedback_nps', async () => {
+      const { procesarRespuestaNPS } = await import('../crons/nurturing');
+      const updateFn = vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: null, error: null })
+      });
+      const mockSupabase = {
+        client: {
+          from: vi.fn().mockReturnValue({
+            update: updateFn,
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({ data: null, error: null })
+              })
+            })
+          })
+        }
+      };
+      const mockMeta = {
+        sendWhatsAppMessage: vi.fn().mockResolvedValue({ messages: [{ id: 'wamid.test' }] })
+      };
+
+      const lead = {
+        id: 'lead-6',
+        name: 'Test NPS',
+        phone: '5210000000006',
+        assigned_to: 'tm-1',
+        notes: {
+          esperando_respuesta_nps: true,
+          esperando_respuesta_nps_at: new Date().toISOString()
+        }
+      };
+
+      const result = await procesarRespuestaNPS(mockSupabase as any, mockMeta as any, lead, '10');
+      expect(result).toBe(true);
+      const notesArg = updateFn.mock.calls[0][0].notes;
+      expect(notesArg.esperando_respuesta_nps).toBe(false);
+      expect(notesArg.esperando_feedback_nps).toBe(true);
+      expect(notesArg.esperando_feedback_nps_at).toBeDefined();
+    });
+  });
+});
