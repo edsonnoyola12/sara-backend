@@ -396,6 +396,7 @@ function requiresAuth(pathname: string): boolean {
     /^\/api\/metrics\/quality/,              // Calidad de respuestas (CRM)
     /^\/api\/surveys/,                       // Encuestas (CRM)
     /^\/api\/send-surveys/,                  // Enviar encuestas (CRM)
+    /^\/api\/error-logs/,                    // Error logs (CRM Sistema)
   ];
 
   for (const pattern of crmPublicPatterns) {
