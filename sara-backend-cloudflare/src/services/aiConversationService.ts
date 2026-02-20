@@ -581,6 +581,53 @@ El cliente está RESPONDIENDO a ese mensaje. Debes:
       console.log('📢 Contexto de broadcast incluido en prompt para IA');
     }
 
+    // Contexto de reactivación (lead respondió a template de seguimiento/re-engagement)
+    let reactivacionContext = '';
+    const leadNotes = typeof lead.notes === 'object' ? lead.notes : {};
+    if (leadNotes.reactivado_solicitud) {
+      const reactivacion = leadNotes.reactivado_solicitud;
+      const tipoMap: Record<string, string> = {
+        'lead_frio': 'un mensaje de seguimiento (lead frío/re-engagement)',
+        'reengagement': 'un mensaje de seguimiento (lead frío/re-engagement)',
+        'cumpleanos': 'una felicitación de cumpleaños',
+        'aniversario': 'una felicitación de aniversario de compra',
+        'postventa': 'un mensaje de seguimiento post-venta',
+        'recordatorio_pago': 'un recordatorio de pago',
+        'seguimiento_credito': 'un seguimiento de su solicitud de crédito hipotecario',
+      };
+      const tipoDesc = tipoMap[reactivacion.type] || `un mensaje automático (${reactivacion.type})`;
+      reactivacionContext = `
+
+⚠️ CONTEXTO: LEAD REACTIVADO
+
+Este cliente recibió recientemente ${tipoDesc} y ESTÁ RESPONDIENDO a ese mensaje.
+Su mensaje: "${reactivacion.solicitud || ''}"
+
+Debes:
+1. Responder con ENTUSIASMO - es un lead que se REACTIVÓ
+2. Contestar su pregunta directamente
+3. Cerrar con propuesta de visita: "¿Te gustaría visitarnos este fin de semana?"
+
+`;
+      console.log(`🔁 Contexto de reactivación incluido en prompt (tipo: ${reactivacion.type})`);
+    } else if (leadNotes.pending_auto_response) {
+      const pending = leadNotes.pending_auto_response;
+      const tipoMap: Record<string, string> = {
+        'lead_frio': 'seguimiento automático (estaba frío)',
+        'reengagement': 'seguimiento automático (re-engagement)',
+        'cumpleanos': 'felicitación de cumpleaños',
+        'aniversario': 'felicitación de aniversario',
+        'postventa': 'seguimiento post-venta',
+        'seguimiento_credito': 'seguimiento de crédito hipotecario',
+      };
+      const tipoDesc = tipoMap[pending.type] || pending.type;
+      reactivacionContext = `
+
+⚠️ NOTA: A este lead se le envió recientemente un ${tipoDesc}. Si su mensaje parece respuesta a eso, responde en ese contexto.
+
+`;
+    }
+
     // ═══ CONTEXTO DE ACCIONES RECIENTES ═══
     // Extraer acciones del historial para que Claude sepa qué recursos se enviaron
     // AUMENTADO de 5 a 15 para mejor contexto de conversación
@@ -675,7 +722,7 @@ CIERRA INMEDIATAMENTE:
 (NO preguntes más - CIERRA la cita)
 
 
-${promocionesContext}${broadcastContext}${accionesContext}
+${promocionesContext}${broadcastContext}${reactivacionContext}${accionesContext}
 Eres SARA de Grupo Santa Rita, Zacatecas. 50+ años construyendo hogares.
 
 🌐 IDIOMA: ${detectedLang === 'en' ? 'INGLÉS' : 'ESPAÑOL'}

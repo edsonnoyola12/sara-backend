@@ -1147,6 +1147,18 @@ export class LeadMessageService {
         }
         break;
 
+      case 'seguimiento_credito':
+        if (esPositiva) {
+          respuesta = `¡Perfecto ${nombreLead}! 🏦\n\n` +
+                      `Tu asesor de crédito te contactará para darte una actualización detallada sobre tu solicitud.`;
+        } else if (esNegativa) {
+          respuesta = `Entendido ${nombreLead}. Si cambias de opinión o necesitas información sobre otras opciones de financiamiento, aquí estamos. 🏠`;
+        } else {
+          respuesta = `¡Gracias por responder ${nombreLead}! 🏦\n\n` +
+                      `Le paso tu mensaje a tu asesor de crédito para que te contacte con los detalles.`;
+        }
+        break;
+
       default:
         // Respuesta genérica
         if (esPositiva) {
@@ -1187,7 +1199,8 @@ export class LeadMessageService {
       'aniversario': '🏠 Felicitación aniversario',
       'cumpleanos': '🎂 Felicitación cumpleaños',
       'postventa': '📦 Seguimiento post-venta',
-      'recordatorio_pago': '💰 Recordatorio de pago'
+      'recordatorio_pago': '💰 Recordatorio de pago',
+      'seguimiento_credito': '🏦 Seguimiento crédito hipotecario'
     };
     return labels[tipo] || '📩 Mensaje automático';
   }

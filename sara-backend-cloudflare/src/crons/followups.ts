@@ -1792,14 +1792,19 @@ export async function seguimientoCredito(supabase: SupabaseService, meta: MetaWh
         await meta.sendTemplate(lead.phone, 'info_credito', 'es_MX', templateComponents);
         console.log(`🏦 Seguimiento crédito (template) enviado a ${lead.name}`);
 
-        // Marcar como enviado
+        // Marcar como enviado + setear pending_auto_response
         await supabase.client
           .from('leads')
           .update({
             notes: {
               ...notas,
               credito_seguimiento_sent: hoyStr,
-              ultimo_seguimiento_credito: ahora.toISOString()
+              ultimo_seguimiento_credito: ahora.toISOString(),
+              pending_auto_response: {
+                type: 'seguimiento_credito',
+                sent_at: ahora.toISOString(),
+                vendedor_id: lead.assigned_to
+              }
             }
           })
           .eq('id', lead.id);
