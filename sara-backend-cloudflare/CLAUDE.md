@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-20 (Sesión 55)
+> Última actualización: 2026-02-20 (Sesión 56)
 
 ---
 
@@ -5604,4 +5604,77 @@ Mejora a la vista Equipo existente con toggle Tarjetas/Rendimiento:
 | CRM | https://sara-crm-new.vercel.app |
 | Videos | https://sara-videos.onrender.com |
 
-**Sistema 100% completo y operativo — Última verificación: 2026-02-20 (Sesión 55)**
+---
+
+### 2026-02-20 (Sesión 56) - pending_auto_response para TODOS los Auto-Mensajes a Leads
+
+**Auditoría completa de TODOS los flujos donde SARA envía mensajes automáticos a leads. Se encontraron 5 gaps donde la respuesta del lead caía al IA genérico sin contexto.**
+
+#### Gaps encontrados y corregidos:
+
+| Auto-Mensaje | Flag Antes | Flag Ahora | Handler Antes | Handler Ahora |
+|---|---|---|---|---|
+| `followUpLeadsInactivos` (3-30d) | Solo `last_auto_followup` | + `pending_auto_response: { type: 'followup_inactivo' }` | Ninguno | `checkAutoMessageResponse` case |
+| `remarketingLeadsFrios` (30-90d) | Solo `remarketing_sent` column | + `pending_auto_response: { type: 'remarketing' }` | Ninguno | `checkAutoMessageResponse` case |
+| Birthday `feliz_cumple` (template+fallback) | Solo `cumple_felicitado_YYYY` | + `pending_auto_response: { type: 'cumpleanos' }` | Solo captura fecha | `checkAutoMessageResponse` case |
+| Recordatorio cita 24h | Solo `reminder_24h_sent` en appointment | + `pending_auto_response: { type: 'recordatorio_cita' }` en lead notes | Solo IA con citaExistenteInfo | + `checkAutoMessageResponse` case |
+| Recordatorio cita 2h | Solo `reminder_2h_sent` en appointment | + `pending_auto_response: { type: 'recordatorio_cita' }` en lead notes | Solo IA | + `checkAutoMessageResponse` case |
+
+#### Archivos modificados:
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/crons/alerts.ts` | `followUpLeadsInactivos`: +`pending_auto_response` type `followup_inactivo` |
+| `src/crons/alerts.ts` | `remarketingLeadsFrios`: +`pending_auto_response` type `remarketing` en notes |
+| `src/crons/followups.ts` | Birthday template + fallback: +`pending_auto_response` type `cumpleanos` |
+| `src/services/notificationService.ts` | Recordatorios 24h y 2h: +`pending_auto_response` type `recordatorio_cita` en lead notes |
+| `src/services/aiConversationService.ts` | Ambos `tipoMap` en `reactivacionContext`: +`followup_inactivo`, `remarketing`, `recordatorio_cita` |
+| `src/services/leadMessageService.ts` | `checkAutoMessageResponse` switch: +3 cases (`followup_inactivo`/`remarketing`, `recordatorio_cita`) |
+| `src/services/leadMessageService.ts` | `getTipoMensajeLabel`: +3 labels nuevos |
+
+#### Tipos de `pending_auto_response` ahora soportados (10 total):
+
+| Tipo | Descripción | Origen |
+|------|-------------|--------|
+| `lead_frio` | Re-engagement lead frío | `followups.ts` |
+| `reengagement` | Re-engagement directo | `followups.ts` |
+| `cumpleanos` | Felicitación de cumpleaños | `followups.ts` |
+| `aniversario` | Aniversario de compra | `maintenance.ts` |
+| `postventa` | Seguimiento post-venta | `nurturing.ts` |
+| `recordatorio_pago` | Recordatorio de pago | `alerts.ts` |
+| `seguimiento_credito` | Seguimiento crédito hipotecario | `followups.ts` |
+| **`followup_inactivo`** | Follow-up lead inactivo (3-30d) | `alerts.ts` **(NUEVO)** |
+| **`remarketing`** | Remarketing lead frío (30-90d) | `alerts.ts` **(NUEVO)** |
+| **`recordatorio_cita`** | Recordatorio de cita 24h/2h | `notificationService.ts` **(NUEVO)** |
+
+**Tests:** 515/515 pasando
+**Commit:** `b7ed66be`
+**Deploy:** Version ID `017c2f09`
+
+---
+
+**Estado final del sistema:**
+
+| Métrica | Valor |
+|---------|-------|
+| Tests | 515/515 ✅ |
+| Test files | 17 |
+| Servicios | 85+ |
+| Comandos verificados | 342/342 (4 roles) |
+| CRONs activos | 25+ |
+| Capas de resilience | 9 |
+| Templates WA aprobados | 3 |
+| Propiedades en catálogo | 38 |
+| Desarrollos | 7 (Monte Verde, Andes, Falco, Encinos, Miravalle, Colorines, Citadella) |
+| **pending_auto_response types** | **10** |
+| **CRM UX/UI Rounds** | **8 completados** |
+
+**URLs de producción:**
+
+| Servicio | URL |
+|----------|-----|
+| Backend | https://sara-backend.edson-633.workers.dev |
+| CRM | https://sara-crm-new.vercel.app |
+| Videos | https://sara-videos.onrender.com |
+
+**Sistema 100% completo y operativo — Última verificación: 2026-02-20 (Sesión 56)**
