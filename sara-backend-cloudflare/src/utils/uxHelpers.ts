@@ -145,10 +145,10 @@ export function getBotonesContextuales(
 ): Array<{ id: string; title: string }> | null {
 
   // Después de dar info de desarrollo
-  if (intent === 'solicitar_informacion' || intent === 'preguntar_precios') {
+  if (intent === 'solicitar_informacion' || intent === 'preguntar_precios' || intent === 'interes_desarrollo') {
     return [
       { id: 'btn_agendar', title: '📅 Agendar visita' },
-      { id: 'btn_mas_info', title: '📋 Más info' },
+      { id: 'btn_credito', title: '🏦 Asesoría hipotecaria' },
       { id: 'btn_ubicacion', title: '📍 Ubicación' }
     ];
   }

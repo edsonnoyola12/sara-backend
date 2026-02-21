@@ -815,12 +815,12 @@ export default {
             // Respuesta a lista o botones
             const interactiveType = message.interactive?.type;
             if (interactiveType === 'list_reply') {
-              // Respuesta a lista: usar el ID o título
-              text = message.interactive.list_reply?.id || message.interactive.list_reply?.title || '';
+              // Respuesta a lista: preferir título (legible) sobre ID
+              text = message.interactive.list_reply?.title || message.interactive.list_reply?.id || '';
               console.log(`📋 Respuesta a LISTA: id="${message.interactive.list_reply?.id}", title="${message.interactive.list_reply?.title}"`);
             } else if (interactiveType === 'button_reply') {
-              // Respuesta a botones: usar el ID o título
-              text = message.interactive.button_reply?.id || message.interactive.button_reply?.title || '';
+              // Respuesta a botones: preferir título (legible) sobre ID (btn_xxx)
+              text = message.interactive.button_reply?.title || message.interactive.button_reply?.id || '';
               console.log(`🔘 Respuesta a BOTÓN: id="${message.interactive.button_reply?.id}", title="${message.interactive.button_reply?.title}"`);
             }
           } else if (messageType === 'button') {
