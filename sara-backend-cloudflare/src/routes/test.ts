@@ -1825,16 +1825,17 @@ export async function handleTestRoutes(
       }
 
       try {
-        // Inicializar servicios necesarios
+        // Inicializar servicios — disable callbacks to reduce subrequests
         const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
-        const meta = await createMetaWithTracking(env, supabase);
+        const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+        if (env.SARA_CACHE) meta.setKVNamespace(env.SARA_CACHE);
         const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
 
         // Llamar al handler de WhatsApp
         const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
         await handler.handleIncomingMessage(`whatsapp:+${phone}`, msg, env);
 
-        // Verificar el lead creado/actualizado
+        // Verificar el lead creado/actualizado (1 query instead of 3)
         let { data: lead } = await supabase.client
           .from('leads')
           .select('id, name, phone, status, score, assigned_to, created_at, updated_at')
@@ -1848,18 +1849,6 @@ export async function handleTestRoutes(
             .update({ name })
             .eq('id', lead.id);
           lead.name = name;
-          console.log(`✅ Nombre "${name}" guardado para lead ${phone}`);
-        }
-
-        // Obtener nombre del vendedor asignado
-        let vendedorNombre = null;
-        if (lead?.assigned_to) {
-          const { data: vendedor } = await supabase.client
-            .from('team_members')
-            .select('name')
-            .eq('id', lead.assigned_to)
-            .single();
-          vendedorNombre = vendedor?.name;
         }
 
         return corsResponse(JSON.stringify({
@@ -1871,7 +1860,7 @@ export async function handleTestRoutes(
             telefono: lead.phone,
             status: lead.status,
             score: lead.score,
-            asignado_a: vendedorNombre || lead.assigned_to,
+            asignado_a: lead.assigned_to,
             creado: lead.created_at,
             actualizado: lead.updated_at
           } : null,

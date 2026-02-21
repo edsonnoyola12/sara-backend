@@ -192,6 +192,16 @@ export class MetaWhatsAppService {
   }
 
   /**
+   * Disables all callbacks (tracking, failed, rate limit).
+   * Useful for test endpoints to reduce subrequest count.
+   */
+  disableCallbacks(): void {
+    this.trackingCallback = undefined;
+    this.failedMessageCallback = undefined;
+    this.rateLimitEnqueueCallback = undefined;
+  }
+
+  /**
    * Llama al callback de tracking si está configurado
    */
   private async track(data: Parameters<MessageTrackingCallback>[0]): Promise<void> {

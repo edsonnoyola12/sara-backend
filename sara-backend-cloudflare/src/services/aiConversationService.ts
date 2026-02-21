@@ -475,54 +475,52 @@ export class AIConversationService {
 
     console.log('🔍 ¿Conversación nueva?', esConversacionNueva, '| Nombre real:', tieneNombreReal, '| Nombre confirmado:', nombreConfirmado, '| lead.name:', lead.name);
 
-    // Verificar si ya existe cita confirmada para este lead (SOLO FUTURAS)
+    // ═══ CITAS: 1 query para futuras + pasadas (ahorra 1 subrequest) ═══
     let citaExistenteInfo = '';
+    let citasPasadasContext = '';
     const hoy = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
     try {
-      const { data: citaExistente } = await this.supabase.client
-        .from('appointments')
-        .select('scheduled_date, scheduled_time, property_name')
-        .eq('lead_id', lead.id)
-        .in('status', ['scheduled', 'confirmed'])
-        .gte('scheduled_date', hoy) // Solo citas de hoy en adelante
-        .order('scheduled_date', { ascending: true }) // La más próxima primero
-        .limit(1);
-      
-      if (citaExistente && citaExistente.length > 0) {
-        const cita = citaExistente[0];
-        citaExistenteInfo = `✅ YA TIENE CITA CONFIRMADA: ${cita.scheduled_date} a las ${cita.scheduled_time} en ${cita.property_name}`;
-        console.log('🚫 CITA EXISTENTE DETECTADA:', citaExistenteInfo);
-      } else {
-        console.log('📅 No hay cita existente para este lead');
-      }
-    } catch (e) {
-      console.error('⚠️ Error verificando cita existente para prompt:', e);
-    }
-
-    // ═══ HISTORIAL DE CITAS PASADAS (para contexto de Claude) ═══
-    let citasPasadasContext = '';
-    try {
-      const { data: citasPasadas } = await this.supabase.client
+      const { data: todasCitas } = await this.supabase.client
         .from('appointments')
         .select('scheduled_date, scheduled_time, property_name, status')
         .eq('lead_id', lead.id)
-        .in('status', ['completed', 'visited', 'cancelled', 'cancelled_by_lead', 'no_show'])
-        .order('scheduled_date', { ascending: false })
-        .limit(5);
+        .in('status', ['scheduled', 'confirmed', 'completed', 'visited', 'cancelled', 'cancelled_by_lead', 'no_show'])
+        .order('scheduled_date', { ascending: true })
+        .limit(10);
 
-      if (citasPasadas && citasPasadas.length > 0) {
-        const statusMap: Record<string, string> = {
-          'completed': 'Visitó', 'visited': 'Visitó',
-          'cancelled': 'Canceló', 'cancelled_by_lead': 'Canceló',
-          'no_show': 'No asistió'
-        };
-        const citasStr = citasPasadas.map((c: any) =>
-          `${statusMap[c.status] || c.status} ${c.property_name || ''} (${c.scheduled_date})`
-        ).join(' | ');
-        citasPasadasContext = `\n- Citas anteriores: ${citasStr}`;
+      if (todasCitas && todasCitas.length > 0) {
+        // Separar futuras y pasadas en memoria
+        const citasFuturas = todasCitas.filter((c: any) =>
+          (c.status === 'scheduled' || c.status === 'confirmed') && c.scheduled_date >= hoy
+        );
+        const citasPasadas = todasCitas.filter((c: any) =>
+          ['completed', 'visited', 'cancelled', 'cancelled_by_lead', 'no_show'].includes(c.status)
+        );
+
+        if (citasFuturas.length > 0) {
+          const cita = citasFuturas[0];
+          citaExistenteInfo = `✅ YA TIENE CITA CONFIRMADA: ${cita.scheduled_date} a las ${cita.scheduled_time} en ${cita.property_name}`;
+          console.log('🚫 CITA EXISTENTE DETECTADA:', citaExistenteInfo);
+        } else {
+          console.log('📅 No hay cita existente para este lead');
+        }
+
+        if (citasPasadas.length > 0) {
+          const statusMap: Record<string, string> = {
+            'completed': 'Visitó', 'visited': 'Visitó',
+            'cancelled': 'Canceló', 'cancelled_by_lead': 'Canceló',
+            'no_show': 'No asistió'
+          };
+          const citasStr = citasPasadas.slice(0, 5).map((c: any) =>
+            `${statusMap[c.status] || c.status} ${c.property_name || ''} (${c.scheduled_date})`
+          ).join(' | ');
+          citasPasadasContext = `\n- Citas anteriores: ${citasStr}`;
+        }
+      } else {
+        console.log('📅 No hay citas para este lead');
       }
     } catch (e) {
-      console.error('⚠️ Error consultando citas pasadas:', e);
+      console.error('⚠️ Error consultando citas:', e);
     }
 
     // ═══ DETECCIÓN DE FASE DE CONVERSACIÓN ═══
@@ -4065,13 +4063,10 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             lead.needs_mortgage = true;
 
             // ✅ FIX 07-ENE-2026: Crear mortgage_application SIEMPRE (con o sin nombre)
-            // Esto da visibilidad al asesor desde el primer momento
-            const { data: asesorData } = await this.supabase.client
-              .from('team_members')
-              .select('id, name, phone')
-              .eq('role', 'asesor')
-              .eq('active', true)
-              .limit(1);
+            // ✅ FIX 20-FEB-2026: Usar teamMembers en memoria (ahorra 1 subrequest)
+            const asesorData = teamMembers
+              .filter((t: any) => t.role === 'asesor' && t.active)
+              .slice(0, 1);
 
             // Usar nombre real si existe, sino placeholder
             const nombreParaMortgage = esNombreReal ? nombreParaUsar : `Prospecto ${lead.phone?.slice(-4) || 'nuevo'}`;
@@ -4433,13 +4428,9 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 
       // ✅ FIX 07-ENE-2026: No enviar respuesta de Claude si ya interceptamos con pregunta de nombre
       // ✅ FIX 14-ENE-2026: Rate limit - no enviar si ya enviamos respuesta hace menos de 5s
-      const { data: leadFrescoRL } = await this.supabase.client
-        .from('leads')
-        .select('notes')
-        .eq('id', lead.id)
-        .single();
-
-      const lastResponseTime = leadFrescoRL?.notes?.last_response_time;
+      // ✅ FIX 20-FEB-2026: Usar lead.notes en memoria (KV dedup previene duplicados concurrentes)
+      const leadNotesActuales = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+      const lastResponseTime = leadNotesActuales?.last_response_time;
       const ahora = Date.now();
       const yaRespondioRecientemente = lastResponseTime && (ahora - lastResponseTime) < 5000;
 
@@ -4447,7 +4438,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         console.log('⏭️ RATE LIMIT: Ya se envió respuesta hace <5s, saltando envío (contexto guardado)');
       } else if (!interceptoCita) {
         // Enviar respuesta de texto + audio opcional si el lead prefiere audio
-        const leadNotesConId = { ...(leadFrescoRL?.notes || {}), lead_id: lead.id };
+        const leadNotesConId = { ...leadNotesActuales, lead_id: lead.id };
         await this.enviarRespuestaConAudioOpcional(from, respuestaLimpia, leadNotesConId);
         console.log('✅ Respuesta de Claude enviada (sin pregunta de crédito)');
 
@@ -4967,18 +4958,12 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         } else if (claudeEstaPreguntando) {
           console.log('⏸️ Recursos en espera - Claude está haciendo una pregunta importante');
         } else {
-          // Consultar estado FRESCO desde DB
-          const { data: leadFresco } = await this.supabase.client
-            .from('leads')
-            .select('resources_sent, resources_sent_for')
-            .eq('id', lead.id)
-            .single();
-          
-          console.log('🔍 Estado recursos en DB:', leadFresco?.resources_sent, '|', leadFresco?.resources_sent_for);
-          
+          // ✅ FIX 20-FEB-2026: Usar lead en memoria (KV dedup previene duplicados concurrentes)
+          console.log('🔍 Estado recursos en memoria:', lead.resources_sent, '|', lead.resources_sent_for);
+
           // ═══ FIX: Comparar PER-DESARROLLO — solo bloquear los que YA se enviaron ═══
           const desarrollosActuales = desarrolloInteres.toLowerCase().split(',').map((d: string) => d.trim()).filter(Boolean);
-          const desarrollosEnviados = (leadFresco?.resources_sent_for || '').toLowerCase().split(',').map((d: string) => d.trim()).filter(Boolean);
+          const desarrollosEnviados = (lead.resources_sent_for || '').toLowerCase().split(',').map((d: string) => d.trim()).filter(Boolean);
 
           // Filtrar: solo enviar desarrollos que NO se hayan enviado antes (fuzzy match)
           const desarrollosPendientes = desarrollosActuales.filter((d: string) => {
