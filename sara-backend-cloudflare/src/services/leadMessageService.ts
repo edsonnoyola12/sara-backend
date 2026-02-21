@@ -379,7 +379,7 @@ export class LeadMessageService {
           `¿Qué te hizo dudar?\n` +
           `• ¿El precio? Tenemos opciones desde $1.5M\n` +
           `• ¿La ubicación? Tenemos en varias zonas\n` +
-          `• ¿El tamaño? Hay desde 2 hasta 4 recámaras\n\n` +
+          `• ¿El tamaño? Hay desde 2 hasta 3 recámaras\n\n` +
           `A veces hay opciones que no conoces 😉`;
         notaVendedor = `❌ *Lead rechazó oferta*\n\n` +
           `*${lead.name}* respondió *"${body}"* a:\n` +

@@ -1035,7 +1035,7 @@ Si el cliente quiere comparar desarrollos:
 Respuesta de comparativa:
 "Te ayudo a comparar 😊 ¿Qué es más importante para ti?
 1. Precio - tengo desde $1.6M
-2. Espacio - casas de 2, 3 o 4 recámaras
+2. Espacio - casas de 2 o 3 recámaras
 3. Amenidades - solo Andes tiene alberca
 4. Ubicación - Colinas del Padre o Guadalupe
 
@@ -1238,7 +1238,7 @@ CUANDO PIDA INFO DE UN DESARROLLO (genérico):
 - NUNCA preguntes "¿te lo mando?" - SIEMPRE envía automáticamente
 
 CUANDO PIDA UN MODELO ESPECÍFICO:
-- Si dice "quiero ver el Ascendente", "info del modelo Gardenia", "cuéntame del Fresno"
+- Si dice "quiero ver el Encino Verde", "info del modelo Gardenia", "cuéntame del Fresno"
 - Responde con info del modelo
 - ⚠️ SÍ activa send_video_desarrollo: true (enviará video + matterport + GPS + brochure automático)
 - Termina con: "¿Qué te parece? ¿Te gustaría visitarlo? 😊"
@@ -1455,7 +1455,7 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
 
 ⚠️ EXTRACCIÓN DE MÚLTIPLES DESARROLLOS Y MODELOS:
 - Si el cliente menciona varios desarrollos (ej. "Los Encinos y Andes"), ponlos en "desarrollos": ["Los Encinos", "Andes"]
-- Si menciona casas/modelos específicos (ej. "el Ascendente y el Gardenia"), ponlos en "modelos": ["Ascendente", "Gardenia"]
+- Si menciona casas/modelos específicos (ej. "el Encino Verde y el Gardenia"), ponlos en "modelos": ["Encino Verde", "Gardenia"]
 - "desarrollo" es para un solo desarrollo, "desarrollos" es para múltiples
 
 ⚠️ EXTRACCIÓN DE FECHAS Y HORAS:
@@ -7693,7 +7693,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       // ⏳ Pequeño delay para asegurar que el texto llegue primero
       await new Promise(resolve => setTimeout(resolve, 1500));
       
-      // CASO 1: Modelos específicos (ej. "el Ascendente y el Gardenia")
+      // CASO 1: Modelos específicos (ej. "el Encino Verde y el Gardenia")
       if (todosModelos.length > 0) {
         const propsModelos = this.handler.getPropsParaModelos(todosModelos, properties);
         

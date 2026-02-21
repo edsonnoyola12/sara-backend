@@ -14,23 +14,26 @@ export const HORARIOS = {
 
 // Desarrollos inmobiliarios conocidos
 export const DESARROLLOS_CONOCIDOS = [
-  'Monte Verde', 'Monte Real', 'Los Encinos', 'Miravalle', 'Andes', 'Distrito Falco'
+  'Monte Verde', 'Monte Real', 'Los Encinos', 'Miravalle', 'Andes', 'Distrito Falco',
+  'Alpes', 'Paseo Colorines', 'Villa Campelo', 'Villa Galiano'
 ];
 
 // Modelos de casas conocidos por desarrollo
 export const MODELOS_CONOCIDOS = [
   // Los Encinos
-  'Ascendente', 'Descendente', 'Encino Blanco', 'Encino Verde', 'Encino Dorado',
+  'Encino Blanco', 'Encino Verde', 'Encino Dorado', 'Roble', 'Maple', 'Nogal', 'Sabino',
   // Andes
-  'Gardenia', 'Dalia', 'Lavanda', 'Azalea', 'Magnolia',
+  'Gardenia', 'Dalia', 'Lavanda', 'Laurel',
   // Distrito Falco
-  'Calandria', 'Colibrí', 'Colibri', 'Chipre', 'Mirlo',
+  'Calandria', 'Colibrí', 'Colibri', 'Chipre', 'Mirlo', 'Chipre Light', 'Colibrí Light', 'Proyecto Especial',
   // Monte Verde
-  'Pino', 'Roble', 'Cedro',
-  // Monte Real
-  'Real I', 'Real II', 'Real III',
+  'Acacia', 'Eucalipto', 'Olivo', 'Fresno', 'Fresno 2',
   // Miravalle
-  'Bilbao', 'Vizcaya', 'Navarra'
+  'Bilbao', 'Vizcaya', 'Casa Habitacion', 'Departamento',
+  // Alpes
+  'Dalia Alpes',
+  // Paseo Colorines
+  'Prototipo 6M', 'Prototipo 7M'
 ];
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

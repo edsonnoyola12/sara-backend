@@ -664,7 +664,7 @@ Ver documentación en `docs/`:
 ## QA COMPLETADO (2026-01-28)
 
 ### SARA responde correctamente:
-- ✅ Preguntas de desarrollos (38 propiedades en catálogo)
+- ✅ Preguntas de desarrollos (34 propiedades en catálogo)
 - ✅ Citadella del Nogal = Villa Campelo + Villa Galiano
 - ✅ Monte Verde, Distrito Falco, Los Encinos, Miravalle, Andes, etc.
 - ✅ NO inventa información (dice "no tengo esa info")
@@ -1105,7 +1105,7 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Flujo real WhatsApp | 3 | ✅ |
 
 **Respuestas verificadas:**
-- ✅ Precios correctos de 38 propiedades
+- ✅ Precios correctos de 34 propiedades
 - ✅ Sinónimos: Citadella del Nogal = Villa Campelo/Galiano
 - ✅ Errores ortográficos: "informasion monteverde" → entiende
 - ✅ NO inventa tasas de interés → redirige a bancos
@@ -1146,7 +1146,7 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Funcionalidad | Estado |
 |---------------|--------|
 | Responder preguntas de desarrollos | ✅ |
-| Información de 38 propiedades | ✅ |
+| Información de 34 propiedades | ✅ |
 | Precios y disponibilidad | ✅ |
 | Manejo de objeciones | ✅ |
 | Detectar errores ortográficos | ✅ |
@@ -1837,7 +1837,7 @@ const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana',
 1. `leads` - 20+ campos, estados del funnel
 2. `team_members` - roles, pending messages
 3. `appointments` - citas con Google Calendar
-4. `properties` - catálogo de 38 propiedades
+4. `properties` - catálogo de 34 propiedades
 5. `mortgage_applications` - créditos hipotecarios
 6. `pending_videos` - videos Veo 3
 7. `offers` - ciclo de vida de ofertas
@@ -2622,7 +2622,7 @@ npm test
 |----------|-----------|
 | /test-ventana-24h | ✅ 2 abiertas, 16 cerradas |
 | /api/leads | ✅ 32 leads |
-| /api/properties | ✅ 38 propiedades |
+| /api/properties | ✅ 34 propiedades |
 | /health | ✅ healthy |
 
 #### Estado de Producción
@@ -3424,7 +3424,7 @@ SARA ajusta su intensidad de venta según la fase del lead:
 | Villa Galiano | 1 | Terrenos |
 | Monte Real | 2 | Casas |
 
-**Total: 38 propiedades en catálogo**
+**Total: 34 propiedades en catálogo**
 
 ---
 

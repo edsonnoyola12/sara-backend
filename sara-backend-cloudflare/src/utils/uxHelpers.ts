@@ -201,15 +201,15 @@ export function getDesarrollosParaLista(): Array<{
     {
       title: '🏡 Residenciales (desde $3M)',
       rows: [
-        { id: 'dev_encinos', title: 'Los Encinos', description: 'Colinas del Padre • 3-4 rec' },
-        { id: 'dev_miravalle', title: 'Miravalle', description: 'Colinas del Padre • 3-4 rec' },
+        { id: 'dev_encinos', title: 'Los Encinos', description: 'Colinas del Padre • 3 rec' },
+        { id: 'dev_miravalle', title: 'Miravalle', description: 'Colinas del Padre • 2-3 rec' },
         { id: 'dev_colorines', title: 'Paseo Colorines', description: 'Colinas del Padre • NUEVO' }
       ]
     },
     {
       title: '✨ Premium (desde $3.7M)',
       rows: [
-        { id: 'dev_falco', title: 'Distrito Falco', description: 'Guadalupe • Lujo • 3-4 rec' }
+        { id: 'dev_falco', title: 'Distrito Falco', description: 'Guadalupe • Lujo • 3 rec' }
       ]
     },
     {
