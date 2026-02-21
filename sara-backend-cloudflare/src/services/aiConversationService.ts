@@ -5043,6 +5043,8 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                 if (propiedadMatch.youtube_link) {
                   partes.push(`🎬 *Video:* ${propiedadMatch.youtube_link}`);
                   recursosDesc.push('video');
+                } else if (analysis.send_video_desarrollo === true) {
+                  console.warn(`⚠️ Video prometido pero youtube_link NULL para ${dev}`);
                 }
                 const msgLowerRes = (originalMessage || message || '').toLowerCase();
                 const pidioPlanos = msgLowerRes.includes('plano') || msgLowerRes.includes('planos');
@@ -5050,9 +5052,16 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   partes.push(`🏠 *Recorrido 3D:* ${propiedadMatch.matterport_link}`);
                   recursosDesc.push('recorrido 3D');
                 }
-                if (analysis.send_gps === true && propiedadMatch.gps_link) {
-                  partes.push(`📍 *Ubicación:* ${propiedadMatch.gps_link}\n_Ahí te lleva directo en Google Maps_`);
-                  recursosDesc.push('GPS');
+                if (analysis.send_gps === true) {
+                  if (propiedadMatch.gps_link) {
+                    partes.push(`📍 *Ubicación:* ${propiedadMatch.gps_link}\n_Ahí te lleva directo en Google Maps_`);
+                    recursosDesc.push('GPS');
+                  } else {
+                    // RESOURCES NULL FIX: GPS prometido pero no existe en DB — fallback oficinas
+                    partes.push(`📍 *Ubicación:* https://maps.app.goo.gl/hUk6aH8chKef6NRY7\n_Oficinas Grupo Santa Rita — ahí te damos la ubicación exacta del desarrollo_`);
+                    recursosDesc.push('GPS (oficinas)');
+                    console.warn(`⚠️ GPS NULL para ${dev} — enviado GPS de oficinas como fallback`);
+                  }
                 }
 
                 // Brochure HTML link goes in the combined message (PDF sent separately)

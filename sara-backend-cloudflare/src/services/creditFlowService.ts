@@ -650,7 +650,7 @@ Atendemos de Lunes a Viernes 9am-6pm y Sábados 9am-2pm 😊`,
 
           // Crear mortgage_application
           if (asesor?.id) {
-            await this.supabase.client
+            const { error: mortgageError } = await this.supabase.client
               .from('mortgage_applications')
               .upsert({
                 lead_id: leadId,
@@ -664,7 +664,19 @@ Atendemos de Lunes a Viernes 9am-6pm y Sábados 9am-2pm 😊`,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
               }, { onConflict: 'lead_id' });
-            console.log(`📊 Mortgage application creada para lead ${leadId}`);
+            if (mortgageError) {
+              // CRÉDITO EN LIMBO FIX: Log error para que no desaparezca silenciosamente
+              console.error(`❌ Error creando mortgage_application para lead ${leadId}:`, mortgageError);
+              try {
+                const { logErrorToDB } = await import('../crons/healthCheck');
+                await logErrorToDB(this.supabase, 'mortgage_insert_failed', mortgageError.message, {
+                  severity: 'critical', source: 'creditFlowService',
+                  context: { leadId, leadPhone: context.lead_phone, asesorId: asesor.id, banco: context.banco_preferido }
+                });
+              } catch (_) { /* best effort */ }
+            } else {
+              console.log(`📊 Mortgage application creada para lead ${leadId}`);
+            }
           }
 
           // Guardar vendedor original en notes del lead (para recordatorios y visibilidad)

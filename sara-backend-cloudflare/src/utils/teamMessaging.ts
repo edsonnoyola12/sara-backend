@@ -230,6 +230,14 @@ export async function enviarMensajeTeamMember(
             await guardarMensajePending(supabase, teamMember.id, notasActuales, pendingKey, mensaje, expirationHours);
             console.log(`   💾 Guardado como pending para reintento posterior`);
           }
+          // VENDEDOR CIEGO FIX: Log critical error — TODOS los paths fallaron
+          try {
+            const { logErrorToDB } = await import('../crons/healthCheck');
+            await logErrorToDB(supabase, 'team_notification_all_failed', `Todos los paths de notificación fallaron para ${teamMember.name} (${teamMember.phone}). templateOverride + fallback ambos fallaron.`, {
+              severity: 'critical', source: 'enviarMensajeTeamMember:templateOverride+fallback',
+              context: { teamMemberId: teamMember.id, teamMemberName: teamMember.name, tipoMensaje, pendingKey, mensajePreview: mensaje.substring(0, 100) }
+            });
+          } catch (_) { /* best effort */ }
           return { success: false, method: 'failed', ventanaAbierta: false };
         }
       } else {
@@ -238,6 +246,14 @@ export async function enviarMensajeTeamMember(
           await guardarMensajePending(supabase, teamMember.id, notasActuales, pendingKey, mensaje, expirationHours);
           console.log(`   💾 Guardado como pending para reintento posterior`);
         }
+        // VENDEDOR CIEGO FIX: Log critical error — template genérico falló
+        try {
+          const { logErrorToDB } = await import('../crons/healthCheck');
+          await logErrorToDB(supabase, 'team_notification_all_failed', `Template genérico falló para ${teamMember.name} (${teamMember.phone}). Mensaje guardado como pending pero vendedor NO fue notificado.`, {
+            severity: 'critical', source: 'enviarMensajeTeamMember:genericTemplateFailed',
+            context: { teamMemberId: teamMember.id, teamMemberName: teamMember.name, tipoMensaje, pendingKey, mensajePreview: mensaje.substring(0, 100) }
+          });
+        } catch (_) { /* best effort */ }
         return { success: false, method: 'failed', ventanaAbierta: false };
       }
     }
@@ -251,6 +267,15 @@ export async function enviarMensajeTeamMember(
 
   } catch (error) {
     console.error(`❌ Error en enviarMensajeTeamMember para ${teamMember.name}:`, error);
+    // VENDEDOR CIEGO FIX: Log critical error — excepción inesperada
+    try {
+      const { logErrorToDB } = await import('../crons/healthCheck');
+      await logErrorToDB(supabase, 'team_notification_crashed', `enviarMensajeTeamMember crasheó para ${teamMember.name}: ${error instanceof Error ? error.message : String(error)}`, {
+        severity: 'critical', source: 'enviarMensajeTeamMember:outerCatch',
+        stack: error instanceof Error ? error.stack : undefined,
+        context: { teamMemberId: teamMember.id, teamMemberName: teamMember.name, tipoMensaje, pendingKey }
+      });
+    } catch (_) { /* best effort */ }
     return { success: false, method: 'failed', ventanaAbierta: false };
   }
 }

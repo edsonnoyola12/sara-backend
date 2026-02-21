@@ -686,6 +686,19 @@ export async function crearCitaCompleta(
       }
       if (result.errorType === 'db_error') {
         console.error('❌ Error DB creando cita:', result.error);
+        // CITA INVISIBLE FIX: Avisar al lead que hubo un problema
+        try {
+          await ctx.twilio.sendWhatsAppMessage(from,
+            '⚠️ Tuve un problema técnico al agendar tu cita. Un asesor te contactará en breve para confirmarla. ¡Disculpa la molestia!');
+        } catch (_) { /* best effort */ }
+        // Alertar al dev
+        try {
+          const { logErrorToDB } = await import('../crons/healthCheck');
+          await logErrorToDB(ctx.supabase, 'cita_creation_failed', result.error || 'DB error creating appointment', {
+            severity: 'critical', source: 'crearCitaCompleta',
+            context: { leadPhone: from, desarrollo, fecha, hora, leadId: lead?.id }
+          });
+        } catch (_) { /* best effort */ }
         return;
       }
       return;
@@ -728,6 +741,14 @@ export async function crearCitaCompleta(
         }
       } catch (notifErr) {
         console.error('⚠️ Error notificando vendedor de cita:', notifErr);
+        // CITA INVISIBLE FIX: Log a error_logs para visibilidad
+        try {
+          const { logErrorToDB } = await import('../crons/healthCheck');
+          await logErrorToDB(ctx.supabase, 'vendor_notification_failed', `Vendedor ${vendedor.name} no recibió notificación de cita`, {
+            severity: 'error', source: 'crearCitaCompleta:vendorNotif',
+            context: { vendedorId: vendedor.id, leadPhone: from, desarrollo, fecha, hora }
+          });
+        } catch (_) { /* best effort */ }
       }
     }
 
@@ -761,6 +782,19 @@ export async function crearCitaCompleta(
     console.log('✅ CITA COMPLETA CREADA');
   } catch (error) {
     console.error('❌ Error en crearCitaCompleta:', error);
+    // CITA INVISIBLE FIX: Avisar al lead + log error
+    try {
+      await ctx.twilio.sendWhatsAppMessage(from,
+        '⚠️ Tuve un problema técnico al agendar tu cita. Un asesor te contactará en breve para confirmarla. ¡Disculpa la molestia!');
+    } catch (_) { /* best effort */ }
+    try {
+      const { logErrorToDB } = await import('../crons/healthCheck');
+      await logErrorToDB(ctx.supabase, 'cita_creation_crashed', error instanceof Error ? error.message : String(error), {
+        severity: 'critical', source: 'crearCitaCompleta:outerCatch',
+        stack: error instanceof Error ? error.stack : undefined,
+        context: { leadPhone: from, desarrollo, fecha, hora, leadId: lead?.id }
+      });
+    } catch (_) { /* best effort */ }
   }
 }
 

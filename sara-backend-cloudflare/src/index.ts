@@ -832,8 +832,11 @@ export default {
           console.log(`📥 Procesando mensaje de ${from}: tipo=${messageType}, texto="${text.substring(0, 50)}..."`);
 
           // ═══ KV FAST DEDUP: Skip si ya procesamos este messageId ═══
+          // MARK-BEFORE + RECOVERY: Marca KV antes de procesar, pero si el procesamiento
+          // falla (catch línea ~1526), ELIMINA la entrada KV para que Meta pueda reintentar.
+          let kvDedupKey: string | null = null;
           if (messageId) {
-            const kvDedupKey = `wamsg:${messageId}`;
+            kvDedupKey = `wamsg:${messageId}`;
             try {
               const kvHit = await env.SARA_CACHE.get(kvDedupKey);
               if (kvHit) {
@@ -1526,12 +1529,23 @@ export default {
       } catch (error) {
         console.error('❌ Meta Webhook Error:', error);
 
+        // RECOVERY: Si el procesamiento falló, eliminar la marca KV para que
+        // el retry de Meta NO sea rechazado como duplicado (Lead Fantasma fix)
+        if (kvDedupKey) {
+          try {
+            await env.SARA_CACHE.delete(kvDedupKey);
+            console.log(`🔄 KV dedup cleared for retry: ${kvDedupKey}`);
+          } catch (kvCleanErr) {
+            console.warn('KV cleanup failed (non-critical):', kvCleanErr);
+          }
+        }
+
         // Persist to error_logs
         ctx.waitUntil(logErrorToDB(supabase, 'webhook_error', error instanceof Error ? error.message : String(error), {
-          severity: 'error',
+          severity: 'critical',
           source: 'webhook:meta',
           stack: error instanceof Error ? error.stack : undefined,
-          context: { from: from || 'unknown' }
+          context: { from: from || 'unknown', messageId: messageId || 'unknown' }
         }));
 
         return new Response('OK', { status: 200 });
