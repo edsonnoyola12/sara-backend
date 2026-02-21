@@ -4491,8 +4491,11 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         }
 
         // Marcar tiempo de última respuesta y guardar memoria de conversación
-        const notasActuales = (leadFrescoRL?.notes && typeof leadFrescoRL.notes === 'object')
-          ? leadFrescoRL.notes
+        // Leer notas frescas de BD (evitar sobreescribir cambios de otros procesos)
+        const { data: leadFrescoMem } = await this.supabase.client
+          .from('leads').select('notes').eq('id', lead.id).single();
+        const notasActuales = (leadFrescoMem?.notes && typeof leadFrescoMem.notes === 'object')
+          ? leadFrescoMem.notes
           : {};
 
         // ═══ MEMORIA DE CONVERSACIÓN MEJORADA ═══

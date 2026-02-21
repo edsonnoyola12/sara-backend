@@ -1313,9 +1313,10 @@ export class WhatsAppHandler {
         await this.generarVideoBienvenidaSiAplica(from, lead, desarrolloInteres, cleanPhone, properties, env);
       }
 
-    } catch (error) {
-      console.error('❌ Error:', error);
-      await this.meta.sendWhatsAppMessage(from, 'Disculpa, tuve un problema técnico. ¿Puedes repetir tu mensaje? 🙏');
+    } catch (error: any) {
+      console.error('❌ Error en handleIncomingMessage:', error?.message || error, error?.stack);
+      try { await logErrorToDB(this.supabase, 'lead_message_error', error?.message || 'Unknown error', { severity: 'critical', source: 'whatsapp:handleIncomingMessage', stack: error?.stack, context: { from, body: body?.substring(0, 200) } }); } catch (_) {}
+      try { await this.meta.sendWhatsAppMessage(from, 'Disculpa, tuve un problema técnico. ¿Puedes repetir tu mensaje? 🙏'); } catch (_) {}
     }
   }
 
