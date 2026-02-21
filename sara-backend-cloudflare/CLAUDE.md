@@ -5707,19 +5707,79 @@ Mejora a la vista Equipo existente con toggle Tarjetas/Rendimiento:
 
 ---
 
+### 2026-02-20 (Sesión 58) - Auditoría de Precisión de Datos: Purga de Modelos Fantasma
+
+**Auditoría completa de TODO el codebase para eliminar datos incorrectos que SARA le decía a los leads.** Se verificó cada modelo, precio, recámara y ubicación contra la base de datos real (34 propiedades en `properties` table).
+
+#### Prioridad Crítica (commit `ed6e26e1`)
+
+| Fix | Archivo | Impacto |
+|-----|---------|---------|
+| **Leads fantasma de team members** | `leadManagementService.ts` | Cuando un vendedor escribía y no tenía `sugerencia_pendiente`, se creaba un lead fantasma con su teléfono. Ahora verifica team_members ANTES de crear lead |
+| **"Encontré otra opción" no detectado** | `aiConversationService.ts` | Nuevo intent `encontre_otra_opcion` — SARA felicita en vez de seguir vendiendo |
+
+#### Prioridad Media (commit `f0571b11`)
+
+**13 modelos fantasma eliminados del prompt de IA** — nombres que SARA mencionaba pero NO existen en la base de datos:
+
+| Modelo Fantasma | Dónde aparecía | Reemplazado por |
+|-----------------|----------------|-----------------|
+| Ascendente, Descendente | Ejemplos en prompt | Encino Verde, Gardenia |
+| Azalea, Magnolia | Andes | (eliminados, reales: Laurel, Dalia, Gardenia, Lavanda) |
+| Pino, Cedro | Monte Verde | (eliminados, reales: Acacia, Eucalipto, Olivo, Fresno, Fresno 2) |
+| Real I, Real II, Real III | Monte Real | (eliminados, Monte Real no tiene modelos en DB) |
+| Navarra | Miravalle | (eliminado, reales: Bilbao, Vizcaya, Casa Habitación, Departamento) |
+
+**También corregido:** precios inventados, ubicaciones incorrectas (Miravalle listado como Guadalupe), Alpes sin datos.
+
+#### Prioridad Baja (commit `8c4813f5`)
+
+| Fix | Archivos | Cambio |
+|-----|----------|--------|
+| **Ghost models en archivos secundarios** | `constants.ts`, `sara.ts` | `MODELOS_CONOCIDOS` y `DESARROLLOS_CONOCIDOS` alineados con DB real |
+| **"4 recámaras" → "3 recámaras"** | `aiConversationService.ts`, `uxHelpers.ts`, `leadMessageService.ts` | Ningún desarrollo tiene 4 rec — máximo 3 (algunos con estudio/vestidor) |
+| **"Ascendente" en ejemplos** | `aiConversationService.ts` (3 ubicaciones) | Reemplazado por "Encino Verde" |
+| **"38 propiedades" → "34 propiedades"** | `CLAUDE.md` (6 ocurrencias) | Conteo real verificado en Supabase |
+| **`sara.ts` reescrito completo** | `src/prompts/sara.ts` | Era 100% outdated (ghost models, precios falsos). Ahora refleja DB real |
+
+#### Limpieza de Código Muerto (commit `a502e74b`)
+
+**Borrado `src/utils/pricing-and-locations.ts`** — 92 líneas de código muerto (nunca importado) con modelos inventados y coordenadas GPS ficticias.
+
+#### SQL: Paseo Colorines `price_equipped` (via endpoint temporal)
+
+| Modelo | `price` | `price_equipped` (antes NULL) | Markup |
+|--------|---------|-------------------------------|--------|
+| Prototipo 6M | $3,000,504 | **$3,150,529** | ~5% |
+| Prototipo 7M | $3,562,634 | **$3,740,766** | ~5% |
+
+Endpoint temporal creado en `test.ts`, ejecutado, verificado y removido. Worker redeployado limpio.
+
+#### Verificación
+
+- ✅ Grep exhaustivo: zero ghost references en código activo
+- ✅ 597/597 tests pasando (18 archivos)
+- ✅ Deployed limpio (Version `1765ff19`)
+- ✅ Data de SARA coincide 100% con Supabase: 34 propiedades, 9 desarrollos, precios reales
+
+**Commits:** `ed6e26e1`, `f0571b11`, `8c4813f5`, `a502e74b`
+**Deploy:** Version ID `1765ff19`
+
+---
+
 **Estado final del sistema:**
 
 | Métrica | Valor |
 |---------|-------|
-| Tests | 515/515 ✅ |
-| Test files | 17 |
+| Tests | 597/597 ✅ |
+| Test files | 18 |
 | Servicios | 85+ |
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 25+ |
 | Capas de resilience | 9 |
 | Templates WA aprobados | 3 |
-| Propiedades en catálogo | 38 |
-| Desarrollos | 7 (Monte Verde, Andes, Falco, Encinos, Miravalle, Colorines, Citadella) |
+| Propiedades en catálogo | 34 |
+| Desarrollos | 9 (Monte Verde, Monte Real, Andes, Falco, Encinos, Miravalle, Colorines, Alpes, Citadella) |
 | **pending_auto_response types** | **16** |
 | **CRM UX/UI Rounds** | **8 completados** |
 
@@ -5731,4 +5791,4 @@ Mejora a la vista Equipo existente con toggle Tarjetas/Rendimiento:
 | CRM | https://sara-crm-new.vercel.app |
 | Videos | https://sara-videos.onrender.com |
 
-**Sistema 100% completo y operativo — Última verificación: 2026-02-20 (Sesión 56)**
+**Sistema 100% completo y operativo — Última verificación: 2026-02-20 (Sesión 58)**
