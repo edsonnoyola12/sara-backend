@@ -690,7 +690,7 @@ ${this.getPreferenciasConocidas(lead)}
 - Si pregunta sobre casas → Info BREVE + "¿Qué día te gustaría conocerlo?"
 - Si dice "no me interesa" → "¿Qué te detiene? Muchos pensaban igual y ahora son propietarios felices"
 - Si dice "lo voy a pensar" → "Con $20K apartado congelas precio. ¿Te guardo uno?"
-- Si dice "muy caro" → "Tenemos desde $1.6M. ¿Cuál es tu presupuesto?"
+- Si dice "muy caro" → "Tenemos desde ${AIConversationService.precioMinGlobal(properties)}. ¿Cuál es tu presupuesto?"
 - Si quiere visitar → "¡Perfecto! ¿Te funciona el sábado a las 11 o prefieres el domingo?"
 
 🚫 NUNCA HAGAS ESTO:
@@ -709,7 +709,7 @@ Si el mensaje del cliente NO ES CLARO, NO ADIVINES. Pregunta para aclarar:
 | "Monte" | Asumir que es Monte Verde | "¿Te refieres a Monte Verde o a otra zona?" |
 | "La de 2 millones" | Adivinar desarrollo | "Tenemos varias en ese rango. ¿Te interesa más Colinas o Guadalupe?" |
 | "La que me dijeron" | Inventar | "¿Recuerdas qué desarrollo te mencionaron?" |
-| "Algo económico" | Dar cualquier opción | "¿Cuál sería tu presupuesto ideal? Tenemos desde $1.6M" |
+| "Algo económico" | Dar cualquier opción | "¿Cuál sería tu presupuesto ideal? Tenemos desde ${AIConversationService.precioMinGlobal(properties)}" |
 | "Por allá" | Adivinar ubicación | "¿Te refieres a la zona de Colinas del Padre o de Guadalupe?" |
 | "El que tiene alberca" | Decir que no hay | "¡Priv. Andes tiene alberca! ¿Es el que buscas?" |
 
@@ -723,7 +723,7 @@ Es mejor preguntar y quedar bien que adivinar y quedar mal
 📌 Si dice "HOLA" o saludo:
 RESPONDE EXACTAMENTE ASÍ (usa saludo según hora del día):
 "${getSaludoPorHora()}! Soy SARA de Grupo Santa Rita 🏠
-Tenemos casas increíbles desde $1.6 millones con financiamiento.
+Tenemos casas increíbles desde ${AIConversationService.precioMinGlobal(properties)} con financiamiento.
 ¿Buscas 2 o 3 recámaras?"
 
 📌 Si pregunta por un DESARROLLO:
@@ -879,7 +879,7 @@ Si preguntan "¿tienen casas en renta?" → Responder:
 
 📝 Si preguntan por alberca, responde:
 "¡Sí tenemos! Priv. Andes es nuestro único desarrollo con ALBERCA 🏊
-Casas desde $1,596,743 (Laurel) hasta $2,838,098 (Lavanda).
+Casas desde ${AIConversationService.precioExactoModelo(properties, 'Laurel')} (Laurel) hasta ${AIConversationService.precioExactoModelo(properties, 'Lavanda')} (Lavanda).
 ¿Te gustaría visitarlo este fin de semana?"
 
 
@@ -893,14 +893,12 @@ Casas desde $1,596,743 (Laurel) hasta $2,838,098 (Lavanda).
 ✅ LA VERDAD: SÍ TENEMOS CITADELLA DEL NOGAL
 Citadella del Nogal es nuestro desarrollo de TERRENOS en GUADALUPE.
 Tiene dos secciones:
-- **Villa Campelo**: Terrenos desde $867,000
-- **Villa Galiano**: Terrenos desde $652,800
+${AIConversationService.infoTerrenos(properties)}
 
 📝 RESPUESTA CORRECTA para "El Nogal" o "Citadella del Nogal":
 "¡Excelente elección! 😊 Citadella del Nogal es nuestro desarrollo de terrenos en Guadalupe.
 Tiene dos secciones:
-• Villa Campelo - Terrenos desde $867,000
-• Villa Galiano - Terrenos desde $652,800
+${AIConversationService.infoTerrenos(properties)}
 ¿Te gustaría visitarlo? ¿Qué día puedes venir a conocerlo?"
 
 **COLINAS DEL PADRE (Zacatecas):**
@@ -924,8 +922,8 @@ Tiene dos secciones:
 📝 Si preguntan por "Guadalupe" → SOLO desarrollos de Guadalupe, NO Colinas
 
 **PASEO COLORINES (Colinas del Padre, Zacatecas):**
-- Prototipo 6M - $3,000,504 (3 rec, 168.90m², terreno 102m²)
-- Prototipo 7M - $3,562,634 (3 rec + estudio, 206.40m², terreno 119m²)
+- Prototipo 6M - ${AIConversationService.precioExactoModelo(properties, 'Prototipo 6M')} (3 rec, 168.90m², terreno 102m²)
+- Prototipo 7M - ${AIConversationService.precioExactoModelo(properties, 'Prototipo 7M')} (3 rec + estudio, 206.40m², terreno 119m²)
 - Casas de 2 plantas con vestidor y terraza
 - Zona de alta plusvalía en Colinas del Padre
 
@@ -938,7 +936,7 @@ Tiene dos secciones:
 
 📌 "ESTÁ MUY CARO" / "NO ME ALCANZA":
 ➜ TÉCNICA: Reencuadre + Opciones + Cierre
-→ "Tenemos desde $1.6M. ¿Cuál es tu presupuesto?"
+→ "Tenemos desde ${AIConversationService.precioMinGlobal(properties)}. ¿Cuál es tu presupuesto?"
 
 📌 OBJECIONES COMUNES (respuestas cortas):
 | Objeción | Respuesta |
@@ -968,26 +966,26 @@ Si el cliente menciona:
 - "familia grande", "somos 5", "4 hijos", "necesito 4 recámaras", "casa grande"
 
 ➜ OPCIONES PARA FAMILIAS GRANDES (3 rec con espacios amplios):
-1. **Distrito Falco** - Casas de hasta 240m² terreno, 3 rec + estudio + vestidor, desde $3.7M
-   - Chipre: 3 rec + estudio, 224m², $5.06M
-   - Mirlo: 3 rec + estudio, 220m², $5.15M
-   - Calandria: 3 rec, 240m² terreno, $5.37M (la más grande)
+1. **Distrito Falco** - Casas de hasta 240m² terreno, 3 rec + estudio + vestidor, desde $${AIConversationService.precioMinDesarrollo(properties, 'Distrito Falco')}
+   - Chipre: ${AIConversationService.infoModelo(properties, 'Chipre')}
+   - Mirlo: ${AIConversationService.infoModelo(properties, 'Mirlo')}
+   - Calandria: ${AIConversationService.infoModelo(properties, 'Calandria')} (la más grande)
 
-2. **Los Encinos** - Casas 3 rec, desde $3.0M
-   - Encino Blanco: 3 rec, 166.8m², $3.0M
-   - Encino Dorado: 3 rec, 146.5m², $3.8M (1 piso, terreno 204m²)
-   - Maple: 3 rec, 210.8m², $3.6M (3 pisos)
+2. **Los Encinos** - Casas 3 rec, desde $${AIConversationService.precioMinDesarrollo(properties, 'Los Encinos')}
+   - Encino Blanco: ${AIConversationService.infoModelo(properties, 'Encino Blanco')}
+   - Encino Dorado: ${AIConversationService.infoModelo(properties, 'Encino Dorado')} (1 piso, terreno 204m²)
+   - Maple: ${AIConversationService.infoModelo(properties, 'Maple')} (3 pisos)
 
-3. **Miravalle** - Casas y departamentos, desde $3.0M
-   - Departamento 6m: 2 rec, $3.05M (el más accesible)
-   - Vizcaya: 3 rec, 210m², $3.51M
-   - Bilbao 7M: 3 rec + roof garden, 242m², $4.11M
+3. **Miravalle** - Casas y departamentos, desde $${AIConversationService.precioMinDesarrollo(properties, 'Miravalle')}
+   - Departamento 6m: ${AIConversationService.infoModelo(properties, 'Departamento 6m')} (el más accesible)
+   - Vizcaya: ${AIConversationService.infoModelo(properties, 'Vizcaya')}
+   - Bilbao 7M: ${AIConversationService.infoModelo(properties, 'Bilbao')} + roof garden
 
 Respuesta sugerida:
 "¡Tengo opciones amplias para familias! 👨‍👩‍👧‍👦
 Las más espaciosas:
-• Distrito Falco - hasta 240m², 3 rec + estudio, desde $3.7M
-• Miravalle - 3 plantas + roof garden, desde $3.0M
+• Distrito Falco - hasta 240m², 3 rec + estudio, desde $${AIConversationService.precioMinDesarrollo(properties, 'Distrito Falco')}
+• Miravalle - 3 plantas + roof garden, desde $${AIConversationService.precioMinDesarrollo(properties, 'Miravalle')}
 ¿Cuántas recámaras necesitas? Así te doy la mejor opción."
 
 
@@ -1005,7 +1003,7 @@ Las más espaciosas:
 Si preguntan por alberca específicamente:
 "¡Sí tenemos! Privada Andes es nuestro único desarrollo con ALBERCA 🏊
 También incluye gym, asadores y salón de eventos.
-Casas desde $1.6M. ¿Te gustaría conocerlo?"
+Casas desde ${AIConversationService.precioMinDesarrollo(properties, 'Andes')}. ¿Te gustaría conocerlo?"
 
 
 📊 COMPARATIVA RÁPIDA (cuando pidan comparar)
@@ -1013,9 +1011,9 @@ Casas desde $1.6M. ¿Te gustaría conocerlo?"
 Si el cliente quiere comparar desarrollos:
 
 **POR PRECIO:**
-- Económico ($1.5-2.8M): Monte Verde, Andes
-- Medio ($3-4.3M): Los Encinos, Miravalle, Paseo Colorines
-- Premium ($3.7-5.4M): Distrito Falco
+- Económico ($${AIConversationService.rangosPrecios(properties).economico}): Monte Verde, Andes
+- Medio ($${AIConversationService.rangosPrecios(properties).medio}): Los Encinos, Miravalle, Paseo Colorines
+- Premium ($${AIConversationService.rangosPrecios(properties).premium}): Distrito Falco
 
 **POR TAMAÑO:**
 - 2 recámaras: Monte Verde (Acacia), Andes (Laurel, Dalia)
@@ -1033,7 +1031,7 @@ Si el cliente quiere comparar desarrollos:
 
 Respuesta de comparativa:
 "Te ayudo a comparar 😊 ¿Qué es más importante para ti?
-1. Precio - tengo desde $1.6M
+1. Precio - tengo desde ${AIConversationService.precioMinGlobal(properties)}
 2. Espacio - casas de 2 o 3 recámaras
 3. Amenidades - solo Andes tiene alberca
 4. Ubicación - Colinas del Padre o Guadalupe
@@ -1187,7 +1185,7 @@ Respuesta: "Las tasas varían según banco y perfil. En la visita te ayudamos co
 
 🏆 FLUJO DE VENTA - CITA EN 3-5 MENSAJES 🏆
 
-1. SALUDO: "¡Hola! Soy SARA de Grupo Santa Rita. Casas desde $1.6M con financiamiento. ¿2 o 3 recámaras?"
+1. SALUDO: "¡Hola! Soy SARA de Grupo Santa Rita. Casas desde ${AIConversationService.precioMinGlobal(properties)} con financiamiento. ¿2 o 3 recámaras?"
 2. CALIFICA: UNA pregunta (recámaras + presupuesto)
 3. RECOMIENDA: "[Desarrollo] desde $X, muy seguro, familias lo eligieron. ¿Lo visitamos este finde?"
 4. AGENDAR: Si quiere visitar → pide nombre (si no tienes) → pide día/hora → confirma
@@ -1212,7 +1210,7 @@ CRÉDITO - REGLAS:
 🚫 NUNCA ofrezcas "conectar con asesor de crédito" ni "asesor VIP"
 🚫 NUNCA preguntes banco, ingreso, enganche — eso se ve en la visita
 ✅ Si pide crédito → responde útil ("Sí, aceptamos INFONAVIT, crédito bancario, etc.") + cierra con VISITA
-✅ Ejemplo: "¡Claro que aceptamos crédito! Tenemos opciones desde $1.6M. ¿Te gustaría venir a conocer? En la visita te ayudamos con todo el trámite de crédito."
+✅ Ejemplo: "¡Claro que aceptamos crédito! Tenemos opciones desde ${AIConversationService.precioMinGlobal(properties)}. ¿Te gustaría venir a conocer? En la visita te ayudamos con todo el trámite de crédito."
 ✅ Si dice "no necesito crédito" → enfócate en la casa
 ✅ Si dice "ya estoy en proceso" → felicita y agenda visita
 ✅ Si dice "ya tengo cita" → confirma y no crees otra
@@ -1285,7 +1283,7 @@ CUANDO QUIERA "HABLAR CON ASESOR":
 
 📌 **"NO GRACIAS":** Un "no" = "todavía no me convences" → rescata con UNA pregunta
 🚫 NUNCA: "Sin problema", "Entendido", "Ok", "Cuando gustes", "Le aviso a vendedor"
-✅ RESCATA: "¿Qué te detiene? Tenemos desde $1.6M"
+✅ RESCATA: "¿Qué te detiene? Tenemos desde ${AIConversationService.precioMinGlobal(properties)}"
 
 📌 **MENSAJE CONFUSO:**
 
@@ -1890,8 +1888,7 @@ RECUERDA:
           parsed.response = `¡Excelente elección! 😊 Citadella del Nogal es nuestro desarrollo de terrenos en Guadalupe.
 
 Tiene dos secciones:
-• *Villa Campelo* - Terrenos desde $867,000
-• *Villa Galiano* - Terrenos desde $652,800
+${AIConversationService.infoTerrenos(properties)}
 
 Excelente plusvalía y muy tranquilo. *¿Te gustaría visitarlo? ¿Qué día puedes venir a conocerlo?*`;
           parsed.intent = 'solicitar_cita';
@@ -1956,7 +1953,7 @@ Si algún familiar o amigo busca casa en el futuro, con gusto lo atiendo. ¡Te d
 
 Pero te cuento algo: con las opciones de crédito actuales, la mensualidad puede ser MUY similar a una renta, ¡y al final la casa es TUYA!
 
-¿Te gustaría que te muestre cómo funciona? Tenemos casas desde $1.6M con mensualidades accesibles.`;
+¿Te gustaría que te muestre cómo funciona? Tenemos casas desde ${AIConversationService.precioMinGlobal(properties)} con mensualidades accesibles.`;
         }
       }
 
@@ -2002,10 +1999,10 @@ Pero con gusto te conecto con uno de nuestros vendedores. Para que te contacten,
           parsed.response = `¡Perfecto, tengo opciones de ENTREGA INMEDIATA! 🏠
 
 Casas listas para mudarte YA:
-• *Monte Verde* - Desde $1.6M
-• *Los Encinos* - Desde $3.0M
-• *Andes* - Desde $1.6M
-• *Paseo Colorines* - Desde $3.0M
+• *Monte Verde* - Desde $${AIConversationService.precioMinDesarrollo(properties, 'Monte Verde')}
+• *Los Encinos* - Desde $${AIConversationService.precioMinDesarrollo(properties, 'Los Encinos')}
+• *Andes* - Desde $${AIConversationService.precioMinDesarrollo(properties, 'Andes')}
+• *Paseo Colorines* - Desde $${AIConversationService.precioMinDesarrollo(properties, 'Paseo Colorines')}
 
 Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte hoy mismo.`;
           parsed.intent = 'solicitar_cita';
@@ -2106,8 +2103,8 @@ Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte
           parsed.response = `¡Sí tenemos desarrollo con alberca! 🏊
 
 **Priv. Andes** es nuestro único fraccionamiento con ALBERCA:
-• Laurel - $1,596,743 (2 rec)
-• Lavanda - $2,838,098 (3 rec, vestidor)
+• Laurel - ${AIConversationService.precioExactoModelo(properties, 'Laurel')} (2 rec)
+• Lavanda - ${AIConversationService.precioExactoModelo(properties, 'Lavanda')} (3 rec, vestidor)
 
 Además tiene vigilancia 24/7, áreas verdes y es pet-friendly 🐕
 
@@ -2228,12 +2225,12 @@ Nosotros te ayudamos con el trámite una vez que elijas tu casa. ¿Ya tienes alg
 Tengo brochures completos con fotos, planos y precios de cada desarrollo.
 
 ¿De cuál te gustaría el folleto?
-• Monte Verde (desde $1.6M)
-• Los Encinos (desde $3.0M)
-• Distrito Falco (desde $3.7M)
-• Andes (desde $1.6M, con alberca 🏊)
-• Miravalle (desde $3.0M)
-• Paseo Colorines (desde $3.0M)
+• Monte Verde (desde $${AIConversationService.precioMinDesarrollo(properties, 'Monte Verde')})
+• Los Encinos (desde $${AIConversationService.precioMinDesarrollo(properties, 'Los Encinos')})
+• Distrito Falco (desde $${AIConversationService.precioMinDesarrollo(properties, 'Distrito Falco')})
+• Andes (desde $${AIConversationService.precioMinDesarrollo(properties, 'Andes')}, con alberca 🏊)
+• Miravalle (desde $${AIConversationService.precioMinDesarrollo(properties, 'Miravalle')})
+• Paseo Colorines (desde $${AIConversationService.precioMinDesarrollo(properties, 'Paseo Colorines')})
 
 Dime cuál y te lo envío ahora mismo 📲`;
           parsed.send_brochure = true;
@@ -2274,7 +2271,7 @@ Dime cuál y te lo envío ahora mismo 📲`;
           console.log('⚠️ CORRIGIENDO: Claude dijo que tenemos locales - SOLO CASAS');
           parsed.response = `En Grupo Santa Rita nos especializamos en casas habitación, no manejamos locales comerciales 🏠
 
-Pero si buscas casa para tu familia, tenemos excelentes opciones desde $1.6M en zonas con muy buena plusvalía.
+Pero si buscas casa para tu familia, tenemos excelentes opciones desde ${AIConversationService.precioMinGlobal(properties)} en zonas con muy buena plusvalía.
 
 ¿Te interesa que te cuente sobre nuestros desarrollos?`;
         }
@@ -2649,17 +2646,17 @@ Por WhatsApp te atiendo 24/7 🙌
           if (presupuesto >= 3) {
             fallbackResponse = `${lead.name}, con ${presupuesto}M estás en excelente posición 😊
 
-En Zacatecas te recomiendo *Los Encinos* (Encino Dorado: 3 rec, 146.5m², $3.8M, 1 piso) o *Miravalle* (Bilbao 7M: 3 niveles, roof garden, $4.1M).
+En Zacatecas te recomiendo *Los Encinos* (Encino Dorado: ${AIConversationService.infoModelo(properties, 'Encino Dorado')}, 1 piso) o *Miravalle* (Bilbao 7M: ${AIConversationService.infoModelo(properties, 'Bilbao')}, roof garden).
 
-En Guadalupe, *Distrito Falco* tiene modelos premium como Chipre (3 rec, 224m², $5.1M).
+En Guadalupe, *Distrito Falco* tiene modelos premium como Chipre (${AIConversationService.infoModelo(properties, 'Chipre')}).
 
 ¿Te gustaría que te detalle primero Zacatecas o Guadalupe?`;
           } else if (presupuesto >= 2) {
             fallbackResponse = `${lead.name}, con ${presupuesto}M tienes muy buenas opciones 😊
 
-En Zacatecas: *Monte Verde* (Fresno/Olivo: 3 rec, áreas verdes) o *Los Encinos* (Encino Blanco: 3 rec, desde $3.0M).
+En Zacatecas: *Monte Verde* (Fresno/Olivo: 3 rec, áreas verdes) o *Los Encinos* (Encino Blanco: ${AIConversationService.infoModelo(properties, 'Encino Blanco')}).
 
-En Guadalupe: *Andes* es excelente por ubicación y precio, modelos como Gardenia te dan 3 rec desde $2.3M.
+En Guadalupe: *Andes* es excelente por ubicación y precio, modelos como Gardenia (${AIConversationService.infoModelo(properties, 'Gardenia')}).
 
 ¿Cuál zona te llama más la atención?`;
           } else {
@@ -2760,13 +2757,7 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
           } else {
             // No tiene desarrollo, preguntar cuál
             fallbackResponse = `¡Mucho gusto ${fallbackData.nombre}! 😊 ¿Qué desarrollo te gustaría conocer?\n\n` +
-              `🏡 Monte Verde - Desde $1.6M\n` +
-              `🏡 Los Encinos - Desde $3.0M\n` +
-              `🏡 Miravalle - Desde $3.0M\n` +
-              `🏡 Andes - Desde $1.6M\n` +
-              `🏡 Alpes - Desde $2.1M\n` +
-              `🏡 Paseo Colorines - Desde $3.0M\n` +
-              `🏡 Distrito Falco - Desde $3.7M`;
+              AIConversationService.listaDesarrollosConPrecios(properties);
             fallbackIntent = 'interes_desarrollo';
           }
 
@@ -2875,7 +2866,7 @@ Para orientarte mejor: ¿más o menos en qué presupuesto andas?`;
               intent: 'solicitar_cita',
               secondary_intents: [],
               extracted_data: { ...fallbackData, fecha: fechaExtraida, hora: horaExtraida },
-              response: `¡Perfecto! ¿Qué desarrollo te gustaría visitar?\n\n🏡 Monte Verde - Desde $1.6M\n🏡 Los Encinos - Desde $3.0M\n🏡 Miravalle - Desde $3.0M\n🏡 Andes - Desde $1.6M\n🏡 Alpes - Desde $2.1M\n🏡 Paseo Colorines - Desde $3.0M\n🏡 Distrito Falco - Desde $3.7M`,
+              response: `¡Perfecto! ¿Qué desarrollo te gustaría visitar?\n\n` + AIConversationService.listaDesarrollosConPrecios(properties),
               send_gps: false,
               send_video_desarrollo: false,
               send_contactos: false,
@@ -3058,6 +3049,168 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
     catalogo += '\n(Si preguntan por otro desarrollo, puedo dar más detalles)\n';
 
     return catalogo;
+  }
+
+  // ━━━━━━━━━━━
+  // HELPERS DINÁMICOS DE PRECIOS (lee de properties en vez de hardcodear)
+  // ━━━━━━━━━━━
+
+  /** Precio mínimo global (equipada) formateado como "$X.XM" */
+  static precioMinGlobal(properties: any[]): string {
+    const precios = properties
+      .filter((p: any) => (p.price_equipped || p.price) && Number(p.price_equipped || p.price) > 100000)
+      .map((p: any) => Number(p.price_equipped || p.price));
+    if (precios.length === 0) return '$1.6M';
+    return `$${(Math.min(...precios) / 1000000).toFixed(1)}M`;
+  }
+
+  /** Precio mínimo de un desarrollo específico */
+  static precioMinDesarrollo(properties: any[], desarrollo: string): string {
+    const devLower = desarrollo.toLowerCase();
+    const precios = properties
+      .filter((p: any) => {
+        const dev = (p.development || p.development_name || '').toLowerCase();
+        return dev.includes(devLower) || devLower.includes(dev);
+      })
+      .filter((p: any) => (p.price_equipped || p.price) && Number(p.price_equipped || p.price) > 100000)
+      .map((p: any) => Number(p.price_equipped || p.price));
+    if (precios.length === 0) return '?';
+    return `$${(Math.min(...precios) / 1000000).toFixed(1)}M`;
+  }
+
+  /** Genera lista "🏡 *Desarrollo* - Desde $X.XM" para TODOS los desarrollos */
+  static listaDesarrollosConPrecios(properties: any[], conUbicacion = false): string {
+    const porDev = new Map<string, any[]>();
+    for (const p of properties) {
+      const dev = p.development || p.development_name || 'Otros';
+      if (!porDev.has(dev)) porDev.set(dev, []);
+      porDev.get(dev)!.push(p);
+    }
+
+    const orden = ['Monte Verde', 'Los Encinos', 'Miravalle', 'Andes', 'Alpes', 'Paseo Colorines', 'Distrito Falco'];
+    const result: string[] = [];
+
+    for (const devName of orden) {
+      const props = porDev.get(devName);
+      if (!props || props.length === 0) continue;
+      const precios = props
+        .filter((p: any) => (p.price_equipped || p.price) && Number(p.price_equipped || p.price) > 100000)
+        .map((p: any) => Number(p.price_equipped || p.price));
+      if (precios.length === 0) continue;
+      const desde = `$${(Math.min(...precios) / 1000000).toFixed(1)}M`;
+      const ubicacion = conUbicacion
+        ? (devName.includes('Falco') || devName.includes('Andes') || devName.includes('Alpes') ? ' (Guadalupe)' : ' (Zacatecas)')
+        : '';
+      const extra = devName.includes('Andes') ? ', con alberca 🏊' : '';
+      result.push(`🏡 *${devName}* - Desde ${desde}${ubicacion}${extra}`);
+    }
+
+    return result.join('\n');
+  }
+
+  /** Genera lista bullet simple "• Desarrollo (desde $X.XM)" */
+  static listaBulletDesarrollos(properties: any[]): string {
+    const porDev = new Map<string, any[]>();
+    for (const p of properties) {
+      const dev = p.development || p.development_name || 'Otros';
+      if (!porDev.has(dev)) porDev.set(dev, []);
+      porDev.get(dev)!.push(p);
+    }
+
+    const orden = ['Monte Verde', 'Los Encinos', 'Distrito Falco', 'Andes', 'Miravalle', 'Paseo Colorines'];
+    const result: string[] = [];
+
+    for (const devName of orden) {
+      const props = porDev.get(devName);
+      if (!props || props.length === 0) continue;
+      const precios = props
+        .filter((p: any) => (p.price_equipped || p.price) && Number(p.price_equipped || p.price) > 100000)
+        .map((p: any) => Number(p.price_equipped || p.price));
+      if (precios.length === 0) continue;
+      const desde = `$${(Math.min(...precios) / 1000000).toFixed(1)}M`;
+      const extra = devName.includes('Andes') ? ', con alberca 🏊' : '';
+      result.push(`• ${devName} (desde ${desde}${extra})`);
+    }
+
+    return result.join('\n');
+  }
+
+  /** Precio de un modelo específico por nombre */
+  static precioModelo(properties: any[], modeloNombre: string): string {
+    const prop = properties.find((p: any) =>
+      (p.name || '').toLowerCase().includes(modeloNombre.toLowerCase())
+    );
+    if (!prop) return '?';
+    const precio = prop.price_equipped || prop.price;
+    return precio ? `$${(Number(precio) / 1000000).toFixed(2)}M` : '?';
+  }
+
+  /** Info de terrenos (Villa Campelo / Villa Galiano) */
+  static infoTerrenos(properties: any[]): string {
+    const campelo = properties.find((p: any) => (p.name || '').toLowerCase().includes('campelo'));
+    const galiano = properties.find((p: any) => (p.name || '').toLowerCase().includes('galiano'));
+    const lines: string[] = [];
+    if (campelo) {
+      const precio = campelo.price_from || campelo.price || 0;
+      lines.push(`• *Villa Campelo* - Terrenos desde $${Number(precio).toLocaleString('es-MX')}`);
+    }
+    if (galiano) {
+      const precio = galiano.price_from || galiano.price || 0;
+      lines.push(`• *Villa Galiano* - Terrenos desde $${Number(precio).toLocaleString('es-MX')}`);
+    }
+    return lines.join('\n') || '• Villa Campelo y Villa Galiano - Terrenos disponibles';
+  }
+
+  /** Precio exacto formateado "$X,XXX,XXX" de un modelo */
+  static precioExactoModelo(properties: any[], modeloNombre: string): string {
+    const prop = properties.find((p: any) =>
+      (p.name || '').toLowerCase().includes(modeloNombre.toLowerCase())
+    );
+    if (!prop) return '?';
+    const precio = Number(prop.price_equipped || prop.price || 0);
+    if (precio <= 0) return '?';
+    return `$${precio.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+  }
+
+  /** Precio + info de un modelo específico: "$X.XM, Xm², X rec" */
+  static infoModelo(properties: any[], modeloNombre: string): string {
+    const prop = properties.find((p: any) =>
+      (p.name || '').toLowerCase().includes(modeloNombre.toLowerCase())
+    );
+    if (!prop) return '?';
+    const precio = Number(prop.price_equipped || prop.price || 0);
+    const precioFmt = precio > 0 ? `$${(precio / 1000000).toFixed(2)}M` : '?';
+    const m2 = prop.construction_size ? `${prop.construction_size}m²` : '';
+    const rec = prop.bedrooms ? `${prop.bedrooms} rec` : '';
+    const parts = [precioFmt, m2, rec].filter(Boolean);
+    return parts.join(', ');
+  }
+
+  /** Rangos de precio por segmento */
+  static rangosPrecios(properties: any[]): { economico: string, medio: string, premium: string } {
+    // Económico: propiedades < 3M
+    // Medio: 3M - 4.5M
+    // Premium: > 4.5M
+    const precios = properties
+      .filter((p: any) => (p.price_equipped || p.price) && Number(p.price_equipped || p.price) > 100000)
+      .map((p: any) => ({ dev: p.development || '', precio: Number(p.price_equipped || p.price) }));
+
+    const econ = precios.filter(p => p.precio < 3000000);
+    const med = precios.filter(p => p.precio >= 3000000 && p.precio < 4500000);
+    const prem = precios.filter(p => p.precio >= 4500000);
+
+    const minMax = (arr: { precio: number }[]) => {
+      if (arr.length === 0) return '?';
+      const min = Math.min(...arr.map(a => a.precio));
+      const max = Math.max(...arr.map(a => a.precio));
+      return `$${(min / 1000000).toFixed(1)}-${(max / 1000000).toFixed(1)}M`;
+    };
+
+    return {
+      economico: minMax(econ),
+      medio: minMax(med),
+      premium: minMax(prem)
+    };
   }
 
   // ━━━━━━━━━━━
@@ -4382,7 +4535,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         console.error('⚠️ CORRIGIENDO: Colinas del Padre tiene casas, no solo terrenos');
         respuestaLimpia = respuestaLimpia.replace(
           /[Ee]n Colinas del Padre (?:tenemos |hay )?(?:SOLO |solo |únicamente )(?:Villa Campelo|terrenos)[^.]*/gi,
-          'En Colinas del Padre tenemos casas en *Monte Verde* (desde $1.6M), *Los Encinos* (desde $3.0M), *Miravalle* (desde $3.0M) y *Paseo Colorines* (desde $3.0M). Los terrenos están en *Citadella del Nogal* (en Guadalupe)'
+          `En Colinas del Padre tenemos casas en *Monte Verde* (desde $${AIConversationService.precioMinDesarrollo(properties, 'Monte Verde')}), *Los Encinos* (desde $${AIConversationService.precioMinDesarrollo(properties, 'Los Encinos')}), *Miravalle* (desde $${AIConversationService.precioMinDesarrollo(properties, 'Miravalle')}) y *Paseo Colorines* (desde $${AIConversationService.precioMinDesarrollo(properties, 'Paseo Colorines')}). Los terrenos están en *Citadella del Nogal* (en Guadalupe)`
         );
       }
 
@@ -5995,15 +6148,8 @@ Lo mejor es que vengas a conocer las casas y en la visita te ayudamos con todo e
         analysis.response = `¡Perfecto! 😊 Para agendarte, ¿me compartes tu nombre completo?`;
       } else if (!tieneDesarrollo) {
         console.log('🏘️ Pidiendo DESARROLLO para cita');
-        analysis.response = `¡Perfecto ${nombreCliente}! 😊 ¿Qué desarrollo te gustaría visitar?\n\n` +
-          `Tenemos:\n` +
-          `🏡 *Monte Verde* - Desde $1.6M (Zacatecas)\n` +
-          `🏡 *Los Encinos* - Desde $3.0M (Zacatecas)\n` +
-          `🏡 *Miravalle* - Desde $3.0M (Zacatecas)\n` +
-          `🏡 *Andes* - Desde $1.6M (Guadalupe)\n` +
-          `🏡 *Alpes* - Desde $2.1M (Zacatecas)\n` +
-          `🏡 *Paseo Colorines* - Desde $3.0M (Zacatecas)\n` +
-          `🏡 *Distrito Falco* - Desde $3.7M (Guadalupe)`;
+        analysis.response = `¡Perfecto ${nombreCliente}! 😊 ¿Qué desarrollo te gustaría visitar?\n\nTenemos:\n` +
+          AIConversationService.listaDesarrollosConPrecios(properties, true);
       } else {
         console.log('📅 Tiene nombre y desarrollo, pidiendo FECHA');
         analysis.response = `¡Perfecto ${nombreCliente}! 😊 ¿Qué día y hora te gustaría visitarnos en ${tieneDesarrollo}?`;
