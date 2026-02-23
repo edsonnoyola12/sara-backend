@@ -25,7 +25,6 @@ import { AIConversationService } from './services/aiConversationService';
 import { getAvailableVendor, TeamMemberAvailability } from './services/leadManagementService';
 import { createTTSTrackingService } from './services/ttsTrackingService';
 import { createMessageTrackingService } from './services/messageTrackingService';
-import { BusinessHoursService } from './services/businessHoursService';
 import { safeJsonParse } from './utils/safeHelpers';
 import { createMetaWithTracking } from './utils/metaTracking';
 import { processRetryQueue, enqueueFailedMessage } from './services/retryQueueService';
@@ -930,55 +929,10 @@ export default {
           const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
           const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
 
-          // ═══ AVISO FUERA DE HORARIO (solo leads, no team members) ═══
-          if (!teamMember) {
-            try {
-              const bhService = new BusinessHoursService();
-              const outsideMsg = bhService.getOutsideHoursMessage('es');
-              if (outsideMsg) {
-                // Verificar dedup: no enviar más de 1 vez cada 12h al mismo lead
-                const { data: leadBH } = await supabase.client
-                  .from('leads')
-                  .select('notes')
-                  .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`)
-                  .maybeSingle();
-                const bhNotes = typeof leadBH?.notes === 'string' ? JSON.parse(leadBH.notes || '{}') : (leadBH?.notes || {});
-
-                // NO enviar aviso si el lead tiene encuesta pendiente (NPS, satisfacción, etc.)
-                const tieneEncuestaPendiente = bhNotes.esperando_respuesta_nps
-                  || bhNotes.esperando_respuesta_entrega
-                  || bhNotes.esperando_respuesta_satisfaccion_casa
-                  || bhNotes.esperando_respuesta_mantenimiento
-                  || bhNotes.pending_client_survey
-                  || bhNotes.pending_nps_survey;
-
-                if (tieneEncuestaPendiente) {
-                  console.log(`🕐 Lead fuera de horario pero tiene encuesta pendiente - skip aviso`);
-                } else {
-                  const lastNotified = bhNotes.outside_hours_notified_at;
-                  const hace12h = Date.now() - 12 * 60 * 60 * 1000;
-                  const yaNotifico = lastNotified && new Date(lastNotified).getTime() > hace12h;
-
-                  if (!yaNotifico) {
-                    console.log(`🕐 Lead escribe fuera de horario - enviando aviso`);
-                    await meta.sendWhatsAppMessage(from, outsideMsg);
-                    // Guardar flag de dedup
-                    if (leadBH) {
-                      await supabase.client
-                        .from('leads')
-                        .update({ notes: { ...bhNotes, outside_hours_notified_at: new Date().toISOString() } })
-                        .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`);
-                    }
-                  } else {
-                    console.log(`🕐 Lead fuera de horario pero ya notificado en últimas 12h - skip aviso`);
-                  }
-                }
-                // NO retornar - seguir procesando con IA normalmente
-              }
-            } catch (bhErr) {
-              console.error('Error en BusinessHoursService:', bhErr);
-            }
-          }
+          // ═══ AVISO FUERA DE HORARIO — DESACTIVADO ═══
+          // SARA responde 24/7 con IA. No enviamos "fuera de horario" a leads.
+          // El servicio BusinessHoursService sigue disponible para otros usos
+          // (ej: coordinadores, reportes) pero NO interrumpe respuestas a leads.
           // ═══ FIN AVISO FUERA DE HORARIO ═══
 
           // ═══ MANEJO DE MENSAJES VACÍOS / WHITESPACE ═══
