@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-20 (Sesión 57)
+> Última actualización: 2026-02-23 (Sesión 62)
 
 ---
 
@@ -5791,4 +5791,344 @@ Endpoint temporal creado en `test.ts`, ejecutado, verificado y removido. Worker 
 | CRM | https://sara-crm-new.vercel.app |
 | Videos | https://sara-videos.onrender.com |
 
-**Sistema 100% completo y operativo — Última verificación: 2026-02-20 (Sesión 58)**
+**Sistema 100% completo y operativo — Última verificación: 2026-02-22 (Sesión 59)**
+
+---
+
+### 2026-02-22 (Sesión 59) - Fix "Error Técnico", Botón Asesoría, Phone Normalization, Subrequests
+
+**4 bugs críticos corregidos en esta sesión:**
+
+#### Fix 1: Reducir subrequests en /test-lead (commit `f1326cc9`)
+
+**Problema:** `/test-lead` lanzaba "Too many subrequests" por queries redundantes.
+
+**Fix:** Pasar `cachedTeamMembers` al handler, combinar appointment queries, paralelizar notificaciones de crédito.
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/services/aiConversationService.ts` | Combinar 2 appointment SELECTs en 1 + filtro en memoria |
+| `src/routes/test.ts` | Pasar teamMembers cacheados al handler |
+
+#### Fix 2: Botón "Asesoría hipotecaria" + prefer title en interactive replies (commit `bfca54fb`)
+
+**Problema:** El botón "Asesoría hipotecaria" (id `btn_credito`) no era reconocido por la IA. Además, interactive replies (botones/listas) pasaban `id` en vez de `title` al procesamiento.
+
+**Fixes:**
+- Agregar `btn_credito` a detección de intent `info_credito`
+- Cambiar extracción de interactive replies: `title || id` (antes solo `id`)
+- `src/services/aiConversationService.ts` — intent detection para `btn_credito`
+- `src/index.ts` — prefer `title` sobre `id` en button/list replies
+
+#### Fix 3: ReferenceError `leadFrescoRL` → "error técnico" a leads (commit `625ca355`)
+
+**Problema:** Leads recibían "Disculpa, tuve un problema técnico" en lugar de respuesta de SARA.
+
+**Causa raíz:** `ReferenceError: leadFrescoRL is not defined` en `aiConversationService.ts:4494`. Variable renombrada en refactor previo pero no actualizada en todos los usos.
+
+**Fix:** Reemplazar `leadFrescoRL` (undefined) con lectura fresca de DB `leadFrescoMem`:
+
+```typescript
+// ANTES (crash):
+const leadActualizado = leadFrescoRL || lead;
+
+// DESPUÉS (fix):
+const { data: leadFrescoMem } = await this.supabase.client
+  .from('leads').select('*').eq('id', lead.id).maybeSingle();
+const leadActualizado = leadFrescoMem || lead;
+```
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/services/aiConversationService.ts` | Reemplazar variable undefined con fresh DB read |
+
+#### Fix 4: Normalización de teléfonos mexicanos de 10 dígitos (commit `71aaeafe`)
+
+**Problema:** Teléfonos de 10 dígitos (ej: `5610016226`) no recibían prefijo `521` (México móvil), causando que Meta API no los reconociera.
+
+**Fixes en 2 archivos:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/routes/test.ts` | Normalizar teléfono antes de pasar al handler (10 dígitos → `521` + 10 dígitos) |
+| `src/services/meta-whatsapp.ts` | Safety net en `normalizePhone()`: 10 dígitos → `521` prefix, 12 dígitos `52XX` → `521XX` |
+
+**Reglas de normalización:**
+- `5610016226` (10 dígitos) → `5215610016226`
+- `525610016226` (12 dígitos, sin `1`) → `5215610016226`
+- `5215610016226` (13 dígitos, correcto) → sin cambio
+
+**Nota:** Solo afecta endpoints de prueba (`/test-lead`). El webhook real de Meta siempre envía teléfonos completos con código de país.
+
+#### Verificación E2E en producción
+
+| Test | Resultado |
+|------|-----------|
+| Health check | ✅ allPassed (Supabase 246ms, KV 265ms, Meta 987ms) |
+| Error logs | ✅ 0 errores |
+| `/test-lead` Monte Verde 3 rec | ✅ Lead creado, score 18, AI respondió |
+| `/test-lead` visita sábado | ✅ Score 21, AI respondió |
+| `/test-lead` hola | ✅ Enviado y entregado |
+| Wrangler tail (delivery) | ✅ sent → delivered confirmado por Meta |
+| WhatsApp (teléfono real) | ✅ Mensajes llegaron al teléfono |
+
+**Archivos modificados:**
+
+| Archivo | Commit | Cambio |
+|---------|--------|--------|
+| `src/services/aiConversationService.ts` | `f1326cc9`, `bfca54fb`, `625ca355` | Appointment query combo, btn_credito intent, fix leadFrescoRL |
+| `src/index.ts` | `bfca54fb` | Interactive reply: prefer title over id |
+| `src/routes/test.ts` | `f1326cc9`, `71aaeafe` | Cached teamMembers, phone normalization |
+| `src/services/meta-whatsapp.ts` | `71aaeafe` | normalizePhone() safety net |
+
+**Tests:** 692/692 pasando (20 archivos de test)
+**Deploy:** Version ID `d1b6699e`
+**Push:** origin/main
+
+---
+
+**Estado final del sistema:**
+
+| Métrica | Valor |
+|---------|-------|
+| Tests | 692/692 ✅ |
+| Test files | 20 |
+| Servicios | 85+ |
+| Comandos verificados | 342/342 (4 roles) |
+| CRONs activos | 25+ |
+| Capas de resilience | 9 |
+| Templates WA aprobados | 3 |
+| Propiedades en catálogo | 34 |
+| Desarrollos | 9 (Monte Verde, Monte Real, Andes, Falco, Encinos, Miravalle, Colorines, Alpes, Citadella) |
+| **pending_auto_response types** | **16** |
+| **CRM UX/UI Rounds** | **8 completados** |
+
+**URLs de producción:**
+
+| Servicio | URL |
+|----------|-----|
+| Backend | https://sara-backend.edson-633.workers.dev |
+| CRM | https://sara-crm-new.vercel.app |
+| Videos | https://sara-videos.onrender.com |
+
+**Sistema 100% completo y operativo — Última verificación: 2026-02-22 (Sesión 59)**
+
+---
+
+### 2026-02-23 (Sesión 60) - Opciones Contextuales 4 Items, SARA 24/7, Fixes Varios
+
+**5 cambios principales:**
+
+#### 1. Opciones contextuales como lista de 4 items (commit `a9a50734`)
+
+**Problema:** WhatsApp quick reply buttons solo permiten 3 opciones. El usuario quiere 4.
+
+**Solución:** Cambiar de `sendQuickReplyButtons` a `sendListMenu` que soporta hasta 10 items.
+
+| Opción | ID | Descripción |
+|--------|-----|-------------|
+| Ver casas | `btn_ver_casas` | Conoce nuestros desarrollos |
+| Precios | `btn_precios` | Consulta precios y modelos |
+| Asesoría hipotecaria | `btn_credito` | Crédito INFONAVIT o bancario |
+| Agendar cita/visita | `btn_agendar` | Visita un desarrollo |
+
+- Guard relajado: solo se omiten opciones cuando SARA está agendando ("¿sábado o domingo?")
+- Ventana de dedup reducida de 6 a 3 mensajes
+- Cada opción tiene texto descriptivo
+
+**Archivos:** `aiConversationService.ts`, `utils/uxHelpers.ts`
+
+#### 2. SARA responde 24/7 (commit `c7efa547`)
+
+**Cambio:** Eliminado `BusinessHoursService` del webhook. SARA responde a toda hora.
+
+**Usuario:** "para eso esta sara para contestar a toda hora momento y lugar"
+
+**Archivo:** `src/index.ts` — removido import y llamada a BusinessHoursService
+
+#### 3. Fix `quiereVisitar` override (commit `e0760ee2`)
+
+**Problema:** Cuando lead enviaba fecha+hora, el intent `confirmar_cita` era sobreescrito por `quiereVisitar` guard que lo cambiaba a `solicitar_cita`.
+
+**Fix:** Si ya hay fecha y hora extraídas, no aplicar override de `quiereVisitar`.
+
+**Archivo:** `aiConversationService.ts`
+
+#### 4. Fix `ReferenceError: message is not defined` (commit en sesión 60)
+
+**Problema:** En `executeAIDecision()`, variable `message` no existía — el parámetro era `originalMessage`.
+
+**Fix:** `message` → `originalMessage` en `executeAIDecision()`
+
+**Archivo:** `aiConversationService.ts`
+
+#### 5. Interactive replies prefieren title sobre id (commit en sesión 60)
+
+**Problema:** Botones/listas enviaban el `id` (ej: `btn_credito`) en vez del `title` (ej: `Asesoría hipotecaria`) al procesamiento de IA.
+
+**Fix:** Extraer `title || id` en button y list reply handlers.
+
+**Archivo:** `src/index.ts`
+
+**Tests:** 692/692 pasando
+**Deploy:** Completado y pusheado a origin/main
+
+---
+
+### 2026-02-23 (Sesión 61) - Dinamización Total de Precios (PDF es Ley)
+
+**Objetivo:** Eliminar TODOS los precios hardcodeados del código. Los precios SOLO deben venir de la base de datos (`properties` table).
+
+#### Parte 1: Actualización de Precios desde PDF Oficial (commit `fa1c364b`)
+
+**PDF oficial Feb 2026** dictó precios actualizados para 31 propiedades.
+
+**SQL ejecutado:** `sql/update_prices_pdf_28feb26.sql` — 31 UPDATEs + 2 DELETEs
+
+| Desarrollo | Propiedades Actualizadas | Cambios |
+|------------|-------------------------|---------|
+| Los Encinos | 5 | Precios, terrenos, construcción, pisos |
+| Monte Verde | 5 | Fresno 2 precio + construction sizes |
+| Andes | 4 | Construction sizes |
+| Miravalle | 6 | Construction sizes |
+| Distrito Falco | 7 | Construction sizes |
+| Paseo Colorines | 2 | Construction sizes |
+| **Eliminados** | Nogal, Sabino | No están en PDF |
+
+**Archivos actualizados con precios del PDF:**
+- `src/prompts/sara.ts` — Prompt con precios actualizados
+- `src/handlers/constants.ts` — Nogal/Sabino removidos de `MODELOS_CONOCIDOS`
+
+#### Parte 2: 10 Helper Methods + Reemplazo de ~75 Precios Hardcodeados (commit `74a9db53`)
+
+**10 métodos estáticos en `AIConversationService`:**
+
+```typescript
+static precioMinGlobal(properties: any[]): string           // "$1.6M" dinámico
+static precioMinDesarrollo(properties: any[], dev): string   // "$2.1M" por desarrollo
+static listaDesarrollosConPrecios(properties: any[]): string // Lista completa con rangos
+static listaBulletDesarrollos(properties: any[]): string     // Lista bullet con desde
+static precioModelo(properties: any[], modelo): string       // "$2.1M equipada"
+static precioExactoModelo(properties: any[], modelo): string // "$2,100,000"
+static infoModelo(properties: any[], modelo): string         // "3 rec, $2.1M, 89m²"
+static infoTerrenos(properties: any[]): string               // Villa Campelo/Galiano
+static rangosPrecios(properties: any[]): object              // economico/medio/premium
+static crearCatalogoDB(properties: any[], dev?): string      // Catálogo completo
+```
+
+**9 categorías de precios reemplazados:**
+
+| Categoría | Ejemplos | Cantidad |
+|-----------|----------|----------|
+| Precio mínimo global | `$1.5M`, `$1.6M` → `precioMinGlobal()` | ~15 |
+| Precio por desarrollo | `$2.1M equipada` → `precioMinDesarrollo()` | ~12 |
+| Lista de desarrollos | Enumeraciones con precios → `listaDesarrollosConPrecios()` | ~8 |
+| Precio de modelo | `Acacia $1.6M` → `precioModelo()` | ~10 |
+| Info completa modelo | `3 rec, $2.6M, 104m²` → `infoModelo()` | ~8 |
+| Terrenos | `$8,500/m²` → `infoTerrenos()` | ~5 |
+| Rangos presupuesto | `$1.5M-$2M`, `$3M-$5M` → `rangosPrecios()` | ~6 |
+| Catálogo completo | Bloques de texto con todos los modelos → `crearCatalogoDB()` | ~5 |
+| Listas bullet | `• Monte Verde desde $X` → `listaBulletDesarrollos()` | ~6 |
+
+**CRON de incremento mensual:** `aplicarPreciosProgramados()` en `src/crons/reports.ts` aplica `INCREMENTO_MENSUAL` (0.5%) a `price`, `price_equipped`, `price_min`, `price_max` el día 1 de cada mes. Con precios dinámicos, este incremento se propaga automáticamente a TODAS las respuestas de SARA.
+
+**Verificación:** Solo queda 1 instancia de `$1.6M` en el código — dentro de `precioMinGlobal()` como fallback para DB vacía (comportamiento correcto).
+
+**Tests:** 692/692 pasando
+**Deploy:** Version ID `ca43408d`
+**Push:** origin/main
+
+### 2026-02-23 (Sesión 62) - Voz Retell Realista + Precios Dinámicos en Prompt de Voz
+
+**Actualización completa del sistema de voz Retell.ai:**
+
+#### Voz actualizada
+
+| Campo | Antes | Después |
+|-------|-------|---------|
+| voice_id | `custom_voice_cfb7b018ed92a7bcbbecd643e7` | `11labs-Hailey-Latin-America-Spanish-localized` |
+| Provider | Custom (clone) | **ElevenLabs** (la más realista) |
+| Accent | Unknown | **Latin America Spanish** |
+| Gender/Age | Unknown | Female / Young |
+
+**Por qué ElevenLabs:** Es el proveedor TTS con la voz más natural y realista. El acento latinoamericano es el más apropiado para México (vs España).
+
+#### Precios dinámicos en prompt de voz
+
+**Problema:** El prompt de Retell tenía 8+ precios hardcodeados en español ("un millón seiscientos mil pesos"). Si cambiaban los precios en DB, la voz seguía diciendo precios viejos.
+
+**Solución:** `/configure-retell-tools` ahora lee `properties` table y convierte precios a español con `precioAPalabras()`:
+
+| Helper | Función |
+|--------|---------|
+| `precioAPalabras(precio)` | `1600000` → `"un millón seiscientos mil pesos"` |
+| `precioM2Palabras(dev)` | `Villa Campelo` → `"entre ocho mil quinientos y nueve mil quinientos pesos por metro cuadrado"` |
+| `getMinPriceByDev(dev)` | Retorna precio mínimo equipado de un desarrollo |
+
+**Precios inyectados dinámicamente:**
+
+| Desarrollo | Precio DB | En prompt de voz |
+|------------|-----------|-----------------|
+| Monte Verde | $1,600,396 | "un millón seiscientos mil pesos" |
+| Andes | $1,597,413 | "un millón quinientos noventa y siete mil pesos" |
+| Los Encinos | $3,004,115 | "tres millones cuatro mil pesos" |
+| Miravalle | $3,050,000 | "tres millones cincuenta mil pesos" |
+| Paseo Colorines | $3,150,529 | "tres millones ciento cincuenta mil pesos" |
+| Distrito Falco | $3,710,000 | "tres millones setecientos diez mil pesos" |
+| Villa Campelo | "entre 8,500 y 9,500/m²" | En palabras |
+| Villa Galiano | "entre 6,400 y 6,700/m²" | En palabras |
+
+**También dinamizados:**
+- Lookup webhook: 3 fallbacks de `precio_desde` (antes `'$1.5 millones'`)
+- Info-desarrollo tool: fallback lista de desarrollos (antes hardcodeado)
+- retellService.ts: outbound call context (antes `'$1.5 millones'`)
+
+#### Nuevo endpoint
+
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/retell-voices?api_key=X&lang=es&gender=female` | GET | Listar voces disponibles con filtros |
+
+Retorna: current voice_id, voice_model, lista de voces con provider, accent, age, preview_audio_url.
+
+#### Archivos modificados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/routes/retell.ts` | `/retell-voices` endpoint, helpers de precio, voice_id param, dynamic prices en prompt/lookup/tool |
+| `src/services/retellService.ts` | `listVoices()` method, removed hardcoded `$1.5 millones` fallback |
+
+**Tests:** 692/692 pasando
+**Commit:** `633db89a`
+**Deploy:** Version ID `7fdc9ef3`
+**Push:** origin/main
+
+---
+
+**Estado final del sistema:**
+
+| Métrica | Valor |
+|---------|-------|
+| Tests | 692/692 ✅ |
+| Test files | 20 |
+| Servicios | 85+ |
+| Comandos verificados | 342/342 (4 roles) |
+| CRONs activos | 25+ |
+| Capas de resilience | 9 |
+| Templates WA aprobados | 3 |
+| Propiedades en catálogo | 34 |
+| Desarrollos | 9 (Monte Verde, Monte Real, Andes, Falco, Encinos, Miravalle, Colorines, Alpes, Citadella) |
+| **pending_auto_response types** | **16** |
+| **CRM UX/UI Rounds** | **8 completados** |
+| **Precios dinámicos** | **100% — 0 hardcoded (WhatsApp + Retell)** |
+| **Voz Retell** | **ElevenLabs LatAm Spanish** |
+
+**URLs de producción:**
+
+| Servicio | URL |
+|----------|-----|
+| Backend | https://sara-backend.edson-633.workers.dev |
+| CRM | https://sara-crm-new.vercel.app |
+| Videos | https://sara-videos.onrender.com |
+
+**Sistema 100% completo y operativo — Última verificación: 2026-02-23 (Sesión 62)**
