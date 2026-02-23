@@ -1825,6 +1825,15 @@ export async function handleTestRoutes(
       }
 
       try {
+        // Normalizar teléfono: agregar código de país si son 10 dígitos
+        const cleanDigits = phone.replace(/\D/g, '');
+        let normalizedPhone = cleanDigits;
+        if (cleanDigits.length === 10) {
+          normalizedPhone = '521' + cleanDigits;
+        } else if (cleanDigits.length === 12 && cleanDigits.startsWith('52')) {
+          normalizedPhone = '521' + cleanDigits.substring(2);
+        }
+
         // Inicializar servicios — disable callbacks to reduce subrequests
         const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
         const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
@@ -1833,7 +1842,7 @@ export async function handleTestRoutes(
 
         // Llamar al handler de WhatsApp
         const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
-        await handler.handleIncomingMessage(`whatsapp:+${phone}`, msg, env);
+        await handler.handleIncomingMessage(`whatsapp:+${normalizedPhone}`, msg, env);
 
         // Verificar el lead creado/actualizado (1 query instead of 3)
         let { data: lead } = await supabase.client

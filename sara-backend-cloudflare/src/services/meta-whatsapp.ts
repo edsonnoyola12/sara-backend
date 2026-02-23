@@ -220,6 +220,11 @@ export class MetaWhatsAppService {
     if (clean.startsWith('+')) {
       clean = clean.substring(1);
     }
+    // 10 dígitos mexicanos → agregar 521 (código país + móvil)
+    if (clean.length === 10 && !clean.startsWith('52')) {
+      clean = '521' + clean;
+    }
+    // 12 dígitos (52 + 10) → insertar 1 para móvil (521 + 10)
     if (clean.startsWith('52') && clean.length === 12) {
       clean = '521' + clean.substring(2);
     }
