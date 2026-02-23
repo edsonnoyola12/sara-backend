@@ -25,7 +25,7 @@ const GHOST_MODELS = [
 
 const REAL_MODELS = [
   // Los Encinos
-  'Encino Blanco', 'Encino Verde', 'Encino Dorado', 'Roble', 'Maple', 'Nogal', 'Sabino',
+  'Encino Blanco', 'Encino Verde', 'Encino Dorado', 'Roble', 'Maple',
   // Andes
   'Gardenia', 'Dalia', 'Lavanda', 'Laurel',
   // Distrito Falco
@@ -87,10 +87,10 @@ describe('SESSION 58: CONSTANTS - Ghost Models Purged', () => {
     expect(result.desarrollos).toContain('Villa Campelo');
   });
 
-  it('parsearDesarrollosYModelos should detect new real models', () => {
-    const result = parsearDesarrollosYModelos('quiero ver el Nogal y el Sabino');
-    expect(result.modelos).toContain('Nogal');
-    expect(result.modelos).toContain('Sabino');
+  it('parsearDesarrollosYModelos should detect real Los Encinos models', () => {
+    const result = parsearDesarrollosYModelos('quiero ver el Encino Blanco y el Maple');
+    expect(result.modelos).toContain('Encino Blanco');
+    expect(result.modelos).toContain('Maple');
   });
 
   it('parsearDesarrollosYModelos should NOT detect ghost models', () => {
@@ -183,14 +183,12 @@ describe('SESSION 58: SARA PROMPT - Data Accuracy', () => {
     expect(SARA_PROMPT).toContain('$5M+ → Distrito Falco');
   });
 
-  it('should list all Los Encinos models (7 total)', () => {
+  it('should list all Los Encinos models (5 total)', () => {
     expect(SARA_PROMPT).toContain('Encino Blanco');
     expect(SARA_PROMPT).toContain('Encino Verde');
     expect(SARA_PROMPT).toContain('Encino Dorado');
     expect(SARA_PROMPT).toContain('Roble');
     expect(SARA_PROMPT).toContain('Maple');
-    expect(SARA_PROMPT).toContain('Nogal');
-    expect(SARA_PROMPT).toContain('Sabino');
   });
 
   it('should list all Distrito Falco models (7 total)', () => {
@@ -207,8 +205,8 @@ describe('SESSION 58: SARA PROMPT - Data Accuracy', () => {
     expect(SARA_PROMPT).toContain('ANDES (Guadalupe) - ALBERCA');
   });
 
-  it('Paseo Colorines should be marked as NUEVO', () => {
-    expect(SARA_PROMPT).toContain('PASEO COLORINES (Colinas del Padre, Zacatecas) - NUEVO');
+  it('Paseo Colorines should be listed', () => {
+    expect(SARA_PROMPT).toContain('PASEO COLORINES (Colinas del Padre, Zacatecas)');
   });
 });
 
@@ -221,8 +219,7 @@ describe('SESSION 58: AI Prompt - No Ghost Models in Delivery Times', () => {
   // These tests verify the patterns that were changed
 
   it('delivery times should reference Fresno 2 (not Descendente)', () => {
-    // The prompt builder adds delivery time info
-    // Commit f0571b11 changed "Encino Descendente, Duque" → "Roble, Maple, Nogal, Sabino"
+    // Commit f0571b11 changed ghost models → real models
     expect(MODELOS_CONOCIDOS).toContain('Fresno 2');
     expect(MODELOS_CONOCIDOS).not.toContain('Descendente');
   });
@@ -238,9 +235,10 @@ describe('SESSION 58: AI Prompt - No Ghost Models in Delivery Times', () => {
     expect(SARA_PROMPT.toLowerCase()).not.toContain('duque');
   });
 
-  it('fallback examples should use Nogal not Ascendente', () => {
-    // Commit f0571b11: "Ascendente: 3 rec, 210m²" → "Nogal: 3 rec, 152m²"
-    expect(MODELOS_CONOCIDOS).toContain('Nogal');
+  it('fallback examples should not use ghost models', () => {
+    // Nogal and Sabino deleted from PDF 28 Feb 2026
+    expect(MODELOS_CONOCIDOS).not.toContain('Nogal');
+    expect(MODELOS_CONOCIDOS).not.toContain('Sabino');
     expect(MODELOS_CONOCIDOS).not.toContain('Ascendente');
   });
 

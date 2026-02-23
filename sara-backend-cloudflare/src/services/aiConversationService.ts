@@ -787,7 +787,7 @@ Usa emojis con moderación: máximo 1-2 por mensaje, solo donde sumen emoción.
 
 **TIEMPOS DE ENTREGA POR DESARROLLO:**
 - Monte Verde: 3 meses (Casas: Acacia [2rec], Eucalipto [2rec], Olivo, Fresno, Fresno 2)
-- Los Encinos: 3 meses (Casas: Encino Blanco, Encino Verde, Encino Dorado, Roble, Maple, Nogal, Sabino)
+- Los Encinos: 3 meses (Casas: Encino Blanco, Encino Verde, Encino Dorado, Roble, Maple)
 - Miravalle: 3 meses (Casas: Vizcaya, Bilbao 7M, Casa Habitacion 6m/7m | Deptos: Departamento 6m/7m [2rec])
 - Distrito Falco: 4 meses (Casas: Proyecto Especial, Chipre Light, Colibri Light, Colibri, Chipre, Mirlo, Calandria)
 - Priv. Andes: 3 meses (Casas: Laurel [2rec], Dalia [2rec], Gardenia, Lavanda)
@@ -973,9 +973,10 @@ Si el cliente menciona:
    - Mirlo: 3 rec + estudio, 220m², $5.15M
    - Calandria: 3 rec, 240m² terreno, $5.37M (la más grande)
 
-2. **Los Encinos** - Casas 3 rec con vestidor, desde $3.0M
-   - Nogal: 3 rec + vestidor, 152m², $3.61M
-   - Sabino: 3 rec + vestidor, 155m², $3.79M (la más amplia)
+2. **Los Encinos** - Casas 3 rec, desde $3.0M
+   - Encino Blanco: 3 rec, 166.8m², $3.0M
+   - Encino Dorado: 3 rec, 146.5m², $3.8M (1 piso, terreno 204m²)
+   - Maple: 3 rec, 210.8m², $3.6M (3 pisos)
 
 3. **Miravalle** - Casas y departamentos, desde $3.0M
    - Departamento 6m: 2 rec, $3.05M (el más accesible)
@@ -2648,7 +2649,7 @@ Por WhatsApp te atiendo 24/7 🙌
           if (presupuesto >= 3) {
             fallbackResponse = `${lead.name}, con ${presupuesto}M estás en excelente posición 😊
 
-En Zacatecas te recomiendo *Los Encinos* (modelo Nogal: 3 rec, 152m², desde $3.6M) o *Miravalle* (Bilbao 7M: 3 niveles, roof garden, $4.1M).
+En Zacatecas te recomiendo *Los Encinos* (Encino Dorado: 3 rec, 146.5m², $3.8M, 1 piso) o *Miravalle* (Bilbao 7M: 3 niveles, roof garden, $4.1M).
 
 En Guadalupe, *Distrito Falco* tiene modelos premium como Chipre (3 rec, 224m², $5.1M).
 

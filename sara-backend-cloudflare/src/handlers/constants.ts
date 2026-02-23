@@ -21,7 +21,7 @@ export const DESARROLLOS_CONOCIDOS = [
 // Modelos de casas conocidos por desarrollo
 export const MODELOS_CONOCIDOS = [
   // Los Encinos
-  'Encino Blanco', 'Encino Verde', 'Encino Dorado', 'Roble', 'Maple', 'Nogal', 'Sabino',
+  'Encino Blanco', 'Encino Verde', 'Encino Dorado', 'Roble', 'Maple',
   // Andes
   'Gardenia', 'Dalia', 'Lavanda', 'Laurel',
   // Distrito Falco
