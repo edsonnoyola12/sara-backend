@@ -13,8 +13,34 @@ export interface CallContext {
   vendorName?: string;
   desarrolloInteres?: string;
   precioDesde?: string;
-  motivo?: 'seguimiento' | 'calificacion' | 'recordatorio_cita' | 'encuesta';
+  motivo?: string;
   notas?: string;
+}
+
+/**
+ * Genera instrucciones específicas según el motivo de la llamada.
+ * Esto permite que SARA adapte su tono y objetivo en cada llamada.
+ */
+export function getMotivoInstrucciones(motivo: string): string {
+  const instrucciones: Record<string, string> = {
+    // Pre-venta
+    'seguimiento': 'Llamada de seguimiento. Objetivo: saber si el cliente tiene dudas y agendar visita. Tono amigable y consultivo.',
+    'calificacion': 'Llamada de calificación. Objetivo: entender necesidades (zona, recámaras, presupuesto) y recomendar desarrollo. Tono profesional.',
+    'recordatorio_cita': 'Recordatorio de cita. Objetivo: confirmar que asistirá a su cita. Sé breve: "Solo te llamo para confirmar tu cita de mañana a las X. ¿Todo bien?" Si cancela, ofrece reagendar.',
+    'encuesta': 'Encuesta de satisfacción. Objetivo: preguntar qué tal su experiencia. Tono cálido y agradecido.',
+
+    // Post-venta (escalamiento desde WhatsApp sin respuesta)
+    'seguimiento_entrega': 'Seguimiento post-entrega. El cliente recibió su casa hace pocos días. Pregunta si todo está bien: llaves, escrituras, servicios (agua, luz, gas). Si reporta algún problema, dile que lo registras y que su asesor le da seguimiento.',
+    'satisfaccion': 'Encuesta de satisfacción de casa. Pregunta: "Del 1 al 4, ¿cómo calificarías tu experiencia con tu nueva casa? 1 excelente, 2 buena, 3 regular, 4 mala." Si dice 3 o 4, pregunta qué se puede mejorar.',
+    'encuesta_nps': 'Encuesta NPS. Pregunta: "Del 0 al 10, ¿qué tan probable es que nos recomiendes con un familiar o amigo?" Agradece su respuesta. Si dice 9 o 10, pregunta si conoce a alguien que busque casa.',
+    'referidos': 'Solicitud de referidos. El cliente compró hace 1-3 meses. Tono: "Esperamos que estés disfrutando tu nueva casa. ¿Conoces a algún familiar o amigo que busque casa? Con gusto lo atendemos."',
+    'checkin_postventa': 'Check-in 2 meses post-compra. Tono cálido: "Solo llamo para saber cómo va todo con tu casa. ¿Todo en orden? ¿Necesitas algo?" Breve y amigable.',
+    'mantenimiento': 'Recordatorio de mantenimiento preventivo. Ya pasó ~1 año desde la entrega. "Te llamo para recordarte que es buen momento para revisar impermeabilización, pintura exterior y servicios. ¿Necesitas apoyo con algo?"',
+
+    // Otros
+    'timeout_30min': 'Seguimiento de bridge expirado. El chat directo con el vendedor terminó. Pregunta si quedó alguna duda pendiente.',
+  };
+  return instrucciones[motivo] || instrucciones['seguimiento'];
 }
 
 export interface CallResult {
@@ -127,7 +153,9 @@ export class RetellService {
             precio_desde: context.precioDesde || '',
             vendedor_nombre: context.vendorName || 'un asesor',
             notas_adicionales: context.notas || '',
-            source: context.notas || 'WhatsApp'
+            source: context.notas || 'WhatsApp',
+            motivo: context.motivo || 'seguimiento',
+            motivo_instrucciones: getMotivoInstrucciones(context.motivo || 'seguimiento')
           }
         })
       });

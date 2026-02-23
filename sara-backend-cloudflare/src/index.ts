@@ -118,7 +118,8 @@ import {
   reminderDocumentosCredito,
   llamadasSeguimientoPostVisita,
   llamadasReactivacionLeadsFrios,
-  llamadasRecordatorioCita
+  llamadasRecordatorioCita,
+  llamadasEscalamiento48h
 } from './crons/followups';
 
 // Lead Scoring y Objeciones
@@ -152,7 +153,8 @@ import {
   isLikelySurveyResponse,
   checkIn60Dias,
   limpiarFlagsEncuestasExpirados,
-  procesarFeedbackEncuesta
+  procesarFeedbackEncuesta,
+  llamadasEscalamientoPostVenta
 } from './crons/nurturing';
 
 // Maintenance - Bridge, followups, stagnant leads, anniversaries
@@ -3383,6 +3385,13 @@ export default {
       await llamadasSeguimientoPostVisita(supabase, meta, env);
     }
 
+    // LLAMADAS ESCALAMIENTO 48h: Diario 12pm L-V
+    // Llamar leads nuevos que no respondieron WhatsApp en 48h
+    if (mexicoHour === 12 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('📞 Ejecutando llamadas escalamiento 48h...');
+      await llamadasEscalamiento48h(supabase, meta, env);
+    }
+
     // LLAMADAS REACTIVACIÓN: Martes y Jueves 10am
     // Reactivar leads fríos (7+ días sin respuesta)
     if (mexicoHour === 10 && isFirstRunOfHour && (dayOfWeek === 2 || dayOfWeek === 4)) {
@@ -3395,6 +3404,13 @@ export default {
     if (mexicoHour === 17 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
       console.log('📞 Ejecutando llamadas de recordatorio de cita...');
       await llamadasRecordatorioCita(supabase, meta, env);
+    }
+
+    // LLAMADAS ESCALAMIENTO POST-VENTA: Diario 1pm L-V
+    // Si el lead NO respondió WhatsApp post-venta en 48h → llamar
+    if (mexicoHour === 13 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
+      console.log('📞 Ejecutando llamadas escalamiento post-venta...');
+      await llamadasEscalamientoPostVenta(supabase, meta, env);
     }
 
     // ═══════════════════════════════════════════════════════════

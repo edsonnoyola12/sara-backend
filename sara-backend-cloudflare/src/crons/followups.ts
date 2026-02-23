@@ -1511,13 +1511,15 @@ export async function seguimientoPostVenta(supabase: SupabaseService, meta: Meta
             .update({ notes: nuevasNotas })
             .eq('id', cliente.id);
 
-          // Notificar al vendedor cuando se piden referidos
+          // Notificar al vendedor cuando se piden referidos (24h-safe)
           if (notificarVendedor) {
             const vendedor = vendedorMap.get(cliente.assigned_to);
-            if (vendedor?.phone) {
-              const notif = `🎯 *Oportunidad de referidos*\n\n`;
-              const notifMsg = notif + `Se envió mensaje pidiendo referidos a *${cliente.name}*.\n\nSi responde con contactos, dale seguimiento rápido.`;
-              await meta.sendWhatsAppMessage(vendedor.phone, notifMsg);
+            if (vendedor?.id) {
+              const notifMsg = `🎯 *Oportunidad de referidos*\n\n` +
+                `Se envió mensaje pidiendo referidos a *${cliente.name}*.\n\nSi responde con contactos, dale seguimiento rápido.`;
+              await enviarMensajeTeamMember(supabase, meta, vendedor, notifMsg, {
+                tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+              });
             }
           }
 
@@ -2039,9 +2041,8 @@ export async function followUp24hLeadsNuevos(supabase: SupabaseService, meta: Me
           })
           .eq('id', lead.id);
 
-        // Notificar al vendedor con preview del mensaje
-        if (vendedor?.phone) {
-          const vendedorPhone = vendedor.phone.replace(/\D/g, '');
+        // Notificar al vendedor con preview del mensaje (24h-safe)
+        if (vendedor) {
           const notificacion = `📤 *FOLLOW-UP PENDIENTE*\n\n` +
             `Lead: *${lead.name}*\n` +
             `En 30 min enviaré:\n\n` +
@@ -2053,7 +2054,9 @@ export async function followUp24hLeadsNuevos(supabase: SupabaseService, meta: Me
             `━━━━━━━━━━━━━━━━━━━━━\n` +
             `_Si no respondes, se envía automático_`;
 
-          await meta.sendWhatsAppMessage(vendedorPhone, notificacion);
+          await enviarMensajeTeamMember(supabase, meta, vendedor, notificacion, {
+            tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+          });
           console.log(`📤 Follow-up pendiente creado para ${lead.name}, vendedor ${vendedor.name} notificado`);
         } else {
           // Sin vendedor asignado, enviar directo
@@ -2154,15 +2157,15 @@ export async function reminderDocumentosCredito(supabase: SupabaseService, meta:
         enviados++;
         console.log(`📄 Reminder docs enviado a: ${lead.name}`);
 
-        // Notificar al vendedor
+        // Notificar al vendedor (24h-safe)
         const vendedor = lead.team_members as any;
-        if (vendedor?.phone) {
-          const vendedorPhone = vendedor.phone.replace(/\D/g, '');
-          await meta.sendWhatsAppMessage(vendedorPhone,
+        if (vendedor?.id) {
+          await enviarMensajeTeamMember(supabase, meta, vendedor,
             `📋 *Lead pendiente de documentos*\n\n` +
             `${lead.name} lleva 3+ días sin enviar docs.\n` +
             `Le envié un recordatorio automático.\n\n` +
-            `💡 Quizás una llamada ayude a destrabarlo.`
+            `💡 Quizás una llamada ayude a destrabarlo.`,
+            { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
           );
         }
 
@@ -2274,16 +2277,17 @@ export async function llamadasSeguimientoPostVisita(
           if (lead.assigned_to) {
             const { data: vendedor } = await supabase.client
               .from('team_members')
-              .select('phone, name')
+              .select('*')
               .eq('id', lead.assigned_to)
               .single();
 
-            if (vendedor?.phone) {
-              await meta.sendWhatsAppMessage(vendedor.phone,
+            if (vendedor) {
+              await enviarMensajeTeamMember(supabase, meta, vendedor,
                 `📞 *LLAMADA IA POST-VISITA*\n\n` +
                 `SARA está llamando a *${lead.name}*\n` +
                 `Desarrollo: ${desarrolloInteres || 'General'}\n\n` +
-                `Te notifico cuando termine.`
+                `Te notifico cuando termine.`,
+                { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
               );
             }
           }
@@ -2386,6 +2390,25 @@ export async function llamadasReactivacionLeadsFrios(
             })
             .eq('id', lead.id);
 
+          // Notificar al vendedor (24h-safe)
+          if (lead.assigned_to) {
+            const { data: vendedor } = await supabase.client
+              .from('team_members')
+              .select('*')
+              .eq('id', lead.assigned_to)
+              .single();
+
+            if (vendedor) {
+              await enviarMensajeTeamMember(supabase, meta, vendedor,
+                `📞 *LLAMADA IA REACTIVACIÓN*\n\n` +
+                `SARA está llamando a *${lead.name}* (lead frío)\n` +
+                `Desarrollo: ${lead.interested_in || (notes as any).desarrollo_interes || 'General'}\n\n` +
+                `Si responde, te aviso.`,
+                { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
+              );
+            }
+          }
+
           await new Promise(r => setTimeout(r, 5000));
         }
       } catch (err) {
@@ -2459,6 +2482,25 @@ export async function llamadasRecordatorioCita(
         if (result.success) {
           llamadasRealizadas++;
           console.log(`📞 Llamada recordatorio a ${cita.lead_name}`);
+
+          // Notificar al vendedor (24h-safe)
+          if (cita.vendedor_id) {
+            const { data: vendedor } = await supabase.client
+              .from('team_members')
+              .select('*')
+              .eq('id', cita.vendedor_id)
+              .single();
+
+            if (vendedor) {
+              await enviarMensajeTeamMember(supabase, meta, vendedor,
+                `📞 *LLAMADA IA RECORDATORIO*\n\n` +
+                `SARA llamó a *${cita.lead_name}* para recordar su cita de mañana a las ${cita.scheduled_time}\n` +
+                `Desarrollo: ${cita.property_name || 'General'}`,
+                { tipoMensaje: 'recordatorio_cita', pendingKey: 'pending_mensaje' }
+              );
+            }
+          }
+
           await new Promise(r => setTimeout(r, 5000));
         }
       } catch (err) {
@@ -2470,5 +2512,155 @@ export async function llamadasRecordatorioCita(
 
   } catch (e) {
     console.error('Error en llamadasRecordatorioCita:', e);
+  }
+}
+
+/**
+ * Llamadas a leads nuevos que no responden en 48h
+ * Se ejecuta diario a las 12pm L-V
+ *
+ * Flujo híbrido: WhatsApp (0-24h) → Follow-up WA (24h) → LLAMADA (48h)
+ * Este es el escalamiento más efectivo: leads que no responden WhatsApp
+ * tienen 3x más probabilidad de responder una llamada.
+ *
+ * Reglas:
+ * - Solo leads con status 'new' o 'contacted' (no qualified+)
+ * - Que tengan al menos 1 mensaje de SARA sin respuesta
+ * - No hayan recibido llamada IA en los últimos 7 días
+ * - Máximo 5 llamadas por ejecución
+ * - Solo 9am-8pm México
+ */
+export async function llamadasEscalamiento48h(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  env: RetellEnv
+): Promise<void> {
+  try {
+    if (!env.RETELL_API_KEY || !env.RETELL_AGENT_ID || !env.RETELL_PHONE_NUMBER) {
+      console.log('⏭️ Llamadas IA desactivadas - Retell no configurado');
+      return;
+    }
+
+    console.log('📞 Iniciando llamadas escalamiento 48h (leads sin responder)...');
+
+    const ahora = new Date();
+    const hace48h = new Date(ahora.getTime() - 48 * 60 * 60 * 1000);
+    const hace72h = new Date(ahora.getTime() - 72 * 60 * 60 * 1000);
+
+    // Leads nuevos/contactados que SARA les escribió hace 48-72h y no respondieron
+    const { data: leadsSinRespuesta } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, assigned_to, interested_in, last_message_at, last_activity_at, score')
+      .in('status', ['new', 'contacted'])
+      .lt('last_activity_at', hace48h.toISOString())   // Última actividad hace +48h
+      .gt('last_activity_at', hace72h.toISOString())    // Pero no más de 72h (evita leads muy viejos)
+      .not('phone', 'like', '%000000%')                 // Excluir teléfonos de prueba
+      .order('score', { ascending: false })              // Priorizar leads con mayor score
+      .limit(10);
+
+    if (!leadsSinRespuesta || leadsSinRespuesta.length === 0) {
+      console.log('📞 No hay leads 48h sin responder para llamar');
+      return;
+    }
+
+    const { createRetellService } = await import('../services/retellService');
+    const retell = createRetellService(
+      env.RETELL_API_KEY,
+      env.RETELL_AGENT_ID,
+      env.RETELL_PHONE_NUMBER
+    );
+
+    let llamadasRealizadas = 0;
+    const maxLlamadas = 5;
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    for (const lead of leadsSinRespuesta) {
+      if (llamadasRealizadas >= maxLlamadas) break;
+
+      try {
+        const notes = typeof lead.notes === 'object' ? (lead.notes || {}) : {};
+        const ultimaLlamadaIA = (notes as any).ultima_llamada_ia;
+
+        // No llamar si ya recibió llamada IA en últimos 7 días
+        if (ultimaLlamadaIA) {
+          const diasDesdeUltimaLlamada = Math.floor(
+            (ahora.getTime() - new Date(ultimaLlamadaIA).getTime()) / (1000 * 60 * 60 * 24)
+          );
+          if (diasDesdeUltimaLlamada < 7) {
+            console.log(`⏭️ ${lead.name} ya recibió llamada IA hace ${diasDesdeUltimaLlamada} días`);
+            continue;
+          }
+        }
+
+        // No llamar si lead pidió no contacto
+        if ((notes as any).no_contactar || (notes as any).do_not_call) {
+          console.log(`⏭️ ${lead.name} tiene flag de no contactar`);
+          continue;
+        }
+
+        if (!lead.phone) continue;
+
+        const desarrolloInteres = lead.interested_in || (notes as any).desarrollo_interes || '';
+
+        const result = await retell.initiateCall({
+          leadId: lead.id,
+          leadName: lead.name || 'Cliente',
+          leadPhone: lead.phone,
+          vendorId: lead.assigned_to,
+          desarrolloInteres: desarrolloInteres,
+          motivo: 'seguimiento',
+          notas: 'Escalamiento 48h - lead no respondió WhatsApp'
+        });
+
+        if (result.success) {
+          llamadasRealizadas++;
+          console.log(`📞 Llamada 48h iniciada a ${lead.name} (score: ${lead.score})`);
+
+          // Actualizar notes del lead
+          await supabase.client
+            .from('leads')
+            .update({
+              notes: {
+                ...notes,
+                ultima_llamada_ia: hoyStr,
+                llamadas_ia_count: ((notes as any).llamadas_ia_count || 0) + 1,
+                llamada_48h_escalamiento: true
+              }
+            })
+            .eq('id', lead.id);
+
+          // Notificar al vendedor (24h-safe)
+          if (lead.assigned_to) {
+            const { data: vendedor } = await supabase.client
+              .from('team_members')
+              .select('*')
+              .eq('id', lead.assigned_to)
+              .single();
+
+            if (vendedor) {
+              await enviarMensajeTeamMember(supabase, meta, vendedor,
+                `📞 *LLAMADA IA - ESCALAMIENTO 48h*\n\n` +
+                `*${lead.name || 'Lead'}* no respondió WhatsApp en 48h.\n` +
+                `SARA le está llamando ahora.\n` +
+                `Desarrollo: ${desarrolloInteres || 'General'}\n` +
+                `Score: ${lead.score || 0}\n\n` +
+                `Te aviso si responde.`,
+                { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
+              );
+            }
+          }
+
+          // Delay entre llamadas
+          await new Promise(r => setTimeout(r, 5000));
+        }
+      } catch (err) {
+        console.error(`Error en llamada 48h a ${lead.name}:`, err);
+      }
+    }
+
+    console.log(`📞 Llamadas escalamiento 48h: ${llamadasRealizadas} realizadas de ${leadsSinRespuesta.length} candidatos`);
+
+  } catch (e) {
+    console.error('Error en llamadasEscalamiento48h:', e);
   }
 }

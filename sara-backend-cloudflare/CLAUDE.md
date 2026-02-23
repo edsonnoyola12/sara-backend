@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-23 (Sesión 62)
+> Última actualización: 2026-02-23 (Sesión 63)
 
 ---
 
@@ -29,7 +29,7 @@
 # 1. Lee la documentación completa
 cat SARA_COMANDOS.md | head -500
 
-# 2. Verifica tests (OBLIGATORIO - 515+ tests)
+# 2. Verifica tests (OBLIGATORIO - 692+ tests)
 npm test
 
 # 3. Si falla algún test, NO hagas cambios
@@ -226,9 +226,17 @@ await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
 
 **Aplica a:** Leads, Vendedores, Coordinadores, Asesores, Marketing
 
-### 5.1 Sistema Híbrido de Llamadas con Retell (2026-02-05)
+### 5.1 Sistema Híbrido de Llamadas con Retell (2026-02-05, actualizado Sesión 63)
 
 Cuando la ventana de 24h está cerrada y el mensaje es importante, SARA puede **LLAMAR** al team member usando Retell.ai.
+
+**Llamadas a LEADS (escalamiento desde WhatsApp):**
+- Si un lead NO responde WhatsApp en 48h → SARA escala a llamada Retell
+- NUNCA se envía WhatsApp + llamada para lo mismo (regla del usuario)
+- 12 motivos con instrucciones específicas (seguimiento, NPS, referidos, mantenimiento, etc.)
+- CRONs: 12 PM (pre-venta) y 1 PM (post-venta) L-V
+
+**Llamadas al EQUIPO (ventana 24h cerrada):**
 
 **Flujo híbrido:**
 ```
@@ -1219,7 +1227,9 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Referidos | Miércoles 11am | solicitarReferidos | ✅ |
 | Check-in mantenimiento | Sábado 10am | checkInMantenimiento | ✅ |
 | Llamadas Retell post-visita | 11 AM L-V | llamadasSeguimientoPostVisita | ✅ |
+| **Llamadas Retell escalamiento 48h** | **12 PM L-V** | llamadasEscalamiento48h | ✅ |
 | Llamadas Retell reactivación | 10 AM Mar/Jue | llamadasReactivacionLeadsFrios | ✅ |
+| **Llamadas Retell post-venta** | **1 PM L-V** | llamadasEscalamientoPostVenta | ✅ |
 | **Health Monitor** | **Cada 5 min** | healthMonitorCron (Supabase/Meta/OpenAI) | ✅ |
 | **Leads estancados (>72h)** | **9 AM L-V** | alertarLeadsEstancados | ✅ |
 | **R2 Backup semanal** | **Sábado 7 PM** | backupSemanalR2 (conversations + leads JSONL) | ✅ |
@@ -6105,6 +6115,126 @@ Retorna: current voice_id, voice_model, lista de voces con provider, accent, age
 
 ---
 
+### 2026-02-23 (Sesión 63) - Auditoría Retell: 3 Gaps Críticos + Raw Sends + Escalamiento Post-Venta
+
+**Auditoría de mejores prácticas del sistema Retell identificó 3 gaps críticos + 6 raw sends en followups.ts + nueva función de escalamiento post-venta.**
+
+#### Parte 1: 6 Raw Sends en followups.ts → enviarMensajeTeamMember (24h-safe)
+
+| Función | Línea | Cambio |
+|---------|-------|--------|
+| `seguimientoPostVenta()` | ~1514 | Notificación referidos → `enviarMensajeTeamMember()` |
+| `followUp24hLeadsNuevos()` | ~2041 | Follow-up pendiente vendedor → `enviarMensajeTeamMember()` |
+| `reminderDocumentosCredito()` | ~2157 | Reminder docs vendedor → `enviarMensajeTeamMember()` |
+| `llamadasSeguimientoPostVisita()` | ~2277 | Post-visita vendedor → `enviarMensajeTeamMember()` |
+| `llamadasReactivacionLeadsFrios()` | ~2340 | Reactivación vendedor → `enviarMensajeTeamMember()` |
+| `llamadasRecordatorioCita()` | ~2400 | Recordatorio cita vendedor → `enviarMensajeTeamMember()` |
+
+#### Parte 2: llamadasEscalamientoPostVenta (nurturing.ts)
+
+**Nueva función:** Si un lead post-venta NO respondió al WhatsApp en 48h → escalar a llamada Retell.
+
+**Regla crítica del usuario:** NUNCA enviar WhatsApp + llamada para lo mismo. Solo escalar a llamada si WhatsApp no fue respondido.
+
+**Tipos escalables a llamada:**
+
+| Tipo | Flag en notes | Motivo Retell |
+|------|---------------|---------------|
+| `post_entrega` | `esperando_respuesta_entrega` | `seguimiento_entrega` |
+| `satisfaccion_casa` | `esperando_respuesta_satisfaccion_casa` | `satisfaccion` |
+| `nps` | `esperando_respuesta_nps` | `encuesta_nps` |
+| `referidos` | `solicitando_referidos` | `referidos` |
+| `checkin_60d` | `checkin_60d_sent` | `checkin_postventa` |
+| `mantenimiento` | `esperando_respuesta_mantenimiento` | `mantenimiento` |
+
+**Lógica:**
+1. Busca leads con `pending_auto_response` activo
+2. Verifica que `flagAt` tenga >48h sin respuesta
+3. Verifica que no se haya llamado ya (`llamada_escalamiento_${tipo}` en notes)
+4. Verifica horario permitido (9 AM - 8 PM México)
+5. Máximo 3 llamadas por ejecución
+6. Limpia flags post-venta del lead después de llamar
+
+**CRON:** Diario 1 PM L-V (`mexicoHour === 13`)
+
+#### Parte 3: GAP #1 — Prompts context-aware por motivo (retellService.ts + retell.ts)
+
+**Problema:** Todas las llamadas Retell usaban el mismo prompt genérico de ventas. Llamadas post-venta (NPS, satisfacción, referidos) sonaban como cold calls.
+
+**Fix:** Nueva función `getMotivoInstrucciones()` con 12 instrucciones específicas:
+
+| Motivo | Instrucción |
+|--------|-------------|
+| `seguimiento` | Seguimiento. Objetivo: saber si tiene dudas y agendar visita |
+| `calificacion` | Calificación. Objetivo: entender necesidades y recomendar desarrollo |
+| `recordatorio_cita` | Recordatorio. Breve: "Solo confirmo tu cita de mañana" |
+| `encuesta` | Encuesta satisfacción. Tono cálido y agradecido |
+| `seguimiento_entrega` | Post-entrega. Preguntar por llaves, escrituras, servicios |
+| `satisfaccion` | Satisfacción casa. Escala 1-4 |
+| `encuesta_nps` | NPS 0-10. Si 9-10, preguntar referidos |
+| `referidos` | Solicitar referidos. Tono amigable |
+| `checkin_postventa` | Check-in 2 meses. "¿Todo en orden?" |
+| `mantenimiento` | Mantenimiento preventivo. ~1 año post-entrega |
+| `timeout_30min` | Bridge expirado. ¿Quedó alguna duda? |
+
+**Dynamic variables** pasadas a Retell: `{{motivo}}` y `{{motivo_instrucciones}}`
+
+#### Parte 4: GAP #2 — Eliminada notificación prematura en call_started (retell.ts)
+
+**Problema:** Al iniciar una llamada, se enviaban 2 raw `sendWhatsAppMessage` al vendedor ("SARA está llamando a X..."). Esto era prematuro (la llamada podía durar 5 segundos) y usaba raw sends.
+
+**Fix:** Solo log en `call_started`. La notificación real se envía en `call_analyzed` con info útil (duración, sentimiento, resumen, resultado, desarrollo).
+
+**Notificación mejorada en call_analyzed:**
+- Duración en minutos
+- Sentimiento del lead (😊 Positivo / 😟 Negativo / 😐 Neutral)
+- Resultado (🔥 INTERESADO / 📅 CITA AGENDADA / ❌ No interesado / etc.)
+- Desarrollo de interés
+- Resumen de la IA
+- Usa `enviarMensajeTeamMember()` (24h-safe)
+
+#### Parte 5: GAP #3 — Guard duración >30s en análisis Claude (retell.ts)
+
+**Problema:** Claude analizaba transcripts de llamadas de 5 segundos (spam, número equivocado, colgaron). Gasto innecesario de API.
+
+**Fix:** `if (durationSeconds > 30)` guard antes del análisis Claude. Llamadas <30s se loguean y skippean.
+
+#### Parte 6: Raw send de nuevo lead inbound → 24h-safe (retell.ts)
+
+**Bonus fix:** Notificación al vendedor cuando se crea lead desde llamada inbound cambiada de raw `sendWhatsAppMessage` a `enviarMensajeTeamMember()`.
+
+#### Parte 7: llamadasEscalamiento48h (followups.ts)
+
+**Nueva función:** Para leads nuevos (pre-venta) que no respondieron WhatsApp en 48h → escalar a llamada.
+
+**CRON:** Diario 12 PM L-V (`mexicoHour === 12`)
+
+#### CRONs Retell actualizados
+
+| CRON | Horario | Función |
+|------|---------|---------|
+| Seguimiento post-visita | 11 AM L-V | `llamadasSeguimientoPostVisita` |
+| **Escalamiento 48h** | **12 PM L-V** | `llamadasEscalamiento48h` **(NUEVO)** |
+| Reactivación leads fríos | 10 AM Mar/Jue | `llamadasReactivacionLeadsFrios` |
+| Recordatorio cita | Cada 2 min | `llamadasRecordatorioCita` |
+| **Escalamiento post-venta** | **1 PM L-V** | `llamadasEscalamientoPostVenta` **(NUEVO)** |
+
+#### Archivos modificados
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/services/retellService.ts` | `getMotivoInstrucciones()` (12 motivos) + `motivo` type → string + dynamic vars |
+| `src/routes/retell.ts` | Prompt con `{{motivo_instrucciones}}`, removed call_started notif, duration guard, enriched call_analyzed notif, raw send → 24h-safe |
+| `src/crons/followups.ts` | 6 raw sends → `enviarMensajeTeamMember()` + `llamadasEscalamiento48h()` |
+| `src/crons/nurturing.ts` | `llamadasEscalamientoPostVenta()` (~185 líneas) |
+| `src/index.ts` | 2 nuevos CRONs (12 PM + 1 PM L-V) + imports |
+
+**Tests:** 692/692 pasando
+**Retell E2E:** 25/25 pasando
+**Retell agent:** Reconfigurado (9 tools, 4818 char prompt)
+
+---
+
 **Estado final del sistema:**
 
 | Métrica | Valor |
@@ -6113,7 +6243,7 @@ Retorna: current voice_id, voice_model, lista de voces con provider, accent, age
 | Test files | 20 |
 | Servicios | 85+ |
 | Comandos verificados | 342/342 (4 roles) |
-| CRONs activos | 25+ |
+| CRONs activos | 27+ |
 | Capas de resilience | 9 |
 | Templates WA aprobados | 3 |
 | Propiedades en catálogo | 34 |
@@ -6122,6 +6252,7 @@ Retorna: current voice_id, voice_model, lista de voces con provider, accent, age
 | **CRM UX/UI Rounds** | **8 completados** |
 | **Precios dinámicos** | **100% — 0 hardcoded (WhatsApp + Retell)** |
 | **Voz Retell** | **ElevenLabs LatAm Spanish** |
+| **Motivos Retell** | **12 context-aware prompts** |
 
 **URLs de producción:**
 
@@ -6131,4 +6262,4 @@ Retorna: current voice_id, voice_model, lista de voces con provider, accent, age
 | CRM | https://sara-crm-new.vercel.app |
 | Videos | https://sara-videos.onrender.com |
 
-**Sistema 100% completo y operativo — Última verificación: 2026-02-23 (Sesión 62)**
+**Sistema 100% completo y operativo — Última verificación: 2026-02-23 (Sesión 63)**

@@ -501,10 +501,12 @@ REGLA #7: NUNCA sugieras un día específico (sábado, domingo, fin de semana, f
 REGLA #8: Cuando el cliente dice su nombre, RECUÉRDALO. No lo vuelvas a preguntar. Si ya lo tienes, úsalo directamente al agendar.
 REGLA #9: Cuando el cliente da presupuesto, usa la herramienta buscar_por_presupuesto. Presenta TODAS las opciones que te devuelva, agrupadas por desarrollo y zona. No elijas solo una.
 
-Variables: {{call_direction}} (inbound/outbound), {{lead_name}}, {{is_new_lead}}, {{desarrollo_interes}}, {{vendedor_nombre}}
+Variables: {{call_direction}} (inbound/outbound), {{lead_name}}, {{is_new_lead}}, {{desarrollo_interes}}, {{vendedor_nombre}}, {{motivo}}, {{motivo_instrucciones}}
+
+CONTEXTO DE ESTA LLAMADA: {{motivo_instrucciones}}
 
 Si inbound: el saludo ya se envió, NO lo repitas. Escucha y responde.
-Si outbound: el saludo ya se envió. Menciona {{desarrollo_interes}} si tiene valor.
+Si outbound: el saludo ya se envió. Sigue las instrucciones del CONTEXTO DE ESTA LLAMADA. Menciona {{desarrollo_interes}} si tiene valor.
 
 FLUJO DE VENTA:
 1. "¿Buscas en Zacatecas o en Guadalupe?" (si dice las dos, está bien)
@@ -1639,25 +1641,12 @@ CASOS ESPECIALES:
             .or(`phone.eq.${leadPhone},phone.like.%${leadPhone?.slice(-10)}`)
             .maybeSingle();
 
+          // Solo log — la notificación real al vendedor se envía en call_analyzed
+          // con información útil (duración, sentimiento, resumen, resultado)
           if (lead?.team_members) {
-            const vendedorPhone = (lead.team_members as any).phone;
             const vendedorName = (lead.team_members as any).name;
-            const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-
-            if (isInbound) {
-              // Llamada entrante: el lead nos está llamando
-              await meta.sendWhatsAppMessage(vendedorPhone,
-                `📞📥 ${lead.name || leadPhone} está LLAMANDO a SARA...\n` +
-                `La IA está atendiendo la llamada.`
-              );
-            } else {
-              // Llamada saliente: nosotros llamamos al lead
-              await meta.sendWhatsAppMessage(vendedorPhone,
-                `📞📤 SARA está llamando a ${lead.name || leadPhone}...`
-              );
-            }
+            console.log(`📞 ${isInbound ? 'Entrante' : 'Saliente'}: ${lead.name || leadPhone} → vendedor ${vendedorName} (notificación en call_analyzed)`);
           } else if (isInbound) {
-            // Llamada entrante de número desconocido
             console.log(`📞 Llamada entrante de número nuevo: ${leadPhone}`);
           }
         }
@@ -1738,23 +1727,24 @@ CASOS ESPECIALES:
                 lead = nuevoLead;
                 console.log(`✅ Lead creado desde llamada: ${nuevoLead.id} - ${nombreFromCall}`);
 
-                // Notificar al vendedor asignado
+                // Notificar al vendedor asignado (24h-safe)
                 if (vendedorId) {
                   const { data: vendedor } = await supabase.client
                     .from('team_members')
-                    .select('phone, name')
+                    .select('*')
                     .eq('id', vendedorId)
                     .single();
 
-                  if (vendedor?.phone) {
+                  if (vendedor) {
                     const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-                    await meta.sendWhatsAppMessage(vendedor.phone,
+                    await enviarMensajeTeamMember(supabase, meta, vendedor,
                       `🆕📞 NUEVO LEAD POR TELÉFONO\n\n` +
                       `👤 ${nombreFromCall}\n` +
                       `📱 ${leadPhone}\n` +
                       `🏠 Interés: ${desarrolloInteres || 'Por definir'}\n` +
                       `💰 Presupuesto: ${presupuesto || 'Por definir'}\n\n` +
-                      `La llamada ya terminó. Te recomiendo dar seguimiento por WhatsApp.`
+                      `La llamada ya terminó. Te recomiendo dar seguimiento por WhatsApp.`,
+                      { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
                     );
                   }
                 }
@@ -1866,19 +1856,48 @@ CASOS ESPECIALES:
 
               const { data: vendedor } = await supabase.client
                 .from('team_members')
-                .select('phone, name')
+                .select('*')
                 .eq('id', lead.assigned_to)
                 .single();
 
-              if (vendedor?.phone) {
+              if (vendedor) {
                 const durationMin = call.duration_ms ? Math.round(call.duration_ms / 60000) : 0;
                 const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-                let mensaje = `📞 Llamada IA completada con ${leadDisplayName}\n`;
-                mensaje += `⏱️ Duración: ${durationMin} minutos\n`;
+
+                // Sentimiento del lead
+                const sentimentMap: Record<string, string> = {
+                  'Positive': '😊 Positivo',
+                  'Negative': '😟 Negativo',
+                  'Neutral': '😐 Neutral',
+                  'Unknown': '❓ Sin determinar'
+                };
+                const sentiment = sentimentMap[call.call_analysis?.user_sentiment || ''] || '';
+
+                // Resultado de la llamada
+                const outcomeMap: Record<string, string> = {
+                  'interested': '🔥 INTERESADO',
+                  'callback_requested': '📞 PIDIÓ QUE LE LLAMEN',
+                  'appointment_scheduled': '📅 CITA AGENDADA',
+                  'not_interested': '❌ No interesado',
+                  'no_answer': '📵 No contestó',
+                  'voicemail': '📭 Buzón de voz',
+                  'busy': '📵 Ocupado',
+                };
+                const outcome = outcomeMap[call.call_analysis?.call_successful ? 'interested' : 'not_interested'] || '';
+
+                let mensaje = `📞 Llamada IA completada con *${leadDisplayName}*\n`;
+                mensaje += `⏱️ Duración: ${durationMin} min\n`;
+                if (sentiment) mensaje += `💭 Sentimiento: ${sentiment}\n`;
+                if (outcome) mensaje += `📊 Resultado: ${outcome}\n`;
+                if (desarrolloFinal) mensaje += `🏠 Desarrollo: ${desarrolloFinal}\n`;
                 if (call.call_analysis?.summary) {
-                  mensaje += `📝 Resumen: ${call.call_analysis.summary.substring(0, 300)}`;
+                  mensaje += `\n📝 *Resumen:*\n${call.call_analysis.summary.substring(0, 400)}`;
                 }
-                await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+
+                await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
+                  tipoMensaje: 'alerta_lead',
+                  pendingKey: 'pending_alerta_lead'
+                });
               }
             }
 
@@ -1891,7 +1910,9 @@ CASOS ESPECIALES:
             // "márcame el viernes", "en 15 minutos", "la próxima semana", etc.
             // → Crear appointment tipo 'llamada' + notificar vendedor + confirmar al lead
             // ═══════════════════════════════════════════════════════════════
-            if (event === 'call_analyzed' && lead && call.transcript) {
+            // Solo analizar con Claude si la llamada duró >30s (skip spam/wrong number/quick hang-ups)
+            const durationSeconds = call.duration_ms ? Math.round(call.duration_ms / 1000) : 0;
+            if (event === 'call_analyzed' && lead && call.transcript && durationSeconds > 30) {
               try {
                 // Obtener transcript como texto plano
                 let transcriptText = '';
@@ -2166,6 +2187,9 @@ Reglas:
                 console.error('Error detectando callback:', callbackError?.message);
                 debugLog.push({ t: Date.now(), step: 'callback_error', error: callbackError?.message });
               }
+            } else if (event === 'call_analyzed' && (!lead || durationSeconds <= 30)) {
+              console.log(`⏭️ Skip Claude analysis: lead=${!!lead}, duration=${durationSeconds}s (min 30s)`);
+              debugLog.push({ t: Date.now(), step: 'skip_claude_analysis', reason: !lead ? 'no_lead' : 'short_call', duration: durationSeconds });
             }
 
             // ═══════════════════════════════════════════════════════════════

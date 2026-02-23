@@ -1825,6 +1825,191 @@ Estamos aquí para lo que necesites 😊`;
 }
 
 // ═══════════════════════════════════════════════════════════
+// LLAMADAS DE ESCALAMIENTO POST-VENTA
+// Si el lead NO respondió al WhatsApp en 48h → llamar con Retell
+// NUNCA se manda WhatsApp + llamada al mismo tiempo
+// ═══════════════════════════════════════════════════════════
+
+interface RetellEnv {
+  RETELL_API_KEY?: string;
+  RETELL_AGENT_ID?: string;
+  RETELL_PHONE_NUMBER?: string;
+}
+
+// Tipos de post-venta que escalan a llamada si no responden
+const TIPOS_ESCALABLES_LLAMADA: Record<string, { flag: string; flagAt: string; motivo: string; mensaje: string }> = {
+  'post_entrega': {
+    flag: 'esperando_respuesta_entrega',
+    flagAt: 'esperando_respuesta_entrega_at',
+    motivo: 'seguimiento_entrega',
+    mensaje: 'Verificar que todo esté bien con su casa nueva: llaves, escrituras, servicios'
+  },
+  'satisfaccion_casa': {
+    flag: 'esperando_respuesta_satisfaccion_casa',
+    flagAt: 'esperando_respuesta_satisfaccion_casa_at',
+    motivo: 'satisfaccion',
+    mensaje: 'Preguntar cómo se siente con su nueva casa y si hay algo por mejorar'
+  },
+  'nps': {
+    flag: 'esperando_respuesta_nps',
+    flagAt: 'esperando_respuesta_nps_at',
+    motivo: 'encuesta_nps',
+    mensaje: 'Preguntar del 0 al 10 qué tan probable es que nos recomiende'
+  },
+  'referidos': {
+    flag: 'solicitando_referidos',
+    flagAt: 'solicitando_referidos_at',
+    motivo: 'referidos',
+    mensaje: 'Preguntar si conoce a alguien que busque casa'
+  },
+  'checkin_60d': {
+    flag: 'checkin_60d_sent',
+    flagAt: 'checkin_60d_date',
+    motivo: 'checkin_postventa',
+    mensaje: 'Check-in: cómo va todo con su casa después de 2 meses'
+  },
+  'mantenimiento': {
+    flag: 'esperando_respuesta_mantenimiento',
+    flagAt: 'esperando_respuesta_mantenimiento_at',
+    motivo: 'mantenimiento',
+    mensaje: 'Recordatorio anual de mantenimiento preventivo de su casa'
+  },
+};
+
+export async function llamadasEscalamientoPostVenta(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  env: RetellEnv
+): Promise<void> {
+  try {
+    if (!env.RETELL_API_KEY || !env.RETELL_AGENT_ID || !env.RETELL_PHONE_NUMBER) {
+      console.log('⏭️ Llamadas post-venta desactivadas - Retell no configurado');
+      return;
+    }
+
+    console.log('📞 Buscando leads post-venta que NO respondieron WhatsApp (48h+)...');
+
+    const ahora = new Date();
+    const hace48h = new Date(ahora.getTime() - 48 * 60 * 60 * 1000);
+    const hace7dias = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const hoyStr = ahora.toISOString().split('T')[0];
+
+    // Buscar leads post-venta con pending_auto_response activo
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, property_interest, assigned_to')
+      .in('status', ['sold', 'closed', 'delivered'])
+      .not('phone', 'is', null)
+      .not('phone', 'like', '%000000%')
+      .limit(50);
+
+    if (!leads || leads.length === 0) {
+      console.log('📞 No hay leads post-venta para verificar');
+      return;
+    }
+
+    const { createRetellService } = await import('../services/retellService');
+    const retell = createRetellService(
+      env.RETELL_API_KEY,
+      env.RETELL_AGENT_ID,
+      env.RETELL_PHONE_NUMBER
+    );
+
+    let llamadasRealizadas = 0;
+    const maxLlamadas = 5;
+
+    for (const lead of leads) {
+      if (llamadasRealizadas >= maxLlamadas) break;
+
+      const notas = typeof lead.notes === 'object' ? (lead.notes || {}) : {};
+      const pendingAuto = (notas as any).pending_auto_response;
+
+      // Debe tener pending_auto_response con tipo escalable
+      if (!pendingAuto?.type || !TIPOS_ESCALABLES_LLAMADA[pendingAuto.type]) continue;
+
+      const config = TIPOS_ESCALABLES_LLAMADA[pendingAuto.type];
+
+      // Verificar que el flag de espera siga activo (= NO respondió)
+      if (!(notas as any)[config.flag]) continue;
+
+      // Verificar que pasaron 48h+ desde el envío del WhatsApp
+      const sentAt = pendingAuto.sent_at || (notas as any)[config.flagAt];
+      if (!sentAt) continue;
+
+      const sentDate = new Date(sentAt);
+      if (sentDate > hace48h) continue; // Menos de 48h, aún puede responder por WA
+      if (sentDate < hace7dias) continue; // Más de 7 días, ya es muy viejo
+
+      // Verificar que no le hayamos llamado ya por este motivo
+      const llamadaKey = `llamada_escalamiento_${pendingAuto.type}`;
+      if ((notas as any)[llamadaKey]) continue;
+
+      // Verificar que no recibió llamada IA hoy
+      if ((notas as any).ultima_llamada_ia === hoyStr) continue;
+
+      // NO tiene flag no_contactar
+      if ((notas as any).no_contactar) continue;
+
+      console.log(`📞 Escalando a llamada: ${lead.name} (${pendingAuto.type}, WhatsApp enviado ${sentAt})`);
+
+      try {
+        const result = await retell.initiateCall({
+          leadId: lead.id,
+          leadName: lead.name || 'Cliente',
+          leadPhone: lead.phone,
+          vendorId: lead.assigned_to,
+          desarrolloInteres: lead.property_interest || '',
+          motivo: config.motivo
+        });
+
+        if (result.success) {
+          llamadasRealizadas++;
+
+          // Marcar para no repetir
+          await supabase.client
+            .from('leads')
+            .update({
+              notes: {
+                ...notas,
+                ultima_llamada_ia: hoyStr,
+                [llamadaKey]: hoyStr,
+                llamadas_ia_count: ((notas as any).llamadas_ia_count || 0) + 1,
+              }
+            })
+            .eq('id', lead.id);
+
+          console.log(`📞 Llamada ${pendingAuto.type} iniciada a ${lead.name} (callId: ${result.callId})`);
+
+          // Notificar al vendedor
+          if (lead.assigned_to) {
+            const { data: vendedor } = await supabase.client
+              .from('team_members')
+              .select('*')
+              .eq('id', lead.assigned_to)
+              .single();
+
+            if (vendedor) {
+              await enviarMensajeTeamMember(supabase, meta, vendedor,
+                `📞 *Llamada IA de escalamiento*\n\nCliente: ${lead.name}\nMotivo: ${config.mensaje}\n\n⚠️ No respondió WhatsApp en 48h, SARA le está llamando.`,
+                { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
+              );
+            }
+          }
+
+          await new Promise(r => setTimeout(r, 3000)); // Espacio entre llamadas
+        }
+      } catch (err) {
+        console.error(`Error llamando a ${lead.name} (${pendingAuto.type}):`, err);
+      }
+    }
+
+    console.log(`📞 Escalamiento post-venta completado: ${llamadasRealizadas} llamadas`);
+  } catch (e) {
+    console.error('Error en llamadasEscalamientoPostVenta:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // LIMPIEZA DE FLAGS DE ENCUESTAS EXPIRADOS
 // Corre 1x/día en CRON nocturno (0 1 * * * = 7 PM México)
 // Limpia flags esperando_respuesta_* con más de 72h
