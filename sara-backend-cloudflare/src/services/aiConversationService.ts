@@ -1810,8 +1810,9 @@ RECUERDA:
         (msgLowerCallback === 'claro que si') ||
         (msgLowerCallback === 'claro que sí');
 
-      // Si quiere visitar, SIEMPRE cerrar con pregunta de día
-      if (quiereVisitar) {
+      // Si quiere visitar, cerrar con pregunta de día — PERO NO sobreescribir si ya tiene confirmar_cita con fecha+hora
+      const yaEsConfirmarCita = parsed.intent === 'confirmar_cita' && parsed.extracted_data?.fecha && parsed.extracted_data?.hora;
+      if (quiereVisitar && !yaEsConfirmarCita) {
         console.log('🎯 Cliente quiere VISITAR - forzando cierre de cita');
         parsed.contactar_vendedor = false;
         parsed.intent = 'solicitar_cita';
@@ -1839,6 +1840,9 @@ RECUERDA:
             parsed.response = '¡Perfecto! 🏡 ¿Qué día y hora te funcionan para la visita?';
           }
         }
+      } else if (quiereVisitar && yaEsConfirmarCita) {
+        console.log('✅ Cliente quiere VISITAR y YA tiene confirmar_cita con fecha+hora - NO sobreescribir');
+        parsed.contactar_vendedor = false;
       }
 
       // ━━━━━━━━━━━━━━━
