@@ -991,39 +991,55 @@ export default {
                           );
                           await meta.sendWhatsAppMessage(from, msgCliente);
 
-                          // Notificar al asesor via enviarMensajeTeamMember (24h safe)
-                          if (asesor.phone && asesor.is_active !== false) {
-                            const { data: asesorFull } = await supabase.client
-                              .from('team_members').select('*').eq('id', asesor.id).single();
-                            if (asesorFull) {
-                              const msgAsesor = creditService.generarNotificacionAsesor(lead, resultado.context);
-                              await enviarMensajeTeamMember(supabase, meta, asesorFull, msgAsesor, {
+                          // Notificar al asesor + vendedor original en paralelo (24h safe)
+                          const needAsesor = asesor.phone && asesor.is_active !== false;
+                          const needVendor = vendedorOriginalId && vendedorOriginalId !== asesor?.id;
+
+                          // Fetch ambos team members en paralelo
+                          const [asesorResult, vendedorResult] = await Promise.all([
+                            needAsesor
+                              ? supabase.client.from('team_members').select('*').eq('id', asesor.id).single()
+                              : Promise.resolve({ data: null }),
+                            needVendor
+                              ? supabase.client.from('team_members').select('*').eq('id', vendedorOriginalId).single()
+                              : Promise.resolve({ data: null })
+                          ]);
+
+                          const asesorFull = asesorResult.data;
+                          const vendedorOriginal = vendedorResult.data;
+
+                          // Enviar notificaciones en paralelo
+                          const notificaciones: Promise<any>[] = [];
+
+                          if (asesorFull) {
+                            const msgAsesor = creditService.generarNotificacionAsesor(lead, resultado.context);
+                            notificaciones.push(
+                              enviarMensajeTeamMember(supabase, meta, asesorFull, msgAsesor, {
                                 tipoMensaje: 'alerta_lead',
                                 guardarPending: true,
                                 pendingKey: 'pending_alerta_lead'
-                              });
-                              console.log(`📤 Asesor ${asesor.name} notificado (enviarMensajeTeamMember)`);
-                            }
+                              }).then(() => console.log(`📤 Asesor ${asesor.name} notificado (enviarMensajeTeamMember)`))
+                            );
                           }
 
-                          // Notificar al vendedor original que su lead entró a crédito
-                          if (vendedorOriginalId && vendedorOriginalId !== asesor?.id) {
-                            const { data: vendedorOriginal } = await supabase.client
-                              .from('team_members').select('*').eq('id', vendedorOriginalId).single();
-                            if (vendedorOriginal?.phone) {
-                              const msgVendedor = `🏦 *LEAD EN CRÉDITO HIPOTECARIO*\n\n` +
-                                `👤 *${resultado.context.lead_name}*\n` +
-                                `📱 ${lead.phone ? formatPhoneForDisplay(lead.phone) : 'Sin tel'}\n\n` +
-                                `Tu lead fue asignado al asesor hipotecario *${asesor.name || 'N/A'}* para su trámite de crédito.\n\n` +
-                                `💡 Sigues siendo responsable de la venta. Cuando el crédito esté listo, coordina la visita.\n\n` +
-                                `Escribe *mis leads* para ver tu lista.`;
-                              await enviarMensajeTeamMember(supabase, meta, vendedorOriginal, msgVendedor, {
+                          if (vendedorOriginal?.phone) {
+                            const msgVendedor = `🏦 *LEAD EN CRÉDITO HIPOTECARIO*\n\n` +
+                              `👤 *${resultado.context.lead_name}*\n` +
+                              `📱 ${lead.phone ? formatPhoneForDisplay(lead.phone) : 'Sin tel'}\n\n` +
+                              `Tu lead fue asignado al asesor hipotecario *${asesor.name || 'N/A'}* para su trámite de crédito.\n\n` +
+                              `💡 Sigues siendo responsable de la venta. Cuando el crédito esté listo, coordina la visita.\n\n` +
+                              `Escribe *mis leads* para ver tu lista.`;
+                            notificaciones.push(
+                              enviarMensajeTeamMember(supabase, meta, vendedorOriginal, msgVendedor, {
                                 tipoMensaje: 'alerta_lead',
                                 guardarPending: true,
                                 pendingKey: 'pending_alerta_lead'
-                              });
-                              console.log(`📤 Vendedor original ${vendedorOriginal.name} notificado del crédito`);
-                            }
+                              }).then(() => console.log(`📤 Vendedor original ${vendedorOriginal.name} notificado del crédito`))
+                            );
+                          }
+
+                          if (notificaciones.length > 0) {
+                            await Promise.all(notificaciones);
                           }
                         }
                       }

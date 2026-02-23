@@ -1842,22 +1842,63 @@ export async function handleTestRoutes(
 
         // Llamar al handler de WhatsApp
         const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
-        await handler.handleIncomingMessage(`whatsapp:+${normalizedPhone}`, msg, env);
+        let handlerError: string | null = null;
+        try {
+          await handler.handleIncomingMessage(`whatsapp:+${normalizedPhone}`, msg, env);
+        } catch (hErr: any) {
+          handlerError = hErr?.message || String(hErr);
+          console.error('❌ Handler error:', handlerError);
+        }
 
-        // Verificar el lead creado/actualizado (1 query instead of 3)
-        let { data: lead } = await supabase.client
-          .from('leads')
-          .select('id, name, phone, status, score, assigned_to, created_at, updated_at')
-          .like('phone', `%${phone.slice(-10)}`)
-          .single();
+        // Intentar obtener datos del lead post-handler
+        // El handler consume casi todos los subrequests de Cloudflare,
+        // así que estas queries pueden fallar con "Too many subrequests"
+        const phoneDigits = phone.replace(/\D/g, '').slice(-10);
+        let lead: any = null;
+        let cita: any = null;
+        let subrequestLimitHit = false;
 
-        // Si el lead existe pero no tiene nombre, guardamos el nombre del parámetro
-        if (lead && !lead.name && name && name !== 'Lead Test') {
-          await supabase.client
+        try {
+          const { data: leads, error: leadErr } = await supabase.client
             .from('leads')
-            .update({ name })
-            .eq('id', lead.id);
-          lead.name = name;
+            .select('id, name, phone, status, score, assigned_to, created_at, updated_at')
+            .ilike('phone', `%${phoneDigits}`)
+            .order('updated_at', { ascending: false })
+            .limit(1);
+
+          if (leadErr?.message?.includes('subrequests')) {
+            subrequestLimitHit = true;
+          } else if (leadErr) {
+            console.error('❌ Lead query error:', leadErr.message);
+          } else {
+            lead = leads?.[0] || null;
+          }
+
+          if (lead) {
+            // Actualizar nombre si no tiene
+            if (!lead.name && name && name !== 'Lead Test') {
+              await supabase.client.from('leads').update({ name }).eq('id', lead.id);
+              lead.name = name;
+            }
+            // Buscar cita reciente
+            const { data: citaData, error: citaErr } = await supabase.client
+              .from('appointments')
+              .select('id, scheduled_date, scheduled_time, property_name, property, status, appointment_type')
+              .eq('lead_id', lead.id)
+              .in('status', ['scheduled', 'confirmed'])
+              .order('created_at', { ascending: false })
+              .limit(1);
+            if (citaErr?.message?.includes('subrequests')) {
+              subrequestLimitHit = true;
+            } else {
+              cita = citaData?.[0] || null;
+            }
+          }
+        } catch (queryErr: any) {
+          subrequestLimitHit = queryErr?.message?.includes('subrequests') || false;
+          if (!subrequestLimitHit) {
+            console.error('❌ Error en queries post-handler:', queryErr?.message);
+          }
         }
 
         return corsResponse(JSON.stringify({
@@ -1873,7 +1914,19 @@ export async function handleTestRoutes(
             creado: lead.created_at,
             actualizado: lead.updated_at
           } : null,
-          nota: 'SARA procesó el mensaje y respondió por WhatsApp (si el teléfono es real)'
+          cita: cita ? {
+            id: cita.id,
+            fecha: cita.scheduled_date,
+            hora: cita.scheduled_time,
+            desarrollo: cita.property_name || cita.property || null,
+            status: cita.status,
+            tipo: cita.appointment_type
+          } : null,
+          nota: subrequestLimitHit
+            ? `Mensaje procesado OK. El handler agotó los subrequests de Cloudflare — usa /debug-lead?phone=${phoneDigits} para ver el resultado.`
+            : handlerError
+              ? `Handler error: ${handlerError}`
+              : 'SARA procesó el mensaje y respondió por WhatsApp (si el teléfono es real)'
         }));
 
       } catch (e: any) {
