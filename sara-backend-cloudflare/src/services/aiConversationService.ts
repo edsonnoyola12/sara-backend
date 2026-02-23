@@ -4133,8 +4133,8 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
       }
 
       // ═══ PRE-DETECCIÓN: Extraer desarrollo del mensaje del lead si Claude no lo detectó ═══
-      if (!desarrolloInteres && message) {
-        const msgLowerPre = message.toLowerCase();
+      if (!desarrolloInteres && originalMessage) {
+        const msgLowerPre = originalMessage.toLowerCase();
         const propMatch = properties.find((p: any) => {
           const devName = (p.development_name || p.name || '').toLowerCase();
           return devName && devName.length > 3 && msgLowerPre.includes(devName);
@@ -4442,38 +4442,46 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         await this.enviarRespuestaConAudioOpcional(from, respuestaLimpia, leadNotesConId);
         console.log('✅ Respuesta de Claude enviada (sin pregunta de crédito)');
 
-        // ═══ BOTONES CONTEXTUALES - Solo cuando SARA no hizo pregunta específica ═══
+        // ═══ OPCIONES CONTEXTUALES (Lista desplegable con 4 opciones) ═══
         try {
-          const respLower = respuestaLimpia.toLowerCase();
-          const tienePregunaEspecifica = /¿(cuál|cual|qué|que|cuándo|cuando|cómo|como|sábado|sabado|domingo|día|dia|hora|nombre|recámara|recamara|presupuesto|te (interesa|gustaría|funciona|parece|llama)|vienes|visitamos|agendamos)/i.test(respuestaLimpia);
+          // Solo skip si SARA está activamente agendando (pidiendo día/hora exacta)
+          const estaAgendando = /¿.*(sábado|sabado|domingo|día|dia|hora|10|11|12).*(te funciona|te queda|va bien|prefieres)/i.test(respuestaLimpia);
 
-          if (tienePregunaEspecifica) {
-            console.log('⏭️ Botones omitidos (SARA ya hizo pregunta específica en su respuesta)');
+          if (estaAgendando) {
+            console.log('⏭️ Opciones omitidas (SARA está agendando cita activamente)');
           } else {
             const historial = lead.conversation_history || [];
-            const yaTieneBotones = historial.slice(-6).some((m: any) =>
-              m.role === 'assistant' && m.content?.includes('¿Qué te gustaría hacer?')
+            const yaTieneOpciones = historial.slice(-3).some((m: any) =>
+              m.role === 'assistant' && (m.content?.includes('¿Qué te gustaría hacer?') || m.content?.includes('Ver opciones'))
             );
 
-            if (!yaTieneBotones) {
+            if (!yaTieneOpciones) {
               const hasAppointment = lead?.status === 'scheduled' || lead?.status === 'visit_scheduled';
-              const botones = getBotonesContextuales(analysis.intent, lead.status, hasAppointment);
+              const opciones = getBotonesContextuales(analysis.intent, lead.status, hasAppointment);
 
-              if (botones && botones.length > 0) {
+              if (opciones && opciones.length > 0) {
                 await new Promise(r => setTimeout(r, 500));
-                await this.meta.sendQuickReplyButtons(
+                await this.meta.sendListMenu(
                   from,
                   '¿Qué te gustaría hacer?',
-                  botones
+                  'Ver opciones 👇',
+                  [{
+                    title: 'Opciones disponibles',
+                    rows: opciones.map(o => ({
+                      id: o.id,
+                      title: o.title.substring(0, 24),
+                      description: o.description || ''
+                    }))
+                  }]
                 );
-                console.log('📱 Botones contextuales enviados');
+                console.log('📱 Lista de opciones enviada (' + opciones.length + ' items)');
               }
             } else {
-              console.log('⏭️ Botones omitidos (ya enviados en últimos 6 mensajes)');
+              console.log('⏭️ Opciones omitidas (ya enviadas en últimos 3 mensajes)');
             }
           }
         } catch (btnErr) {
-          console.log('⚠️ No se pudieron enviar botones:', btnErr);
+          console.log('⚠️ No se pudieron enviar opciones:', btnErr);
         }
 
         // ═══ GUARDAR HISTORIAL CON RESPUESTA CORRECTA (después de validar horario) ═══
@@ -5034,7 +5042,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                 } else if (analysis.send_video_desarrollo === true) {
                   console.warn(`⚠️ Video prometido pero youtube_link NULL para ${dev}`);
                 }
-                const msgLowerRes = (originalMessage || message || '').toLowerCase();
+                const msgLowerRes = (originalMessage || '').toLowerCase();
                 const pidioPlanos = msgLowerRes.includes('plano') || msgLowerRes.includes('planos');
                 if (propiedadMatch.matterport_link && !pidioPlanos) {
                   partes.push(`🏠 *Recorrido 3D:* ${propiedadMatch.matterport_link}`);

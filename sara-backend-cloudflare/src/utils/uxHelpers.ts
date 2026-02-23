@@ -136,51 +136,62 @@ export function generarContextoPersonalizado(lead: any): string {
 }
 
 /**
- * Determina qué botones mostrar según el contexto
+ * Determina qué opciones mostrar según el contexto
+ * Retorna 4 opciones para usar con lista desplegable de WhatsApp
  */
 export function getBotonesContextuales(
   intent: string,
   leadStatus: string,
   hasAppointment: boolean
-): Array<{ id: string; title: string }> | null {
+): Array<{ id: string; title: string; description?: string }> {
 
   // Después de dar info de desarrollo
   if (intent === 'solicitar_informacion' || intent === 'preguntar_precios' || intent === 'interes_desarrollo') {
     return [
-      { id: 'btn_agendar', title: '📅 Agendar visita' },
-      { id: 'btn_credito', title: '🏦 Asesoría hipotecaria' },
-      { id: 'btn_ubicacion', title: '📍 Ubicación' }
+      { id: 'btn_ver_casas', title: '🏠 Ver casas', description: 'Conoce nuestros desarrollos' },
+      { id: 'btn_precios', title: '💰 Precios', description: 'Desde $1.6M con financiamiento' },
+      { id: 'btn_credito', title: '🏦 Asesoría hipotecaria', description: 'INFONAVIT, bancario, cofinavit' },
+      { id: 'btn_agendar', title: '📅 Agendar visita', description: 'Visita el desarrollo que te guste' }
     ];
   }
 
   // Lead nuevo o sin cita
   if (leadStatus === 'new' && !hasAppointment) {
     return [
-      { id: 'btn_ver_casas', title: '🏠 Ver casas' },
-      { id: 'btn_precios', title: '💰 Precios' },
-      { id: 'btn_agendar', title: '📅 Agendar cita' }
+      { id: 'btn_ver_casas', title: '🏠 Ver casas', description: 'Conoce nuestros desarrollos' },
+      { id: 'btn_precios', title: '💰 Precios', description: 'Desde $1.6M con financiamiento' },
+      { id: 'btn_credito', title: '🏦 Asesoría hipotecaria', description: 'INFONAVIT, bancario, cofinavit' },
+      { id: 'btn_agendar', title: '📅 Agendar cita', description: 'Agenda una visita presencial' }
     ];
   }
 
   // Lead con cita agendada
   if (hasAppointment) {
     return [
-      { id: 'btn_confirmar', title: '✅ Confirmar' },
-      { id: 'btn_reagendar', title: '📅 Cambiar fecha' },
-      { id: 'btn_cancelar', title: '❌ Cancelar' }
+      { id: 'btn_confirmar', title: '✅ Confirmar cita', description: 'Confirma tu visita' },
+      { id: 'btn_reagendar', title: '📅 Cambiar fecha', description: 'Reagenda tu cita' },
+      { id: 'btn_precios', title: '💰 Ver precios', description: 'Consulta precios y modelos' },
+      { id: 'btn_credito', title: '🏦 Asesoría hipotecaria', description: 'Opciones de financiamiento' }
     ];
   }
 
   // Lead en negociación
-  if (leadStatus === 'negotiating' || leadStatus === 'visited') {
+  if (leadStatus === 'negotiating' || leadStatus === 'negotiation' || leadStatus === 'visited') {
     return [
-      { id: 'btn_cotizar', title: '💰 Cotización' },
-      { id: 'btn_credito', title: '🏦 Crédito' },
-      { id: 'btn_otra_visita', title: '📅 Otra visita' }
+      { id: 'btn_cotizar', title: '💰 Cotización', description: 'Solicita cotización formal' },
+      { id: 'btn_credito', title: '🏦 Crédito', description: 'Asesoría hipotecaria' },
+      { id: 'btn_precios', title: '💰 Precios', description: 'Consulta precios actualizados' },
+      { id: 'btn_otra_visita', title: '📅 Otra visita', description: 'Agenda otra visita' }
     ];
   }
 
-  return null;
+  // Fallback: siempre ofrecer 4 opciones útiles
+  return [
+    { id: 'btn_ver_casas', title: '🏠 Ver casas', description: 'Conoce nuestros desarrollos' },
+    { id: 'btn_precios', title: '💰 Precios', description: 'Desde $1.6M con financiamiento' },
+    { id: 'btn_credito', title: '🏦 Asesoría hipotecaria', description: 'INFONAVIT, bancario, cofinavit' },
+    { id: 'btn_agendar', title: '📅 Agendar cita', description: 'Agenda una visita presencial' }
+  ];
 }
 
 /**
