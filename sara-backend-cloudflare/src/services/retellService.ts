@@ -124,7 +124,7 @@ export class RetellService {
             greeting: this.buildGreeting(context),
             desarrollo: context.desarrolloInteres || 'nuestros desarrollos',
             desarrollo_interes: context.desarrolloInteres || '',
-            precio_desde: context.precioDesde || '$1.5 millones',
+            precio_desde: context.precioDesde || '',
             vendedor_nombre: context.vendorName || 'un asesor',
             notas_adicionales: context.notas || '',
             source: context.notas || 'WhatsApp'
@@ -593,6 +593,26 @@ export class RetellService {
       return { success: true, data };
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : 'Error' };
+    }
+  }
+
+  /**
+   * Lista las voces disponibles en Retell (filtra por idioma si se especifica)
+   */
+  async listVoices(): Promise<any[]> {
+    if (!this.apiKey) return [];
+    try {
+      const response = await fetch(`${this.baseUrl}/list-voices`, {
+        headers: { 'Authorization': `Bearer ${this.apiKey}` }
+      });
+      if (!response.ok) {
+        console.error('❌ Retell error listando voces:', response.status);
+        return [];
+      }
+      return await response.json() as any[];
+    } catch (e) {
+      console.error('❌ Retell error:', e);
+      return [];
     }
   }
 

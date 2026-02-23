@@ -155,8 +155,67 @@ export async function handleRetellRoutes(
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // RETELL VOICES - Listar voces disponibles (para elegir la mejor)
+    // USO: /retell-voices?api_key=XXX&lang=es
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === '/retell-voices' && request.method === 'GET') {
+      try {
+        const authError = checkApiAuth(request, env);
+        if (authError) return authError;
+
+        const { createRetellService } = await import('../services/retellService');
+        const retell = createRetellService(env.RETELL_API_KEY, env.RETELL_AGENT_ID || '', env.RETELL_PHONE_NUMBER || '');
+
+        const allVoices = await retell.listVoices();
+        const langFilter = url.searchParams.get('lang') || '';
+        const genderFilter = url.searchParams.get('gender') || '';
+
+        let filtered = allVoices;
+        if (langFilter) {
+          filtered = filtered.filter((v: any) => {
+            const lang = (v.language || '').toLowerCase();
+            const accent = (v.accent || '').toLowerCase();
+            const name = (v.voice_name || v.name || '').toLowerCase();
+            return lang.includes(langFilter.toLowerCase()) ||
+                   accent.includes(langFilter.toLowerCase()) ||
+                   name.includes(langFilter.toLowerCase());
+          });
+        }
+        if (genderFilter) {
+          filtered = filtered.filter((v: any) =>
+            (v.gender || '').toLowerCase().includes(genderFilter.toLowerCase())
+          );
+        }
+
+        // Get current agent voice
+        const agent = await retell.getAgent();
+        const currentVoiceId = agent?.voice_id || 'unknown';
+        const currentVoiceModel = agent?.voice_model || 'unknown';
+
+        return corsResponse(JSON.stringify({
+          current_voice_id: currentVoiceId,
+          current_voice_model: currentVoiceModel,
+          total_voices: allVoices.length,
+          filtered_count: filtered.length,
+          voices: filtered.map((v: any) => ({
+            voice_id: v.voice_id,
+            name: v.voice_name || v.name,
+            provider: v.provider,
+            gender: v.gender,
+            accent: v.accent,
+            language: v.language,
+            age: v.age,
+            preview_audio_url: v.preview_audio_url
+          }))
+        }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ error: e.message }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // CONFIGURE RETELL TOOLS - Registrar custom tools en el LLM de Retell
-    // USO: /configure-retell-tools?api_key=XXX
+    // USO: /configure-retell-tools?api_key=XXX&voice_id=XXX (optional)
     // ═══════════════════════════════════════════════════════════════════════
     if (url.pathname === '/configure-retell-tools' && request.method === 'GET') {
       try {
@@ -185,7 +244,92 @@ export async function handleRetellRoutes(
         const llm = await retell.getLlm(llmId);
         const existingTools = llm?.general_tools || [];
 
-        // 3. Definir las custom tools de SARA
+        // 3. Consultar precios reales de la BD para el prompt dinámico
+        const { data: allProperties } = await supabase.client
+          .from('properties')
+          .select('name, development, price, price_equipped');
+
+        // Helper: precio mínimo equipado por desarrollo
+        function getMinPriceByDev(devName: string): number {
+          if (!allProperties) return 0;
+          const devProps = allProperties.filter((p: any) =>
+            (p.development || '').toLowerCase().includes(devName.toLowerCase())
+          );
+          if (devProps.length === 0) return 0;
+          return devProps.reduce((min: number, p: any) => {
+            const precio = p.price_equipped || p.price || 0;
+            return precio > 0 && precio < min ? precio : min;
+          }, Infinity);
+        }
+
+        // Helper: convertir precio numérico a palabras en español (para voz)
+        function precioAPalabras(precio: number): string {
+          if (precio <= 0) return 'precio por confirmar';
+          const millones = Math.floor(precio / 1000000);
+          const restoMiles = Math.round((precio % 1000000) / 1000);
+
+          const numPalabras: Record<number, string> = {
+            1: 'un', 2: 'dos', 3: 'tres', 4: 'cuatro', 5: 'cinco',
+            6: 'seis', 7: 'siete', 8: 'ocho', 9: 'nueve', 10: 'diez',
+            11: 'once', 12: 'doce', 13: 'trece', 14: 'catorce', 15: 'quince'
+          };
+
+          if (millones >= 1 && restoMiles === 0) {
+            if (millones === 1) return 'un millón de pesos';
+            return `${numPalabras[millones] || millones} millones de pesos`;
+          }
+
+          if (millones >= 1) {
+            const milPalabra = restoMiles === 100 ? 'cien mil'
+              : restoMiles === 200 ? 'doscientos mil'
+              : restoMiles === 300 ? 'trescientos mil'
+              : restoMiles === 400 ? 'cuatrocientos mil'
+              : restoMiles === 500 ? 'quinientos mil'
+              : restoMiles === 600 ? 'seiscientos mil'
+              : restoMiles === 700 ? 'setecientos mil'
+              : restoMiles === 800 ? 'ochocientos mil'
+              : restoMiles === 900 ? 'novecientos mil'
+              : `${restoMiles} mil`;
+            if (millones === 1) return `un millón ${milPalabra} pesos`;
+            return `${numPalabras[millones] || millones} millones ${milPalabra} pesos`;
+          }
+
+          // Solo miles (para terrenos precio/m²)
+          if (precio >= 1000) {
+            const miles = Math.round(precio / 1000);
+            return `${numPalabras[miles] || miles} mil pesos`;
+          }
+          return `${precio} pesos`;
+        }
+
+        // Helper: rango de precio/m² para terrenos
+        function precioM2Palabras(devName: string): string {
+          if (!allProperties) return 'precio por confirmar';
+          const devProps = allProperties.filter((p: any) =>
+            (p.development || '').toLowerCase().includes(devName.toLowerCase())
+          );
+          if (devProps.length === 0) return 'precio por confirmar';
+          const precios = devProps.map((p: any) => p.price_equipped || p.price || 0).filter((x: number) => x > 0);
+          if (precios.length === 0) return 'precio por confirmar';
+          const min = Math.min(...precios);
+          const max = Math.max(...precios);
+          if (min === max) return precioAPalabras(min) + ' por metro cuadrado';
+          return `${precioAPalabras(min)} a ${precioAPalabras(max)} por metro cuadrado`;
+        }
+
+        // Precios dinámicos por desarrollo
+        const precioMonteVerde = getMinPriceByDev('Monte Verde');
+        const precioEncinos = getMinPriceByDev('Los Encinos');
+        const precioMiravalle = getMinPriceByDev('Miravalle');
+        const precioColorines = getMinPriceByDev('Paseo Colorines');
+        const precioAndes = getMinPriceByDev('Andes');
+        const precioFalco = getMinPriceByDev('Distrito Falco');
+
+        // Precio mínimo global (para objeciones "caro")
+        const todosPrecios = [precioMonteVerde, precioEncinos, precioMiravalle, precioColorines, precioAndes, precioFalco].filter(p => p > 0 && p < Infinity);
+        const precioMinimoGlobal = todosPrecios.length > 0 ? Math.min(...todosPrecios) : 1600000;
+
+        // 4. Definir las custom tools de SARA
         const baseUrl = 'https://sara-backend.edson-633.workers.dev';
         const saraTools: any[] = [
           {
@@ -344,7 +488,7 @@ export async function handleRetellRoutes(
           }
         ];
 
-        // 4. Definir el prompt de SARA para llamadas INBOUND
+        // 5. Definir el prompt de SARA para llamadas INBOUND (precios dinámicos de DB)
         const saraPrompt = `Eres SARA, asistente virtual de ventas de Grupo Santa Rita, inmobiliaria en Zacatecas. Eres IA, no persona real.
 
 REGLA #1: Habla CORTO. Máximo una o dos oraciones por turno. Es llamada telefónica, no discurso.
@@ -365,9 +509,7 @@ Si outbound: el saludo ya se envió. Menciona {{desarrollo_interes}} si tiene va
 FLUJO DE VENTA:
 1. "¿Buscas en Zacatecas o en Guadalupe?" (si dice las dos, está bien)
 2. "¿Y tienes un presupuesto en mente?"
-3. Con presupuesto, usa la herramienta buscar_por_presupuesto. Menciona TODAS las opciones que devuelva:
-   "Con cinco millones hay varias opciones: en Colinas del Padre tienes Los Encinos, Miravalle y Paseo Colorines. En Guadalupe está Distrito Falco. Y las más económicas Monte Verde y Andes. ¿Cuál te llama más la atención?"
-   Si solo hay pocas opciones, menciónalas todas con precio.
+3. Con presupuesto, usa la herramienta buscar_por_presupuesto. Menciona TODAS las opciones que devuelva, agrupadas por desarrollo y zona. No elijas solo una.
 4. "¿Te gustaría conocerlo? ¿Qué día te queda para visitarlas?"
 5. Pide nombre, agenda con la herramienta. Listo.
 
@@ -380,21 +522,21 @@ CITAS:
 
 DESARROLLOS:
 Zacatecas (Colinas del Padre) - SOLO CASAS:
-- Monte Verde: desde un millón seiscientos mil pesos
-- Los Encinos: desde tres millones
-- Miravalle: desde tres millones
-- Paseo Colorines: desde tres millones
+- Monte Verde: desde ${precioAPalabras(precioMonteVerde)}
+- Los Encinos: desde ${precioAPalabras(precioEncinos)}
+- Miravalle: desde ${precioAPalabras(precioMiravalle)}
+- Paseo Colorines: desde ${precioAPalabras(precioColorines)}
 
 Guadalupe - CASAS:
-- Priv. Andes (Siglo Veintiuno): desde un millón seiscientos mil. ÚNICO CON ALBERCA, gym, asadores
-- Distrito Falco (Calzada Solidaridad): desde tres millones setecientos mil. Premium, domótica
+- Priv. Andes (Siglo Veintiuno): desde ${precioAPalabras(precioAndes)}. ÚNICO CON ALBERCA, gym, asadores
+- Distrito Falco (Calzada Solidaridad): desde ${precioAPalabras(precioFalco)}. Premium, domótica
 
 Terrenos Citadella del Nogal (Guadalupe):
-- Villa Campelo: ocho mil quinientos a nueve mil quinientos por metro cuadrado
-- Villa Galiano: seis mil cuatrocientos a seis mil setecientos por metro cuadrado
+- Villa Campelo: ${precioM2Palabras('Villa Campelo')}
+- Villa Galiano: ${precioM2Palabras('Villa Galiano')}
 
 OBJECIONES (responde corto y cierra con pregunta):
-- Caro: "Tenemos desde un millón seiscientos mil. ¿Cuál es tu presupuesto?"
+- Caro: "Tenemos desde ${precioAPalabras(precioMinimoGlobal)}. ¿Cuál es tu presupuesto?"
 - Pensar: "Con veinte mil de apartado congelas precio. ¿Te gustaría al menos conocerlo? ¿Qué día te queda bien?"
 - Lejos: "La plusvalía es del ocho al diez por ciento anual. ¿Te gustaría conocer la zona?"
 - Sin enganche: "INFONAVIT financia hasta el cien por ciento. ¿Ya tienes tu precalificación?"
@@ -424,30 +566,46 @@ CASOS ESPECIALES:
 - Pide humano: "Te comunico con tu asesor. También puedes escribirnos por WhatsApp"
 - No sabes algo: usa la herramienta adecuada`;
 
-        // 5. Actualizar el LLM con tools + prompt
+        // 6. Actualizar el LLM con tools + prompt
         const updateResult = await retell.updateLlm(llmId, {
           general_tools: saraTools,
           general_prompt: saraPrompt
         });
 
-        // 6. Configurar begin_message en el agente para que SARA conteste inmediatamente
+        // 7. Configurar begin_message + voz en el agente
         // Usa {{greeting}} que viene del lookup webhook
-        const agentUpdate = await retell.updateAgent(agent.agent_id, {
+        // voice_id se puede pasar como query param para overridear
+        const voiceIdParam = url.searchParams.get('voice_id') || '';
+        const agentUpdates: Record<string, any> = {
           begin_message: '{{greeting}}',
           webhook_url: 'https://sara-backend.edson-633.workers.dev/webhook/retell'
-        });
+        };
+        if (voiceIdParam) {
+          agentUpdates.voice_id = voiceIdParam;
+        }
+        const agentUpdate = await retell.updateAgent(agent.agent_id, agentUpdates);
 
         if (updateResult.success) {
           return corsResponse(JSON.stringify({
             success: true,
-            message: `${saraTools.length} tools + prompt inbound + begin_message configurados`,
+            message: `${saraTools.length} tools + prompt dinámico + begin_message configurados`,
             agent_id: agent.agent_id,
             llm_id: llmId,
             tools: saraTools.map(t => ({ name: t.name, type: t.type })),
             previous_tools_count: existingTools.length,
             prompt_length: saraPrompt.length,
             begin_message: '{{greeting}}',
-            agent_update: agentUpdate.success ? 'ok' : agentUpdate.error
+            voice_id: voiceIdParam || '(sin cambio)',
+            agent_update: agentUpdate.success ? 'ok' : agentUpdate.error,
+            precios_dinamicos: {
+              monte_verde: precioMonteVerde < Infinity ? `$${(precioMonteVerde/1000000).toFixed(2)}M` : 'N/A',
+              los_encinos: precioEncinos < Infinity ? `$${(precioEncinos/1000000).toFixed(2)}M` : 'N/A',
+              miravalle: precioMiravalle < Infinity ? `$${(precioMiravalle/1000000).toFixed(2)}M` : 'N/A',
+              paseo_colorines: precioColorines < Infinity ? `$${(precioColorines/1000000).toFixed(2)}M` : 'N/A',
+              andes: precioAndes < Infinity ? `$${(precioAndes/1000000).toFixed(2)}M` : 'N/A',
+              distrito_falco: precioFalco < Infinity ? `$${(precioFalco/1000000).toFixed(2)}M` : 'N/A',
+              minimo_global: `$${(precioMinimoGlobal/1000000).toFixed(2)}M`
+            }
           }));
         } else {
           return corsResponse(JSON.stringify({
@@ -486,6 +644,23 @@ CASOS ESPECIALES:
 
         const defaultGreeting = '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?';
 
+        // Calcular precio mínimo global dinámico
+        const { data: minPriceProps } = await supabase.client
+          .from('properties')
+          .select('price_equipped, price')
+          .order('price_equipped', { ascending: true })
+          .limit(10);
+        let precioDesdeGlobal = '$1.5 millones';
+        if (minPriceProps && minPriceProps.length > 0) {
+          const minP = minPriceProps.reduce((min: number, p: any) => {
+            const precio = p.price_equipped || p.price || 0;
+            return precio > 0 && precio < min ? precio : min;
+          }, Infinity);
+          if (minP < Infinity) {
+            precioDesdeGlobal = `$${(minP / 1000000).toFixed(1)} millones`;
+          }
+        }
+
         if (!callerPhone) {
           console.log('📞 RETELL LOOKUP: No se recibió número de teléfono');
           return new Response(JSON.stringify({
@@ -496,7 +671,7 @@ CASOS ESPECIALES:
               greeting: defaultGreeting,
               desarrollo_interes: '',
               vendedor_nombre: 'un asesor',
-              precio_desde: '$1.5 millones'
+              precio_desde: precioDesdeGlobal
             }
           }), {
             status: 200,
@@ -585,7 +760,7 @@ CASOS ESPECIALES:
               greeting: defaultGreeting,
               desarrollo_interes: '',
               vendedor_nombre: 'un asesor',
-              precio_desde: '$1.5 millones'
+              precio_desde: precioDesdeGlobal
             }
           }), {
             status: 200,
@@ -602,7 +777,7 @@ CASOS ESPECIALES:
             greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?',
             desarrollo_interes: '',
             vendedor_nombre: 'un asesor',
-            precio_desde: '$1.5 millones'
+            precio_desde: precioDesdeGlobal
           }
         }), {
           status: 200,
@@ -635,8 +810,26 @@ CASOS ESPECIALES:
           .ilike('development', `%${desarrollo}%`);
 
         if (!props || props.length === 0) {
+          // Construir lista dinámica de desarrollos con precios mínimos de DB
+          const { data: allDevProps } = await supabase.client
+            .from('properties')
+            .select('development, price_equipped, price');
+          const devMap = new Map<string, number>();
+          if (allDevProps) {
+            for (const p of allDevProps) {
+              const dev = p.development || '';
+              const precio = p.price_equipped || p.price || 0;
+              if (dev && precio > 0) {
+                const current = devMap.get(dev) || Infinity;
+                if (precio < current) devMap.set(dev, precio);
+              }
+            }
+          }
+          const devList = Array.from(devMap.entries())
+            .map(([dev, price]) => `${dev} (desde $${(price/1000000).toFixed(1)}M)`)
+            .join(', ');
           return new Response(JSON.stringify({
-            result: `No encontré información de "${desarrollo}". Los desarrollos disponibles son: Monte Verde (desde $1.6M), Los Encinos (desde $3M), Miravalle (desde $3M), Distrito Falco (desde $3.7M), Andes (desde $1.6M), Paseo Colorines (desde $3M), y terrenos en Citadella del Nogal.`
+            result: `No encontré información de "${desarrollo}". Los desarrollos disponibles son: ${devList || 'Monte Verde, Los Encinos, Miravalle, Distrito Falco, Andes, Paseo Colorines'}, y terrenos en Citadella del Nogal.`
           }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
 
