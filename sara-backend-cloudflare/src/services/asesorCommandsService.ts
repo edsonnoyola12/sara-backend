@@ -163,9 +163,9 @@ export class AsesorCommandsService {
     }
 
     // ━━━ RECHAZADO [lead] [motivo] ━━━
-    const rechazadoMatch = msg.match(/^rechazado\s+(\S+)\s+(.+)$/i) || msg.match(/^no aprobado\s+(\S+)\s+(.+)$/i);
+    const rechazadoMatch = msg.match(/^rechazado\s+(\S+)(?:\s+(.+))?$/i) || msg.match(/^no aprobado\s+(\S+)(?:\s+(.+))?$/i);
     if (rechazadoMatch) {
-      return { action: 'call_handler', handlerName: 'asesorRechazado', handlerParams: { query: rechazadoMatch[1], motivo: rechazadoMatch[2] } };
+      return { action: 'call_handler', handlerName: 'asesorRechazado', handlerParams: { query: rechazadoMatch[1], motivo: rechazadoMatch[2] || 'No especificado' } };
     }
 
     // ━━━ ADELANTE / AVANZAR [lead] ━━━

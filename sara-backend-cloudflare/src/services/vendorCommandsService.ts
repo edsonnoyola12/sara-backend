@@ -525,6 +525,14 @@ export class VendorCommandsService {
       return { matched: true, handlerName: 'vendedorPropiedades' };
     }
 
+    // ═══ ON/OFF (disponibilidad del vendedor) ═══
+    if (/^(?:on|disponible|activo)$/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorOnOff', handlerParams: { estado: true } };
+    }
+    if (/^(?:off|no disponible|ocupado|inactivo)$/i.test(msg)) {
+      return { matched: true, handlerName: 'vendedorOnOff', handlerParams: { estado: false } };
+    }
+
     // ═══ DISPONIBILIDAD ═══
     if (/^(?:disponibilidad|agenda\s+disponible|horarios\s+disponibles|slots)$/i.test(msg)) {
       return { matched: true, handlerName: 'vendedorDisponibilidad' };

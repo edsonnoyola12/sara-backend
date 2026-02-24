@@ -114,7 +114,7 @@ export class CEOCommandsService {
 
     // ═══ NOTA - Agregar nota a lead ═══
     // Formato: "nota Juan llamé y no contestó" o "nota 4921234567 interesado en Encinos"
-    const matchNota = mensaje.match(/^nota\s+([a-záéíóúñü\d]+)\s+(.+)$/i);
+    const matchNota = mensaje.match(/^nota\s+([a-záéíóúñü\d]+):?\s+(.+)$/i);
     if (matchNota) {
       return {
         action: 'call_handler',

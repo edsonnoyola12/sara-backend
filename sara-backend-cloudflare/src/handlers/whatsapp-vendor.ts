@@ -2140,6 +2140,9 @@ export async function routeVendorCommand(ctx: HandlerContext, handler: any,
     case 'vendedorMisHot':
       await vendedorMisHot(ctx, handler, from, vendedor, nombreVendedor);
       break;
+    case 'vendedorOnOff':
+      await vendedorOnOff(ctx, handler, from, vendedor, nombreVendedor, params.estado);
+      break;
     case 'vendedorDisponibilidad':
       await vendedorDisponibilidad(ctx, handler, from, vendedor, nombreVendedor);
       break;
@@ -5765,6 +5768,25 @@ export async function vendedorMisHot(ctx: HandlerContext, handler: any, from: st
   } catch (error) {
     console.error('Error en vendedorMisHot:', error);
     await ctx.twilio.sendWhatsAppMessage(from, 'Error obteniendo leads HOT');
+  }
+}
+
+// ON/OFF: Toggle disponibilidad del vendedor
+export async function vendedorOnOff(ctx: HandlerContext, handler: any, from: string, vendedor: any, nombre: string, estado: boolean): Promise<void> {
+  try {
+    await ctx.supabase.client
+      .from('team_members')
+      .update({ is_on_duty: estado })
+      .eq('id', vendedor.id);
+
+    if (estado) {
+      await ctx.twilio.sendWhatsAppMessage(from, `✅ *Disponibilidad activada*\n\n${nombre}, ahora recibirás nuevos leads y notificaciones.\n\n💡 Escribe *OFF* para pausar.`);
+    } else {
+      await ctx.twilio.sendWhatsAppMessage(from, `⏸️ *Disponibilidad pausada*\n\n${nombre}, no recibirás nuevos leads por ahora.\n\n💡 Escribe *ON* cuando estés listo.`);
+    }
+  } catch (error) {
+    console.error('Error en vendedorOnOff:', error);
+    await ctx.twilio.sendWhatsAppMessage(from, 'Error al cambiar disponibilidad.');
   }
 }
 
