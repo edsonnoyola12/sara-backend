@@ -547,8 +547,9 @@ export class WhatsAppHandler {
         // Razón: Vendemos CASAS, no créditos. El crédito es una herramienta para cerrar la venta.
         // Las preguntas de crédito ahora las maneja SARA/Claude con instrucciones de redirigir a VISITA.
         // Si el lead estaba en credit_flow, limpiar ese status para que vuelva al flujo normal.
+        let enFlujoCredito = false;
         if (!esTeamMemberCredito && lead?.id) {
-          const enFlujoCredito = await creditService.estaEnFlujoCredito(lead.id);
+          enFlujoCredito = await creditService.estaEnFlujoCredito(lead.id);
           if (enFlujoCredito) {
             console.log(`🏦 Lead ${lead.id} estaba en credit_flow - limpiando para flujo normal`);
             await this.supabase.client.from('leads').update({ status: 'contacted' }).eq('id', lead.id).eq('status', 'credit_flow');

@@ -819,14 +819,14 @@ Te esperamos en nuestra oficina. Si tienes algún cambio, avísame 😊
         }
 
         // Si solo da hora o solo fecha, pedir lo que falta
-        if (fechaHora.hora && !fechaHora.fecha) {
+        if (fechaHoraCita.hora && !fechaHoraCita.fecha) {
           return {
             respuesta: `¡Perfecto! ¿Y qué día te gustaría venir? 📅`,
             context
           };
         }
 
-        if (fechaHora.fecha && !fechaHora.hora) {
+        if (fechaHoraCita.fecha && !fechaHoraCita.hora) {
           return {
             respuesta: `¡${fechaHora.fecha} me parece bien! ¿A qué hora te acomoda? ⏰
 

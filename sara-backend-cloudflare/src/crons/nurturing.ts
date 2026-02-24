@@ -1788,9 +1788,9 @@ Han pasado 2 meses desde tu compra en *${desarrollo}* y queríamos saber cómo v
 Estamos aquí para lo que necesites 😊`;
 
       try {
-        if (puedeEnviarMensajeAutomatico(cliente)) {
+        if (puedeEnviarMensajeAutomatico(supabase, cliente.id)) {
           await meta.sendWhatsAppMessage(cliente.phone!, mensaje);
-          registrarMensajeAutomatico(cliente);
+          registrarMensajeAutomatico(supabase, cliente.id);
           enviados++;
 
           // Marcar como enviado

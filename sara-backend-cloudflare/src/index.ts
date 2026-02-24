@@ -976,7 +976,7 @@ export default {
                     if (enFlujoCredito) {
                       console.log(`🏦 Lead ${lead.id} en flujo de crédito - procesando documento`);
 
-                      const resultado = await creditService.procesarRespuesta(lead.id, caption, mediaUrl);
+                      const resultado = await creditService.procesarRespuesta(lead.id, caption);
 
                       if (resultado) {
                         await meta.sendWhatsAppMessage(from, resultado.respuesta);
@@ -2214,13 +2214,16 @@ export default {
       // Track error in KV for rate monitoring
       ctx.waitUntil(trackError(env, 'fetch_error'));
 
-      // Persist to error_logs
-      ctx.waitUntil(logErrorToDB(supabase, 'fetch_error', error instanceof Error ? error.message : String(error), {
-        severity: 'critical',
-        source: `fetch:${url.pathname}`,
-        stack: error instanceof Error ? error.stack : undefined,
-        context: { request_id: requestId, path: url.pathname, method: request.method }
-      }));
+      // Persist to error_logs (create new supabase instance since the one in try block is out of scope)
+      try {
+        const errorSupabase = new SupabaseService(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
+        ctx.waitUntil(logErrorToDB(errorSupabase, 'fetch_error', error instanceof Error ? error.message : String(error), {
+          severity: 'critical',
+          source: `fetch:${url.pathname}`,
+          stack: error instanceof Error ? error.stack : undefined,
+          context: { request_id: requestId, path: url.pathname, method: request.method }
+        }));
+      } catch (_) { /* ignore - best effort error logging */ }
 
       return corsResponse(JSON.stringify({
         error: 'Internal Server Error',
@@ -2643,7 +2646,7 @@ export default {
     // BACKUP SEMANAL R2 - Domingos 7 PM MX (1 AM UTC lunes)
     // Exporta conversations + leads activos como JSONL
     // ═══════════════════════════════════════════════════════════
-    if (event.cron === '0 1 * * *' && mexicoDay === 0) { // domingo
+    if (event.cron === '0 1 * * *' && dayOfWeek === 0) { // domingo
       try {
         if (env.SARA_BACKUPS) {
           console.log('💾 Iniciando backup semanal R2...');
@@ -3498,7 +3501,7 @@ export default {
             if (breach.vendorPhone) {
               try {
                 await meta.sendWhatsAppMessage(breach.vendorPhone,
-                  `⏱️ *SLA Alert:* Lead *${breach.leadName || 'Sin nombre'}* lleva ${breach.waitMinutes || '?'} min sin respuesta.\n\n` +
+                  `⏱️ *SLA Alert:* Lead *${breach.leadName || 'Sin nombre'}* lleva ${breach.waitingMinutes || '?'} min sin respuesta.\n\n` +
                   `📱 Responde cuanto antes para mantener tu SLA.`
                 );
               } catch (alertErr) { console.error('⚠️ SLA alert send error:', alertErr); }

@@ -844,7 +844,7 @@ export class CEOCommandsService {
         // ═══ CALCULADORA DE FINANCIAMIENTO ═══
         case 'calculadoraFinanciamiento': {
           const financingService = new FinancingCalculatorService(this.supabase);
-          const amountText = handlerParams?.amount || '';
+          const amountText = params?.amount || '';
 
           // If amount provided, do a quick estimate
           if (amountText) {
@@ -873,7 +873,7 @@ export class CEOCommandsService {
         // ═══ COMPARADOR DE PROPIEDADES ═══
         case 'compararPropiedades': {
           const comparatorService = new PropertyComparatorService(this.supabase);
-          const query = handlerParams?.query || '';
+          const query = params?.query || '';
 
           if (!query) {
             const msg = `🏠 *COMPARADOR DE PROPIEDADES*\n\n` +

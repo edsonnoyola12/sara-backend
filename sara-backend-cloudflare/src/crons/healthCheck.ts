@@ -399,7 +399,7 @@ export async function enviarDigestoErroresDiario(
 
     mensaje += `\n_Ver detalle en CRM_`;
 
-    await meta.sendWhatsAppMessage(DEV_PHONE, mensaje);
+    await meta.sendWhatsAppMessage(OWNER_PHONE, mensaje);
     console.log(`📊 Error digest sent to Dev (Edson): ${errors.length} errors`);
   } catch (e) {
     console.error('Error sending error digest:', e);

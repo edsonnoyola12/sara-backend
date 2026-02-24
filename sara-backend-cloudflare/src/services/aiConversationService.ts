@@ -15,7 +15,7 @@ import { CalendarService } from './calendar';
 import { ClaudeService } from './claude';
 import { scoringService } from './leadScoring';
 import { PromocionesService } from './promocionesService';
-import { HORARIOS } from '../handlers/constants';
+import { HORARIOS, parsearDesarrollosYModelos } from '../handlers/constants';
 import { I18nService, SupportedLanguage, createI18n } from './i18nService';
 import { TTSService, createTTSService, shouldSendAsAudio } from './ttsService';
 import { getSaludoPorHora, generarContextoPersonalizado, getBotonesContextuales, getDesarrollosParaLista } from '../utils/uxHelpers';
@@ -5387,7 +5387,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             // ═══ GPS INDEPENDIENTE - Enviar aunque recursos ya se enviaron ═══
             if (analysis.send_gps === true) {
               console.log('📍 GPS solicitado (recursos ya enviados, enviando GPS solo)');
-              const devParaGPS = desarrolloInteres || desarrollosLista[0] || '';
+              const devParaGPS = desarrolloInteres || '';
               if (devParaGPS) {
                 const propGPS = properties.find((p: any) => {
                   const nombreProp = (p.development || p.name || '').toLowerCase().trim();
