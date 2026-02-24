@@ -29,6 +29,10 @@ interface AIAnalysis {
   send_gps?: boolean;
   send_video_desarrollo?: boolean;
   send_contactos?: boolean;
+  send_brochure?: boolean;
+  send_video?: boolean;
+  send_matterport?: boolean;
+  contactar_vendedor?: boolean;
   propiedad_sugerida?: string;
   pedir_presupuesto?: boolean;
   pedir_fecha_cita?: boolean;
@@ -40,6 +44,7 @@ interface AIAnalysis {
   detected_language?: SupportedLanguage; // Idioma detectado del mensaje (es/en)
   phase?: string;
   phaseNumber?: number;
+  secondary_intents?: string[];
 }
 
 // Handler reference para acceder a métodos auxiliares
@@ -5747,7 +5752,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
     );
     
     // Detectar modalidad
-    const modalidades = [
+    const modalidades: Array<{ nombre: string; codigos: string[]; tipo?: string }> = [
       { nombre: 'Telefónica', codigos: ['telefon', 'llamada', 'llamar', 'celular', '1'] },
       { nombre: 'Videollamada', codigos: ['zoom', 'videollamada', 'video', 'meet', 'teams', '2'] },
       { nombre: 'Presencial', codigos: ['presencial', 'oficina', 'persona', 'fisico', 'física', '3'] }
@@ -5903,7 +5908,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
     // Banco: si regex no detectó pero OpenAI sí
     if (!bancoDetectado && analysis.extracted_data?.banco_preferido) {
       const bancoAI = analysis.extracted_data?.banco_preferido;
-      bancoDetectado = bancosDisponibles.find(b => b.nombre.toLowerCase() === bancoAI.toLowerCase()) || { nombre: bancoAI };
+      bancoDetectado = bancosDisponibles.find(b => b.nombre.toLowerCase() === bancoAI.toLowerCase()) || { nombre: bancoAI, codigos: [] as string[] };
       console.log('📌 ¤“ Banco detectado por OpenAI:', bancoAI);
     }
     
@@ -5929,11 +5934,11 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
     if (!modalidadDetectada && analysis.extracted_data?.modalidad_contacto) {
       const modAI = (analysis.extracted_data?.modalidad_contacto || '').toLowerCase();
       if (modAI.includes('telefon') || modAI === 'telefonica') {
-        modalidadDetectada = { nombre: 'Telefónica', tipo: 'llamada' };
+        modalidadDetectada = { nombre: 'Telefónica', codigos: [], tipo: 'llamada' };
       } else if (modAI.includes('video') || modAI === 'videollamada') {
-        modalidadDetectada = { nombre: 'Videollamada', tipo: 'zoom' };
+        modalidadDetectada = { nombre: 'Videollamada', codigos: [], tipo: 'zoom' };
       } else if (modAI.includes('presencial') || modAI === 'oficina') {
-        modalidadDetectada = { nombre: 'Presencial', tipo: 'oficina' };
+        modalidadDetectada = { nombre: 'Presencial', codigos: [], tipo: 'oficina' };
       }
       if (modalidadDetectada) console.log('📌 ¤“ Modalidad detectada por OpenAI:', modalidadDetectada.nombre);
     }

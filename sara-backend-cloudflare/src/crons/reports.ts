@@ -10,7 +10,7 @@
  */
 
 import { SupabaseService } from '../services/supabase';
-import { MetaWhatsAppService } from '../services/metaWhatsAppService';
+import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { enviarMensajeTeamMember, EnviarMensajeTeamResult } from '../utils/teamMessaging';
 import { parseNotasSafe, formatVendorFeedback } from '../handlers/whatsapp-utils';
 

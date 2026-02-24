@@ -72,7 +72,7 @@ export class ClaudeService {
             throw error;
           }
 
-          return response.json();
+          return response.json() as Promise<any>;
         },
         {
           ...RetryPresets.anthropic,

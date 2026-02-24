@@ -121,6 +121,9 @@ interface Env {
   RETELL_PHONE_NUMBER?: string;
   OPENAI_API_KEY?: string;
   VEO_API_KEY?: string;
+  GEMINI_API_KEY?: string;
+  SARA_BACKUPS?: R2Bucket;
+  META_WHATSAPP_BUSINESS_ID?: string;
 }
 
 type CorsResponseFn = (body: string | null, status?: number, contentType?: string, request?: Request) => Response;
@@ -433,11 +436,11 @@ export async function handleTestRoutes(
         const callDetails = await retell.getCallDetails(callId);
         if (!callDetails) return corsResponse(JSON.stringify({ error: 'Call not found', callId }));
 
-        const isInbound = callDetails.direction === 'inbound';
+        const isInbound = (callDetails as any).direction === 'inbound';
         const leadPhone = isInbound
           ? (callDetails as any).from_number?.replace('+', '')
           : (callDetails as any).to_number?.replace('+', '');
-        debug.steps.push({ step: 'call_details', leadPhone, duration_ms: callDetails.duration_ms, direction: callDetails.direction });
+        debug.steps.push({ step: 'call_details', leadPhone, duration_ms: callDetails.duration_ms, direction: (callDetails as any).direction });
 
         // 2. Buscar lead
         const { data: lead } = await supabase.client
@@ -458,11 +461,11 @@ export async function handleTestRoutes(
         // 4. Detectar desarrollo del transcript
         let desarrolloDelTranscript = '';
         const desarrollosConocidos = ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano'];
-        const transcript = callDetails.transcript;
+        const transcript = callDetails.transcript as any;
         if (transcript) {
           let userMessages: string[] = [];
           if (typeof transcript === 'string') {
-            const lines = transcript.split('\n');
+            const lines = (transcript as string).split('\n');
             for (const line of lines) {
               if (line.startsWith('User:')) userMessages.push(line.substring(5).trim().toLowerCase());
             }
@@ -2460,8 +2463,8 @@ export async function handleTestRoutes(
           desarrollo_detectado: analysis.desarrollo_cita || analysis.extracted_data?.desarrollo,
           // Flags de recursos (estos activan envío automático en producción)
           send_gps: analysis.send_gps || false,
-          send_video: analysis.send_video || false,
-          send_brochure: analysis.send_brochure || false,
+          send_video: (analysis as any).send_video || false,
+          send_brochure: (analysis as any).send_brochure || false,
           send_video_desarrollo: analysis.send_video_desarrollo || false,
           phase: analysis.phase || 'unknown',
           phaseNumber: analysis.phaseNumber || 0,
@@ -4212,7 +4215,7 @@ Mensaje: ${mensaje}`;
         }), 400);
       }
 
-      const approvalService = new FollowupApprovalService(supabase);
+      const approvalService = new FollowupApprovalService(supabase) as any;
       const result = await approvalService.proponerFollowup(
         leadId,
         lead.assigned_to,
@@ -5132,7 +5135,7 @@ Mensaje: ${mensaje}`;
 
         if (testLeadCreated) {
           // Simular la actualización de nombre (como lo hace agendar-cita handler)
-          const nuevoNombre = 'Test E2E Retell';
+          const nuevoNombre: string = 'Test E2E Retell';
           if (nuevoNombre !== 'Lead Telefónico' && nuevoNombre !== 'Lead') {
             await supabase.client.from('leads').update({ name: nuevoNombre }).eq('id', testLeadCreated.id);
           }

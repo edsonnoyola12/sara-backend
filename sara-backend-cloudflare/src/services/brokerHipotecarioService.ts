@@ -194,7 +194,7 @@ RESPONDE EN JSON:
         };
       }
 
-      const data = await response.json();
+      const data = await response.json() as any;
       const content = data.choices?.[0]?.message?.content || '';
       
       const jsonMatch = content.match(/\{[\s\S]*\}/);

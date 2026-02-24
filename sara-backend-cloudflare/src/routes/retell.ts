@@ -998,7 +998,7 @@ CASOS ESPECIALES:
         const { data: properties } = await supabase.client.from('properties').select('*');
 
         const { AppointmentService } = await import('../services/appointmentService');
-        const { CalendarService } = await import('../services/calendarService');
+        const { CalendarService } = await import('../services/calendar');
         const calendarService = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
         const appointmentService = new AppointmentService(supabase, calendarService, null as any);
 
@@ -1034,7 +1034,7 @@ CASOS ESPECIALES:
 
           // 2. Enviar confirmación por WhatsApp al lead
           try {
-            const { MetaWhatsAppService } = await import('../services/metaWhatsAppService');
+            const { MetaWhatsAppService } = await import('../services/meta-whatsapp');
             const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
 
             // Normalizar teléfono para WhatsApp
@@ -1183,7 +1183,7 @@ CASOS ESPECIALES:
         }
 
         const { AppointmentService } = await import('../services/appointmentService');
-        const { CalendarService } = await import('../services/calendarService');
+        const { CalendarService } = await import('../services/calendar');
         const calendarService = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
         const appointmentService = new AppointmentService(supabase, calendarService, null as any);
 
@@ -1290,7 +1290,7 @@ CASOS ESPECIALES:
         const { data: properties } = await supabase.client.from('properties').select('*');
 
         const { AppointmentService } = await import('../services/appointmentService');
-        const { CalendarService } = await import('../services/calendarService');
+        const { CalendarService } = await import('../services/calendar');
         const calendarService = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
         const appointmentService = new AppointmentService(supabase, calendarService, null as any);
 
@@ -1386,7 +1386,7 @@ CASOS ESPECIALES:
           whatsappPhone = '521' + whatsappPhone.substring(2);
         }
 
-        const { MetaWhatsAppService } = await import('../services/metaWhatsAppService');
+        const { MetaWhatsAppService } = await import('../services/meta-whatsapp');
         const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
 
         if (tipo === 'ubicacion' || tipo === 'gps') {

@@ -452,7 +452,7 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
         // ━━━ FALLBACK 2: Intentar comandos de vendedor ━━━
         console.log('📤 CEO: Comando no es asesor, intentando comandos de vendedor...');
         const vendorService = new VendorCommandsService(ctx.supabase);
-        const vendorResult = vendorService.detectCommand(mensaje, nombreCEO);
+        const vendorResult = (vendorService as any).detectCommand(mensaje, nombreCEO);
 
         if (vendorResult.action === 'call_handler') {
           console.log('📤 CEO: Comando reconocido como vendedor:', vendorResult.handlerName);

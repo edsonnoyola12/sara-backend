@@ -388,7 +388,7 @@ export async function enviarBriefingSupervision(supabase: SupabaseService, meta:
       .select('id, name')
       .eq('role', 'vendedor')
       .eq('active', true);
-    const vendedorMap = new Map((vendedores || []).map(v => [v.id, v.name]));
+    const vendedorMap = new Map<string, string>((vendedores || []).map(v => [v.id as string, v.name as string]));
 
     // ═══════════════════════════════════════════════════════════════════
     // 1. LEADS NUEVOS SIN CONTACTAR (+24h)
@@ -750,7 +750,7 @@ export async function enviarBriefingSupervisionTest(supabase: SupabaseService, m
       .select('id, name')
       .eq('role', 'vendedor')
       .eq('active', true);
-    const vendedorMap = new Map((vendedores || []).map(v => [v.id, v.name]));
+    const vendedorMap = new Map<string, string>((vendedores || []).map(v => [v.id as string, v.name as string]));
 
     // 1. LEADS NUEVOS SIN CONTACTAR (+24h)
     const { data: leadsSinContactar } = await supabase.client
@@ -1387,7 +1387,7 @@ export async function seguimientoPostVenta(supabase: SupabaseService, meta: Meta
       .select('id, name, phone')
       .eq('role', 'vendedor')
       .eq('active', true);
-    const vendedorMap = new Map((vendedores || []).map(v => [v.id, v]));
+    const vendedorMap = new Map<string, any>((vendedores || []).map(v => [v.id as string, v]));
 
     let enviados = 0;
 

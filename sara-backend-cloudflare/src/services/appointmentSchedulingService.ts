@@ -1,5 +1,5 @@
 import { SupabaseService } from './supabase';
-import { GoogleCalendarService } from './googleCalendar';
+import { CalendarService as GoogleCalendarService } from './calendar';
 import { parseCancelarCitaCommand, parseReagendarCommand, formatearFechaLegible, formatearHoraLegible } from '../handlers/appointmentService';
 import { parseFechaISO, parseHoraISO } from '../handlers/dateParser';
 import { parseHora } from '../utils/vendedorParsers';

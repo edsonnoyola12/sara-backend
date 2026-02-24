@@ -432,7 +432,7 @@ export class MetaWhatsAppService {
       throw retryError;
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     if (!response.ok) {
       console.error('❌ Meta WA error:', JSON.stringify(data));
       throw new Error(data.error?.message || 'Error enviando mensaje');
@@ -540,7 +540,7 @@ export class MetaWhatsAppService {
       },
       body: JSON.stringify(payload)
     });
-    const data = await response.json();
+    const data = await response.json() as any;
 
     // 📊 Tracking de imagen enviada
     const messageId = data.messages?.[0]?.id;
@@ -578,7 +578,7 @@ export class MetaWhatsAppService {
       },
       body: JSON.stringify(payload)
     });
-    const data = await response.json();
+    const data = await response.json() as any;
 
     // 📊 Tracking de video enviado
     const messageId = data.messages?.[0]?.id;
@@ -622,7 +622,7 @@ export class MetaWhatsAppService {
       body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
+    const data = await response.json() as any;
     if (!response.ok) {
       console.error('❌ Error enviando documento:', JSON.stringify(data));
       throw new Error(data.error?.message || 'Error enviando documento');
@@ -668,7 +668,7 @@ export class MetaWhatsAppService {
       body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
+    const data = await response.json() as any;
     if (!response.ok) {
       console.error('❌ Error enviando video:', JSON.stringify(data));
       throw new Error(data.error?.message || 'Error enviando video');
@@ -709,7 +709,7 @@ export class MetaWhatsAppService {
       body: formData
     });
 
-    const data = await response.json();
+    const data = await response.json() as any;
     if (!response.ok) {
       console.error('❌ Error subiendo video:', JSON.stringify(data));
       throw new Error(data.error?.message || 'Error subiendo video');
@@ -756,7 +756,7 @@ export class MetaWhatsAppService {
       body: formData
     });
 
-    const data = await response.json();
+    const data = await response.json() as any;
     if (!response.ok) {
       console.error('❌ Error subiendo audio:', JSON.stringify(data));
       throw new Error(data.error?.message || 'Error subiendo audio');
@@ -791,7 +791,7 @@ export class MetaWhatsAppService {
       body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
+    const data = await response.json() as any;
     if (!response.ok) {
       console.error('❌ Error enviando audio:', JSON.stringify(data));
       throw new Error(data.error?.message || 'Error enviando audio');
@@ -839,7 +839,7 @@ export class MetaWhatsAppService {
       body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
+    const data = await response.json() as any;
     if (!response.ok) {
       console.error('❌ Error enviando audio:', JSON.stringify(data));
       throw new Error(data.error?.message || 'Error enviando audio');
@@ -925,7 +925,7 @@ export class MetaWhatsAppService {
       },
       body: JSON.stringify(payload)
     });
-    const data = await response.json();
+    const data = await response.json() as any;
 
     // 📊 Tracking de botones enviados
     const messageId = data.messages?.[0]?.id;
@@ -1002,7 +1002,7 @@ export class MetaWhatsAppService {
       },
       body: JSON.stringify(payload)
     });
-    const data = await response.json();
+    const data = await response.json() as any;
 
     // 📊 Tracking de lista enviada
     const messageId = data.messages?.[0]?.id;
@@ -1039,7 +1039,7 @@ export class MetaWhatsAppService {
       },
       body: JSON.stringify(payload)
     });
-    const data = await response.json();
+    const data = await response.json() as any;
 
     // 📊 Tracking de ubicación enviada
     const messageId = data.messages?.[0]?.id;
@@ -1247,7 +1247,7 @@ export class MetaWhatsAppService {
       throw retryError;
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     if (!response.ok) {
       console.error('❌ Error enviando template:', JSON.stringify(data));
       throw new Error(data.error?.message || 'Error enviando template');

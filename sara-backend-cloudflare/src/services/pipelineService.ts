@@ -176,7 +176,7 @@ export class PipelineService {
       .select('id, name')
       .eq('active', true);
 
-    const teamMap = new Map(teamMembers?.map(t => [t.id, t.name]) || []);
+    const teamMap = new Map<string, string>(teamMembers?.map((t: any) => [t.id, t.name]) || []);
 
     if (!leads || leads.length === 0) {
       return this.getEmptyPipelineSummary(timeframeDays);

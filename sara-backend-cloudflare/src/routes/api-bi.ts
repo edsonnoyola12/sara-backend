@@ -2562,7 +2562,7 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
     if (url.pathname === '/api/cache' || url.pathname === '/cache') {
       // GET - Ver stats del cache
       if (request.method === 'GET') {
-        const info = cache.getCacheInfo();
+        const info = (cache as any).getCacheInfo();
         return corsResponse(JSON.stringify({
           success: true,
           ...info
@@ -2574,7 +2574,7 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
         const authError = checkApiAuth(request, env);
         if (authError) return authError;
 
-        const result = await cache.warmup(supabase);
+        const result = await (cache as any).warmup(supabase);
         return corsResponse(JSON.stringify({
           success: result.success,
           message: result.success ? 'Cache precalentado' : 'Error en warmup',

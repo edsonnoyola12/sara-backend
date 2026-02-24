@@ -230,6 +230,7 @@ Escribe el nombre del banco o "no sé" si quieres que te oriente.`,
     context: CreditFlowContext;
     accion?: 'conectar_asesor';
     datos?: any;
+    passToAI?: boolean;
   } | null> {
     const context = await this.obtenerContexto(leadId);
     if (!context) return null;

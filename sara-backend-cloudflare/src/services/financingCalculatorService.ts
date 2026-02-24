@@ -314,8 +314,8 @@ export class FinancingCalculatorService {
     const cheapestMonthly = results[0]?.bank || 'N/A';
     const cheapestTotal = [...results].sort((a, b) => a.total_payment - b.total_payment)[0]?.bank || 'N/A';
     const fastestApproval = [...results].sort((a, b) => {
-      const aBank = Object.values(BANK_CONFIGS).find(b => b.name === a.bank);
-      const bBank = Object.values(BANK_CONFIGS).find(b => b.name === b.bank);
+      const aBank = Object.values(BANK_CONFIGS).find((b: any) => b.name === a.bank);
+      const bBank = Object.values(BANK_CONFIGS).find((b: any) => b.name === b.bank);
       return (aBank?.processing_days || 99) - (bBank?.processing_days || 99);
     })[0]?.bank || 'N/A';
 

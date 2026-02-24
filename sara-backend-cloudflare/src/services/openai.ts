@@ -44,9 +44,9 @@ export class OpenAIService {
       throw new Error(`OpenAI error: ${response.status} - ${JSON.stringify(errorData)}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     const content = data.choices?.[0]?.message?.content;
-    
+
     if (!content) {
       throw new Error('OpenAI returned empty response');
     }
@@ -88,9 +88,9 @@ export class OpenAIService {
       throw new Error(`OpenAI error: ${response.status} - ${JSON.stringify(errorData)}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     const content = data.choices?.[0]?.message?.content;
-    
+
     if (!content) {
       throw new Error('OpenAI returned empty response');
     }

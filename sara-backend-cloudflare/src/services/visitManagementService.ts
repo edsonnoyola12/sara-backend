@@ -130,7 +130,7 @@ export class VisitManagementService {
       .select('id, name')
       .in('id', vendorIds);
 
-    const vendorMap = new Map(vendors?.map(v => [v.id, v.name]) || []);
+    const vendorMap = new Map<string, string>(vendors?.map((v: any) => [v.id, v.name]) || []);
 
     return appointments.map(a => this.mapToVisit(a, vendorMap));
   }
@@ -152,7 +152,7 @@ export class VisitManagementService {
       .select('id, name')
       .in('id', vendorIds);
 
-    const vendorMap = new Map(vendors?.map(v => [v.id, v.name]) || []);
+    const vendorMap = new Map<string, string>(vendors?.map((v: any) => [v.id, v.name]) || []);
 
     return appointments.map(a => this.mapToVisit(a, vendorMap));
   }
@@ -203,7 +203,7 @@ export class VisitManagementService {
       .select('id, name')
       .eq('active', true);
 
-    const vendorMap = new Map(vendors?.map(v => [v.id, v.name]) || []);
+    const vendorMap = new Map<string, string>(vendors?.map((v: any) => [v.id, v.name]) || []);
 
     const visits = (appointments || []).map(a => this.mapToVisit(a, vendorMap));
 

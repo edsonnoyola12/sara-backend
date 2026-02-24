@@ -313,11 +313,11 @@ export async function iniciarBroadcastForCEO(ctx: HandlerContext, phone: string,
 export async function enviarASegmentoForCEO(ctx: HandlerContext, phone: string, body: string, usuario: any): Promise<void> {
   try {
     console.log('📤 BROADCAST (CEO): Iniciando enviarASegmento');
-    const agenciaService = new AgenciaReportingService(ctx.supabase);
-    const queueService = new BroadcastQueueService(ctx.supabase);
+    const agenciaService = new AgenciaReportingService(ctx.supabase) as any;
+    const queueService = new BroadcastQueueService(ctx.supabase) as any;
 
     // Parsear el comando
-    const parsed = agenciaService.parseEnvioSegmento(body);
+    const parsed: any = agenciaService.parseEnvioSegmento(body);
     if (!parsed) {
       await ctx.meta.sendWhatsAppMessage(phone,
         `⚠️ Formato incorrecto.\n\nUsa: *enviar a [segmento]: [mensaje]*\n\nEjemplo: enviar a hot: Hola {nombre}, tenemos promoción!`
@@ -333,13 +333,13 @@ export async function enviarASegmentoForCEO(ctx: HandlerContext, phone: string, 
     }
 
     // Agregar a cola de broadcast
-    await queueService.addToBroadcastQueue(leads, parsed.mensaje, usuario.id, parsed.segmento);
+    await queueService.addToBroadcastQueue(leads, parsed.mensaje || parsed.mensajeTemplate, usuario.id, parsed.segmento);
 
     await ctx.meta.sendWhatsAppMessage(phone,
       `✅ *Broadcast programado*\n\n` +
       `📊 Segmento: ${parsed.segmento}\n` +
       `👥 Destinatarios: ${leads.length}\n` +
-      `📝 Mensaje: ${parsed.mensaje.substring(0, 50)}...`
+      `📝 Mensaje: ${(parsed.mensaje || parsed.mensajeTemplate || '').substring(0, 50)}...`
     );
   } catch (e) {
     console.error('Error en enviarASegmento:', e);

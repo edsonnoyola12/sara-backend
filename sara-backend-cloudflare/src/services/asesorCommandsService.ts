@@ -1569,7 +1569,7 @@ Ejemplo:
         `¡Te esperamos! 🏠`;
 
       try {
-        await this.meta.sendWhatsAppMessage(leadPhone, mensajeLead);
+        await (this as any).meta.sendWhatsAppMessage(leadPhone, mensajeLead);
       } catch (e) {
         console.error('⚠️ No se pudo notificar al lead sobre la cita');
       }

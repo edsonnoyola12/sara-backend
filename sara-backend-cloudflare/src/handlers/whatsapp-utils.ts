@@ -4,7 +4,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { HandlerContext } from './whatsapp-types';
-import { LeadManagementService, DetectarReferidoResult, ActualizarLeadResult, RegistrarActividadResult } from '../services/leadManagementService';
+import { LeadManagementService } from '../services/leadManagementService';
 import { PropertyService } from '../services/propertyService';
 import { MortgageService, MortgageData } from '../services/mortgageService';
 import { AppointmentService, CrearCitaParams, CrearCitaResult } from '../services/appointmentService';
@@ -205,7 +205,7 @@ export function detectarIntencionCita(mensaje: string): { detectado: boolean; fe
 
 export function determinarContextoYAccion(datos: DatosConversacion): ContextoDecision {
   const contextService = new ConversationContextService();
-  return contextService.determinarContextoYAccion(datos);
+  return contextService.determinarContextoYAccion(datos) as unknown as ContextoDecision;
 }
 
 export function extraerNombreSimple(mensaje: string): string | null {
@@ -224,12 +224,12 @@ export function detectarMonto(mensaje: string): number | null {
 }
 
 export function getPropsParaDesarrollos(ctx: HandlerContext, desarrollos: string[], properties: any[]): any[] {
-  const propertyService = new PropertyService(ctx.supabase);
+  const propertyService = new PropertyService(ctx.supabase) as any;
   return propertyService.getPropsParaDesarrollos(desarrollos, properties);
 }
 
 export function getPropsParaModelos(ctx: HandlerContext, modelos: string[], properties: any[]): any[] {
-  const propertyService = new PropertyService(ctx.supabase);
+  const propertyService = new PropertyService(ctx.supabase) as any;
   return propertyService.getPropsParaModelos(modelos, properties);
 }
 
@@ -270,7 +270,7 @@ export async function finalizarFlujoCredito(ctx: HandlerContext, lead: any, from
       console.log('📤 Asesor notificado:', result.asesor.name);
     }
 
-    await ctx.twilio.sendWhatsAppMessage(from, mortgageService.formatAsesorInfo(result.asesor));
+    await ctx.twilio.sendWhatsAppMessage(from, (mortgageService as any).formatAsesorInfo(result.asesor));
     console.log('✅ Datos del asesor enviados al cliente');
 
   } catch (e) {
@@ -337,13 +337,13 @@ export async function actualizarScoreInteligente(ctx: HandlerContext, leadId: st
 // UTILITY FUNCTIONS (from lines 10507-11986)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export async function getOrCreateLead(ctx: HandlerContext, phone: string, skipTeamCheck = false): Promise<{ lead: any; isNew: boolean }> {
+export async function getOrCreateLead(ctx: HandlerContext, phone: string, skipTeamCheck = false): Promise<{ lead: any; isNew: boolean; isTeamMember?: boolean; assignedVendedorId?: string }> {
   const leadService = new LeadManagementService(ctx.supabase);
   return leadService.getOrCreateLead(phone, skipTeamCheck);
 }
 
 export async function getVendedorMenosCarga(ctx: HandlerContext): Promise<any> {
-  const leadService = new LeadManagementService(ctx.supabase);
+  const leadService = new LeadManagementService(ctx.supabase) as any;
   return leadService.getVendedorMenosCarga();
 }
 
@@ -423,7 +423,7 @@ export async function getAllProperties(ctx: HandlerContext): Promise<any[]> {
 }
 
 export function findPropertyByDevelopment(ctx: HandlerContext, properties: any[], desarrollo: string): any | null {
-  const propertyService = new PropertyService(ctx.supabase);
+  const propertyService = new PropertyService(ctx.supabase) as any;
   return propertyService.findPropertyByDevelopment(properties, desarrollo);
 }
 
@@ -614,7 +614,7 @@ export async function generarVideoBienvenida(
       return null;
     }
 
-    const result = await response.json();
+    const result: any = await response.json();
 
     if (result.error) {
       console.error('❌ Google rechazó:', JSON.stringify(result.error));
@@ -1004,7 +1004,7 @@ export function parseReagendarParams(body: string): { dia?: string; hora?: strin
 }
 
 export async function actualizarLead(ctx: HandlerContext, lead: any, analysis: AIAnalysis, originalMessage: string): Promise<void> {
-  const leadManagementService = new LeadManagementService(ctx.supabase);
+  const leadManagementService = new LeadManagementService(ctx.supabase) as any;
   const result = await leadManagementService.actualizarLead(lead, analysis, originalMessage);
 
   if (result.vendedorReasignado?.phone && result.leadInfo) {
@@ -1027,7 +1027,7 @@ export async function registrarActividad(
   vendedor: any,
   monto?: number | null
 ): Promise<void> {
-  const leadManagementService = new LeadManagementService(ctx.supabase);
+  const leadManagementService = new LeadManagementService(ctx.supabase) as any;
   const result = await leadManagementService.registrarActividad(nombreLead, tipo, vendedor, monto);
 
   switch (result.action) {
@@ -1439,7 +1439,7 @@ export async function procesarRespuestaEncuesta(ctx: HandlerContext, phone: stri
     console.log(`📋 Encuesta encontrada: ${encuesta.id} tipo=${encuesta.survey_type} status=${encuesta.status}`);
 
     if (encuesta.status === 'awaiting_feedback') {
-      const respuestaCliente = await encuestasService.procesarComentario(encuesta, mensaje);
+      const respuestaCliente = await (encuestasService as any).procesarComentario(encuesta, mensaje);
       await notificarResultadoEncuesta(ctx, encuesta, mensaje.trim());
       return respuestaCliente;
     }
@@ -1448,19 +1448,19 @@ export async function procesarRespuestaEncuesta(ctx: HandlerContext, phone: stri
 
     if (encuesta.survey_type === 'post_cita') {
       const respuesta = parseInt(textoLimpio);
-      const resultado = await encuestasService.procesarCalificacionPostCita(encuesta, respuesta);
+      const resultado = await (encuestasService as any).procesarCalificacionPostCita(encuesta, respuesta);
       if (resultado) return resultado;
     }
 
     if (encuesta.survey_type === 'nps') {
       const nps = parseInt(textoLimpio);
-      const resultado = await encuestasService.procesarCalificacionNPS(encuesta, nps);
+      const resultado = await (encuestasService as any).procesarCalificacionNPS(encuesta, nps);
       if (resultado) return resultado;
     }
 
     const tiposFlexibles = ['custom', 'satisfaction', 'rescate', 'post_cierre'];
     if (tiposFlexibles.includes(encuesta.survey_type)) {
-      const resultado = await encuestasService.procesarEncuestaFlexible(encuesta, mensaje);
+      const resultado = await (encuestasService as any).procesarEncuestaFlexible(encuesta, mensaje);
       if (resultado) return resultado;
     }
 
@@ -1484,8 +1484,8 @@ export async function notificarResultadoEncuesta(ctx: HandlerContext, encuesta: 
       }
     }
 
-    if (encuestasService.esCalificacionBaja(encuesta)) {
-      const admins = await encuestasService.obtenerAdmins();
+    if ((encuestasService as any).esCalificacionBaja(encuesta)) {
+      const admins = await (encuestasService as any).obtenerAdmins();
       for (const admin of admins) {
         await ctx.meta.sendWhatsAppMessage(admin.phone, `🚨 *ALERTA ENCUESTA BAJA*\n\n${mensaje}`);
         console.log(`🚨 Alerta de encuesta enviada a admin ${admin.name}`);
@@ -1545,7 +1545,7 @@ export async function detectarYCrearReferido(
           leadManagementService.formatMensajeNotificacionVendedor(
             result.referido!.nombre,
             result.referido!.telefono,
-            result.referidorNombre!
+            (result as any).referidorNombre || clienteReferidor.name || 'Cliente'
           )
         );
       }
@@ -1553,9 +1553,9 @@ export async function detectarYCrearReferido(
       try {
         await ctx.meta.sendWhatsAppMessage(
           result.referido!.telefono,
-          leadManagementService.formatMensajeBienvenidaReferido(
+          (leadManagementService as any).formatMensajeBienvenidaReferido(
             result.referido!.nombre,
-            result.referidorNombre!
+            (result as any).referidorNombre || clienteReferidor.name || 'Cliente'
           )
         );
       } catch (e) {

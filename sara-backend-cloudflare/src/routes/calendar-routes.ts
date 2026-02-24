@@ -31,7 +31,7 @@ export async function handleCalendarRoutes(
   // POST - Crear cita y notificar por WhatsApp
   if (url.pathname === '/api/calendar/events' && request.method === 'POST') {
     try {
-      const body = await request.json();
+      const body = await request.json() as any;
       const { summary, description, startTime, endTime, attendees } = body;
       
       // Crear evento en Google Calendar
@@ -104,7 +104,7 @@ export async function handleCalendarRoutes(
       
       // Obtener detalles del evento antes de eliminarlo
       const events = await calendar.getEvents();
-      const eventToDelete = events.items?.find((e: any) => e.id === eventId);
+      const eventToDelete = (events as any).items?.find((e: any) => e.id === eventId);
       
       // Eliminar el evento
       const success = await calendar.deleteEvent(eventId!);

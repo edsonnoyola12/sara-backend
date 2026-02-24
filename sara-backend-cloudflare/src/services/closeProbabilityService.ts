@@ -154,7 +154,7 @@ export class CloseProbabilityService {
       .select('id, name')
       .eq('active', true);
 
-    const memberMap = new Map(members?.map(m => [m.id, m.name]) || []);
+    const memberMap = new Map<string, string>(members?.map((m: any) => [m.id, m.name]) || []);
 
     // Calculate probabilities
     const probabilities: LeadProbability[] = [];

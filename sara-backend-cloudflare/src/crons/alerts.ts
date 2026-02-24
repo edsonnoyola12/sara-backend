@@ -1528,7 +1528,7 @@ export async function recordatoriosPagoApartado(supabase: SupabaseService, meta:
       .from('team_members')
       .select('id, name, phone')
       .in('id', vendedorIds);
-    const vendedorMap = new Map(vendedores?.map(v => [v.id, v]) || []);
+    const vendedorMap = new Map<string, any>(vendedores?.map(v => [v.id as string, v]) || []);
 
     console.log(`📋 Verificando ${leadsReservados.length} leads reservados...`);
 
@@ -2161,7 +2161,7 @@ export async function alertaCitaNoConfirmada(supabase: SupabaseService, meta: Me
 
     if (!leads) return;
 
-    const leadsMap = new Map(leads.map(l => [l.id, l]));
+    const leadsMap = new Map<string, any>(leads.map(l => [l.id as string, l]));
 
     // Buscar vendedores
     const vendedorIds = [...new Set(citas.map(c => c.vendedor_id).filter(Boolean))];
@@ -2170,7 +2170,7 @@ export async function alertaCitaNoConfirmada(supabase: SupabaseService, meta: Me
       .select('id, phone, name')
       .in('id', vendedorIds);
 
-    const vendedoresMap = new Map((vendedores || []).map(v => [v.id, v]));
+    const vendedoresMap = new Map<string, any>((vendedores || []).map(v => [v.id as string, v]));
 
     let alertas = 0;
 
@@ -2254,7 +2254,7 @@ export async function alertarLeadsEstancados(supabase: SupabaseService, meta: Me
       .eq('active', true);
 
     if (!teamMembers) return;
-    const tmMap = new Map(teamMembers.map(tm => [tm.id, tm]));
+    const tmMap = new Map<string, any>(teamMembers.map(tm => [tm.id as string, tm]));
 
     // Group by vendor, max 10 per vendor
     const porVendedor = new Map<string, typeof leads>();

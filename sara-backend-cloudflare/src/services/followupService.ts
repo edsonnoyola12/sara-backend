@@ -72,7 +72,7 @@ export class FollowupService {
 
       // Cancelar follow-ups anteriores del mismo sequence_group
       const sequenceGroups = [...new Set(rules.map(r => r.sequence_group))];
-      for (const group of sequenceGroups) {
+      for (const group of sequenceGroups as string[]) {
         await this.cancelarFollowupsPorGrupo(leadId, group, 'nueva_secuencia');
       }
 

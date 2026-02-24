@@ -63,8 +63,8 @@ export class TwilioService {
       body: formData.toString()
     });
 
-    const result = await res.json();
-    
+    const result = await res.json() as any;
+
     if (!res.ok) {
       console.error('❌ Twilio error:', result);
     } else {
@@ -98,8 +98,8 @@ export class TwilioService {
       body: formData.toString()
     });
 
-    const result = await res.json();
-    
+    const result = await res.json() as any;
+
     if (!res.ok) {
       console.error('❌ Twilio error:', result);
     } else {

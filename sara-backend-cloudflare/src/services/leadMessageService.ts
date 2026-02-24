@@ -9,7 +9,7 @@
 
 import { SupabaseService } from './supabase';
 import { BroadcastQueueService } from './broadcastQueueService';
-import { OfferTrackingService } from './offerTrackingService';
+import { OfferTrackingService, OfferStatus } from './offerTrackingService';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // INTERFACES
@@ -24,7 +24,7 @@ export interface LeadMessageResult {
   action: LeadMessageAction;
   response?: string;
   sendVia?: 'meta' | 'twilio';
-  notifyVendor?: { phone: string; message: string };
+  notifyVendor?: { phone: string; message: string } | boolean;
   updateLead?: Record<string, any>;
   error?: string;
   broadcastContext?: {
@@ -411,7 +411,7 @@ export class LeadMessageService {
       }
 
       // Actualizar status de la oferta
-      await offerService.updateOfferStatus(recentOffer.id, nuevoStatus, vendedor?.id, body);
+      await offerService.updateOfferStatus(recentOffer.id, nuevoStatus as OfferStatus, vendedor?.id, body);
 
       // Retornar respuesta con notificación al vendedor
       return {

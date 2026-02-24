@@ -1103,7 +1103,7 @@ export class WhatsAppHandler {
         }
 
         // Notificar al vendedor si es necesario
-        if (leadMsgResult.notifyVendor) {
+        if (leadMsgResult.notifyVendor && typeof leadMsgResult.notifyVendor === 'object') {
           await this.meta.sendWhatsAppMessage(leadMsgResult.notifyVendor.phone, leadMsgResult.notifyVendor.message);
         }
 
@@ -1121,7 +1121,7 @@ export class WhatsAppHandler {
       }
 
       // Si hay notificación de vendedor pendiente (ej: respuesta a broadcast), enviarla
-      if (leadMsgResult.notifyVendor) {
+      if (leadMsgResult.notifyVendor && typeof leadMsgResult.notifyVendor === 'object') {
         await this.meta.sendWhatsAppMessage(leadMsgResult.notifyVendor.phone, leadMsgResult.notifyVendor.message);
         console.log('📢 Notificación de broadcast enviada a vendedor');
       }
@@ -1330,7 +1330,7 @@ export class WhatsAppHandler {
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   
   private async handleSurveyResponse(from: string, body: string, lead: any): Promise<void> {
-    const surveyService = new SurveyService(this.supabase);
+    const surveyService = new SurveyService(this.supabase) as any;
     const step = lead.survey_step;
 
     const result = surveyService.processStep(step, body, lead);
@@ -1570,7 +1570,7 @@ export class WhatsAppHandler {
    */
   private async executeVendorResult(
     from: string,
-    result: import('../services/vendorCommandsService').VendorMessageResult,
+    result: any,
     vendedor: any,
     nombreVendedor: string,
     teamMembers: any[]
@@ -1584,7 +1584,7 @@ export class WhatsAppHandler {
    */
   private async executeSubHandler(
     from: string,
-    result: import('../services/vendorCommandsService').VendorMessageResult,
+    result: any,
     vendedor: any,
     nombreVendedor: string,
     teamMembers: any[]

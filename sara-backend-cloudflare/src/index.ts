@@ -1996,7 +1996,7 @@ export default {
 
       // ── TEST 10: AI fallback - logErrorToDB writes to error_logs ──
       try {
-        await logErrorToDB(supabase, 'e2e_test_error', 'Resilience E2E test - safe to ignore', { severity: 'info', source: 'e2e-test-resilience', context: { test: true } });
+        await logErrorToDB(supabase, 'e2e_test_error', 'Resilience E2E test - safe to ignore', { severity: 'warning' as any, source: 'e2e-test-resilience', context: { test: true } });
         const { data: errLog } = await supabase.client.from('error_logs').select('id').eq('error_type', 'e2e_test_error').eq('source', 'e2e-test-resilience').order('created_at', { ascending: false }).limit(1);
         const ok = errLog && errLog.length > 0;
         tests.push({ name: 'logErrorToDB writes to error_logs table', pass: !!ok, detail: ok ? `id=${errLog![0].id}` : 'No row found' });
@@ -2891,7 +2891,7 @@ export default {
     // 10am MARTES: Coaching automático personalizado a vendedores
     if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek === 2) {
       console.log('🎓 Enviando coaching personalizado a vendedores...');
-      const coachingService = new IACoachingService(supabase, meta);
+      const coachingService = new IACoachingService(supabase, meta as any);
       await coachingService.enviarCoachingEquipo(7); // Solo si no recibió en 7 días
     }
 

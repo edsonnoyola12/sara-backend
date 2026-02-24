@@ -486,7 +486,7 @@ export async function verificarPendingParaLlamar(
 
   if (error || !teamMembers) {
     console.error('❌ Error obteniendo team members:', error);
-    return { llamadas: 0, errores: 1 };
+    return { llamadas: 0, errores: 1, detalles: [] };
   }
 
   const ahora = Date.now();

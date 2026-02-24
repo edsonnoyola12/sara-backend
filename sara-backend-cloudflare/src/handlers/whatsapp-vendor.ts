@@ -18,7 +18,7 @@ import { createSLAMonitoring } from '../services/slaMonitoringService';
 export async function handleVendedorMessage(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, teamMembers: any[]): Promise<void> {
   const mensaje = body.toLowerCase().trim();
   const nombreVendedor = vendedor.name?.split(' ')[0] || 'crack';
-  const vendorService = new VendorCommandsService(ctx.supabase);
+  const vendorService: any = new VendorCommandsService(ctx.supabase);
 
   console.log('🔍 VENDEDOR HANDLER - mensaje:', mensaje);
 
@@ -606,7 +606,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
     }
   }
 
-  const vendorCtx: import('../services/vendorCommandsService').VendorMessageContext = {
+  const vendorCtx: any = {
     from,
     body,
     mensaje,
@@ -1201,7 +1201,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
 export async function executeVendorResult(
   ctx: HandlerContext, handler: any,
   from: string,
-  result: import('../services/vendorCommandsService').VendorMessageResult,
+  result: any,
   vendedor: any,
   nombreVendedor: string,
   teamMembers: any[]
@@ -1251,7 +1251,7 @@ export async function executeVendorResult(
 export async function executeSubHandler(
   ctx: HandlerContext, handler: any,
   from: string,
-  result: import('../services/vendorCommandsService').VendorMessageResult,
+  result: any,
   vendedor: any,
   nombreVendedor: string,
   teamMembers: any[]
@@ -1273,7 +1273,7 @@ export async function executeSubHandler(
 
     case 'forwardBridgeMessage':
       await ctx.meta.sendWhatsAppMessage(params.leadPhone, params.mensaje);
-      const vendorService = new VendorCommandsService(ctx.supabase);
+      const vendorService: any = new VendorCommandsService(ctx.supabase);
       await ctx.meta.sendWhatsAppMessage(params.vendedorFrom, vendorService.formatBridgeConfirmation(params.leadName));
       // Detectar intención de cita
       const intencion = handler.detectarIntencionCita(params.mensaje);
@@ -1591,7 +1591,7 @@ export async function processShowConfirmationResult(ctx: HandlerContext, handler
   if (showResult.tipo === 'si_llego' && showResult.needsClientSurvey && showResult.leadPhone && showResult.leadId) {
     const nombreCliente = showResult.leadName?.split(' ')[0] || '';
     const propiedad = showResult.property || 'la propiedad';
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     try {
       const templateComponents = [{
         type: 'body',
@@ -1640,7 +1640,7 @@ export async function routeCoordinadorCommand(ctx: HandlerContext, handler: any,
   nombreVendedor: string,
   teamMembers: any[]
 ): Promise<boolean> {
-  const vendorService = new VendorCommandsService(ctx.supabase);
+  const vendorService: any = new VendorCommandsService(ctx.supabase);
   const result = vendorService.detectCoordinadorCommand(mensaje, body);
 
   if (!result.matched) {
@@ -1863,7 +1863,7 @@ export async function routeVendorCommand(ctx: HandlerContext, handler: any,
 
   const leadPendiente = leadsPendientes?.[0]; // Solo procesar el primero
 
-  const vendorService = new VendorCommandsService(ctx.supabase);
+  const vendorService: any = new VendorCommandsService(ctx.supabase);
   const result = vendorService.detectRouteCommand(body, mensaje);
 
   // ═══ DEFENSIVE: Keyword whitelist para evitar que comandos sean forwarded como mensajes ═══
@@ -2430,7 +2430,7 @@ export async function vendedorRegistrarReferido(ctx: HandlerContext, handler: an
  * Mueve lead en el funnel (siguiente/anterior/específico)
  */
 export async function vendedorMoverEtapa(ctx: HandlerContext, handler: any, from: string, body: string, mensaje: string, vendedor: any, nombreVendedor: string): Promise<void> {
-  const vendorService = new VendorCommandsService(ctx.supabase);
+  const vendorService: any = new VendorCommandsService(ctx.supabase);
   let nombreLead: string | null = null;
   let direccion: 'next' | 'prev' | null = null;
 
@@ -2551,7 +2551,7 @@ export async function vendedorMoverEtapa(ctx: HandlerContext, handler: any, from
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export async function verLeadsPorTipo(ctx: HandlerContext, handler: any, from: string, vendedor: any, tipo: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const esAdmin = vendedor.role === 'admin' || vendedor.role === 'coordinador';
     const result = await vendorService.getLeadsPorTipo(vendedor.id, esAdmin, tipo);
     const mensaje = vendorService.formatLeadsPorTipo(result);
@@ -2567,7 +2567,7 @@ export async function verLeadsPorTipo(ctx: HandlerContext, handler: any, from: s
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export async function archivarDesarchivarLead(ctx: HandlerContext, handler: any, from: string, nombreLead: string, vendedor: any, archivar: boolean): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const esAdmin = vendedor.role === 'admin' || vendedor.role === 'coordinador';
     const result = await vendorService.archivarDesarchivarLead(nombreLead, vendedor.id, esAdmin, archivar);
 
@@ -2594,7 +2594,7 @@ export async function archivarDesarchivarLead(ctx: HandlerContext, handler: any,
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export async function reactivarLead(ctx: HandlerContext, handler: any, from: string, nombreLead: string, vendedor: any): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const esAdmin = vendedor.role === 'admin' || vendedor.role === 'coordinador';
     const result = await vendorService.reactivarLead(nombreLead, vendedor.id, esAdmin);
 
@@ -2621,7 +2621,7 @@ export async function reactivarLead(ctx: HandlerContext, handler: any, from: str
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export async function vendedorEnviarMaterial(ctx: HandlerContext, handler: any, from: string, desarrollo: string, mensaje: string, vendedor: any): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const result = await vendorService.buscarMaterialDesarrollo(desarrollo);
 
     if (!result.success) {
@@ -2668,7 +2668,7 @@ export async function vendedorEnviarMaterial(ctx: HandlerContext, handler: any, 
 }
 export async function vendedorMotivoRespuesta(ctx: HandlerContext, handler: any, from: string, opcion: string, vendedor: any): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const result = await vendorService.procesarMotivoRespuesta(opcion, vendedor.id);
 
     if (!result.success) {
@@ -2691,7 +2691,7 @@ export async function vendedorMotivoRespuesta(ctx: HandlerContext, handler: any,
 }
 export async function vendedorMotivoCustom(ctx: HandlerContext, handler: any, from: string, motivo: string, vendedor: any): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const result = await vendorService.procesarMotivoCustom(motivo, vendedor.id);
 
     if (!result.success) return;
@@ -2710,7 +2710,7 @@ export async function vendedorMotivoCustom(ctx: HandlerContext, handler: any, fr
 // Función auxiliar para cambiar etapa por nombre
 export async function vendedorCambiarEtapaConNombre(ctx: HandlerContext, handler: any, from: string, nombreLead: string, vendedor: any, nuevaEtapa: string, etapaTexto: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const esAdmin = vendedor.role === 'admin' || vendedor.role === 'coordinador';
     const result = await vendorService.cambiarEtapa(nombreLead, nuevaEtapa, vendedor.id, esAdmin);
 
@@ -2766,7 +2766,7 @@ export async function vendedorCambiarEtapaConNombre(ctx: HandlerContext, handler
 }
 export async function vendedorCambiarEtapa(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, nuevaEtapa: string, etapaTexto: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const nombreLead = vendorService.parseNombreLeadCambioEtapa(body);
 
     if (!nombreLead) {
@@ -2834,7 +2834,7 @@ export async function vendedorCambiarEtapa(ctx: HandlerContext, handler: any, fr
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export async function vendedorEnviarABanco(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const parsed = vendorService.parseEnvioABanco(body);
 
     if (!parsed.nombre || !parsed.banco) {
@@ -2869,7 +2869,7 @@ export async function vendedorEnviarABanco(ctx: HandlerContext, handler: any, fr
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export async function vendedorConfirmarEnvioABanco(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const parsed = vendorService.parseConfirmarEnvio(body);
 
     if (!parsed.nombre || !parsed.banco) {
@@ -2904,7 +2904,7 @@ export async function vendedorConfirmarEnvioABanco(ctx: HandlerContext, handler:
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export async function vendedorConsultarCredito(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any): Promise<void> {
   try {
-    const mortgageService = new MortgageService(ctx.supabase);
+    const mortgageService: any = new MortgageService(ctx.supabase);
 
     // Extraer nombre
     const matchNombre = body.match(/(?:cómo va|como va|estatus|status).*?(?:de\s+)?([a-záéíóúñ\s]+?)(?:\?|$)/i) ||
@@ -2977,7 +2977,7 @@ export async function vendedorConsultarCredito(ctx: HandlerContext, handler: any
 export async function vendedorAsignarAsesor(ctx: HandlerContext, handler: any, from: string, nombreLead: string, vendedor: any, teamMembers: any[], telefonoLead?: string | null): Promise<void> {
   try {
     console.log(`🏦 Vendedor ${vendedor.name} asignando "${nombreLead}" a asesor hipotecario...`);
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const result = await vendorService.asignarAsesorHipotecario(nombreLead, vendedor, teamMembers, telefonoLead);
 
     if (!result.success) {
@@ -3009,7 +3009,7 @@ export async function vendedorAsignarAsesor(ctx: HandlerContext, handler: any, f
 export async function vendedorPreguntarAsesor(ctx: HandlerContext, handler: any, from: string, nombreLead: string, vendedor: any, teamMembers: any[]): Promise<void> {
   try {
     console.log(`💬 Vendedor ${vendedor.name} preguntando al asesor por "${nombreLead}"...`);
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const result = await vendorService.preguntarAsesorCredito(nombreLead, vendedor, teamMembers);
 
     if (!result.success) {
@@ -3035,7 +3035,7 @@ export async function vendedorPreguntarAsesor(ctx: HandlerContext, handler: any,
 // ═══════════════════════════════════════════════════════════════
 export async function mostrarTelefonoLead(ctx: HandlerContext, handler: any, from: string, nombreLead: string, usuario: any): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const result = await vendorService.buscarLeadTelefono(nombreLead, usuario);
 
     if (!result.success) {
@@ -3057,7 +3057,7 @@ export async function mostrarTelefonoLead(ctx: HandlerContext, handler: any, fro
 // ═══════════════════════════════════════════════════════════════
 export async function enviarMensajeLead(ctx: HandlerContext, handler: any, from: string, nombreLead: string, usuario: any): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const result = await vendorService.buscarLeadMensaje(nombreLead, usuario);
 
     if (!result.success) {
@@ -3218,7 +3218,7 @@ export async function vendedorCerrarVenta(ctx: HandlerContext, handler: any, fro
     if (ceo?.phone) {
       const msgCEO = `🏆 *¡VENTA CERRADA!*\n\n👤 Cliente: ${leadVenta.name || 'N/A'}\n🏠 Desarrollo: ${leadVenta.property_interest || 'N/A'}\n💼 Vendedor: ${nombre}\n📅 Fecha: ${new Date().toLocaleDateString('es-MX')}\n\n¡Felicidades al equipo! 🎉`;
       const { enviarMensajeTeamMember } = await import('../utils/teamMessaging');
-      await enviarMensajeTeamMember(ctx.supabase, ctx.twilio, ceo, msgCEO, {
+      await enviarMensajeTeamMember(ctx.supabase, ctx.twilio as any, ceo, msgCEO, {
         tipoMensaje: 'notificacion',
         pendingKey: 'pending_mensaje'
       });
@@ -3550,7 +3550,7 @@ Responde con fecha y hora:
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export async function vendedorAgregarNota(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const parsed = vendorService.parseAgregarNota(body);
 
     if (!parsed.nombreLead || !parsed.textoNota) {
@@ -3581,7 +3581,7 @@ export async function vendedorAgregarNota(ctx: HandlerContext, handler: any, fro
 }
 export async function vendedorVerNotas(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const nombreLead = vendorService.parseVerNotas(body);
 
     if (!nombreLead) {
@@ -3614,7 +3614,7 @@ export async function vendedorVerNotas(ctx: HandlerContext, handler: any, from: 
 // Versión con params ya parseados
 export async function vendedorAgregarNotaConParams(ctx: HandlerContext, handler: any, from: string, nombreLead: string, textoNota: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
 
     if (!nombreLead || !textoNota) {
       await ctx.meta.sendWhatsAppMessage(from, vendorService.getMensajeAyudaAgregarNota());
@@ -3644,7 +3644,7 @@ export async function vendedorAgregarNotaConParams(ctx: HandlerContext, handler:
 }
 export async function vendedorVerNotasConParams(ctx: HandlerContext, handler: any, from: string, nombreLead: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
 
     if (!nombreLead) {
       await ctx.meta.sendWhatsAppMessage(from, vendorService.getMensajeAyudaVerNotas());
@@ -3925,7 +3925,7 @@ export async function vendedorAyudaContextual(ctx: HandlerContext, handler: any,
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export async function vendedorCrearLead(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const parsed = vendorService.parseCrearLead(body);
 
     if (!parsed) {
@@ -4014,7 +4014,7 @@ export async function vendedorAsignarHipoteca(ctx: HandlerContext, handler: any,
 
 // Función auxiliar para asignar hipoteca a un lead (usa MortgageService)
 export async function asignarHipotecaALead(ctx: HandlerContext, handler: any, from: string, lead: any, vendedor: any, teamMembers: any[]): Promise<void> {
-  const mortgageService = new MortgageService(ctx.supabase);
+  const mortgageService: any = new MortgageService(ctx.supabase);
   const result = await mortgageService.assignMortgageToLead(lead, teamMembers);
 
   // Si ya tiene hipoteca asignada
@@ -4608,7 +4608,7 @@ export async function cancelarConfirmacionPendiente(ctx: HandlerContext, handler
 }
 export async function vendedorPropiedades(ctx: HandlerContext, handler: any, from: string, vendedor: any): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const props = await vendorService.getPropiedadesDisponibles();
     const mensaje = vendorService.formatPropiedadesDisponibles(props);
     await ctx.twilio.sendWhatsAppMessage(from, mensaje);
@@ -4668,7 +4668,7 @@ export async function vendedorAyuda(ctx: HandlerContext, handler: any, from: str
 }
 export async function vendedorCitasHoy(ctx: HandlerContext, handler: any, from: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const esAdmin = vendedor.role === 'admin' || vendedor.role === 'coordinador';
     const citas = await vendorService.getCitasHoy(vendedor.id, esAdmin);
     const mensaje = vendorService.formatCitasHoy(citas, nombre, esAdmin);
@@ -4680,7 +4680,7 @@ export async function vendedorCitasHoy(ctx: HandlerContext, handler: any, from: 
 }
 export async function vendedorCitasManana(ctx: HandlerContext, handler: any, from: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const esAdmin = vendedor.role === 'admin' || vendedor.role === 'coordinador';
     const citas = await vendorService.getCitasManana(vendedor.id, esAdmin);
     const mensaje = vendorService.formatCitasManana(citas, nombre, esAdmin);
@@ -4692,7 +4692,7 @@ export async function vendedorCitasManana(ctx: HandlerContext, handler: any, fro
 }
 export async function vendedorBriefing(ctx: HandlerContext, handler: any, from: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const data = await vendorService.getBriefing(vendedor.id);
     const mensaje = vendorService.formatBriefing(data, nombre);
     await ctx.twilio.sendWhatsAppMessage(from, mensaje);
@@ -4703,7 +4703,7 @@ export async function vendedorBriefing(ctx: HandlerContext, handler: any, from: 
 }
 export async function vendedorMetaAvance(ctx: HandlerContext, handler: any, from: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
 
     // Meta configurable: 1) del vendedor, 2) de system_config, 3) default 5
     let metaMensual = 5;
@@ -5072,7 +5072,7 @@ export async function vendedorNuevoLead(ctx: HandlerContext, handler: any, from:
 }
 export async function vendedorResumenLeads(ctx: HandlerContext, handler: any, from: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const data = await vendorService.getResumenLeads(vendedor.id);
     const mensaje = vendorService.formatResumenLeads(data, nombre);
     await ctx.twilio.sendWhatsAppMessage(from, mensaje);
@@ -5738,7 +5738,7 @@ export async function vendedorContactarLead(ctx: HandlerContext, handler: any, f
 }
 export async function vendedorBuscarPorTelefono(ctx: HandlerContext, handler: any, from: string, telefono: string, vendedor: any): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const result = await vendorService.getBusquedaTelefono(telefono);
     const mensaje = vendorService.formatBusquedaTelefono(result, telefono);
     await ctx.twilio.sendWhatsAppMessage(from, mensaje);
@@ -5749,7 +5749,7 @@ export async function vendedorBuscarPorTelefono(ctx: HandlerContext, handler: an
 }
 export async function vendedorCrearRecordatorio(ctx: HandlerContext, handler: any, from: string, texto: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const scheduledFor = await vendorService.crearRecordatorio(texto);
     const mensaje = vendorService.formatRecordatorioCreado(texto, scheduledFor);
     await ctx.twilio.sendWhatsAppMessage(from, mensaje);
@@ -5762,7 +5762,7 @@ export async function vendedorCrearRecordatorio(ctx: HandlerContext, handler: an
 // MIS HOT: Leads calientes asignados
 export async function vendedorMisHot(ctx: HandlerContext, handler: any, from: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const leads = await vendorService.getLeadsHot(vendedor.id);
     const mensaje = vendorService.formatLeadsHot(leads, nombre);
     await ctx.twilio.sendWhatsAppMessage(from, mensaje);
@@ -5881,7 +5881,7 @@ export async function vendedorDisponibilidad(ctx: HandlerContext, handler: any, 
 // ENVIAR INFO A LEAD: Manda info de desarrollo a un lead
 export async function vendedorEnviarInfoALead(ctx: HandlerContext, handler: any, from: string, desarrollo: string, nombreLead: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
 
     // Buscar lead
     const leadResult = await vendorService.getLeadParaEnviarInfo(nombreLead, vendedor.id, vendedor.role);
@@ -5924,7 +5924,7 @@ export async function vendedorEnviarInfoALead(ctx: HandlerContext, handler: any,
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export async function vendedorLlamar(ctx: HandlerContext, handler: any, from: string, nombreLead: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const result = await vendorService.getLlamarLead(nombreLead, vendedor.id);
 
     // Si encontró uno solo, registrar la llamada
@@ -5975,7 +5975,7 @@ export async function vendedorLlamarIA(ctx: HandlerContext, handler: any, from: 
     }
 
     // Buscar lead
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const result = await vendorService.getLlamarLead(nombreLead, vendedor.id);
 
     if (!result.found || !result.lead) {
@@ -6068,7 +6068,7 @@ export async function vendedorLlamarIA(ctx: HandlerContext, handler: any, from: 
 }
 export async function vendedorProgramarLlamada(ctx: HandlerContext, handler: any, from: string, nombreLead: string, cuando: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const result = await vendorService.getLlamarLead(nombreLead, vendedor.id);
 
     if (!result.found || !result.lead) {
@@ -6090,7 +6090,7 @@ export async function vendedorRecordarLlamar(ctx: HandlerContext, handler: any, 
     console.log(`📞 RECORDAR LLAMAR: ${nombreLead} - ${fechaHora} (vendedor: ${nombreVendedor})`);
 
     // 1. Buscar el lead
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const result = await vendorService.getLlamarLead(nombreLead, vendedor.id);
 
     if (!result.found || !result.lead) {
@@ -6203,7 +6203,7 @@ export async function vendedorReagendarLlamada(ctx: HandlerContext, handler: any
     console.log(`🔄 REAGENDAR LLAMADA: ${nombreLead} -> ${nuevaFechaHora} (vendedor: ${nombreVendedor})`);
 
     // 1. Buscar el lead
-    const vendorService = new VendorCommandsService(ctx.supabase);
+    const vendorService: any = new VendorCommandsService(ctx.supabase);
     const result = await vendorService.getLlamarLead(nombreLead, vendedor.id);
 
     if (!result.found || !result.lead) {

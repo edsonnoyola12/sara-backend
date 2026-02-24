@@ -372,7 +372,7 @@ export async function asesorCrearLeadHipoteca(ctx: HandlerContext, handler: any,
     const asesorService = new AsesorCommandsService(ctx.supabase);
 
     // Parsear el comando
-    const parsed = asesorService.parseCrearLeadHipoteca(body);
+    const parsed: any = asesorService.parseCrearLeadHipoteca(body);
     if (!parsed) {
       await ctx.twilio.sendWhatsAppMessage(from, asesorService.getMensajeAyudaCrearLeadHipoteca());
       return;
@@ -454,7 +454,7 @@ export async function asesorAyuda(ctx: HandlerContext, handler: any, from: strin
 
 export async function asesorAgendarCita(ctx: HandlerContext, handler: any, from: string, body: string, asesor: any, nombre: string): Promise<void> {
   const asesorService = new AsesorCommandsService(ctx.supabase);
-  const datosCita = asesorService.parseAgendarCita(body);
+  const datosCita: any = asesorService.parseAgendarCita(body);
 
   if (!datosCita) {
     await ctx.twilio.sendWhatsAppMessage(from, asesorService.getMensajeAyudaAgendarCita());
@@ -474,7 +474,7 @@ export async function asesorAgendarCita(ctx: HandlerContext, handler: any, from:
 
   // Google Calendar
   try {
-    const calData = asesorService.getEventoCalendarData(datosCita.fecha, leadName, leadPhone, datosCita.lugar);
+    const calData = (asesorService as any).getEventoCalendarData(datosCita.fecha, leadName, leadPhone, datosCita.lugar);
     const formatDate = (d: Date) => {
       return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:00`;
     };
@@ -490,6 +490,6 @@ export async function asesorAgendarCita(ctx: HandlerContext, handler: any, from:
     console.error('Error GCal:', e);
   }
 
-  const mensaje = asesorService.formatCitaCreada(datosCita.fecha, leadName, datosCita.lugar);
+  const mensaje = (asesorService as any).formatCitaCreada(datosCita.fecha, leadName, datosCita.lugar);
   await ctx.twilio.sendWhatsAppMessage(from, mensaje);
 }
