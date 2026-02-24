@@ -672,7 +672,7 @@ Ver documentación en `docs/`:
 ## QA COMPLETADO (2026-01-28)
 
 ### SARA responde correctamente:
-- ✅ Preguntas de desarrollos (34 propiedades en catálogo)
+- ✅ Preguntas de desarrollos (32 propiedades en catálogo)
 - ✅ Citadella del Nogal = Villa Campelo + Villa Galiano
 - ✅ Monte Verde, Distrito Falco, Los Encinos, Miravalle, Andes, etc.
 - ✅ NO inventa información (dice "no tengo esa info")
@@ -1113,7 +1113,7 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Flujo real WhatsApp | 3 | ✅ |
 
 **Respuestas verificadas:**
-- ✅ Precios correctos de 34 propiedades
+- ✅ Precios correctos de 32 propiedades
 - ✅ Sinónimos: Citadella del Nogal = Villa Campelo/Galiano
 - ✅ Errores ortográficos: "informasion monteverde" → entiende
 - ✅ NO inventa tasas de interés → redirige a bancos
@@ -1154,7 +1154,7 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Funcionalidad | Estado |
 |---------------|--------|
 | Responder preguntas de desarrollos | ✅ |
-| Información de 34 propiedades | ✅ |
+| Información de 32 propiedades | ✅ |
 | Precios y disponibilidad | ✅ |
 | Manejo de objeciones | ✅ |
 | Detectar errores ortográficos | ✅ |
@@ -1847,7 +1847,7 @@ const nombresHallucinated = ['Salma', 'María', 'Maria', 'Juan', 'Pedro', 'Ana',
 1. `leads` - 20+ campos, estados del funnel
 2. `team_members` - roles, pending messages
 3. `appointments` - citas con Google Calendar
-4. `properties` - catálogo de 34 propiedades
+4. `properties` - catálogo de 32 propiedades
 5. `mortgage_applications` - créditos hipotecarios
 6. `pending_videos` - videos Veo 3
 7. `offers` - ciclo de vida de ofertas
@@ -2632,7 +2632,7 @@ npm test
 |----------|-----------|
 | /test-ventana-24h | ✅ 2 abiertas, 16 cerradas |
 | /api/leads | ✅ 32 leads |
-| /api/properties | ✅ 34 propiedades |
+| /api/properties | ✅ 32 propiedades |
 | /health | ✅ healthy |
 
 #### Estado de Producción
@@ -3423,18 +3423,18 @@ SARA ajusta su intensidad de venta según la fase del lead:
 
 | Desarrollo | Propiedades | Tipo |
 |------------|-------------|------|
-| Los Encinos | 7 | Casas |
+| Los Encinos | 5 | Casas |
 | Monte Verde | 5 | Casas |
 | Andes | 4 | Casas |
 | Distrito Falco | 7 | Casas |
-| Miravalle | 8 | Casas/Deptos |
+| Miravalle | 6 | Casas/Deptos |
 | **Paseo Colorines** | 2 | Casas |
 | Alpes | 1 | Casas |
 | Villa Campelo | 1 | Terrenos |
 | Villa Galiano | 1 | Terrenos |
-| Monte Real | 2 | Casas |
+| Monte Real | 0 | Casas |
 
-**Total: 34 propiedades en catálogo**
+**Total: 32 propiedades en catálogo**
 
 ---
 
@@ -4967,7 +4967,7 @@ if (!desarrolloInteres && message) {
 
 | Prueba | Resultado | Detalles |
 |--------|-----------|----------|
-| Health Check | ✅ | Supabase (873ms), KV (506ms), Meta API (1767ms), 18 team members, 34 properties |
+| Health Check | ✅ | Supabase (873ms), KV (506ms), Meta API (1767ms), 18 team members, 32 properties |
 | Status Dashboard | ✅ | All services healthy, CRONs activos |
 | AI Response: interés general | ✅ | Intent: solicitar_cita, respuesta coherente |
 | AI Response: Monte Verde + precio | ✅ | Desarrollo detectado: "Monte Verde", send_video_desarrollo: true |
@@ -4998,7 +4998,7 @@ if (!desarrolloInteres && message) {
 
 | # | Prueba | Resultado | Detalles |
 |---|--------|-----------|----------|
-| 1 | Health Check | ✅ | Supabase 53ms, KV 332ms, Meta API 1094ms (token válido), 18 team members, 34 propiedades |
+| 1 | Health Check | ✅ | Supabase 53ms, KV 332ms, Meta API 1094ms (token válido), 18 team members, 32 propiedades |
 | 2 | AI Response: Monte Verde 3 rec | ✅ | Intent `interes_desarrollo`, desarrollo detectado, modelos con precios reales, `send_video_desarrollo: true`, 7.6s |
 | 3 | Lead REAL WhatsApp | ✅ | Mensaje enviado a 5610016226, lead "Edson" actualizado en DB, score 21, asignado a Karla Muedano |
 | 4 | Debug Lead DB | ✅ | `dentroVentana24h: true`, `last_message_at` actualizado, datos consistentes |
@@ -5062,7 +5062,7 @@ if (!desarrolloInteres && message) {
 | 5.5 | CEO: hoy | ✅ 3 leads nuevos, 1 cita programada |
 | 5.6 | CEO: equipo | ✅ 19 miembros activos |
 | 5.7 | API /api/leads | ✅ Roberto E2E visible, **score=61** (subió de 21) |
-| 5.8 | API /api/properties | ✅ 34 propiedades |
+| 5.8 | API /api/properties | ✅ 32 propiedades |
 
 #### Fase 6: Cancelación
 | # | Test | Resultado |
@@ -5273,7 +5273,7 @@ ai_responses: id, lead_phone, lead_message, ai_response, model_used, tokens_used
 
 | Test | Resultado |
 |------|-----------|
-| `/health` | ✅ allPassed, 19 team members, 34 properties |
+| `/health` | ✅ allPassed, 19 team members, 32 properties |
 | `/test-ai-response` (hola busco casa) | ✅ 9.6s, intent `interes_desarrollo`, logueado en `ai_responses` |
 | `/run-health-monitor` | ✅ Supabase OK (190ms), Meta OK (954ms), OpenAI OK (442ms), saved=true |
 | CEO `status` | ✅ "SALUDABLE — hace 0 min" con latencia por servicio |
@@ -5719,7 +5719,7 @@ Mejora a la vista Equipo existente con toggle Tarjetas/Rendimiento:
 
 ### 2026-02-20 (Sesión 58) - Auditoría de Precisión de Datos: Purga de Modelos Fantasma
 
-**Auditoría completa de TODO el codebase para eliminar datos incorrectos que SARA le decía a los leads.** Se verificó cada modelo, precio, recámara y ubicación contra la base de datos real (34 propiedades en `properties` table).
+**Auditoría completa de TODO el codebase para eliminar datos incorrectos que SARA le decía a los leads.** Se verificó cada modelo, precio, recámara y ubicación contra la base de datos real (32 propiedades en `properties` table).
 
 #### Prioridad Crítica (commit `ed6e26e1`)
 
@@ -5749,7 +5749,7 @@ Mejora a la vista Equipo existente con toggle Tarjetas/Rendimiento:
 | **Ghost models en archivos secundarios** | `constants.ts`, `sara.ts` | `MODELOS_CONOCIDOS` y `DESARROLLOS_CONOCIDOS` alineados con DB real |
 | **"4 recámaras" → "3 recámaras"** | `aiConversationService.ts`, `uxHelpers.ts`, `leadMessageService.ts` | Ningún desarrollo tiene 4 rec — máximo 3 (algunos con estudio/vestidor) |
 | **"Ascendente" en ejemplos** | `aiConversationService.ts` (3 ubicaciones) | Reemplazado por "Encino Verde" |
-| **"38 propiedades" → "34 propiedades"** | `CLAUDE.md` (6 ocurrencias) | Conteo real verificado en Supabase |
+| **"38 propiedades" → "32 propiedades"** | `CLAUDE.md` (6 ocurrencias) | Conteo real verificado en Supabase |
 | **`sara.ts` reescrito completo** | `src/prompts/sara.ts` | Era 100% outdated (ghost models, precios falsos). Ahora refleja DB real |
 
 #### Limpieza de Código Muerto (commit `a502e74b`)
@@ -5770,7 +5770,7 @@ Endpoint temporal creado en `test.ts`, ejecutado, verificado y removido. Worker 
 - ✅ Grep exhaustivo: zero ghost references en código activo
 - ✅ 597/597 tests pasando (18 archivos)
 - ✅ Deployed limpio (Version `1765ff19`)
-- ✅ Data de SARA coincide 100% con Supabase: 34 propiedades, 9 desarrollos, precios reales
+- ✅ Data de SARA coincide 100% con Supabase: 32 propiedades, 9 desarrollos, precios reales
 
 **Commits:** `ed6e26e1`, `f0571b11`, `8c4813f5`, `a502e74b`
 **Deploy:** Version ID `1765ff19`
@@ -5788,7 +5788,7 @@ Endpoint temporal creado en `test.ts`, ejecutado, verificado y removido. Worker 
 | CRONs activos | 25+ |
 | Capas de resilience | 9 |
 | Templates WA aprobados | 3 |
-| Propiedades en catálogo | 34 |
+| Propiedades en catálogo | 32 |
 | Desarrollos | 9 (Monte Verde, Monte Real, Andes, Falco, Encinos, Miravalle, Colorines, Alpes, Citadella) |
 | **pending_auto_response types** | **16** |
 | **CRM UX/UI Rounds** | **8 completados** |
@@ -5908,7 +5908,7 @@ const leadActualizado = leadFrescoMem || lead;
 | CRONs activos | 25+ |
 | Capas de resilience | 9 |
 | Templates WA aprobados | 3 |
-| Propiedades en catálogo | 34 |
+| Propiedades en catálogo | 32 |
 | Desarrollos | 9 (Monte Verde, Monte Real, Andes, Falco, Encinos, Miravalle, Colorines, Alpes, Citadella) |
 | **pending_auto_response types** | **16** |
 | **CRM UX/UI Rounds** | **8 completados** |
@@ -6246,7 +6246,7 @@ Retorna: current voice_id, voice_model, lista de voces con provider, accent, age
 | CRONs activos | 27+ |
 | Capas de resilience | 9 |
 | Templates WA aprobados | 3 |
-| Propiedades en catálogo | 34 |
+| Propiedades en catálogo | 32 |
 | Desarrollos | 9 (Monte Verde, Monte Real, Andes, Falco, Encinos, Miravalle, Colorines, Alpes, Citadella) |
 | **pending_auto_response types** | **16** |
 | **CRM UX/UI Rounds** | **8 completados** |
