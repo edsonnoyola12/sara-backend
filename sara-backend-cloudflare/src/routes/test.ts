@@ -2459,6 +2459,7 @@ export async function handleTestRoutes(
           send_video: (analysis as any).send_video || false,
           send_brochure: (analysis as any).send_brochure || false,
           send_video_desarrollo: analysis.send_video_desarrollo || false,
+          send_carousel: analysis.send_carousel || null,
           phase: analysis.phase || 'unknown',
           phaseNumber: analysis.phaseNumber || 0,
           nota: 'Usa el MISMO servicio que los leads reales (AIConversationService)'

@@ -45,6 +45,7 @@ interface AIAnalysis {
   phase?: string;
   phaseNumber?: number;
   secondary_intents?: string[];
+  send_carousel?: 'economico' | 'premium' | 'all' | 'terrenos';
 }
 
 // Handler reference para acceder a métodos auxiliares
@@ -1441,8 +1442,17 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
   "send_video": false,
   "send_matterport": false,
   "send_contactos": false,
-  "contactar_vendedor": false
+  "contactar_vendedor": false,
+  "send_carousel": null
 }
+
+📋 CAROUSEL: Si el lead pregunta por opciones de casas SIN especificar un desarrollo concreto:
+- Presupuesto < $3M o pide "económico/barato" → send_carousel: "economico"
+- Presupuesto $3M+ o pide "premium/grande" → send_carousel: "premium"
+- Sin presupuesto claro, pregunta general → send_carousel: "all"
+- Pregunta por terrenos/lotes → send_carousel: "terrenos"
+- NO usar si ya preguntó por UN desarrollo específico (ej: "Monte Verde")
+- NO usar si ya se envió carousel en esta conversación
 
 ⚠️ DETECCIÓN DE MÚLTIPLES INTENCIONES:
 - "intent" es la intención PRINCIPAL (la más importante)
@@ -2493,7 +2503,8 @@ Por WhatsApp te atiendo 24/7 🙌
         contactar_vendedor: parsed.contactar_vendedor || false,
         detected_language: detectedLang,
         phase: phaseInfo.phase,
-        phaseNumber: phaseInfo.phaseNumber
+        phaseNumber: phaseInfo.phaseNumber,
+        send_carousel: parsed.send_carousel || null
       };
       
     } catch (e) {
@@ -3218,6 +3229,109 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
       medio: minMax(med),
       premium: minMax(prem)
     };
+  }
+
+  /**
+   * Fotos por desarrollo para carousels (fallback si photo_url no existe en DB).
+   */
+  static readonly FOTOS_DESARROLLO: Record<string, string> = {
+    'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg',
+    'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2021/07/M4215335.jpg',
+    'Andes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg',
+    'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-min-scaled-e1740520053367.jpg',
+    'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
+    'Paseo Colorines': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/ACACIA-1-scaled.jpg',
+    'Alpes': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg',
+    'Villa Campelo': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
+    'Villa Galiano': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
+  };
+
+  /**
+   * Configuración de segmentos para carousel templates.
+   */
+  static readonly CAROUSEL_SEGMENTS: Record<string, { developments: string[]; template: string }> = {
+    economico: {
+      developments: ['Monte Verde', 'Andes', 'Alpes'],
+      template: 'casas_economicas'
+    },
+    premium: {
+      developments: ['Los Encinos', 'Miravalle', 'Paseo Colorines', 'Distrito Falco'],
+      template: 'casas_premium'
+    },
+    terrenos: {
+      developments: ['Villa Campelo', 'Villa Galiano'],
+      template: 'terrenos_nogal'
+    }
+  };
+
+  /**
+   * Construye los cards de un carousel template a partir de datos de la DB.
+   * Agrupa propiedades por development_name, toma la de menor precio equipado.
+   */
+  static buildCarouselCards(
+    properties: any[],
+    segment: 'economico' | 'premium' | 'terrenos'
+  ): Array<{ imageUrl: string; bodyParams: string[]; quickReplyPayload: string; quickReplyPayload2: string }> {
+    const config = AIConversationService.CAROUSEL_SEGMENTS[segment];
+    if (!config) return [];
+
+    const cards: Array<{ imageUrl: string; bodyParams: string[]; quickReplyPayload: string; quickReplyPayload2: string }> = [];
+
+    for (const devName of config.developments) {
+      // Find all properties for this development
+      const devProps = properties.filter((p: any) => {
+        const name = (p.development_name || p.development || p.name || '').toLowerCase();
+        return name.includes(devName.toLowerCase()) || devName.toLowerCase().includes(name);
+      });
+
+      if (devProps.length === 0) continue;
+
+      // Get minimum price (equipped for houses, price_min for terrenos)
+      const isTerreno = segment === 'terrenos';
+      let precioTexto: string;
+
+      if (isTerreno) {
+        const priceMin = devProps[0].price_min || devProps[0].price || 0;
+        const priceMax = devProps[0].price_max || priceMin;
+        precioTexto = `$${(priceMin / 1000).toFixed(0)}-$${(priceMax / 1000).toFixed(0)}/m²`;
+      } else {
+        const precios = devProps
+          .map((p: any) => Number(p.price_equipped || p.price || 0))
+          .filter((p: number) => p > 100000);
+        const minPrecio = precios.length > 0 ? Math.min(...precios) : 0;
+        precioTexto = `$${(minPrecio / 1000000).toFixed(1)}M`;
+      }
+
+      // Bedrooms range
+      const bedrooms = devProps
+        .map((p: any) => Number(p.bedrooms || 0))
+        .filter((b: number) => b > 0);
+      const minBed = bedrooms.length > 0 ? Math.min(...bedrooms) : 0;
+      const maxBed = bedrooms.length > 0 ? Math.max(...bedrooms) : 0;
+      const recText = isTerreno ? 'Terrenos' : (minBed === maxBed ? `${minBed} rec` : `${minBed}-${maxBed} rec`);
+
+      // Zone
+      const zona = ['Monte Verde', 'Los Encinos', 'Miravalle', 'Paseo Colorines', 'Alpes', 'Monte Real']
+        .includes(devName) ? 'Colinas del Padre' : 'Guadalupe';
+
+      // Photo URL: prefer DB, fallback to hardcoded
+      const imageUrl = devProps[0]?.photo_url ||
+        AIConversationService.FOTOS_DESARROLLO[devName] ||
+        'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg';
+
+      // Slug for quick reply payload
+      const slug = devName.toLowerCase().replace(/\s+/g, '_').replace(/[áéíóú]/g, (m: string) =>
+        ({ á: 'a', é: 'e', í: 'i', ó: 'o', ú: 'u' }[m] || m));
+
+      cards.push({
+        imageUrl,
+        bodyParams: [devName, `Desde ${precioTexto}`, recText, zona],
+        quickReplyPayload: `carousel_ver_${slug}`,
+        quickReplyPayload2: `carousel_cita_${slug}`
+      });
+    }
+
+    return cards;
   }
 
   // ━━━━━━━━━━━
@@ -5029,6 +5143,56 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               }
             }
           }
+        }
+      }
+
+      // 5.5 CAROUSEL: Enviar tarjetas deslizables si Claude lo indicó y NO hay desarrollo específico
+      if (analysis.send_carousel && !desarrolloInteres) {
+        try {
+          // Dedup: no enviar carousel si ya se envió en los últimos 5 mensajes
+          const { data: leadFrescoCarousel } = await this.supabase.client
+            .from('leads').select('notes').eq('id', lead.id).maybeSingle();
+          const notasCarousel = (leadFrescoCarousel?.notes && typeof leadFrescoCarousel.notes === 'object')
+            ? leadFrescoCarousel.notes : {};
+          const carouselSentAt = notasCarousel.carousel_sent_at;
+          const msgCountSinceCarousel = (lead.conversation_history || [])
+            .filter((m: any) => m.role === 'user' && new Date(m.timestamp) > new Date(carouselSentAt || 0))
+            .length;
+
+          if (!carouselSentAt || msgCountSinceCarousel >= 5) {
+            const segments = analysis.send_carousel === 'all'
+              ? ['economico', 'premium'] as const
+              : [analysis.send_carousel] as const;
+
+            for (const segment of segments) {
+              const cards = AIConversationService.buildCarouselCards(properties, segment as any);
+              const templateName = AIConversationService.CAROUSEL_SEGMENTS[segment]?.template;
+
+              if (cards.length > 0 && templateName) {
+                const bodyParam = segment === 'terrenos'
+                  ? 'Terrenos en Citadella del Nogal'
+                  : (segment === 'economico' ? AIConversationService.precioMinGlobal(properties) : '$3M+');
+
+                await new Promise(r => setTimeout(r, 500));
+                try {
+                  await this.meta.sendCarouselTemplate(from, templateName, [bodyParam], cards);
+                  console.log(`🎠 Carousel "${templateName}" enviado (${cards.length} cards)`);
+                } catch (carouselErr: any) {
+                  // Template might not be approved yet — fallback silently
+                  console.log(`⚠️ Carousel "${templateName}" falló (template pendiente?):`, carouselErr?.message);
+                }
+              }
+            }
+
+            // Track carousel sent
+            await this.supabase.client.from('leads').update({
+              notes: JSON.stringify({ ...notasCarousel, carousel_sent_at: new Date().toISOString() })
+            }).eq('id', lead.id);
+          } else {
+            console.log('⏭️ Carousel omitido (ya enviado, solo ' + msgCountSinceCarousel + ' msgs después)');
+          }
+        } catch (carouselError) {
+          console.log('⚠️ Error enviando carousel:', carouselError);
         }
       }
 

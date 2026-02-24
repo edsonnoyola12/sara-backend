@@ -410,7 +410,7 @@ export async function enviarDigestoErroresDiario(
 // ALERT SISTEMA - Send WhatsApp alert to Edson (owner) via template
 // ═══════════════════════════════════════════════════════════════════════════
 
-const OWNER_PHONE = '5610016226'; // Edson - TODAS las alertas de sistema van aquí
+const DEFAULT_DEV_PHONE = '5610016226'; // Fallback if env.DEV_PHONE not set
 
 /**
  * Envía alerta de sistema a Edson vía template (no requiere ventana 24h).
@@ -421,9 +421,10 @@ const OWNER_PHONE = '5610016226'; // Edson - TODAS las alertas de sistema van aq
 export async function enviarAlertaSistema(
   meta: MetaWhatsAppService,
   mensaje: string,
-  env?: { SARA_CACHE?: KVNamespace },
+  env?: { SARA_CACHE?: KVNamespace; DEV_PHONE?: string },
   dedupKey: string = 'last_health_alert'
 ): Promise<boolean> {
+  const OWNER_PHONE = env?.DEV_PHONE || DEFAULT_DEV_PHONE;
   try {
     // Dedup: check if we already sent an alert in the last hour
     if (env?.SARA_CACHE && dedupKey) {

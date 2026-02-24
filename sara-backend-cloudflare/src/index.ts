@@ -846,6 +846,7 @@ export default {
 
           // ═══ EXTRAER TEXTO DEL MENSAJE (incluyendo respuestas interactivas) ═══
           let text = '';
+          let buttonPayloadRaw = ''; // Raw payload/id para detectar carousel_ver_* etc.
           if (messageType === 'text') {
             text = message.text?.body || '';
           } else if (messageType === 'interactive') {
@@ -854,16 +855,19 @@ export default {
             if (interactiveType === 'list_reply') {
               // Respuesta a lista: preferir título (legible) sobre ID
               text = message.interactive.list_reply?.title || message.interactive.list_reply?.id || '';
+              buttonPayloadRaw = message.interactive.list_reply?.id || '';
               console.log(`📋 Respuesta a LISTA: id="${message.interactive.list_reply?.id}", title="${message.interactive.list_reply?.title}"`);
             } else if (interactiveType === 'button_reply') {
               // Respuesta a botones: preferir título (legible) sobre ID (btn_xxx)
               text = message.interactive.button_reply?.title || message.interactive.button_reply?.id || '';
+              buttonPayloadRaw = message.interactive.button_reply?.id || '';
               console.log(`🔘 Respuesta a BOTÓN: id="${message.interactive.button_reply?.id}", title="${message.interactive.button_reply?.title}"`);
             }
           } else if (messageType === 'button') {
             // Botón de template (diferente a interactive button)
             text = message.button?.text || message.button?.payload || '';
-            console.log(`🔲 Respuesta a TEMPLATE BUTTON: "${text}"`);
+            buttonPayloadRaw = message.button?.payload || '';
+            console.log(`🔲 Respuesta a TEMPLATE BUTTON: "${text}", payload="${buttonPayloadRaw}"`);
           }
 
           console.log(`📥 Procesando mensaje de ${from}: tipo=${messageType}, texto="${text.substring(0, 50)}..."`);
@@ -1520,6 +1524,24 @@ export default {
             }
           }
           // ═══ FIN DETECCIÓN DE LEADS CALIENTES Y OBJECIONES ═══
+
+          // ═══ CAROUSEL QUICK REPLY: Interceptar payloads carousel_ver_* y carousel_cita_* ═══
+          if (buttonPayloadRaw.startsWith('carousel_ver_') || buttonPayloadRaw.startsWith('carousel_cita_')) {
+            const isVerMas = buttonPayloadRaw.startsWith('carousel_ver_');
+            const slug = buttonPayloadRaw.replace(/^carousel_(ver|cita)_/, '');
+            // Reverse slug to development name: monte_verde → Monte Verde
+            const devName = slug.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+            console.log(`🎠 Carousel ${isVerMas ? 'VER MÁS' : 'AGENDAR CITA'}: slug="${slug}", desarrollo="${devName}"`);
+
+            if (isVerMas) {
+              // "Ver más" → trigger resource sending (video+GPS+brochure) for that development
+              text = `Quiero ver información de ${devName}`;
+            } else {
+              // "Agendar visita" → trigger appointment flow for that development
+              text = `Quiero agendar una visita a ${devName}`;
+            }
+          }
+          // ═══ FIN CAROUSEL QUICK REPLY ═══
 
           await handler.handleIncomingMessage(`whatsapp:+${from}`, text, env);
 

@@ -11,7 +11,7 @@ import { createLeadAttribution } from '../services/leadAttributionService';
 import { createSLAMonitoring } from '../services/slaMonitoringService';
 import { getAvailableVendor } from '../services/leadManagementService';
 import { logErrorToDB, enviarDigestoErroresDiario } from '../crons/healthCheck';
-import { isAllowedCrmOrigin, parsePagination, paginatedResponse, validateRequired, validatePhone, validateDateISO } from './cors';
+import { isAllowedCrmOrigin, parsePagination, paginatedResponse, validateRequired, validatePhone, validateDateISO, validateLeadStatus, validateSource } from './cors';
 
 interface Env {
   SUPABASE_URL: string;
@@ -286,6 +286,9 @@ Responde *SI* para confirmar tu asistencia.`;
     // API: Borrar lead y datos asociados (para testing)
     // ═══════════════════════════════════════════════════════════
     if (url.pathname.match(/^\/api\/leads\/[^/]+$/) && request.method === 'DELETE') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const leadId = url.pathname.split('/').pop();
       console.log('🗑️ Borrando lead:', leadId);
 
@@ -688,6 +691,8 @@ ${asesor.phone ? `📱 *Tel:* ${asesor.phone}` : ''}
       const reqError = validateRequired(body, ['name', 'phone']);
       if (reqError) return corsResponse(JSON.stringify({ error: reqError }), 400);
       if (!validatePhone(body.phone)) return corsResponse(JSON.stringify({ error: 'Formato de teléfono inválido (10-15 dígitos)' }), 400);
+      if (body.status && !validateLeadStatus(body.status)) return corsResponse(JSON.stringify({ error: 'Status inválido. Válidos: new, contacted, qualified, scheduled, visited, negotiation, reserved, closed, delivered, lost, inactive' }), 400);
+      if (body.source && !validateSource(body.source)) return corsResponse(JSON.stringify({ error: 'Source inválido. Válidos: whatsapp, facebook, instagram, website, referral, walk_in, phone, retell, crm, manual, other' }), 400);
 
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
 

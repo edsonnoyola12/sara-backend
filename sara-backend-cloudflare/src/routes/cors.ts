@@ -78,3 +78,15 @@ export function validateRole(role: string): boolean {
 export function validateDateISO(date: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(date) && !isNaN(new Date(date).getTime());
 }
+
+const VALID_LEAD_STATUSES = ['new', 'contacted', 'qualified', 'scheduled', 'visit_scheduled', 'visited', 'negotiation', 'negotiating', 'reserved', 'closed', 'sold', 'delivered', 'lost', 'inactive', 'fallen', 'paused'];
+
+export function validateLeadStatus(status: string): boolean {
+  return VALID_LEAD_STATUSES.includes(status);
+}
+
+const VALID_SOURCES = ['whatsapp', 'facebook', 'instagram', 'website', 'referral', 'walk_in', 'phone', 'retell', 'crm', 'manual', 'other'];
+
+export function validateSource(source: string): boolean {
+  return VALID_SOURCES.includes(source);
+}

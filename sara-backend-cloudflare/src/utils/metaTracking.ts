@@ -54,6 +54,11 @@ export async function createMetaWithTracking(env: any, supabase: SupabaseService
     meta.setKVNamespace(env.SARA_CACHE);
   }
 
+  // Configurar teléfono de admin para alertas de sistema
+  if (env.DEV_PHONE) {
+    meta.setAdminPhone(env.DEV_PHONE);
+  }
+
   // Configurar callback para encolar mensajes cuando se excede el rate limit global
   meta.setRateLimitEnqueueCallback(async (data) => {
     await enqueueFailedMessage(

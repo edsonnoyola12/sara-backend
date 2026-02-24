@@ -33,7 +33,7 @@ const DNC_PHRASES = [
 ];
 
 // Admin para alertas críticas de sistema → Edson (owner)
-const ADMIN_PHONE = '5610016226';
+const DEFAULT_ADMIN_PHONE = '5610016226';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 🧪 MODO PRUEBA - Solo envía a teléfonos autorizados
@@ -128,6 +128,7 @@ export class MetaWhatsAppService {
   private failedMessageCallback?: FailedMessageCallback;
   private rateLimitEnqueueCallback?: RateLimitEnqueueCallback;
   private kvNamespace?: KVNamespace;
+  private adminPhone: string = DEFAULT_ADMIN_PHONE;
 
   // Meta Business API global rate limit: ~80 msgs/min (basic tier)
   // We cap at 75 to leave headroom
@@ -136,6 +137,10 @@ export class MetaWhatsAppService {
   constructor(phoneNumberId: string, accessToken: string) {
     this.phoneNumberId = phoneNumberId;
     this.accessToken = accessToken;
+  }
+
+  setAdminPhone(phone: string): void {
+    this.adminPhone = phone;
   }
 
   /**
@@ -460,7 +465,7 @@ export class MetaWhatsAppService {
       const msgTruncado = message.length > 1000 ? message.substring(0, 997) + '...' : message;
       // Intentar template primero (no requiere ventana 24h)
       try {
-        await this.sendTemplate(ADMIN_PHONE, 'alerta_sistema', 'es_MX', [
+        await this.sendTemplate(this.adminPhone, 'alerta_sistema', 'es_MX', [
           { type: 'body', parameters: [{ type: 'text', text: msgTruncado }] }
         ], true);
         console.log(`🚨 Alerta enviada a admin via template: ${message.substring(0, 50)}...`);
@@ -473,7 +478,7 @@ export class MetaWhatsAppService {
       const payload = {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
-        to: ADMIN_PHONE,
+        to: this.adminPhone,
         type: 'text',
         text: { body: message }
       };
@@ -1263,6 +1268,145 @@ export class MetaWhatsAppService {
         messageType: 'template',
         categoria: `template_${templateName}`,
         contenido: `Template: ${templateName}`
+      });
+    }
+
+    return data;
+  }
+
+  /**
+   * Envía un template tipo carousel (tarjetas deslizables) via Meta WhatsApp API.
+   * Cada card tiene: imagen header, body con params dinámicos, y botones quick_reply.
+   * Requiere template aprobado por Meta con componente CAROUSEL.
+   */
+  async sendCarouselTemplate(
+    to: string,
+    templateName: string,
+    bodyParams: string[],
+    cards: Array<{
+      imageUrl: string;
+      bodyParams: string[];
+      quickReplyPayload: string;
+      quickReplyPayload2?: string;
+    }>,
+    languageCode: string = 'es'
+  ): Promise<any> {
+    const phone = this.normalizePhone(to);
+
+    if (!isTestPhoneAllowed(phone)) {
+      console.log(`🧪 TEST_MODE: Bloqueado carousel "${templateName}" a ${phone}`);
+      return { test_mode_blocked: true, phone, template: templateName };
+    }
+
+    const canSend = await this.checkGlobalRateLimit();
+    if (!canSend) {
+      console.warn(`🚦 Rate limited: carousel "${templateName}" to ${phone}`);
+      return { rate_limited: true, phone, template: templateName };
+    }
+
+    const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
+
+    // Build carousel cards components
+    const carouselCards = cards.map((card, index) => {
+      const cardComponents: any[] = [
+        {
+          type: 'header',
+          parameters: [{ type: 'image', image: { link: card.imageUrl } }]
+        },
+        {
+          type: 'body',
+          parameters: card.bodyParams.map(p => ({ type: 'text', text: p }))
+        },
+        {
+          type: 'button',
+          sub_type: 'quick_reply',
+          index: 0,
+          parameters: [{ type: 'payload', payload: card.quickReplyPayload }]
+        }
+      ];
+
+      if (card.quickReplyPayload2) {
+        cardComponents.push({
+          type: 'button',
+          sub_type: 'quick_reply',
+          index: 1,
+          parameters: [{ type: 'payload', payload: card.quickReplyPayload2 }]
+        });
+      }
+
+      return { card_index: index, components: cardComponents };
+    });
+
+    const components: any[] = [];
+
+    // Body params for the template header text (before cards)
+    if (bodyParams.length > 0) {
+      components.push({
+        type: 'body',
+        parameters: bodyParams.map(p => ({ type: 'text', text: p }))
+      });
+    }
+
+    // Carousel component
+    components.push({
+      type: 'CAROUSEL',
+      cards: carouselCards
+    });
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        components
+      }
+    };
+
+    console.log(`📤 Enviando carousel "${templateName}" (${cards.length} cards) a ${phone}`);
+
+    let response: Response;
+    try {
+      response = await this.fetchWithRetry(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      }, `sendCarousel:${templateName}:${phone}`);
+    } catch (retryError: any) {
+      if (this.failedMessageCallback) {
+        try {
+          await this.failedMessageCallback({
+            recipientPhone: phone,
+            messageType: 'template',
+            payload: { templateName, languageCode, components },
+            context: `sendCarousel:${templateName}:${phone}`,
+            errorMessage: retryError?.message || String(retryError)
+          });
+        } catch (_) { /* silent */ }
+      }
+      throw retryError;
+    }
+
+    const data = await response.json() as any;
+    if (!response.ok) {
+      console.error('❌ Error enviando carousel:', JSON.stringify(data));
+      throw new Error(data.error?.message || 'Error enviando carousel');
+    }
+    console.log(`✅ Carousel enviado: ${data.messages?.[0]?.id}`);
+
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId,
+        recipientPhone: phone,
+        messageType: 'template',
+        categoria: `carousel_${templateName}`,
+        contenido: `Carousel: ${templateName} (${cards.length} cards)`
       });
     }
 
