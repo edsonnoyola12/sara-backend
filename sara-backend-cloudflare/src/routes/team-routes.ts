@@ -1,27 +1,5 @@
 import { SupabaseService } from '../services/supabase';
-
-const ALLOWED_CRM_ORIGINS = [
-  'https://sara-crm.vercel.app',
-  'https://sara-crm-new.vercel.app',
-  'https://sara-crm.netlify.app',
-  'https://gruposantarita.com',
-  'https://www.gruposantarita.com',
-  'http://localhost:3000',
-  'http://localhost:5173',
-];
-
-function getCorsHeadersForRequest(request: Request): Record<string, string> {
-  const origin = request.headers.get('Origin');
-  const allowed = origin && (
-    ALLOWED_CRM_ORIGINS.includes(origin) ||
-    /^https:\/\/sara-crm.*\.vercel\.app$/.test(origin)
-  );
-  return {
-    'Access-Control-Allow-Origin': allowed ? origin! : ALLOWED_CRM_ORIGINS[0],
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  };
-}
+import { isAllowedCrmOrigin, getCorsHeaders, parsePagination, paginatedResponse, validateRequired, validatePhone, validateRole } from './cors';
 
 function checkTeamAuth(request: Request, env: any): boolean {
   // API key auth
@@ -32,7 +10,7 @@ function checkTeamAuth(request: Request, env: any): boolean {
   if (env.API_SECRET && (apiKey === env.API_SECRET || queryKey === env.API_SECRET)) return true;
   // Origin-based auth
   const origin = request.headers.get('Origin');
-  if (origin && (ALLOWED_CRM_ORIGINS.includes(origin) || /^https:\/\/sara-crm.*\.vercel\.app$/.test(origin))) return true;
+  if (isAllowedCrmOrigin(origin)) return true;
   // No API_SECRET configured = dev mode
   if (!env.API_SECRET) return true;
   return false;
@@ -40,8 +18,8 @@ function checkTeamAuth(request: Request, env: any): boolean {
 
 export async function handleTeamRoutes(request: Request, env: any, supabase: SupabaseService): Promise<Response | null> {
   const url = new URL(request.url);
-  
-  const corsHeaders = getCorsHeadersForRequest(request);
+
+  const corsHeaders = getCorsHeaders(request);
 
   if (url.pathname === '/api/team-members' && request.method === 'GET') {
     if (!checkTeamAuth(request, env)) {
@@ -50,10 +28,17 @@ export async function handleTeamRoutes(request: Request, env: any, supabase: Sup
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
+    const { limit, offset, page } = parsePagination(url);
+
+    const { count } = await supabase.client
+      .from('team_members')
+      .select('id', { count: 'exact', head: true });
+
     const { data, error } = await supabase.client
       .from('team_members')
       .select('*')
-      .order('name');
+      .order('name')
+      .range(offset, offset + limit - 1);
 
     if (error) {
       return new Response(JSON.stringify({ error: error.message }), {
@@ -62,14 +47,35 @@ export async function handleTeamRoutes(request: Request, env: any, supabase: Sup
       });
     }
 
-    return new Response(JSON.stringify(data), {
+    return new Response(JSON.stringify(paginatedResponse(data || [], count || 0, page, limit)), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
-  
+
   if (url.pathname === '/api/team-members' && request.method === 'POST') {
-    const body = await request.json();
-    
+    const body = await request.json() as any;
+
+    // Validate required fields
+    const reqError = validateRequired(body, ['name', 'phone', 'role']);
+    if (reqError) {
+      return new Response(JSON.stringify({ error: reqError }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    if (!validatePhone(body.phone)) {
+      return new Response(JSON.stringify({ error: 'Formato de teléfono inválido (10-15 dígitos)' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    if (!validateRole(body.role)) {
+      return new Response(JSON.stringify({ error: 'Rol inválido. Válidos: admin, vendedor, coordinador, asesor, agencia' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     const { data, error } = await supabase.client
       .from('team_members')
       .insert([{
@@ -81,23 +87,37 @@ export async function handleTeamRoutes(request: Request, env: any, supabase: Sup
       }])
       .select()
       .single();
-    
+
     if (error) {
       return new Response(JSON.stringify({ error: error.message }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-    
+
     return new Response(JSON.stringify(data), {
       status: 201,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
-  
+
   if (url.pathname.startsWith('/api/team-members/') && request.method === 'PUT') {
     const id = url.pathname.split('/')[3];
     const body = await request.json() as any;
+
+    // Validate optional fields if present
+    if (body.phone !== undefined && body.phone !== null && !validatePhone(body.phone)) {
+      return new Response(JSON.stringify({ error: 'Formato de teléfono inválido (10-15 dígitos)' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    if (body.role !== undefined && !validateRole(body.role)) {
+      return new Response(JSON.stringify({ error: 'Rol inválido. Válidos: admin, vendedor, coordinador, asesor, agencia' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
 
     // Construir objeto de actualización solo con campos presentes
     const updateData: any = {};
@@ -132,26 +152,26 @@ export async function handleTeamRoutes(request: Request, env: any, supabase: Sup
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
-  
+
   if (url.pathname.startsWith('/api/team-members/') && request.method === 'DELETE') {
     const id = url.pathname.split('/')[3];
-    
+
     const { error } = await supabase.client
       .from('team_members')
       .delete()
       .eq('id', id);
-    
+
     if (error) {
       return new Response(JSON.stringify({ error: error.message }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-    
+
     return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
-  
+
   return null;
 }

@@ -11,6 +11,7 @@ import { createLeadAttribution } from '../services/leadAttributionService';
 import { createSLAMonitoring } from '../services/slaMonitoringService';
 import { getAvailableVendor } from '../services/leadManagementService';
 import { logErrorToDB, enviarDigestoErroresDiario } from '../crons/healthCheck';
+import { isAllowedCrmOrigin, parsePagination, paginatedResponse, validateRequired, validatePhone, validateDateISO } from './cors';
 
 interface Env {
   SUPABASE_URL: string;
@@ -33,23 +34,7 @@ interface Env {
 type CorsResponseFn = (body: string | null, status?: number, contentType?: string, request?: Request) => Response;
 type CheckApiAuthFn = (request: Request, env: Env) => Response | null;
 
-// Whitelist de orígenes permitidos para endpoints con datos sensibles
-const ALLOWED_CRM_ORIGINS = [
-  'https://sara-crm.vercel.app',
-  'https://sara-crm-new.vercel.app',
-  'https://sara-crm.netlify.app',
-  'https://gruposantarita.com',
-  'https://www.gruposantarita.com',
-  'http://localhost:3000',
-  'http://localhost:5173',
-];
-
-function isAllowedCrmOrigin(origin: string | null): boolean {
-  if (!origin) return false;
-  if (ALLOWED_CRM_ORIGINS.includes(origin)) return true;
-  if (origin.match(/^https:\/\/sara-crm.*\.vercel\.app$/)) return true;
-  return false;
-}
+// CORS whitelist imported from ./cors.ts (single source of truth)
 
 /**
  * Check auth for sensitive data endpoints.
@@ -274,11 +259,19 @@ Responde *SI* para confirmar tu asistencia.`;
     if (url.pathname === '/api/leads' && request.method === 'GET') {
       const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
       if (authErr) return authErr;
+      const { limit, offset, page } = parsePagination(url);
+
+      const { count } = await supabase.client
+        .from('leads')
+        .select('id', { count: 'exact', head: true });
+
       const { data } = await supabase.client
         .from('leads')
         .select('*')
-        .order('created_at', { ascending: false });
-      return corsResponse(JSON.stringify(data || []));
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      return corsResponse(JSON.stringify(paginatedResponse(data || [], count || 0, page, limit)));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -673,8 +666,14 @@ ${asesor.phone ? `📱 *Tel:* ${asesor.phone}` : ''}
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/leads' && request.method === 'POST') {
       const body = await request.json() as any;
+
+      // Validate required fields
+      const reqError = validateRequired(body, ['name', 'phone']);
+      if (reqError) return corsResponse(JSON.stringify({ error: reqError }), 400);
+      if (!validatePhone(body.phone)) return corsResponse(JSON.stringify({ error: 'Formato de teléfono inválido (10-15 dígitos)' }), 400);
+
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-      
+
       let vendedorAsignado = null;
       const esVendedor = body.creador_role === 'vendedor';
 
@@ -1350,22 +1349,27 @@ ${body.nota || 'Sin nota'}
       const startDate = url.searchParams.get('start_date');
       const endDate = url.searchParams.get('end_date');
       const vendorId = url.searchParams.get('vendor_id');
+      const { limit, offset, page } = parsePagination(url);
+
+      // Count query with same filters
+      let countQuery = supabase.client
+        .from('appointments')
+        .select('id', { count: 'exact', head: true });
+      if (startDate) countQuery = countQuery.gte('scheduled_date', startDate);
+      if (endDate) countQuery = countQuery.lte('scheduled_date', endDate);
+      if (vendorId) countQuery = countQuery.eq('vendedor_id', vendorId);
+      const { count } = await countQuery;
 
       let query = supabase.client
         .from('appointments')
         .select('*, leads(name, phone)')
         .order('scheduled_date', { ascending: true })
-        .order('scheduled_time', { ascending: true });
+        .order('scheduled_time', { ascending: true })
+        .range(offset, offset + limit - 1);
 
-      if (startDate) {
-        query = query.gte('scheduled_date', startDate);
-      }
-      if (endDate) {
-        query = query.lte('scheduled_date', endDate);
-      }
-      if (vendorId) {
-        query = query.eq('vendedor_id', vendorId);
-      }
+      if (startDate) query = query.gte('scheduled_date', startDate);
+      if (endDate) query = query.lte('scheduled_date', endDate);
+      if (vendorId) query = query.eq('vendedor_id', vendorId);
 
       const { data, error } = await query;
 
@@ -1373,13 +1377,18 @@ ${body.nota || 'Sin nota'}
         return corsResponse(JSON.stringify({ error: error.message }), 500);
       }
 
-      return corsResponse(JSON.stringify(data || []));
+      return corsResponse(JSON.stringify(paginatedResponse(data || [], count || 0, page, limit)));
     }
 
     // Crear nueva cita
     if (url.pathname === '/api/appointments' && request.method === 'POST') {
       const body = await request.json() as any;
-      
+
+      // Validate required fields
+      const reqError = validateRequired(body, ['lead_id', 'scheduled_date']);
+      if (reqError) return corsResponse(JSON.stringify({ error: reqError }), 400);
+      if (!validateDateISO(body.scheduled_date)) return corsResponse(JSON.stringify({ error: 'scheduled_date debe ser formato YYYY-MM-DD' }), 400);
+
       try {
         // Construir fecha/hora en formato local (no UTC)
         const citaHora = (body.scheduled_time || '10:00').substring(0, 5);
@@ -2136,16 +2145,27 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
     const type = url.searchParams.get('type');
     const severity = url.searchParams.get('severity');
     const resolved = url.searchParams.get('resolved');
-    const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
+    const { limit, offset, page } = parsePagination(url);
 
     const desde = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+    // Count with same filters
+    let countQuery = supabase.client
+      .from('error_logs')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', desde);
+    if (type) countQuery = countQuery.eq('error_type', type);
+    if (severity) countQuery = countQuery.eq('severity', severity);
+    if (resolved === 'true') countQuery = countQuery.eq('resolved', true);
+    if (resolved === 'false') countQuery = countQuery.eq('resolved', false);
+    const { count } = await countQuery;
 
     let query = supabase.client
       .from('error_logs')
       .select('*')
       .gte('created_at', desde)
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .range(offset, offset + limit - 1);
 
     if (type) query = query.eq('error_type', type);
     if (severity) query = query.eq('severity', severity);
@@ -2159,7 +2179,7 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
     }
 
     const stats = {
-      total: errors?.length || 0,
+      total: count || 0,
       critical: errors?.filter((e: any) => e.severity === 'critical').length || 0,
       unresolved: errors?.filter((e: any) => !e.resolved).length || 0,
       by_type: {} as Record<string, number>
@@ -2168,7 +2188,7 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
       stats.by_type[err.error_type] = (stats.by_type[err.error_type] || 0) + 1;
     }
 
-    return corsResponse(JSON.stringify({ stats, errors }), 200, 'application/json', request);
+    return corsResponse(JSON.stringify({ stats, errors, pagination: { page, limit, total: count || 0, pages: Math.ceil((count || 0) / limit) } }), 200, 'application/json', request);
   }
 
   // Mark error as resolved
