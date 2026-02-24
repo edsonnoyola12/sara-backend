@@ -344,9 +344,8 @@ export async function handleRetellRoutes(
             description: 'Busca información detallada de un desarrollo inmobiliario específico: modelos, precios, recámaras, metros cuadrados. Usa SOLO cuando el cliente pregunte por un desarrollo específico por nombre.',
             url: `${baseUrl}/webhook/retell/tool/info-desarrollo`,
             method: 'POST',
-            speak_during_execution: true,
-            execution_message_description: 'Dile que estás buscando la información del desarrollo.',
-            timeout_ms: 10000,
+            speak_during_execution: false,
+            timeout_ms: 8000,
             parameters: {
               type: 'object',
               properties: {
@@ -364,9 +363,8 @@ export async function handleRetellRoutes(
             description: 'Busca TODAS las casas de TODOS los desarrollos que se ajusten a un presupuesto. Usa esta herramienta cuando el cliente diga cuánto tiene para gastar o su presupuesto. Ejemplo: "tengo 5 millones", "mi presupuesto es 2 millones", "busco algo de 3 millones".',
             url: `${baseUrl}/webhook/retell/tool/buscar-por-presupuesto`,
             method: 'POST',
-            speak_during_execution: true,
-            execution_message_description: 'Dile que estás buscando las opciones que se ajustan a su presupuesto.',
-            timeout_ms: 10000,
+            speak_during_execution: false,
+            timeout_ms: 8000,
             parameters: {
               type: 'object',
               properties: {
@@ -388,8 +386,7 @@ export async function handleRetellRoutes(
             description: 'Agenda una cita de visita. Usa esta herramienta en cuanto tengas nombre, fecha y hora. Si no sabe qué desarrollo, usa "Oficinas Santa Rita" como punto de encuentro.',
             url: `${baseUrl}/webhook/retell/tool/agendar-cita`,
             method: 'POST',
-            speak_during_execution: true,
-            execution_message_description: 'Dile que estás agendando su cita.',
+            speak_during_execution: false,
             timeout_ms: 15000,
             parameters: {
               type: 'object',
@@ -408,9 +405,8 @@ export async function handleRetellRoutes(
             description: 'Cancela la cita próxima del cliente. Usa cuando el cliente diga que quiere cancelar su cita.',
             url: `${baseUrl}/webhook/retell/tool/cancelar-cita`,
             method: 'POST',
-            speak_during_execution: true,
-            execution_message_description: 'Dile que estás cancelando su cita.',
-            timeout_ms: 10000,
+            speak_during_execution: false,
+            timeout_ms: 8000,
             parameters: {
               type: 'object',
               properties: {
@@ -425,9 +421,8 @@ export async function handleRetellRoutes(
             description: 'Reagenda la cita del cliente a una nueva fecha y hora. Usa cuando quiera cambiar su cita existente.',
             url: `${baseUrl}/webhook/retell/tool/cambiar-cita`,
             method: 'POST',
-            speak_during_execution: true,
-            execution_message_description: 'Dile que estás cambiando su cita.',
-            timeout_ms: 15000,
+            speak_during_execution: false,
+            timeout_ms: 12000,
             parameters: {
               type: 'object',
               properties: {
@@ -443,9 +438,8 @@ export async function handleRetellRoutes(
             description: 'Envía información al cliente por WhatsApp: brochure, ubicación GPS, video, o info general de un desarrollo. Usa cuando el cliente pida que le mandes info.',
             url: `${baseUrl}/webhook/retell/tool/enviar-whatsapp`,
             method: 'POST',
-            speak_during_execution: true,
-            execution_message_description: 'Dile que le estás enviando la información por WhatsApp.',
-            timeout_ms: 10000,
+            speak_during_execution: false,
+            timeout_ms: 8000,
             parameters: {
               type: 'object',
               properties: {
@@ -461,8 +455,7 @@ export async function handleRetellRoutes(
             description: 'Consulta información sobre crédito hipotecario, INFONAVIT, FOVISSSTE, o bancario. Calcula capacidad de crédito aproximada basada en ingreso.',
             url: `${baseUrl}/webhook/retell/tool/info-credito`,
             method: 'POST',
-            speak_during_execution: true,
-            execution_message_description: 'Dile que estás calculando sus opciones de crédito.',
+            speak_during_execution: false,
             timeout_ms: 8000,
             parameters: {
               type: 'object',
@@ -497,7 +490,8 @@ REGLA #2: UNA sola pregunta por turno. Nunca dos preguntas juntas.
 REGLA #3: Precios SIEMPRE en palabras: "un millón seiscientos mil pesos", nunca números ni abreviaciones.
 REGLA #4: No te cicles. Si ya tienes nombre, día y hora, agenda de una vez con la herramienta.
 REGLA #5: NUNCA pidas el celular ni el teléfono del cliente. Ya estás hablando con él por teléfono, ya tienes su número.
-REGLA #6: SÍ puedes enviar info por WhatsApp. Usa la herramienta enviar_info_whatsapp. Dile "Te mando la info por WhatsApp ahorita mismo".
+REGLA #6: SÍ puedes enviar info por WhatsApp. Usa la herramienta enviar_info_whatsapp. Di UNA VEZ "Te mando la info por WhatsApp" y ESPERA el resultado de la herramienta. NO repitas que lo estás enviando.
+REGLA #6.1: ANTI-LOOP: Cuando uses CUALQUIER herramienta, di UNA sola frase corta y ESPERA en silencio el resultado. NUNCA repitas "te lo envío" o "estoy buscando". Si ya dijiste que vas a hacer algo, NO lo repitas.
 REGLA #7: NUNCA sugieras un día específico (sábado, domingo, fin de semana, finde, mañana). SIEMPRE pregunta abierto: "¿Qué día te queda bien?" y espera a que EL CLIENTE diga el día.
 REGLA #8: Cuando el cliente dice su nombre, RECUÉRDALO. No lo vuelvas a preguntar. Si ya lo tienes, úsalo directamente al agendar.
 REGLA #9: Cuando el cliente da presupuesto, usa la herramienta buscar_por_presupuesto. Presenta TODAS las opciones que te devuelva, agrupadas por desarrollo y zona. No elijas solo una.
