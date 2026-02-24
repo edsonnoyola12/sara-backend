@@ -3,6 +3,7 @@ import { CalendarService as GoogleCalendarService } from './calendar';
 import { parseCancelarCitaCommand, parseReagendarCommand, formatearFechaLegible, formatearHoraLegible } from '../handlers/appointmentService';
 import { parseFechaISO, parseHoraISO } from '../handlers/dateParser';
 import { parseHora } from '../utils/vendedorParsers';
+import { findLeadByName } from '../handlers/whatsapp-utils';
 
 interface CancelarResult {
   success?: boolean;
@@ -77,12 +78,11 @@ export class AppointmentSchedulingService {
 
   async cancelarCitaCompleto(nombreLead: string, vendedor: any): Promise<CancelarResult> {
     try {
-      // Buscar leads que coincidan
-      const { data: leads } = await this.supabase.client
-        .from('leads')
-        .select('id, name, phone')
-        .ilike('name', `%${nombreLead}%`)
-        .limit(10);
+      // Buscar leads que coincidan (con fallback accent-tolerant)
+      const leads = await findLeadByName(this.supabase, nombreLead, {
+        select: 'id, name, phone',
+        limit: 10
+      });
 
       if (!leads || leads.length === 0) {
         return { error: `No encontré a "${nombreLead}" en tus leads.` };
@@ -308,12 +308,11 @@ reagendar ${nombreLead} mañana 4pm`;
         return { needsHelp: true };
       }
 
-      // Buscar leads que coincidan
-      const { data: leads } = await this.supabase.client
-        .from('leads')
-        .select('id, name, phone')
-        .ilike('name', `%${parsed.nombreLead}%`)
-        .limit(10);
+      // Buscar leads que coincidan (con fallback accent-tolerant)
+      const leads = await findLeadByName(this.supabase, parsed.nombreLead, {
+        select: 'id, name, phone',
+        limit: 10
+      });
 
       if (!leads || leads.length === 0) {
         return { error: `No encontré a "${parsed.nombreLead}" en tus leads.` };
@@ -726,12 +725,11 @@ agendar ${nombreLead} mañana 4pm`;
       }
 
       // Buscar leads que coincidan (incluir property_interest para ubicación)
-      const { data: leads } = await this.supabase.client
-        .from('leads')
-        .select('id, name, phone, property_interest')
-        .eq('assigned_to', vendedor.id)
-        .ilike('name', `%${parsed.nombreLead}%`)
-        .limit(10);
+      const leads = await findLeadByName(this.supabase, parsed.nombreLead, {
+        vendedorId: vendedor.id,
+        select: 'id, name, phone, property_interest',
+        limit: 10
+      });
 
       if (!leads || leads.length === 0) {
         return { error: `No encontré a "${parsed.nombreLead}" en tus leads.` };

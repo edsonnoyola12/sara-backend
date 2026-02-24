@@ -2,6 +2,7 @@ import { SupabaseService } from './supabase';
 import { MetaWhatsAppService } from './meta-whatsapp';
 import { ClaudeService } from './claude';
 import { safeJsonParse } from '../utils/safeHelpers';
+import { findLeadByName } from '../handlers/whatsapp-utils';
 
 interface VendorMetrics {
   id: string;
@@ -361,13 +362,11 @@ export class IACoachingService {
    */
   async getCoaching(nombreLead: string, vendedor: any): Promise<{ success: boolean; mensaje?: string; error?: string }> {
     try {
-      // 1. Buscar el lead
-      const { data: leads } = await this.supabase.client
-        .from('leads')
-        .select('*')
-        .eq('assigned_to', vendedor.id)
-        .ilike('name', `%${nombreLead}%`)
-        .limit(5);
+      // 1. Buscar el lead (con fallback accent-tolerant)
+      const leads = await findLeadByName(this.supabase, nombreLead, {
+        vendedorId: vendedor.id,
+        limit: 5
+      });
 
       if (!leads || leads.length === 0) {
         return { success: false, error: `No encontré a "${nombreLead}" en tus leads.\n\n💡 Escribe *leads* para ver tu lista.` };

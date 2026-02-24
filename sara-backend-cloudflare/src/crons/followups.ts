@@ -10,6 +10,7 @@ import { logEvento } from './briefings';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { safeJsonParse } from '../utils/safeHelpers';
 import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
+import { logErrorToDB } from './healthCheck';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LÍMITE DE MENSAJES AUTOMÁTICOS POR DÍA
@@ -46,6 +47,7 @@ export async function puedeEnviarMensajeAutomatico(supabase: SupabaseService, le
     return true;
   } catch (e) {
     console.error('Error verificando límite mensajes:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'puedeEnviarMensajeAutomatico', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
     return true; // En caso de error, permitir envío
   }
 }
@@ -79,6 +81,7 @@ export async function registrarMensajeAutomatico(supabase: SupabaseService, lead
 
   } catch (e) {
     console.error('Error registrando mensaje automático:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'registrarMensajeAutomatico', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -195,6 +198,7 @@ export async function seguimientoHipotecas(supabase: SupabaseService, meta: Meta
     }
   } catch (e) {
     console.log('Error en seguimiento hipotecas:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'seguimientoHipotecas', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -353,6 +357,7 @@ export async function enviarRecordatoriosPromociones(supabase: SupabaseService, 
 
   } catch (e) {
     console.error('Error en recordatorios de promociones:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarRecordatoriosPromociones', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -398,7 +403,8 @@ export async function enviarBriefingSupervision(supabase: SupabaseService, meta:
       .select('id, name, phone, assigned_to, created_at')
       .eq('status', 'new')
       .lt('created_at', hace24h)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: true })
+      .limit(100);
 
     // ═══════════════════════════════════════════════════════════════════
     // 2. CITAS DE HOY SIN CONFIRMAR
@@ -407,7 +413,8 @@ export async function enviarBriefingSupervision(supabase: SupabaseService, meta:
       .from('appointments')
       .select('id, lead_name, scheduled_time, vendedor_id, status')
       .eq('scheduled_date', hoyStr)
-      .eq('status', 'scheduled');
+      .eq('status', 'scheduled')
+      .limit(100);
 
     // ═══════════════════════════════════════════════════════════════════
     // 3. PAGOS DE APARTADO PRÓXIMOS (esta semana)
@@ -461,7 +468,8 @@ export async function enviarBriefingSupervision(supabase: SupabaseService, meta:
       .select('id, lead_id, vendedor_id, scheduled_for, notes')
       .eq('status', 'pending')
       .lte('scheduled_for', ahora.toISOString())
-      .order('scheduled_for', { ascending: true });
+      .order('scheduled_for', { ascending: true })
+      .limit(100);
 
     // ═══════════════════════════════════════════════════════════════════
     // 6. NO-SHOWS DE AYER
@@ -730,6 +738,7 @@ export async function enviarBriefingSupervision(supabase: SupabaseService, meta:
 
   } catch (e) {
     console.error('Error en briefing de supervisión:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarBriefingSupervision', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -758,7 +767,8 @@ export async function enviarBriefingSupervisionTest(supabase: SupabaseService, m
       .select('id, name, phone, assigned_to, created_at')
       .eq('status', 'new')
       .lt('created_at', hace24h)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: true })
+      .limit(100);
 
     // 2. CITAS DE HOY SIN CONFIRMAR
     const { data: citasSinConfirmar } = await supabase.client
@@ -1035,6 +1045,7 @@ export async function enviarBriefingSupervisionTest(supabase: SupabaseService, m
 
   } catch (e) {
     console.error('Error en briefing de supervisión test:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarBriefingSupervisionTest', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1055,7 +1066,8 @@ export async function verificarReengagement(supabase: SupabaseService, meta: Met
       .in('status', ['new', 'contacted'])
       .lt('updated_at', hace48h)
       .not('phone', 'is', null)
-      .order('updated_at', { ascending: true });
+      .order('updated_at', { ascending: true })
+      .limit(100);
 
     if (error || !leads || leads.length === 0) {
       console.log('📭 Sin leads para re-engagement');
@@ -1155,6 +1167,7 @@ export async function verificarReengagement(supabase: SupabaseService, meta: Met
 
   } catch (e) {
     console.error('Error en verificarReengagement:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'verificarReengagement', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1357,6 +1370,7 @@ export async function reengagementDirectoLeads(supabase: SupabaseService, meta: 
 
   } catch (e) {
     console.error('Error en reengagementDirectoLeads:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'reengagementDirectoLeads', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1535,6 +1549,7 @@ export async function seguimientoPostVenta(supabase: SupabaseService, meta: Meta
 
   } catch (e) {
     console.error('Error en seguimientoPostVenta:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'seguimientoPostVenta', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1674,6 +1689,7 @@ export async function enviarFelicitacionesCumple(supabase: SupabaseService, meta
 
   } catch (e) {
     console.error('Error en enviarFelicitacionesCumple:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarFelicitacionesCumple', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1736,6 +1752,7 @@ export async function felicitarEquipoCumple(supabase: SupabaseService, meta: Met
 
   } catch (e) {
     console.error('Error felicitando equipo:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'felicitarEquipoCumple', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1889,6 +1906,7 @@ export async function seguimientoCredito(supabase: SupabaseService, meta: MetaWh
 
   } catch (e) {
     console.error('Error en seguimientoCredito:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'seguimientoCredito', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1956,6 +1974,7 @@ export async function procesarBroadcastQueue(supabase: SupabaseService, meta: Me
 
   } catch (e) {
     console.error('Error en procesarBroadcastQueue:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'procesarBroadcastQueue', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2078,6 +2097,7 @@ export async function followUp24hLeadsNuevos(supabase: SupabaseService, meta: Me
 
   } catch (e) {
     console.error('Error en followUp24hLeadsNuevos:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'followUp24hLeadsNuevos', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2179,6 +2199,7 @@ export async function reminderDocumentosCredito(supabase: SupabaseService, meta:
 
   } catch (e) {
     console.error('Error en reminderDocumentosCredito:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'reminderDocumentosCredito', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2303,6 +2324,7 @@ export async function llamadasSeguimientoPostVisita(
 
   } catch (e) {
     console.error('Error en llamadasSeguimientoPostVisita:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'llamadasSeguimientoPostVisita', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2420,6 +2442,7 @@ export async function llamadasReactivacionLeadsFrios(
 
   } catch (e) {
     console.error('Error en llamadasReactivacionLeadsFrios:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'llamadasReactivacionLeadsFrios', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2512,6 +2535,7 @@ export async function llamadasRecordatorioCita(
 
   } catch (e) {
     console.error('Error en llamadasRecordatorioCita:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'llamadasRecordatorioCita', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2662,5 +2686,6 @@ export async function llamadasEscalamiento48h(
 
   } catch (e) {
     console.error('Error en llamadasEscalamiento48h:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'llamadasEscalamiento48h', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }

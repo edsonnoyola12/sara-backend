@@ -8,6 +8,7 @@ import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { puedeEnviarMensajeAutomatico, registrarMensajeAutomatico } from './followups';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
+import { logErrorToDB } from './healthCheck';
 
 // ═══════════════════════════════════════════════════════════
 // HELPER: Validar si un mensaje parece respuesta a encuesta
@@ -183,6 +184,7 @@ Etapa abandonada: ${etapa}
 
   } catch (e) {
     console.error('Error en recuperarAbandonosCredito:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'recuperarAbandonosCredito', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -339,6 +341,7 @@ Hace: ${diasDesdeVisita} días
 
   } catch (e) {
     console.error('Error en followUpPostVisita:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'followUpPostVisita', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -623,6 +626,7 @@ export async function nurturingEducativo(supabase: SupabaseService, meta: MetaWh
 
   } catch (e) {
     console.error('Error en nurturingEducativo:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'nurturingEducativo', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -761,6 +765,7 @@ Hace: ${diasDesdeCompra} días
 
   } catch (e) {
     console.error('Error en solicitarReferidos:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'solicitarReferidos', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -900,6 +905,7 @@ Tu respuesta nos ayuda a mejorar 🙏`;
 
   } catch (e) {
     console.error('Error en enviarEncuestaNPS:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarEncuestaNPS', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
     resultado.detalles.push(`❌ Error general: ${e}`);
     return resultado;
   }
@@ -1142,6 +1148,7 @@ Si hay algo pendiente o algún detalle por resolver, responde y te ayudamos de i
 
   } catch (e) {
     console.error('Error en seguimientoPostEntrega:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'seguimientoPostEntrega', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1360,6 +1367,7 @@ Tu opinión nos ayuda a mejorar 🙏`;
 
   } catch (e) {
     console.error('Error en encuestaSatisfaccionCasa:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'encuestaSatisfaccionCasa', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1629,6 +1637,7 @@ Responde *SÍ* si todo está bien o *AYUDA* si necesitas contactos de proveedore
 
   } catch (e) {
     console.error('Error en checkInMantenimiento:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'checkInMantenimiento', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1821,6 +1830,7 @@ Estamos aquí para lo que necesites 😊`;
     console.log(`📅 Check-in 60 días completado: ${enviados} enviados`);
   } catch (e) {
     console.error('Error en checkIn60Dias:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'checkIn60Dias', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2006,6 +2016,7 @@ export async function llamadasEscalamientoPostVenta(
     console.log(`📞 Escalamiento post-venta completado: ${llamadasRealizadas} llamadas`);
   } catch (e) {
     console.error('Error en llamadasEscalamientoPostVenta:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'llamadasEscalamientoPostVenta', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2100,6 +2111,7 @@ export async function limpiarFlagsEncuestasExpirados(
     return { limpiados: totalLimpiados, leadsAfectados };
   } catch (e) {
     console.error('Error en limpiarFlagsEncuestasExpirados:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'limpiarFlagsEncuestasExpirados', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
     return { limpiados: 0, leadsAfectados: 0 };
   }
 }

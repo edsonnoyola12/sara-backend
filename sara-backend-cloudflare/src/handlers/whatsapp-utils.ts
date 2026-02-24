@@ -4,6 +4,7 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import { HandlerContext } from './whatsapp-types';
+import { SupabaseService } from '../services/supabase';
 import { LeadManagementService } from '../services/leadManagementService';
 import { PropertyService } from '../services/propertyService';
 import { MortgageService, MortgageData } from '../services/mortgageService';
@@ -108,6 +109,102 @@ export function parseNotasSafe(notes: any): any {
     try { return JSON.parse(notes); } catch { return {}; }
   }
   return typeof notes === 'object' ? notes : {};
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// HELPER: findLeadByName - búsqueda fuzzy de leads por nombre
+// Reemplaza ~46 patrones duplicados de .ilike('name', ...) en el codebase
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+export interface FindLeadByNameOptions {
+  vendedorId?: string;                // Scope to this vendedor's leads
+  statusFilter?: string | string[];   // Filter by status (single or array)
+  limit?: number;                     // Max results (default 5)
+  select?: string;                    // Column selection (default '*')
+  orderBy?: string;                   // Order column (default 'updated_at')
+  orderAsc?: boolean;                 // Order direction (default false = desc)
+}
+
+/**
+ * Fuzzy search for leads by name with accent-tolerant fallback.
+ *
+ * 1. Tries PostgreSQL `.ilike('name', '%nombre%')`
+ * 2. If no results, falls back to in-memory accent-normalized search
+ *
+ * @returns Array of matching leads (empty array if none found, never null)
+ */
+export async function findLeadByName(
+  supabase: SupabaseService,
+  nombre: string,
+  options: FindLeadByNameOptions = {}
+): Promise<any[]> {
+  const {
+    vendedorId,
+    statusFilter,
+    limit = 5,
+    select = '*',
+    orderBy = 'updated_at',
+    orderAsc = false
+  } = options;
+
+  if (!nombre || nombre.trim().length === 0) return [];
+
+  const nombreTrimmed = nombre.trim();
+
+  // Build query
+  let query = supabase.client
+    .from('leads')
+    .select(select)
+    .ilike('name', `%${nombreTrimmed}%`);
+
+  if (vendedorId) {
+    query = query.eq('assigned_to', vendedorId);
+  }
+
+  if (statusFilter) {
+    if (Array.isArray(statusFilter)) {
+      query = query.in('status', statusFilter);
+    } else {
+      query = query.eq('status', statusFilter);
+    }
+  }
+
+  query = query.order(orderBy, { ascending: orderAsc });
+
+  const { data: leads } = await query.limit(limit);
+
+  // If ilike found results, return them
+  if (leads && leads.length > 0) return leads;
+
+  // Fallback: accent-normalized in-memory search
+  const normalizar = (str: string) =>
+    str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const nombreNorm = normalizar(nombreTrimmed);
+
+  let fallbackQuery = supabase.client
+    .from('leads')
+    .select(select);
+
+  if (vendedorId) {
+    fallbackQuery = fallbackQuery.eq('assigned_to', vendedorId);
+  }
+
+  if (statusFilter) {
+    if (Array.isArray(statusFilter)) {
+      fallbackQuery = fallbackQuery.in('status', statusFilter);
+    } else {
+      fallbackQuery = fallbackQuery.eq('status', statusFilter);
+    }
+  }
+
+  const { data: allLeads } = await fallbackQuery.limit(200);
+
+  if (!allLeads || allLeads.length === 0) return [];
+
+  const filtered = allLeads
+    .filter(l => normalizar(l.name || '').includes(nombreNorm))
+    .slice(0, limit);
+
+  return filtered;
 }
 
 export function formatVendorFeedback(notes: any, options?: { compact?: boolean }): string | null {
@@ -1149,17 +1246,14 @@ export async function mostrarActividadesHoy(ctx: HandlerContext, from: string, v
 }
 
 export async function mostrarHistorialLead(ctx: HandlerContext, from: string, nombreLead: string, vendedor: any): Promise<void> {
-  let query = ctx.supabase.client
-    .from('leads')
-    .select('id, name, phone, status, score, property_interest, quote_amount, source, created_at')
-    .ilike('name', '%' + nombreLead + '%')
-    .order('updated_at', { ascending: false });
-
-  if (vendedor.role !== 'admin' && vendedor.role !== 'coordinador') {
-    query = query.eq('assigned_to', vendedor.id);
-  }
-
-  const { data: leads } = await query.limit(5);
+  const esAdmin = vendedor.role === 'admin' || vendedor.role === 'coordinador';
+  const leads = await findLeadByName(ctx.supabase, nombreLead, {
+    vendedorId: esAdmin ? undefined : vendedor.id,
+    select: 'id, name, phone, status, score, property_interest, quote_amount, source, created_at',
+    orderBy: 'updated_at',
+    orderAsc: false,
+    limit: 5
+  });
 
   if (!leads || leads.length === 0) {
     await ctx.twilio.sendWhatsAppMessage(from, 'No encontre a "' + nombreLead + '"');

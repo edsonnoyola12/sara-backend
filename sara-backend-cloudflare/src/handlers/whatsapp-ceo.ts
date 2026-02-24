@@ -5,7 +5,7 @@
 
 import { HandlerContext } from './whatsapp-types';
 import * as utils from './whatsapp-utils';
-import { deliverPendingMessage } from './whatsapp-utils';
+import { deliverPendingMessage, findLeadByName } from './whatsapp-utils';
 import { isPendingExpired } from '../utils/teamMessaging';
 import { CEOCommandsService } from '../services/ceoCommandsService';
 import { AgenciaCommandsService } from '../services/agenciaCommandsService';
@@ -674,12 +674,11 @@ export async function ceoMensajeLead(ctx: HandlerContext, handler: any, from: st
     console.log(`💬 CEO ${nombreCEO} quiere enviar mensaje a: ${nombreLead}`);
 
     try {
-      // Buscar lead por nombre
-      const { data: leads } = await ctx.supabase.client
-        .from('leads')
-        .select('id, name, phone, status')
-        .ilike('name', `%${nombreLead}%`)
-        .limit(5);
+      // Buscar lead por nombre (con fallback accent-tolerant)
+      const leads = await findLeadByName(ctx.supabase, nombreLead, {
+        select: 'id, name, phone, status',
+        limit: 5
+      });
 
       if (!leads || leads.length === 0) {
         // Buscar sugerencias de nombres similares
@@ -783,12 +782,11 @@ export async function ceoBridgeLead(ctx: HandlerContext, handler: any, from: str
     console.log(`🔗 CEO ${nombreCEO} quiere bridge con: ${nombreLead}`);
 
     try {
-      // Buscar lead por nombre
-      const { data: leads } = await ctx.supabase.client
-        .from('leads')
-        .select('id, name, phone, status')
-        .ilike('name', `%${nombreLead}%`)
-        .limit(5);
+      // Buscar lead por nombre (con fallback accent-tolerant)
+      const leads = await findLeadByName(ctx.supabase, nombreLead, {
+        select: 'id, name, phone, status',
+        limit: 5
+      });
 
       if (!leads || leads.length === 0) {
         // Buscar sugerencias de nombres similares
@@ -1227,36 +1225,17 @@ export async function ceoMoverLead(ctx: HandlerContext, handler: any, from: stri
     const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
     console.log(`📌 CEO mover lead: "${nombreLead}" ${direccion}`);
 
-    // Normalizar texto (remover acentos para búsqueda tolerante)
+    // Normalizar texto para comparación exacta downstream
     const normalizar = (str: string) => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const nombreNormalizado = normalizar(nombreLead);
-    console.log(`📌 Nombre normalizado: "${nombreNormalizado}"`);
 
     try {
-      // CEO puede ver TODOS los leads - buscar con ilike primero
-      let { data: leads } = await ctx.supabase.client
-        .from('leads')
-        .select('*')
-        .ilike('name', `%${nombreLead}%`)
-        .limit(5);
+      // CEO puede ver TODOS los leads - buscar con accent-tolerant fallback
+      let leads = await findLeadByName(ctx.supabase, nombreLead, {
+        limit: 5
+      });
 
-      console.log(`📌 Búsqueda ilike: ${leads?.length || 0} resultados`);
-
-      // Si no encuentra, buscar todos y filtrar manualmente (más tolerante a acentos)
-      if (!leads || leads.length === 0) {
-        const { data: allLeads, error: allErr } = await ctx.supabase.client
-          .from('leads')
-          .select('*')
-          .limit(100);
-
-        console.log(`📌 Total leads en BD: ${allLeads?.length || 0}, error: ${allErr?.message || 'ninguno'}`);
-        if (allLeads && allLeads.length > 0) {
-          console.log(`📌 Primeros 5 leads: ${allLeads.slice(0, 5).map(l => l.name).join(', ')}`);
-        }
-
-        leads = allLeads?.filter(l => normalizar(l.name || '').includes(nombreNormalizado)) || [];
-        console.log(`📌 Búsqueda manual: ${leads.length} resultados`);
-      }
+      console.log(`📌 Búsqueda findLeadByName: ${leads?.length || 0} resultados`);
 
       const FUNNEL_STAGES = ['new', 'contacted', 'qualified', 'scheduled', 'visited', 'negotiation', 'reserved', 'closed', 'delivered'];
       const STATUS_ALIASES: Record<string, string> = {
@@ -1347,24 +1326,11 @@ export async function ceoQuienEs(ctx: HandlerContext, handler: any, from: string
     const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
     console.log(`🔍 CEO busca: "${nombreLead}"`);
 
-    const normalizar = (str: string) => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    const nombreNormalizado = normalizar(nombreLead);
-
     try {
-      let { data: leads } = await ctx.supabase.client
-        .from('leads')
-        .select('id, name, phone, stage, status, created_at, notes, assigned_to')
-        .ilike('name', `%${nombreLead}%`)
-        .limit(5);
-
-      // Búsqueda tolerante a acentos si no encuentra
-      if (!leads || leads.length === 0) {
-        const { data: allLeads } = await ctx.supabase.client
-          .from('leads')
-          .select('id, name, phone, stage, status, created_at, notes, assigned_to')
-          .limit(100);
-        leads = allLeads?.filter(l => normalizar(l.name || '').includes(nombreNormalizado)) || [];
-      }
+      const leads = await findLeadByName(ctx.supabase, nombreLead, {
+        select: 'id, name, phone, stage, status, created_at, notes, assigned_to',
+        limit: 5
+      });
 
       if (!leads || leads.length === 0) {
         await ctx.meta.sendWhatsAppMessage(cleanPhone, `❌ No encontré a "${nombreLead}"`);
@@ -1733,14 +1699,11 @@ export async function ceoVerLead(ctx: HandlerContext, handler: any, from: string
 
         leads = foundLeads || [];
       } else {
-        // Buscar por nombre
-        const { data } = await ctx.supabase.client
-          .from('leads')
-          .select('id, name, phone, interested_development, lead_score, status, conversation_history, created_at, notes, assigned_to, last_message_at')
-          .ilike('name', `%${identificador}%`)
-          .limit(1);
-
-        leads = data || [];
+        // Buscar por nombre (con fallback accent-tolerant)
+        leads = await findLeadByName(ctx.supabase, identificador, {
+          select: 'id, name, phone, interested_development, lead_score, status, conversation_history, created_at, notes, assigned_to, last_message_at',
+          limit: 1
+        });
       }
 
       if (!leads || leads.length === 0) {

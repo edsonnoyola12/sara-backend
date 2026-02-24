@@ -6,6 +6,7 @@
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { logEvento } from './briefings';
+import { logErrorToDB } from './healthCheck';
 
 // ═══════════════════════════════════════════════════════════
 // VERIFICAR VIDEOS PENDIENTES (CRON cada 2 min)
@@ -388,6 +389,7 @@ Vertical 9:16, 8 seconds.`;
 
   } catch (error) {
     console.error('❌ Error generando video semanal:', error);
+    logErrorToDB(supabase, 'cron_error', 'error', 'generarVideoSemanalLogros', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
   }
 }
 
@@ -603,6 +605,7 @@ Keep focus on this specific house facade throughout. Golden hour lighting, 4k. N
 
   } catch (e) {
     console.error('Error en videoFelicitacionPostVenta:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'videoFelicitacionPostVenta', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -776,5 +779,6 @@ Keep focus on this specific house facade. Warm daylight, 4k. No text, no subtitl
 
   } catch (e) {
     console.error('Error en videoBienvenidaLeadNuevo:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'videoBienvenidaLeadNuevo', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }

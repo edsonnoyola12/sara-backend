@@ -1,4 +1,5 @@
 import { SupabaseService } from './supabase';
+import { findLeadByName } from '../handlers/whatsapp-utils';
 
 interface DatosApartado {
   nombreLead: string;
@@ -49,16 +50,10 @@ export class VentasService {
    */
   async registrarApartado(datos: DatosApartado, vendedor: any): Promise<ResultadoOperacion> {
     try {
-      // Buscar lead por nombre
-      const { data: leads, error } = await this.supabase.client
-        .from('leads')
-        .select('*')
-        .eq('assigned_to', vendedor.id)
-        .ilike('name', `%${datos.nombreLead}%`);
-
-      if (error) {
-        return { success: false, error: 'Error buscando lead' };
-      }
+      // Buscar lead por nombre (con fallback accent-tolerant)
+      const leads = await findLeadByName(this.supabase, datos.nombreLead, {
+        vendedorId: vendedor.id
+      });
 
       if (!leads || leads.length === 0) {
         return { success: false, error: `No encontré a "${datos.nombreLead}" en tus leads` };
@@ -167,15 +162,9 @@ export class VentasService {
    */
   async cerrarVenta(nombreLead: string, vendedor: any): Promise<ResultadoOperacion> {
     try {
-      const { data: leads, error } = await this.supabase.client
-        .from('leads')
-        .select('*')
-        .eq('assigned_to', vendedor.id)
-        .ilike('name', `%${nombreLead}%`);
-
-      if (error) {
-        return { success: false, error: 'Error buscando lead' };
-      }
+      const leads = await findLeadByName(this.supabase, nombreLead, {
+        vendedorId: vendedor.id
+      });
 
       if (!leads || leads.length === 0) {
         return { success: false, error: `No encontré a "${nombreLead}" en tus leads` };
@@ -255,15 +244,9 @@ export class VentasService {
    */
   async cancelarLead(nombreLead: string, vendedor: any): Promise<ResultadoOperacion> {
     try {
-      const { data: leads, error } = await this.supabase.client
-        .from('leads')
-        .select('*')
-        .eq('assigned_to', vendedor.id)
-        .ilike('name', `%${nombreLead}%`);
-
-      if (error) {
-        return { success: false, error: 'Error buscando lead' };
-      }
+      const leads = await findLeadByName(this.supabase, nombreLead, {
+        vendedorId: vendedor.id
+      });
 
       if (!leads || leads.length === 0) {
         return { success: false, error: `No encontré a "${nombreLead}" en tus leads` };

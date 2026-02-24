@@ -2436,7 +2436,11 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
         if (authError) return authError;
 
         try {
-          const body = await request.json() as Record<string, any>;
+          const rawBody = await request.json() as Record<string, any>;
+          const ALLOWED_FLAG_FIELDS = ['ai_responses_enabled', 'ai_credit_flow_enabled', 'ai_multilang_enabled', 'slack_notifications_enabled', 'email_reports_enabled', 'sentry_enabled', 'audio_transcription_enabled', 'auto_followups_enabled', 'broadcast_enabled', 'tts_enabled', 'voice_messages_enabled', 'retell_enabled', 'outside_hours_responses', 'smart_caching_enabled', 'audit_log_enabled', 'ab_test_greeting', 'ab_test_cta', 'rate_limit_per_minute', 'max_ai_tokens'];
+          const body = Object.fromEntries(
+            Object.entries(rawBody).filter(([k]) => ALLOWED_FLAG_FIELDS.includes(k))
+          );
           await featureFlags.setFlags(body);
           const updatedFlags = await featureFlags.getFlags();
           return corsResponse(JSON.stringify({
@@ -3755,7 +3759,11 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
         const webhookId = updateMatch[1];
 
         try {
-          const body = await request.json() as any;
+          const rawBody = await request.json() as any;
+          const ALLOWED_WEBHOOK_FIELDS = ['name', 'url', 'events', 'secret', 'active', 'headers', 'retry_count'];
+          const body = Object.fromEntries(
+            Object.entries(rawBody).filter(([k]) => ALLOWED_WEBHOOK_FIELDS.includes(k))
+          );
           const updated = await webhookService.updateWebhook(webhookId, body);
 
           if (!updated) {
@@ -4148,7 +4156,11 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
       // PUT /api/sla - Actualizar configuración
       if (request.method === 'PUT' && url.pathname === '/api/sla') {
         try {
-          const body = await request.json() as any;
+          const rawBody = await request.json() as any;
+          const ALLOWED_SLA_FIELDS = ['name', 'description', 'firstResponseTime', 'followUpTime', 'escalationTime', 'alertChannels', 'escalationContacts', 'applyDuringBusinessHours', 'businessHoursStart', 'businessHoursEnd', 'businessDays'];
+          const body = Object.fromEntries(
+            Object.entries(rawBody).filter(([k]) => ALLOWED_SLA_FIELDS.includes(k))
+          );
           const updated = await sla.updateConfig(body);
           return corsResponse(JSON.stringify({
             success: true,
@@ -4350,7 +4362,11 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
       const updateRuleMatch = url.pathname.match(/^\/api\/assignment\/rules\/([^\/]+)$/);
       if (request.method === 'PUT' && updateRuleMatch) {
         try {
-          const body = await request.json() as any;
+          const rawBody = await request.json() as any;
+          const ALLOWED_RULE_FIELDS = ['name', 'description', 'priority', 'conditions', 'conditionLogic', 'assignTo', 'schedule', 'active'];
+          const body = Object.fromEntries(
+            Object.entries(rawBody).filter(([k]) => ALLOWED_RULE_FIELDS.includes(k))
+          );
           const updated = await assignment.updateRule(updateRuleMatch[1], body);
 
           if (!updated) {
@@ -4695,7 +4711,11 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
       const updateMatch = url.pathname.match(/^\/api\/webhooks\/([^\/]+)$/);
       if (request.method === 'PUT' && updateMatch) {
         try {
-          const body = await request.json() as any;
+          const rawBody = await request.json() as any;
+          const ALLOWED_OUTGOING_WEBHOOK_FIELDS = ['name', 'url', 'events', 'secret', 'active', 'headers'];
+          const body = Object.fromEntries(
+            Object.entries(rawBody).filter(([k]) => ALLOWED_OUTGOING_WEBHOOK_FIELDS.includes(k))
+          );
           const updated = await webhooks.updateWebhook(updateMatch[1], body);
           return corsResponse(JSON.stringify({
             success: !!updated,

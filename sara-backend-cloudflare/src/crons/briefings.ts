@@ -15,6 +15,7 @@
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
+import { logErrorToDB } from './healthCheck';
 import { createTTSService } from '../services/ttsService';
 import { safeJsonParse } from '../utils/safeHelpers';
 import { parseNotasSafe, formatVendorFeedback } from '../handlers/whatsapp-utils';
@@ -67,6 +68,7 @@ export async function logEvento(
     });
   } catch (e) {
     console.error('Error logging evento:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'logEvento', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -451,6 +453,7 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
   } catch (error) {
     console.error(`\n   ❌ ERROR EN BRIEFING para ${vendedor.name}:`, error);
     console.error(`   ❌ Stack:`, error instanceof Error ? error.stack : 'No stack');
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarBriefingMatutino', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
   }
 
   console.log(`\n═══════════════════════════════════════════════════════════`);

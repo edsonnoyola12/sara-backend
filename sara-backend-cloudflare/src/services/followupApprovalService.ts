@@ -3,6 +3,7 @@
  */
 
 import { SupabaseService } from './supabase';
+import { findLeadByName } from '../handlers/whatsapp-utils';
 
 export class FollowupApprovalService {
   constructor(private supabase: SupabaseService) {}
@@ -131,12 +132,11 @@ export class FollowupApprovalService {
       const leadName = match[1].trim();
       const statusUpdate = match[2].trim();
 
-      // Buscar lead por nombre
-      const { data: leads } = await this.supabase.client
-        .from('leads')
-        .select('id, name')
-        .ilike('name', `%${leadName}%`)
-        .limit(1);
+      // Buscar lead por nombre (con fallback accent-tolerant)
+      const leads = await findLeadByName(this.supabase, leadName, {
+        select: 'id, name',
+        limit: 1
+      });
 
       if (!leads || leads.length === 0) {
         return { handled: false };

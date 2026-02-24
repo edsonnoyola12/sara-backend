@@ -9,7 +9,7 @@ import { FollowupService } from '../services/followupService';
 import { BridgeService } from '../services/bridgeService';
 import { CalendarService } from '../services/calendar';
 import { isPendingExpired } from '../utils/teamMessaging';
-import { deliverPendingMessage, parseNotasSafe, formatPhoneForDisplay } from './whatsapp-utils';
+import { deliverPendingMessage, parseNotasSafe, formatPhoneForDisplay, findLeadByName } from './whatsapp-utils';
 import { AppointmentService } from '../services/appointmentService';
 import { safeJsonParse } from '../utils/safeHelpers';
 import { formatVendorFeedback } from './whatsapp-utils';
@@ -2343,19 +2343,16 @@ export async function vendedorGuardarCumple(ctx: HandlerContext, handler: any, f
   const dia = match[2].padStart(2, '0');
   const mes = match[3].padStart(2, '0');
   
-  const { data: lead } = await ctx.supabase.client
-    .from('leads')
-    .select('*')
-    .eq('assigned_to', vendedor.id)
-    .eq('status', 'delivered')
-    .ilike('name', '%' + nombreCliente + '%')
-    .single();
-  
+  const leads = await findLeadByName(ctx.supabase, nombreCliente, {
+    vendedorId: vendedor.id, statusFilter: 'delivered', limit: 1
+  });
+  const lead = leads[0];
+
   if (!lead) {
     await ctx.twilio.sendWhatsAppMessage(from, '❌ No encontré cliente entregado "' + nombreCliente + '"');
     return;
   }
-  
+
   await ctx.supabase.client.from('leads').update({ birthday: '2000-' + mes + '-' + dia }).eq('id', lead.id);
   await ctx.twilio.sendWhatsAppMessage(from, '🎂 Cumpleaños de *' + lead.name + '* guardado: *' + dia + '/' + mes + '*');
 }
@@ -2367,19 +2364,16 @@ export async function vendedorGuardarEmail(ctx: HandlerContext, handler: any, fr
   const nombreCliente = match[1].trim();
   const correo = match[2].toLowerCase();
   
-  const { data: lead } = await ctx.supabase.client
-    .from('leads')
-    .select('*')
-    .eq('assigned_to', vendedor.id)
-    .eq('status', 'delivered')
-    .ilike('name', '%' + nombreCliente + '%')
-    .single();
-  
+  const leads = await findLeadByName(ctx.supabase, nombreCliente, {
+    vendedorId: vendedor.id, statusFilter: 'delivered', limit: 1
+  });
+  const lead = leads[0];
+
   if (!lead) {
     await ctx.twilio.sendWhatsAppMessage(from, '❌ No encontré cliente entregado "' + nombreCliente + '"');
     return;
   }
-  
+
   await ctx.supabase.client.from('leads').update({ email: correo }).eq('id', lead.id);
   await ctx.twilio.sendWhatsAppMessage(from, '📧 Email de *' + lead.name + '* guardado: *' + correo + '*');
 }
@@ -2392,12 +2386,10 @@ export async function vendedorRegistrarReferido(ctx: HandlerContext, handler: an
   const telReferido = match[2];
   const nombreReferidor = match[3].trim();
   
-  const { data: referidor } = await ctx.supabase.client
-    .from('leads')
-    .select('*')
-    .eq('status', 'delivered')
-    .ilike('name', '%' + nombreReferidor + '%')
-    .single();
+  const referidores = await findLeadByName(ctx.supabase, nombreReferidor, {
+    statusFilter: 'delivered', limit: 1
+  });
+  const referidor = referidores[0] || null;
   
   await ctx.supabase.client
     .from('leads')
@@ -2944,11 +2936,10 @@ export async function vendedorConsultarCredito(ctx: HandlerContext, handler: any
       resp += `\n¿Quieres que le pregunte al asesor?\n*1.* Sí, pregúntale\n*2.* No, está bien`;
 
       // Guardar estado para siguiente mensaje
-      const { data: lead } = await ctx.supabase.client
-        .from('leads')
-        .select('id, notes')
-        .ilike('name', '%' + nombreLead + '%')
-        .single();
+      const creditLeads = await findLeadByName(ctx.supabase, nombreLead, {
+        select: 'id, notes', limit: 1
+      });
+      const lead = creditLeads[0];
 
       if (lead) {
         await ctx.supabase.client
@@ -3282,12 +3273,9 @@ export async function vendedorPausarLead(ctx: HandlerContext, from: string, nomb
     return;
   }
 
-  const { data: leads } = await ctx.supabase.client
-    .from('leads')
-    .select('id, name, status, notes')
-    .eq('assigned_to', vendedor.id)
-    .ilike('name', `%${nombreLead}%`)
-    .limit(5);
+  const leads = await findLeadByName(ctx.supabase, nombreLead, {
+    vendedorId: vendedor.id, select: 'id, name, status, notes', limit: 5
+  });
 
   if (!leads || leads.length === 0) {
     await ctx.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
@@ -3324,12 +3312,9 @@ export async function vendedorReanudarLead(ctx: HandlerContext, from: string, no
     return;
   }
 
-  const { data: leads } = await ctx.supabase.client
-    .from('leads')
-    .select('id, name, status, notes')
-    .eq('assigned_to', vendedor.id)
-    .ilike('name', `%${nombreLead}%`)
-    .limit(5);
+  const leads = await findLeadByName(ctx.supabase, nombreLead, {
+    vendedorId: vendedor.id, select: 'id, name, status, notes', limit: 5
+  });
 
   if (!leads || leads.length === 0) {
     await ctx.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
@@ -3368,12 +3353,9 @@ export async function vendedorHumanoLead(ctx: HandlerContext, from: string, nomb
     return;
   }
 
-  const { data: leads } = await ctx.supabase.client
-    .from('leads')
-    .select('id, name, status, notes')
-    .eq('assigned_to', vendedor.id)
-    .ilike('name', `%${nombreLead}%`)
-    .limit(5);
+  const leads = await findLeadByName(ctx.supabase, nombreLead, {
+    vendedorId: vendedor.id, select: 'id, name, status, notes', limit: 5
+  });
 
   if (!leads || leads.length === 0) {
     await ctx.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
@@ -3412,12 +3394,9 @@ export async function vendedorBotLead(ctx: HandlerContext, from: string, nombreL
     return;
   }
 
-  const { data: leads } = await ctx.supabase.client
-    .from('leads')
-    .select('id, name, status, notes')
-    .eq('assigned_to', vendedor.id)
-    .ilike('name', `%${nombreLead}%`)
-    .limit(5);
+  const leads = await findLeadByName(ctx.supabase, nombreLead, {
+    vendedorId: vendedor.id, select: 'id, name, status, notes', limit: 5
+  });
 
   if (!leads || leads.length === 0) {
     await ctx.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
@@ -3456,12 +3435,9 @@ export async function vendedorEntregado(ctx: HandlerContext, from: string, nombr
     return;
   }
 
-  const { data: leads } = await ctx.supabase.client
-    .from('leads')
-    .select('id, name, phone')
-    .eq('assigned_to', vendedor.id)
-    .ilike('name', `%${nombreLead}%`)
-    .limit(5);
+  const leads = await findLeadByName(ctx.supabase, nombreLead, {
+    vendedorId: vendedor.id, select: 'id, name, phone', limit: 5
+  });
 
   if (!leads || leads.length === 0) {
     await ctx.twilio.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
@@ -3519,12 +3495,9 @@ Escribe así:
   const nombreLead = match[1].trim();
 
   // Buscar lead
-  let { data: leads } = await ctx.supabase.client
-    .from('leads')
-    .select('*')
-    .eq('assigned_to', vendedor.id)
-    .ilike('name', `%${nombreLead}%`)
-    .limit(1);
+  let leads = await findLeadByName(ctx.supabase, nombreLead, {
+    vendedorId: vendedor.id, limit: 1
+  });
 
   if (!leads || leads.length === 0) {
     await ctx.twilio.sendWhatsAppMessage(from,
@@ -3969,12 +3942,9 @@ export async function vendedorAsignarHipoteca(ctx: HandlerContext, handler: any,
   const nombreBusqueda = match[1].trim();
 
   // Buscar lead existente del vendedor
-  const { data: leads } = await ctx.supabase.client
-    .from('leads')
-    .select('id, name, phone, needs_mortgage')
-    .eq('assigned_to', vendedor.id)
-    .ilike('name', `%${nombreBusqueda}%`)
-    .limit(5);
+  const leads = await findLeadByName(ctx.supabase, nombreBusqueda, {
+    vendedorId: vendedor.id, select: 'id, name, phone, needs_mortgage', limit: 5
+  });
 
   if (!leads || leads.length === 0) {
     await ctx.twilio.sendWhatsAppMessage(from,
@@ -4403,14 +4373,9 @@ export async function vendedorVerHistorial(ctx: HandlerContext, handler: any, fr
     } else {
       queryDebug += `esTel=false`;
       // Buscar por nombre
-      const { data } = await ctx.supabase.client
-        .from('leads')
-        .select('id, name, phone, property_interest, lead_score, status, conversation_history, created_at, notes, assigned_to')
-        .ilike('name', `%${identificador}%`)
-        .eq('assigned_to', vendedor.id)
-        .limit(1);
-
-      leads = data || [];
+      leads = await findLeadByName(ctx.supabase, identificador, {
+        vendedorId: vendedor.id, select: 'id, name, phone, property_interest, lead_score, status, conversation_history, created_at, notes, assigned_to', limit: 1
+      });
     }
 
     console.log(`🔍 VER HISTORIAL FINAL: encontrados=${leads?.length || 0}`);
@@ -4737,16 +4702,10 @@ export async function vendedorQuienEs(ctx: HandlerContext, handler: any, from: s
   try {
     const esAdmin = ['admin', 'coordinador', 'ceo', 'director'].includes(vendedor.role?.toLowerCase() || '');
 
-    let query = ctx.supabase.client
-      .from('leads')
-      .select('id, name, phone, stage, status, created_at, notes')
-      .ilike('name', `%${nombreLead}%`);
-
-    if (!esAdmin) {
-      query = query.eq('assigned_to', vendedor.id);
-    }
-
-    const { data: leads } = await query.limit(5);
+    const leads = await findLeadByName(ctx.supabase, nombreLead, {
+      vendedorId: esAdmin ? undefined : vendedor.id,
+      select: 'id, name, phone, stage, status, created_at, notes', limit: 5
+    });
 
     if (!leads || leads.length === 0) {
       await ctx.twilio.sendWhatsAppMessage(from, `❌ No encontré a "${nombreLead}" en tus leads.`);
@@ -4905,12 +4864,9 @@ export async function vendedorPasarACredito(ctx: HandlerContext, handler: any, f
 
   try {
     // Buscar el lead
-    const { data: leads } = await ctx.supabase.client
-      .from('leads')
-      .select('id, name, phone, email, property_interest, budget')
-      .eq('assigned_to', vendedor.id)
-      .ilike('name', `%${nombreLead}%`)
-      .limit(5);
+    const leads = await findLeadByName(ctx.supabase, nombreLead, {
+      vendedorId: vendedor.id, select: 'id, name, phone, email, property_interest, budget', limit: 5
+    });
 
     if (!leads || leads.length === 0) {
       await ctx.twilio.sendWhatsAppMessage(from, `❌ No encontré lead "${nombreLead}" en tus leads asignados.`);
@@ -5192,14 +5148,11 @@ export async function vendedorCotizar(ctx: HandlerContext, handler: any, from: s
 
   try {
     // Buscar lead por nombre
-    const { data: leads, error } = await ctx.supabase.client
-      .from('leads')
-      .select('id, name, phone, property_interest, assigned_to')
-      .eq('assigned_to', vendedor.id)
-      .ilike('name', `%${nombreLead}%`)
-      .limit(5);
+    const leads = await findLeadByName(ctx.supabase, nombreLead, {
+      vendedorId: vendedor.id, select: 'id, name, phone, property_interest, assigned_to', limit: 5
+    });
 
-    if (error || !leads || leads.length === 0) {
+    if (!leads || leads.length === 0) {
       await ctx.meta.sendWhatsAppMessage(from,
         `❌ No encontré ningún lead con nombre *${nombreLead}* en tu cartera.\n\n` +
         `Escribe *mis leads* para ver tus leads.`
@@ -5371,12 +5324,9 @@ export async function vendedorVerOferta(ctx: HandlerContext, handler: any, from:
 
   try {
     // Buscar lead
-    const { data: leads } = await ctx.supabase.client
-      .from('leads')
-      .select('id, name')
-      .eq('assigned_to', vendedor.id)
-      .ilike('name', `%${nombreLead}%`)
-      .limit(1);
+    const leads = await findLeadByName(ctx.supabase, nombreLead, {
+      vendedorId: vendedor.id, select: 'id, name', limit: 1
+    });
 
     if (!leads || leads.length === 0) {
       await ctx.meta.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
@@ -5429,12 +5379,9 @@ export async function vendedorEnviarOferta(ctx: HandlerContext, handler: any, fr
 
   try {
     // Buscar lead
-    const { data: leads } = await ctx.supabase.client
-      .from('leads')
-      .select('id, name, phone, last_message_at')
-      .eq('assigned_to', vendedor.id)
-      .ilike('name', `%${nombreLead}%`)
-      .limit(1);
+    const leads = await findLeadByName(ctx.supabase, nombreLead, {
+      vendedorId: vendedor.id, select: 'id, name, phone, last_message_at', limit: 1
+    });
 
     if (!leads || leads.length === 0) {
       await ctx.meta.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
@@ -5526,12 +5473,9 @@ export async function vendedorOfertaAceptada(ctx: HandlerContext, handler: any, 
 
   try {
     // Buscar lead
-    const { data: leads } = await ctx.supabase.client
-      .from('leads')
-      .select('id, name')
-      .eq('assigned_to', vendedor.id)
-      .ilike('name', `%${nombreLead}%`)
-      .limit(1);
+    const leads = await findLeadByName(ctx.supabase, nombreLead, {
+      vendedorId: vendedor.id, select: 'id, name', limit: 1
+    });
 
     if (!leads || leads.length === 0) {
       await ctx.meta.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
@@ -5587,12 +5531,9 @@ export async function vendedorOfertaRechazada(ctx: HandlerContext, handler: any,
 
   try {
     // Buscar lead
-    const { data: leads } = await ctx.supabase.client
-      .from('leads')
-      .select('id, name')
-      .eq('assigned_to', vendedor.id)
-      .ilike('name', `%${nombreLead}%`)
-      .limit(1);
+    const leads = await findLeadByName(ctx.supabase, nombreLead, {
+      vendedorId: vendedor.id, select: 'id, name', limit: 1
+    });
 
     if (!leads || leads.length === 0) {
       await ctx.meta.sendWhatsAppMessage(from, `❌ No encontré a *${nombreLead}* en tus leads.`);
@@ -5648,14 +5589,13 @@ export async function vendedorContactarLead(ctx: HandlerContext, handler: any, f
 
     // Buscar lead por nombre
     // Buscar en todos los leads (no solo asignados) para flexibilidad
-    const { data: leads, error } = await ctx.supabase.client
-      .from('leads')
-      .select('id, name, phone, last_message_at, property_interest, status, assigned_to')
-      .ilike('name', `%${nombreLead}%`)
-      .not('status', 'in', '("lost","dnc")')
-      .limit(5);
+    const leads = await findLeadByName(ctx.supabase, nombreLead, {
+      select: 'id, name, phone, last_message_at, property_interest, status, assigned_to', limit: 5
+    });
+    // Filter out lost/dnc leads (findLeadByName doesn't support .not() filter)
+    const filteredLeads = leads.filter((l: any) => !['lost', 'dnc'].includes(l.status));
 
-    if (error || !leads || leads.length === 0) {
+    if (!filteredLeads || filteredLeads.length === 0) {
       await ctx.meta.sendWhatsAppMessage(from,
         `❌ No encontré ningún lead con nombre *${nombreLead}*.\n\n` +
         `Escribe *mis leads* para ver tu cartera.`
@@ -5664,9 +5604,9 @@ export async function vendedorContactarLead(ctx: HandlerContext, handler: any, f
     }
 
     // Si hay múltiples coincidencias, pedir especificar
-    if (leads.length > 1) {
-      let msg = `🔍 Encontré ${leads.length} leads con ese nombre:\n\n`;
-      leads.forEach((l: any, i: number) => {
+    if (filteredLeads.length > 1) {
+      let msg = `🔍 Encontré ${filteredLeads.length} leads con ese nombre:\n\n`;
+      filteredLeads.forEach((l: any, i: number) => {
         const tel = l.phone?.replace(/\D/g, '').slice(-10) || 'Sin tel';
         msg += `${i + 1}. *${l.name}* (${tel})\n`;
       });
@@ -5675,7 +5615,7 @@ export async function vendedorContactarLead(ctx: HandlerContext, handler: any, f
       return;
     }
 
-    const lead = leads[0];
+    const lead = filteredLeads[0];
     const leadPhone = lead.phone?.startsWith('521')
       ? lead.phone
       : '521' + (lead.phone || '').replace(/\D/g, '').slice(-10);

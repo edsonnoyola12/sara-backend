@@ -27,6 +27,7 @@ import { PostVisitService } from '../services/postVisitService';
 import { PipelineService, formatPipelineForWhatsApp, formatCurrency } from '../services/pipelineService';
 import { enviarMensajeTeamMember, isPendingExpired, getPendingMessages, verificarPendingParaLlamar, CALL_CONFIG } from '../utils/teamMessaging';
 import { parseFechaEspanol, getMexicoNow } from '../handlers/dateParser';
+import { findLeadByName } from '../handlers/whatsapp-utils';
 
 // CRON imports
 import {
@@ -619,20 +620,12 @@ export async function handleTestRoutes(
             const nombreLead = params?.nombreLead || '';
             const direccion: 'next' | 'prev' = params?.direccion || 'next';
 
+            // Search lead by name (with accent-tolerant fallback)
+            let leads = await findLeadByName(supabase, nombreLead, {
+              limit: 5
+            });
             const normalizar = (str: string) => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
             const nombreNormalizado = normalizar(nombreLead);
-
-            // Search lead by name
-            let { data: leads } = await supabase.client
-              .from('leads')
-              .select('*')
-              .ilike('name', `%${nombreLead}%`)
-              .limit(5);
-
-            if (!leads || leads.length === 0) {
-              const { data: allLeads } = await supabase.client.from('leads').select('*').limit(100);
-              leads = allLeads?.filter(l => normalizar(l.name || '').includes(nombreNormalizado)) || [];
-            }
 
             if (!leads || leads.length === 0) {
               return corsResponse(JSON.stringify({ ok: false, comando: cmd, error: `No encontre a "${nombreLead}"` }));
@@ -3190,12 +3183,11 @@ export async function handleTestRoutes(
       if (!nombre) {
         return corsResponse(JSON.stringify({ error: "Falta ?nombre=X" }), 400);
       }
-      // Buscar lead
-      const { data: leads } = await supabase.client
-        .from('leads')
-        .select('id, name')
-        .ilike('name', `%${nombre}%`)
-        .limit(1);
+      // Buscar lead (con fallback accent-tolerant)
+      const leads = await findLeadByName(supabase, nombre, {
+        select: 'id, name',
+        limit: 1
+      });
       if (!leads || leads.length === 0) {
         return corsResponse(JSON.stringify({ error: "Lead no encontrado" }), 404);
       }
@@ -3226,14 +3218,7 @@ export async function handleTestRoutes(
     if (url.pathname === "/test-debug-lead") {
       const nombre = url.searchParams.get('nombre') || 'Lead';
 
-      const { data, error } = await supabase.client
-        .from('leads')
-        .select('*')
-        .ilike('name', `%${nombre}%`)
-        .limit(1);
-      if (error) {
-        return corsResponse(JSON.stringify({ error: error.message }), 500);
-      }
+      const data = await findLeadByName(supabase, nombre, { limit: 1 });
       // También obtener citas del lead
       if (data && data[0]) {
         const { data: citas } = await supabase.client
@@ -3254,10 +3239,14 @@ export async function handleTestRoutes(
       if (!nombre || !desarrollo) {
         return corsResponse(JSON.stringify({ error: "Falta ?nombre=X&desarrollo=Y" }), 400);
       }
+      const foundLeads = await findLeadByName(supabase, nombre, { select: 'id', limit: 1 });
+      if (!foundLeads || foundLeads.length === 0) {
+        return corsResponse(JSON.stringify({ error: "Lead no encontrado" }), 404);
+      }
       const { data, error } = await supabase.client
         .from('leads')
         .update({ property_interest: desarrollo })
-        .ilike('name', `%${nombre}%`)
+        .eq('id', foundLeads[0].id)
         .select('id, name, phone, property_interest');
       if (error) {
         return corsResponse(JSON.stringify({ error: error.message }), 500);
@@ -3270,10 +3259,14 @@ export async function handleTestRoutes(
       const nombre = url.searchParams.get('nombre') || 'Lead Prueba';
 
       const hace48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+      const foundInactive = await findLeadByName(supabase, nombre, { select: 'id', limit: 1 });
+      if (!foundInactive || foundInactive.length === 0) {
+        return corsResponse(JSON.stringify({ error: "Lead no encontrado" }), 404);
+      }
       const { data, error } = await supabase.client
         .from('leads')
         .update({ last_message_at: hace48h })
-        .ilike('name', `%${nombre}%`)
+        .eq('id', foundInactive[0].id)
         .select('id, name, phone, last_message_at');
       if (error) {
         return corsResponse(JSON.stringify({ error: error.message }), 500);

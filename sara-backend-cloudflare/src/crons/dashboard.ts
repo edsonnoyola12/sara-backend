@@ -5,6 +5,7 @@
 
 import { SupabaseService } from '../services/supabase';
 import { CacheService } from '../services/cacheService';
+import { logErrorToDB } from './healthCheck';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -409,6 +410,7 @@ export async function getAnalyticsDashboard(
 
   } catch (e) {
     console.error('Error generating analytics:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'getAnalyticsDashboard', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 
   return dashboard;

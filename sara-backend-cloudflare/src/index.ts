@@ -290,8 +290,8 @@ function log(level: 'info' | 'warn' | 'error', message: string, requestId: strin
 // ═══════════════════════════════════════════════════════════════════════════
 // RATE LIMITING: 100 req/min por IP usando KV
 // ═══════════════════════════════════════════════════════════════════════════
-async function checkRateLimit(request: Request, env: Env, requestId: string): Promise<Response | null> {
-  // Solo aplicar rate limit si KV está disponible
+async function checkRateLimit(request: Request, env: Env, requestId: string, maxRequests: number = 100, failClosed: boolean = false): Promise<Response | null> {
+  // Si KV no está configurado, permitir (config issue, no runtime failure)
   if (!env.SARA_CACHE) return null;
 
   // No limitar webhooks de Meta (necesitan responder rápido)
@@ -299,8 +299,9 @@ async function checkRateLimit(request: Request, env: Env, requestId: string): Pr
   if (url.pathname.startsWith('/webhook')) return null;
 
   const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
-  const key = `ratelimit:${ip}`;
-  const limit = 100; // requests por minuto
+  const endpoint = url.pathname.split('?')[0];
+  const key = `ratelimit:${ip}:${endpoint}`;
+  const limit = maxRequests;
   const windowSeconds = 60;
 
   try {
@@ -308,7 +309,7 @@ async function checkRateLimit(request: Request, env: Env, requestId: string): Pr
     const count = current ? parseInt(current, 10) : 0;
 
     if (count >= limit) {
-      log('warn', `Rate limit exceeded for IP: ${ip}`, requestId, { ip, count, limit });
+      log('warn', `Rate limit exceeded for IP: ${ip}`, requestId, { ip, count, limit, endpoint });
       return new Response(JSON.stringify({
         error: 'Too many requests',
         retry_after: windowSeconds
@@ -326,8 +327,24 @@ async function checkRateLimit(request: Request, env: Env, requestId: string): Pr
     // Incrementar contador
     await env.SARA_CACHE.put(key, String(count + 1), { expirationTtl: windowSeconds });
   } catch (e) {
-    // Si falla KV, permitir la request (fail open)
-    log('error', 'Rate limit check failed', requestId, { error: String(e) });
+    if (failClosed) {
+      // Fail closed for expensive endpoints: block request when KV is unavailable
+      console.warn(`⚠️ Rate limit KV error (fail-closed, request BLOCKED): ${String(e)}`);
+      log('warn', 'Rate limit KV failed, blocking request (fail-closed)', requestId, { error: String(e), ip, endpoint });
+      return new Response(JSON.stringify({
+        error: 'Service temporarily unavailable',
+        retry_after: 30
+      }), {
+        status: 503,
+        headers: {
+          'Content-Type': 'application/json',
+          'Retry-After': '30',
+        }
+      });
+    }
+    // Fail open for standard CRM traffic: KV failures are transient
+    console.warn(`⚠️ Rate limit KV error (fail-open, request allowed): ${String(e)}`);
+    log('warn', 'Rate limit KV failed, allowing request (fail-open)', requestId, { error: String(e), ip, endpoint });
   }
 
   return null;
@@ -619,9 +636,25 @@ export default {
     try {
 
     // ═══════════════════════════════════════════════════════════
-    // RATE LIMITING: 100 req/min por IP
+    // RATE LIMITING: per-endpoint limits (req/min per IP)
     // ═══════════════════════════════════════════════════════════
-    const rateLimitError = await checkRateLimit(request, env, requestId);
+    const pathname = url.pathname;
+    let rateLimitMax = 100; // default: 100/min
+    let rateLimitFailClosed = false; // default: fail open for CRM traffic
+    if (pathname === '/test-ai-response') {
+      rateLimitMax = 10; // expensive Claude API call
+      rateLimitFailClosed = true;
+    } else if (pathname === '/test-load-test') {
+      rateLimitMax = 5; // very expensive: simulates N concurrent leads
+      rateLimitFailClosed = true;
+    } else if (pathname.startsWith('/run-')) {
+      rateLimitMax = 10; // CRON triggers: run-nps, run-backup, etc.
+      rateLimitFailClosed = true;
+    } else if (pathname === '/test-lead') {
+      rateLimitMax = 20; // sends real WhatsApp messages
+      rateLimitFailClosed = true;
+    }
+    const rateLimitError = await checkRateLimit(request, env, requestId, rateLimitMax, rateLimitFailClosed);
     if (rateLimitError) return rateLimitError;
 
     // ═══════════════════════════════════════════════════════════

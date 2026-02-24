@@ -13,6 +13,7 @@ import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { enviarMensajeTeamMember, EnviarMensajeTeamResult } from '../utils/teamMessaging';
 import { parseNotasSafe, formatVendorFeedback } from '../handlers/whatsapp-utils';
+import { logErrorToDB } from './healthCheck';
 
 // ═══════════════════════════════════════════════════════════════
 // REPORTES CEO AUTOMÁTICOS
@@ -55,79 +56,38 @@ export async function enviarReporteDiarioCEO(supabase: SupabaseService, meta: Me
   const inicioSemPasada = new Date(semPasada.getFullYear(), semPasada.getMonth(), semPasada.getDate()).toISOString();
   const finSemPasada = new Date(semPasada.getFullYear(), semPasada.getMonth(), semPasada.getDate() + 1).toISOString();
 
-  // === QUERIES ===
-  const { data: leadsAyer } = await supabase.client
-    .from('leads')
-    .select('*, team_members:assigned_to(name)')
-    .gte('created_at', inicioAyer)
-    .lt('created_at', inicioHoy);
-
-  const { data: leadsSemPasada } = await supabase.client
-    .from('leads')
-    .select('id')
-    .gte('created_at', inicioSemPasada)
-    .lt('created_at', finSemPasada);
-
-  const { data: cierresAyer } = await supabase.client
-    .from('leads')
-    .select('*, properties(price)')
-    .in('status', ['closed', 'delivered'])
-    .gte('status_changed_at', inicioAyer)
-    .lt('status_changed_at', inicioHoy);
-
-  const { data: cierresSemPasada } = await supabase.client
-    .from('leads')
-    .select('id, properties(price)')
-    .in('status', ['closed', 'delivered'])
-    .gte('status_changed_at', inicioSemPasada)
-    .lt('status_changed_at', finSemPasada);
-
-  const { data: citasAyer } = await supabase.client
-    .from('appointments')
-    .select('*')
-    .eq('scheduled_date', ayer.toISOString().split('T')[0]);
-
-  const { data: citasHoy } = await supabase.client
-    .from('appointments')
-    .select('*, team_members(name), leads(name, phone)')
-    .eq('scheduled_date', hoy.toISOString().split('T')[0])
-    .eq('status', 'scheduled');
-
-  const { data: pipelineDiario } = await supabase.client
-    .from('leads')
-    .select('*, properties(price)')
-    .in('status', ['negotiation', 'reserved', 'scheduled', 'visited']);
-
-  const { data: estancados } = await supabase.client
-    .from('leads')
-    .select('id')
-    .eq('status', 'new')
-    .lt('created_at', inicioAyer);
-
-  const { data: perdidosAyer } = await supabase.client
-    .from('leads')
-    .select('id, lost_reason')
-    .eq('status', 'lost')
-    .gte('status_changed_at', inicioAyer)
-    .lt('status_changed_at', inicioHoy);
-
-  const { data: vendedoresDiario } = await supabase.client
-    .from('team_members')
-    .select('id, name')
-    .eq('role', 'vendedor')
-    .eq('active', true);
-
-  // Proyección del mes
+  // === QUERIES (parallelized with Promise.all) ===
   const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString();
-  const { data: cierresMes } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMes);
-  const { data: leadsMes } = await supabase.client.from('leads').select('id').gte('created_at', inicioMes);
 
-  // Follow-ups de ayer
-  const { data: followupsAyer } = await supabase.client
-    .from('followup_approvals')
-    .select('status')
-    .gte('created_at', inicioAyer)
-    .lt('created_at', inicioHoy);
+  const [
+    { data: leadsAyer },
+    { data: leadsSemPasada },
+    { data: cierresAyer },
+    { data: cierresSemPasada },
+    { data: citasAyer },
+    { data: citasHoy },
+    { data: pipelineDiario },
+    { data: estancados },
+    { data: perdidosAyer },
+    { data: vendedoresDiario },
+    { data: cierresMes },
+    { data: leadsMes },
+    { data: followupsAyer }
+  ] = await Promise.all([
+    supabase.client.from('leads').select('*, team_members:assigned_to(name)').gte('created_at', inicioAyer).lt('created_at', inicioHoy),
+    supabase.client.from('leads').select('id').gte('created_at', inicioSemPasada).lt('created_at', finSemPasada),
+    supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioAyer).lt('status_changed_at', inicioHoy),
+    supabase.client.from('leads').select('id, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioSemPasada).lt('status_changed_at', finSemPasada),
+    supabase.client.from('appointments').select('*').eq('scheduled_date', ayer.toISOString().split('T')[0]),
+    supabase.client.from('appointments').select('*, team_members(name), leads(name, phone)').eq('scheduled_date', hoy.toISOString().split('T')[0]).eq('status', 'scheduled'),
+    supabase.client.from('leads').select('*, properties(price)').in('status', ['negotiation', 'reserved', 'scheduled', 'visited']),
+    supabase.client.from('leads').select('id').eq('status', 'new').lt('created_at', inicioAyer),
+    supabase.client.from('leads').select('id, lost_reason').eq('status', 'lost').gte('status_changed_at', inicioAyer).lt('status_changed_at', inicioHoy),
+    supabase.client.from('team_members').select('id, name').eq('role', 'vendedor').eq('active', true),
+    supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMes),
+    supabase.client.from('leads').select('id').gte('created_at', inicioMes),
+    supabase.client.from('followup_approvals').select('status').gte('created_at', inicioAyer).lt('created_at', inicioHoy)
+  ]);
 
   // === CÁLCULOS ===
   let revenueAyer = 0, pipelineValueDiario = 0;
@@ -246,7 +206,10 @@ _Escribe *resumen* para más detalles_`;
 
   await Promise.allSettled(adminsUnicos.map(async (admin) => {
     try {
-      await meta.sendWhatsAppMessage(admin.phone, msg);
+      await enviarMensajeTeamMember(supabase, meta, admin, msg, {
+        tipoMensaje: 'reporte_diario',
+        pendingKey: 'pending_reporte_diario'
+      });
       console.log(`📊 Reporte diario enviado a ${admin.name}`);
     } catch (e) {
       console.log(`Error enviando reporte a ${admin.name}:`, e);
@@ -270,20 +233,32 @@ export async function enviarReporteSemanalCEO(supabase: SupabaseService, meta: M
   const inicioSemanaAnterior = new Date(inicioSemana);
   inicioSemanaAnterior.setDate(inicioSemanaAnterior.getDate() - 7);
 
-  // Queries
-  const { data: leadsSemana } = await supabase.client.from('leads').select('*, team_members:assigned_to(name)').gte('created_at', inicioSemana.toISOString());
-  const { data: cierresSemana } = await supabase.client.from('leads').select('*, properties(price), team_members:assigned_to(name)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioSemana.toISOString());
-  const { data: citasSemana } = await supabase.client.from('appointments').select('*').gte('scheduled_date', inicioSemana.toISOString().split('T')[0]);
-  const { data: leadsSemanaAnt } = await supabase.client.from('leads').select('id').gte('created_at', inicioSemanaAnterior.toISOString()).lt('created_at', inicioSemana.toISOString());
-  const { data: cierresSemanaAnt } = await supabase.client.from('leads').select('id, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioSemanaAnterior.toISOString()).lt('status_changed_at', inicioSemana.toISOString());
-  const { data: perdidosSemana } = await supabase.client.from('leads').select('id, lost_reason').eq('status', 'lost').gte('status_changed_at', inicioSemana.toISOString());
-  const { data: pipeline } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['negotiation', 'reserved', 'scheduled', 'visited']);
-  const { data: vendedores } = await supabase.client.from('team_members').select('id, name').eq('role', 'vendedor').eq('active', true);
-
-  // Proyección del mes
+  // Queries (parallelized with Promise.all)
   const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString();
-  const { data: cierresMes } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMes);
-  const { data: leadsMes } = await supabase.client.from('leads').select('id').gte('created_at', inicioMes);
+
+  const [
+    { data: leadsSemana },
+    { data: cierresSemana },
+    { data: citasSemana },
+    { data: leadsSemanaAnt },
+    { data: cierresSemanaAnt },
+    { data: perdidosSemana },
+    { data: pipeline },
+    { data: vendedores },
+    { data: cierresMes },
+    { data: leadsMes }
+  ] = await Promise.all([
+    supabase.client.from('leads').select('*, team_members:assigned_to(name)').gte('created_at', inicioSemana.toISOString()),
+    supabase.client.from('leads').select('*, properties(price), team_members:assigned_to(name)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioSemana.toISOString()),
+    supabase.client.from('appointments').select('*').gte('scheduled_date', inicioSemana.toISOString().split('T')[0]),
+    supabase.client.from('leads').select('id').gte('created_at', inicioSemanaAnterior.toISOString()).lt('created_at', inicioSemana.toISOString()),
+    supabase.client.from('leads').select('id, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioSemanaAnterior.toISOString()).lt('status_changed_at', inicioSemana.toISOString()),
+    supabase.client.from('leads').select('id, lost_reason').eq('status', 'lost').gte('status_changed_at', inicioSemana.toISOString()),
+    supabase.client.from('leads').select('*, properties(price)').in('status', ['negotiation', 'reserved', 'scheduled', 'visited']),
+    supabase.client.from('team_members').select('id, name').eq('role', 'vendedor').eq('active', true),
+    supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMes),
+    supabase.client.from('leads').select('id').gte('created_at', inicioMes)
+  ]);
 
   // Cálculos básicos
   let revenue = 0, revenueAnt = 0, pipelineValue = 0, revenueMes = 0;
@@ -425,7 +400,10 @@ _Escribe *resumen* para más detalles_`;
 
   await Promise.allSettled(adminsUnicos.map(async (admin) => {
     try {
-      await meta.sendWhatsAppMessage(admin.phone, msg);
+      await enviarMensajeTeamMember(supabase, meta, admin, msg, {
+        tipoMensaje: 'resumen_semanal',
+        pendingKey: 'pending_resumen_semanal'
+      });
       console.log(`📈 Reporte semanal enviado a ${admin.name}`);
     } catch (e) {
       console.log(`Error enviando reporte semanal a ${admin.name}:`, e);
@@ -472,81 +450,64 @@ export async function enviarReporteMensualCEO(supabase: SupabaseService, meta: M
                    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
     const nombreMes = meses[mesReporte];
 
-    // ═══ DATOS DEL MES REPORTADO ═══
+    // ═══ DATOS DEL MES REPORTADO (parallelized with Promise.all) ═══
 
-    // Leads del mes
-    const { data: leadsMes } = await supabase.client
-      .from('leads')
-      .select('*, team_members:assigned_to(name)')
-      .gte('created_at', inicioMesReporte.toISOString())
-      .lte('created_at', finMesReporte.toISOString());
-
-    // Leads mes anterior (MoM)
-    const { data: leadsMesAnterior } = await supabase.client
-      .from('leads')
-      .select('id')
-      .gte('created_at', inicioMesAnterior.toISOString())
-      .lte('created_at', finMesAnterior.toISOString());
-
-    // Leads YoY (mismo mes año anterior)
-    const { data: leadsYoY } = await supabase.client
-      .from('leads')
-      .select('id')
-      .gte('created_at', inicioMesYoY.toISOString())
-      .lte('created_at', finMesYoY.toISOString());
-
-    // Cierres del mes
-    const { data: cierresMes } = await supabase.client
-      .from('leads')
-      .select('*, properties(price, name), team_members:assigned_to(name)')
-      .in('status', ['closed', 'delivered'])
-      .gte('status_changed_at', inicioMesReporte.toISOString())
-      .lte('status_changed_at', finMesReporte.toISOString());
-
-    // Cierres mes anterior (MoM)
-    const { data: cierresMesAnterior } = await supabase.client
-      .from('leads')
-      .select('id, properties(price)')
-      .in('status', ['closed', 'delivered'])
-      .gte('status_changed_at', inicioMesAnterior.toISOString())
-      .lte('status_changed_at', finMesAnterior.toISOString());
-
-    // Cierres YoY
-    const { data: cierresYoY } = await supabase.client
-      .from('leads')
-      .select('id, properties(price)')
-      .in('status', ['closed', 'delivered'])
-      .gte('status_changed_at', inicioMesYoY.toISOString())
-      .lte('status_changed_at', finMesYoY.toISOString());
-
-    // Pipeline actual (forecast)
-    const { data: pipeline } = await supabase.client
-      .from('leads')
-      .select('*, properties(price)')
-      .in('status', ['negotiation', 'reserved', 'scheduled', 'visited']);
-
-    // Leads perdidos
-    const { data: leadsPerdidos } = await supabase.client
-      .from('leads')
-      .select('id, lost_reason')
-      .eq('status', 'lost')
-      .gte('status_changed_at', inicioMesReporte.toISOString())
-      .lte('status_changed_at', finMesReporte.toISOString());
-
-    // Citas del mes
-    const { data: citasMes } = await supabase.client
-      .from('appointments')
-      .select('*')
-      .gte('scheduled_date', inicioMesReporte.toISOString().split('T')[0])
-      .lte('scheduled_date', finMesReporte.toISOString().split('T')[0]);
-
-    // Vendedores con stats
-    const { data: vendedores } = await supabase.client
-      .from('team_members')
-      .select('*')
-      .eq('role', 'vendedor')
-      .eq('active', true)
-      .order('sales_count', { ascending: false });
+    const [
+      { data: leadsMes },
+      { data: leadsMesAnterior },
+      { data: leadsYoY },
+      { data: cierresMes },
+      { data: cierresMesAnterior },
+      { data: cierresYoY },
+      { data: pipeline },
+      { data: leadsPerdidos },
+      { data: citasMes },
+      { data: vendedores }
+    ] = await Promise.all([
+      // Leads del mes
+      supabase.client.from('leads').select('*, team_members:assigned_to(name)')
+        .gte('created_at', inicioMesReporte.toISOString())
+        .lte('created_at', finMesReporte.toISOString()),
+      // Leads mes anterior (MoM)
+      supabase.client.from('leads').select('id')
+        .gte('created_at', inicioMesAnterior.toISOString())
+        .lte('created_at', finMesAnterior.toISOString()),
+      // Leads YoY (mismo mes año anterior)
+      supabase.client.from('leads').select('id')
+        .gte('created_at', inicioMesYoY.toISOString())
+        .lte('created_at', finMesYoY.toISOString()),
+      // Cierres del mes
+      supabase.client.from('leads').select('*, properties(price, name), team_members:assigned_to(name)')
+        .in('status', ['closed', 'delivered'])
+        .gte('status_changed_at', inicioMesReporte.toISOString())
+        .lte('status_changed_at', finMesReporte.toISOString()),
+      // Cierres mes anterior (MoM)
+      supabase.client.from('leads').select('id, properties(price)')
+        .in('status', ['closed', 'delivered'])
+        .gte('status_changed_at', inicioMesAnterior.toISOString())
+        .lte('status_changed_at', finMesAnterior.toISOString()),
+      // Cierres YoY
+      supabase.client.from('leads').select('id, properties(price)')
+        .in('status', ['closed', 'delivered'])
+        .gte('status_changed_at', inicioMesYoY.toISOString())
+        .lte('status_changed_at', finMesYoY.toISOString()),
+      // Pipeline actual (forecast)
+      supabase.client.from('leads').select('*, properties(price)')
+        .in('status', ['negotiation', 'reserved', 'scheduled', 'visited']),
+      // Leads perdidos
+      supabase.client.from('leads').select('id, lost_reason')
+        .eq('status', 'lost')
+        .gte('status_changed_at', inicioMesReporte.toISOString())
+        .lte('status_changed_at', finMesReporte.toISOString()),
+      // Citas del mes
+      supabase.client.from('appointments').select('*')
+        .gte('scheduled_date', inicioMesReporte.toISOString().split('T')[0])
+        .lte('scheduled_date', finMesReporte.toISOString().split('T')[0]),
+      // Vendedores con stats
+      supabase.client.from('team_members').select('*')
+        .eq('role', 'vendedor').eq('active', true)
+        .order('sales_count', { ascending: false })
+    ]);
 
     // ═══ CÁLCULOS ═══
 
@@ -753,7 +714,10 @@ _Generado por SARA_`;
 
     await Promise.allSettled(adminsUnicos.map(async (admin) => {
       try {
-        await meta.sendWhatsAppMessage(admin.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, admin, msg, {
+          tipoMensaje: 'reporte_diario',
+          pendingKey: 'pending_reporte_diario'
+        });
         console.log(`📊 Reporte mensual enviado a ${admin.name}`);
       } catch (e) {
         console.log(`Error enviando reporte mensual a ${admin.name}:`, e);
@@ -761,6 +725,7 @@ _Generado por SARA_`;
     }));
   } catch (e) {
     console.log('Error en reporte mensual:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteMensualCEO', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -797,39 +762,28 @@ export async function enviarReporteSemanalVendedores(supabase: SupabaseService, 
     const finSemAnterior = new Date(finSemPasada);
     finSemAnterior.setDate(finSemPasada.getDate() - 7);
 
-    // Datos globales de la semana
-    const { data: todosLeadsSem } = await supabase.client
-      .from('leads')
-      .select('*, properties(price)')
-      .gte('created_at', inicioSemPasada.toISOString())
-      .lte('created_at', finSemPasada.toISOString());
-
-    const { data: todosCierresSem } = await supabase.client
-      .from('leads')
-      .select('*, properties(price)')
-      .in('status', ['closed', 'delivered'])
-      .gte('status_changed_at', inicioSemPasada.toISOString())
-      .lte('status_changed_at', finSemPasada.toISOString());
-
-    const { data: todasCitasSem } = await supabase.client
-      .from('appointments')
-      .select('*')
-      .gte('scheduled_date', inicioSemPasada.toISOString().split('T')[0])
-      .lte('scheduled_date', finSemPasada.toISOString().split('T')[0]);
-
-    // Datos semana anterior para comparación
-    const { data: todosLeadsSemAnt } = await supabase.client
-      .from('leads')
-      .select('id, assigned_to')
-      .gte('created_at', inicioSemAnterior.toISOString())
-      .lte('created_at', finSemAnterior.toISOString());
-
-    const { data: todosCierresSemAnt } = await supabase.client
-      .from('leads')
-      .select('id, assigned_to, properties(price)')
-      .in('status', ['closed', 'delivered'])
-      .gte('status_changed_at', inicioSemAnterior.toISOString())
-      .lte('status_changed_at', finSemAnterior.toISOString());
+    // Datos globales de la semana (parallelized with Promise.all)
+    const [
+      { data: todosLeadsSem },
+      { data: todosCierresSem },
+      { data: todasCitasSem },
+      { data: todosLeadsSemAnt },
+      { data: todosCierresSemAnt }
+    ] = await Promise.all([
+      supabase.client.from('leads').select('*, properties(price)')
+        .gte('created_at', inicioSemPasada.toISOString()).lte('created_at', finSemPasada.toISOString()),
+      supabase.client.from('leads').select('*, properties(price)')
+        .in('status', ['closed', 'delivered'])
+        .gte('status_changed_at', inicioSemPasada.toISOString()).lte('status_changed_at', finSemPasada.toISOString()),
+      supabase.client.from('appointments').select('*')
+        .gte('scheduled_date', inicioSemPasada.toISOString().split('T')[0])
+        .lte('scheduled_date', finSemPasada.toISOString().split('T')[0]),
+      supabase.client.from('leads').select('id, assigned_to')
+        .gte('created_at', inicioSemAnterior.toISOString()).lte('created_at', finSemAnterior.toISOString()),
+      supabase.client.from('leads').select('id, assigned_to, properties(price)')
+        .in('status', ['closed', 'delivered'])
+        .gte('status_changed_at', inicioSemAnterior.toISOString()).lte('status_changed_at', finSemAnterior.toISOString())
+    ]);
 
     // Calcular ranking por revenue
     const vendedoresConRevenue = vendedores.map(v => {
@@ -988,7 +942,10 @@ ${insightsText}
 _¡Éxito esta semana!_ 🚀`;
 
       try {
-        await meta.sendWhatsAppMessage(vendedor.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, vendedor, msg, {
+          tipoMensaje: 'resumen_semanal',
+          pendingKey: 'pending_resumen_semanal'
+        });
         console.log(`📊 Reporte semanal enviado a ${vendedor.name}`);
       } catch (e) {
         console.log(`Error enviando reporte a ${vendedor.name}:`, e);
@@ -1001,6 +958,7 @@ _¡Éxito esta semana!_ 🚀`;
     console.log(`✅ Reportes semanales enviados a ${vendedores.length} vendedores`);
   } catch (e) {
     console.log('Error en reporte semanal vendedores:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteSemanalVendedores', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1105,8 +1063,11 @@ export async function iniciarFlujosPostVisita(supabase: SupabaseService, meta: M
         // Iniciar flujo post-visita
         const { mensaje, context } = await postVisitService.iniciarFlujoPostVisita(cita, lead, vendedor);
 
-        // Enviar pregunta al vendedor
-        await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+        // Enviar pregunta al vendedor (24h-safe)
+        await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
+          tipoMensaje: 'alerta_lead',
+          pendingKey: 'pending_alerta_lead'
+        });
 
         console.log(`📋 POST-VISITA: Pregunta enviada a ${vendedor.name} sobre ${lead.name}`);
 
@@ -1117,6 +1078,7 @@ export async function iniciarFlujosPostVisita(supabase: SupabaseService, meta: M
     }
   } catch (e) {
     console.error('Error en iniciarFlujosPostVisita:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'iniciarFlujosPostVisita', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1189,20 +1151,24 @@ export async function enviarEncuestasPostCita(supabase: SupabaseService, meta: M
       return;
     }
 
+    // Batch prefetch: obtener todas las encuestas ya enviadas para las citas de hoy (evita N+1 queries)
+    const citaIds = citasCompletadas.map(c => c.id).filter(Boolean);
+    const { data: encuestasExistentes } = citaIds.length > 0
+      ? await supabase.client
+          .from('surveys')
+          .select('appointment_id')
+          .in('appointment_id', citaIds)
+          .eq('survey_type', 'post_cita')
+      : { data: [] };
+    const encuestaEnviadaSet = new Set((encuestasExistentes || []).map(e => e.appointment_id));
+
     for (const cita of citasCompletadas) {
       const lead = cita.leads as any;
       const vendedor = cita.team_members as any;
       if (!lead?.phone) continue;
 
-      // Verificar si ya se envió encuesta para esta cita
-      const { data: encuestaExistente } = await supabase.client
-        .from('surveys')
-        .select('id')
-        .eq('appointment_id', cita.id)
-        .eq('survey_type', 'post_cita')
-        .single();
-
-      if (encuestaExistente) continue;
+      // Verificar si ya se envió encuesta para esta cita (batch prefetched)
+      if (encuestaEnviadaSet.has(cita.id)) continue;
 
       const nombreCliente = lead.name?.split(' ')[0] || 'Cliente';
       const nombreVendedor = vendedor?.name?.split(' ')[0] || 'nuestro asesor';
@@ -1245,6 +1211,7 @@ Tu opinión nos ayuda a mejorar 🙏`;
     }
   } catch (e) {
     console.log('Error en encuestas post-cita:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarEncuestasPostCita', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1317,6 +1284,7 @@ _Responde con un número del 0 al 10_
     }
   } catch (e) {
     console.log('Error en encuestas NPS:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarEncuestasNPS', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1408,6 +1376,7 @@ export async function procesarRespuestaEncuesta(supabase: SupabaseService, phone
     return null;
   } catch (e) {
     console.log('Error procesando respuesta encuesta:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'procesarRespuestaEncuesta', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
     return null;
   }
 }
@@ -1441,60 +1410,39 @@ export async function enviarReporteDiarioVendedores(supabase: SupabaseService, m
     const finAyer = new Date(finHoy);
     finAyer.setDate(finAyer.getDate() - 1);
 
-    // Datos globales de hoy
-    const { data: todosLeadsHoy } = await supabase.client
-      .from('leads')
-      .select('*, properties(price)')
-      .gte('created_at', inicioHoy.toISOString())
-      .lte('created_at', finHoy.toISOString());
-
-    const { data: todosCierresHoy } = await supabase.client
-      .from('leads')
-      .select('*, properties(price)')
-      .in('status', ['closed', 'delivered'])
-      .gte('status_changed_at', inicioHoy.toISOString())
-      .lte('status_changed_at', finHoy.toISOString());
-
-    const { data: todasCitasHoy } = await supabase.client
-      .from('appointments')
-      .select('*')
-      .eq('scheduled_date', inicioHoy.toISOString().split('T')[0]);
-
-    // Citas de mañana
+    // Datos globales (parallelized with Promise.all)
     const manana = new Date(inicioHoy);
     manana.setDate(manana.getDate() + 1);
-    const { data: citasManana } = await supabase.client
-      .from('appointments')
-      .select('*, leads(name, phone)')
-      .eq('scheduled_date', manana.toISOString().split('T')[0])
-      .eq('status', 'scheduled');
 
-    // Datos de ayer para comparar
-    const { data: todosLeadsAyer } = await supabase.client
-      .from('leads')
-      .select('id, assigned_to')
-      .gte('created_at', inicioAyer.toISOString())
-      .lte('created_at', finAyer.toISOString());
-
-    const { data: todosCierresAyer } = await supabase.client
-      .from('leads')
-      .select('id, assigned_to, properties(price)')
-      .in('status', ['closed', 'delivered'])
-      .gte('status_changed_at', inicioAyer.toISOString())
-      .lte('status_changed_at', finAyer.toISOString());
-
-    // Pipeline activo
-    const { data: pipelineActivo } = await supabase.client
-      .from('leads')
-      .select('*, properties(price)')
-      .in('status', ['new', 'contacted', 'qualified', 'negotiation', 'scheduled', 'visited']);
-
-    // Follow-ups de hoy
-    const { data: followupsHoy } = await supabase.client
-      .from('followup_approvals')
-      .select('vendedor_id, status, sent_at')
-      .gte('created_at', inicioHoy.toISOString())
-      .lte('created_at', finHoy.toISOString());
+    const [
+      { data: todosLeadsHoy },
+      { data: todosCierresHoy },
+      { data: todasCitasHoy },
+      { data: citasManana },
+      { data: todosLeadsAyer },
+      { data: todosCierresAyer },
+      { data: pipelineActivo },
+      { data: followupsHoy }
+    ] = await Promise.all([
+      supabase.client.from('leads').select('*, properties(price)')
+        .gte('created_at', inicioHoy.toISOString()).lte('created_at', finHoy.toISOString()),
+      supabase.client.from('leads').select('*, properties(price)')
+        .in('status', ['closed', 'delivered'])
+        .gte('status_changed_at', inicioHoy.toISOString()).lte('status_changed_at', finHoy.toISOString()),
+      supabase.client.from('appointments').select('*')
+        .eq('scheduled_date', inicioHoy.toISOString().split('T')[0]),
+      supabase.client.from('appointments').select('*, leads(name, phone)')
+        .eq('scheduled_date', manana.toISOString().split('T')[0]).eq('status', 'scheduled'),
+      supabase.client.from('leads').select('id, assigned_to')
+        .gte('created_at', inicioAyer.toISOString()).lte('created_at', finAyer.toISOString()),
+      supabase.client.from('leads').select('id, assigned_to, properties(price)')
+        .in('status', ['closed', 'delivered'])
+        .gte('status_changed_at', inicioAyer.toISOString()).lte('status_changed_at', finAyer.toISOString()),
+      supabase.client.from('leads').select('*, properties(price)')
+        .in('status', ['new', 'contacted', 'qualified', 'negotiation', 'scheduled', 'visited']),
+      supabase.client.from('followup_approvals').select('vendedor_id, status, sent_at')
+        .gte('created_at', inicioHoy.toISOString()).lte('created_at', finHoy.toISOString())
+    ]);
 
     // Calcular ranking del día por cierres
     const vendedoresConCierres = vendedores.map(v => {
@@ -1715,6 +1663,7 @@ _¡Descansa y mañana con todo!_ 🚀`;
     console.log(`✅ Reportes diarios procesados para ${vendedores.length} vendedores`);
   } catch (e) {
     console.log('Error en reporte diario vendedores:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteDiarioVendedores', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -1754,52 +1703,36 @@ export async function enviarReporteMensualVendedores(supabase: SupabaseService, 
     const nombreMes = meses[mesReporte];
 
     // Datos globales del mes
-    const { data: todosLeadsMes } = await supabase.client
-      .from('leads')
-      .select('*, properties(price)')
-      .gte('created_at', inicioMesReporte.toISOString())
-      .lte('created_at', finMesReporte.toISOString());
-
-    const { data: todosCierresMes } = await supabase.client
-      .from('leads')
-      .select('*, properties(price)')
-      .in('status', ['closed', 'delivered'])
-      .gte('status_changed_at', inicioMesReporte.toISOString())
-      .lte('status_changed_at', finMesReporte.toISOString());
-
-    const { data: todasCitasMes } = await supabase.client
-      .from('appointments')
-      .select('*')
-      .gte('scheduled_date', inicioMesReporte.toISOString().split('T')[0])
-      .lte('scheduled_date', finMesReporte.toISOString().split('T')[0]);
-
-    // Datos mes anterior
-    const { data: todosLeadsMesAnt } = await supabase.client
-      .from('leads')
-      .select('id, assigned_to')
-      .gte('created_at', inicioMesAnterior.toISOString())
-      .lte('created_at', finMesAnterior.toISOString());
-
-    const { data: todosCierresMesAnt } = await supabase.client
-      .from('leads')
-      .select('id, assigned_to, properties(price)')
-      .in('status', ['closed', 'delivered'])
-      .gte('status_changed_at', inicioMesAnterior.toISOString())
-      .lte('status_changed_at', finMesAnterior.toISOString());
-
-    const { data: todasCitasMesAnt } = await supabase.client
-      .from('appointments')
-      .select('id, vendedor_id, status')
-      .gte('scheduled_date', inicioMesAnterior.toISOString().split('T')[0])
-      .lte('scheduled_date', finMesAnterior.toISOString().split('T')[0]);
-
-    // Encuestas del mes
-    const { data: todasEncuestasMes } = await supabase.client
-      .from('surveys')
-      .select('*')
-      .eq('status', 'answered')
-      .gte('answered_at', inicioMesReporte.toISOString())
-      .lte('answered_at', finMesReporte.toISOString());
+    // Datos globales del mes (parallelized with Promise.all)
+    const [
+      { data: todosLeadsMes },
+      { data: todosCierresMes },
+      { data: todasCitasMes },
+      { data: todosLeadsMesAnt },
+      { data: todosCierresMesAnt },
+      { data: todasCitasMesAnt },
+      { data: todasEncuestasMes }
+    ] = await Promise.all([
+      supabase.client.from('leads').select('*, properties(price)')
+        .gte('created_at', inicioMesReporte.toISOString()).lte('created_at', finMesReporte.toISOString()),
+      supabase.client.from('leads').select('*, properties(price)')
+        .in('status', ['closed', 'delivered'])
+        .gte('status_changed_at', inicioMesReporte.toISOString()).lte('status_changed_at', finMesReporte.toISOString()),
+      supabase.client.from('appointments').select('*')
+        .gte('scheduled_date', inicioMesReporte.toISOString().split('T')[0])
+        .lte('scheduled_date', finMesReporte.toISOString().split('T')[0]),
+      supabase.client.from('leads').select('id, assigned_to')
+        .gte('created_at', inicioMesAnterior.toISOString()).lte('created_at', finMesAnterior.toISOString()),
+      supabase.client.from('leads').select('id, assigned_to, properties(price)')
+        .in('status', ['closed', 'delivered'])
+        .gte('status_changed_at', inicioMesAnterior.toISOString()).lte('status_changed_at', finMesAnterior.toISOString()),
+      supabase.client.from('appointments').select('id, vendedor_id, status')
+        .gte('scheduled_date', inicioMesAnterior.toISOString().split('T')[0])
+        .lte('scheduled_date', finMesAnterior.toISOString().split('T')[0]),
+      supabase.client.from('surveys').select('*')
+        .eq('status', 'answered')
+        .gte('answered_at', inicioMesReporte.toISOString()).lte('answered_at', finMesReporte.toISOString())
+    ]);
 
     // Calcular ranking por revenue
     const vendedoresConRevenue = vendedores.map(v => {
@@ -2040,7 +1973,10 @@ ${insightsText}
 _¡Éxito en ${meses[mesActual]}!_ 🚀`;
 
       try {
-        await meta.sendWhatsAppMessage(vendedor.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, vendedor, msg, {
+          tipoMensaje: 'reporte_diario',
+          pendingKey: 'pending_reporte_diario'
+        });
         console.log(`📊 Reporte mensual enviado a ${vendedor.name}`);
       } catch (e) {
         console.log(`Error enviando reporte mensual a ${vendedor.name}:`, e);
@@ -2052,6 +1988,7 @@ _¡Éxito en ${meses[mesActual]}!_ 🚀`;
     console.log(`✅ Reportes mensuales enviados a ${vendedores.length} vendedores`);
   } catch (e) {
     console.log('Error en reporte mensual vendedores:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteMensualVendedores', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2076,10 +2013,18 @@ export async function enviarReporteDiarioAsesores(supabase: SupabaseService, met
     const inicioAyer = new Date(inicioHoy); inicioAyer.setDate(inicioAyer.getDate() - 1);
     const finAyer = new Date(finHoy); finAyer.setDate(finAyer.getDate() - 1);
 
-    const { data: hipotecasHoy } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').gte('created_at', inicioHoy.toISOString()).lte('created_at', finHoy.toISOString());
-    const { data: aprobadasHoy } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').eq('status', 'approved').gte('updated_at', inicioHoy.toISOString()).lte('updated_at', finHoy.toISOString());
-    const { data: hipotecasAyer } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').gte('created_at', inicioAyer.toISOString()).lte('created_at', finAyer.toISOString());
-    const { data: pipelineActivo } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').in('status', ['pending', 'in_progress', 'sent_to_bank']);
+    // Queries (parallelized with Promise.all)
+    const [
+      { data: hipotecasHoy },
+      { data: aprobadasHoy },
+      { data: hipotecasAyer },
+      { data: pipelineActivo }
+    ] = await Promise.all([
+      supabase.client.from('mortgage_applications').select('*, leads(name, phone)').gte('created_at', inicioHoy.toISOString()).lte('created_at', finHoy.toISOString()),
+      supabase.client.from('mortgage_applications').select('*, leads(name, phone)').eq('status', 'approved').gte('updated_at', inicioHoy.toISOString()).lte('updated_at', finHoy.toISOString()),
+      supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').gte('created_at', inicioAyer.toISOString()).lte('created_at', finAyer.toISOString()),
+      supabase.client.from('mortgage_applications').select('*, leads(name, phone)').in('status', ['pending', 'in_progress', 'sent_to_bank'])
+    ]);
 
     const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
     const fechaHoy = `${hoy.getDate()}/${hoy.getMonth()+1}/${hoy.getFullYear()}`;
@@ -2138,6 +2083,7 @@ export async function enviarReporteDiarioAsesores(supabase: SupabaseService, met
     console.log(`✅ Reportes diarios procesados para ${asesores.length} asesores`);
   } catch (e) {
     console.log('Error en reporte diario asesores:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteDiarioAsesores', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2156,12 +2102,22 @@ export async function enviarReporteSemanalAsesores(supabase: SupabaseService, me
     const inicioSemAnt = new Date(inicioSemana); inicioSemAnt.setDate(inicioSemAnt.getDate() - 7);
     const finSemAnt = new Date(inicioSemana); finSemAnt.setDate(finSemAnt.getDate() - 1); finSemAnt.setHours(23, 59, 59, 999);
 
-    const { data: hipotecasSemana } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').gte('created_at', inicioSemana.toISOString()).lte('created_at', finSemana.toISOString());
-    const { data: aprobadasSemana } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').eq('status', 'approved').gte('updated_at', inicioSemana.toISOString()).lte('updated_at', finSemana.toISOString());
-    const { data: rechazadasSemana } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'rejected').gte('updated_at', inicioSemana.toISOString()).lte('updated_at', finSemana.toISOString());
-    const { data: hipotecasSemAnt } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').gte('created_at', inicioSemAnt.toISOString()).lte('created_at', finSemAnt.toISOString());
-    const { data: aprobadasSemAnt } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'approved').gte('updated_at', inicioSemAnt.toISOString()).lte('updated_at', finSemAnt.toISOString());
-    const { data: pipelineActivo } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').in('status', ['pending', 'in_progress', 'sent_to_bank']);
+    // Queries (parallelized with Promise.all)
+    const [
+      { data: hipotecasSemana },
+      { data: aprobadasSemana },
+      { data: rechazadasSemana },
+      { data: hipotecasSemAnt },
+      { data: aprobadasSemAnt },
+      { data: pipelineActivo }
+    ] = await Promise.all([
+      supabase.client.from('mortgage_applications').select('*, leads(name, phone)').gte('created_at', inicioSemana.toISOString()).lte('created_at', finSemana.toISOString()),
+      supabase.client.from('mortgage_applications').select('*, leads(name, phone)').eq('status', 'approved').gte('updated_at', inicioSemana.toISOString()).lte('updated_at', finSemana.toISOString()),
+      supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'rejected').gte('updated_at', inicioSemana.toISOString()).lte('updated_at', finSemana.toISOString()),
+      supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').gte('created_at', inicioSemAnt.toISOString()).lte('created_at', finSemAnt.toISOString()),
+      supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'approved').gte('updated_at', inicioSemAnt.toISOString()).lte('updated_at', finSemAnt.toISOString()),
+      supabase.client.from('mortgage_applications').select('*, leads(name, phone)').in('status', ['pending', 'in_progress', 'sent_to_bank'])
+    ]);
 
     const asesoresConAprobaciones = asesores.map(a => ({ ...a, aprobaciones: (aprobadasSemana?.filter(h => h.assigned_advisor_id === a.id) || []).length })).sort((a, b) => b.aprobaciones - a.aprobaciones);
     const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
@@ -2212,6 +2168,7 @@ export async function enviarReporteSemanalAsesores(supabase: SupabaseService, me
     console.log(`✅ Reportes semanales procesados para ${asesores.length} asesores`);
   } catch (e) {
     console.log('Error en reporte semanal asesores:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteSemanalAsesores', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2238,11 +2195,19 @@ export async function enviarReporteMensualAsesores(supabase: SupabaseService, me
     const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
     const nombreMes = meses[mesReporte];
 
-    const { data: hipotecasMes } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').gte('created_at', inicioMesReporte.toISOString()).lte('created_at', finMesReporte.toISOString());
-    const { data: aprobadasMes } = await supabase.client.from('mortgage_applications').select('*, leads(name, phone)').eq('status', 'approved').gte('updated_at', inicioMesReporte.toISOString()).lte('updated_at', finMesReporte.toISOString());
-    const { data: rechazadasMes } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'rejected').gte('updated_at', inicioMesReporte.toISOString()).lte('updated_at', finMesReporte.toISOString());
-    const { data: hipotecasMesAnt } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').gte('created_at', inicioMesAnterior.toISOString()).lte('created_at', finMesAnterior.toISOString());
-    const { data: aprobadasMesAnt } = await supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'approved').gte('updated_at', inicioMesAnterior.toISOString()).lte('updated_at', finMesAnterior.toISOString());
+    const [
+      { data: hipotecasMes },
+      { data: aprobadasMes },
+      { data: rechazadasMes },
+      { data: hipotecasMesAnt },
+      { data: aprobadasMesAnt }
+    ] = await Promise.all([
+      supabase.client.from('mortgage_applications').select('*, leads(name, phone)').gte('created_at', inicioMesReporte.toISOString()).lte('created_at', finMesReporte.toISOString()),
+      supabase.client.from('mortgage_applications').select('*, leads(name, phone)').eq('status', 'approved').gte('updated_at', inicioMesReporte.toISOString()).lte('updated_at', finMesReporte.toISOString()),
+      supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'rejected').gte('updated_at', inicioMesReporte.toISOString()).lte('updated_at', finMesReporte.toISOString()),
+      supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').gte('created_at', inicioMesAnterior.toISOString()).lte('created_at', finMesAnterior.toISOString()),
+      supabase.client.from('mortgage_applications').select('id, assigned_advisor_id').eq('status', 'approved').gte('updated_at', inicioMesAnterior.toISOString()).lte('updated_at', finMesAnterior.toISOString())
+    ]);
 
     const asesoresConAprobaciones = asesores.map(a => ({ ...a, aprobaciones: (aprobadasMes?.filter(h => h.assigned_advisor_id === a.id) || []).length })).sort((a, b) => b.aprobaciones - a.aprobaciones);
     const totalAprobacionesEquipo = aprobadasMes?.length || 0;
@@ -2274,7 +2239,10 @@ export async function enviarReporteMensualAsesores(supabase: SupabaseService, me
       const msg = `📊 *TU REPORTE MENSUAL*\nHola *${nombreCorto}* 👋\n*${nombreMes.toUpperCase()} ${anioReporte}*\n\n━━━━━━━━━━━━━━━━━━━━━\n🏦 *TUS RESULTADOS*\n━━━━━━━━━━━━━━━━━━━━━\n• Solicitudes: *${nuevasMes.length}* ${calcVar(nuevasMes.length, nuevasMesAnt.length)}\n• Aprobadas: *${aprobadasAsesor.length}* ${calcVar(aprobadasAsesor.length, aprobadasAnt.length)}\n• Rechazadas: ${rechazadasAsesor.length}\n• Tasa aprobación: *${tasaAprobacion}%*\n\n━━━━━━━━━━━━━━━━━━━━━\n🏆 *RANKING EQUIPO*\n━━━━━━━━━━━━━━━━━━━━━\n• Posición: *${posicionStr}* de ${asesoresConAprobaciones.length}\n• Aportaste: *${porcentajeEquipo}%* de aprobaciones\n• Total equipo: ${totalAprobacionesEquipo} aprobadas\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *RESUMEN DEL MES*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Éxito en ${meses[mesActual]}!_ 🚀`;
 
       try {
-        await meta.sendWhatsAppMessage(asesor.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, asesor, msg, {
+          tipoMensaje: 'reporte_diario',
+          pendingKey: 'pending_reporte_diario'
+        });
         console.log(`📊 Reporte mensual asesor enviado a ${asesor.name}`);
       } catch (e) {
         console.log(`Error enviando reporte mensual a ${asesor.name}:`, e);
@@ -2284,6 +2252,7 @@ export async function enviarReporteMensualAsesores(supabase: SupabaseService, me
     console.log(`✅ Reportes mensuales enviados a ${asesores.length} asesores`);
   } catch (e) {
     console.log('Error en reporte mensual asesores:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteMensualAsesores', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2303,10 +2272,18 @@ export async function enviarReporteDiarioMarketing(supabase: SupabaseService, me
     const inicioAyer = new Date(inicioHoy); inicioAyer.setDate(inicioAyer.getDate() - 1);
     const finAyer = new Date(finHoy); finAyer.setDate(finAyer.getDate() - 1);
 
-    const { data: leadsHoy } = await supabase.client.from('leads').select('*, properties(price)').gte('created_at', inicioHoy.toISOString()).lte('created_at', finHoy.toISOString());
-    const { data: leadsAyer } = await supabase.client.from('leads').select('id, source').gte('created_at', inicioAyer.toISOString()).lte('created_at', finAyer.toISOString());
-    const { data: citasHoy } = await supabase.client.from('appointments').select('*').eq('scheduled_date', inicioHoy.toISOString().split('T')[0]);
-    const { data: cierresHoy } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioHoy.toISOString()).lte('status_changed_at', finHoy.toISOString());
+    // Queries (parallelized with Promise.all)
+    const [
+      { data: leadsHoy },
+      { data: leadsAyer },
+      { data: citasHoy },
+      { data: cierresHoy }
+    ] = await Promise.all([
+      supabase.client.from('leads').select('*, properties(price)').gte('created_at', inicioHoy.toISOString()).lte('created_at', finHoy.toISOString()),
+      supabase.client.from('leads').select('id, source').gte('created_at', inicioAyer.toISOString()).lte('created_at', finAyer.toISOString()),
+      supabase.client.from('appointments').select('*').eq('scheduled_date', inicioHoy.toISOString().split('T')[0]),
+      supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioHoy.toISOString()).lte('status_changed_at', finHoy.toISOString())
+    ]);
 
     const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
     const fechaHoy = `${hoy.getDate()}/${hoy.getMonth()+1}/${hoy.getFullYear()}`;
@@ -2348,7 +2325,10 @@ export async function enviarReporteDiarioMarketing(supabase: SupabaseService, me
       const msg = `📊 *REPORTE DIARIO MARKETING*\nHola *${nombreCorto}* 👋\n_${fechaHoy}_\n\n━━━━━━━━━━━━━━━━━━━━━\n📣 *LEADS HOY*\n━━━━━━━━━━━━━━━━━━━━━\n• Total: *${leadsHoy?.length || 0}* ${calcVar(leadsHoy?.length || 0, leadsAyer?.length || 0)}\n• Conv. lead→cita: *${convLeadCita}%*\n${cierresHoy && cierresHoy.length > 0 ? `• Revenue: *$${(revenueHoy/1000000).toFixed(1)}M*\n` : ''}\n━━━━━━━━━━━━━━━━━━━━━\n📍 *POR FUENTE*\n━━━━━━━━━━━━━━━━━━━━━\n${fuentesStr}\n\n━━━━━━━━━━━━━━━━━━━━━\n📅 *CITAS*\n━━━━━━━━━━━━━━━━━━━━━\n• Agendadas: ${citasAgendadas}\n• Completadas: ${citasCompletadas}\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *INSIGHTS*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Mañana seguimos!_ 🚀`;
 
       try {
-        await meta.sendWhatsAppMessage(mkt.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, mkt, msg, {
+          tipoMensaje: 'reporte_diario',
+          pendingKey: 'pending_reporte_diario'
+        });
         console.log(`📊 Reporte diario marketing enviado a ${mkt.name}`);
       } catch (e) {
         console.log(`Error enviando reporte a ${mkt.name}:`, e);
@@ -2358,6 +2338,7 @@ export async function enviarReporteDiarioMarketing(supabase: SupabaseService, me
     console.log(`✅ Reportes diarios enviados a ${marketing.length} de marketing`);
   } catch (e) {
     console.log('Error en reporte diario marketing:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteDiarioMarketing', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2376,11 +2357,20 @@ export async function enviarReporteSemanalMarketing(supabase: SupabaseService, m
     const inicioSemAnt = new Date(inicioSemana); inicioSemAnt.setDate(inicioSemAnt.getDate() - 7);
     const finSemAnt = new Date(inicioSemana); finSemAnt.setDate(finSemAnt.getDate() - 1); finSemAnt.setHours(23, 59, 59, 999);
 
-    const { data: leadsSemana } = await supabase.client.from('leads').select('*, properties(price)').gte('created_at', inicioSemana.toISOString()).lte('created_at', finSemana.toISOString());
-    const { data: leadsSemAnt } = await supabase.client.from('leads').select('id, source').gte('created_at', inicioSemAnt.toISOString()).lte('created_at', finSemAnt.toISOString());
-    const { data: citasSemana } = await supabase.client.from('appointments').select('*').gte('scheduled_date', inicioSemana.toISOString().split('T')[0]).lte('scheduled_date', finSemana.toISOString().split('T')[0]);
-    const { data: cierresSemana } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioSemana.toISOString()).lte('status_changed_at', finSemana.toISOString());
-    const { data: cierresSemAnt } = await supabase.client.from('leads').select('id, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioSemAnt.toISOString()).lte('status_changed_at', finSemAnt.toISOString());
+    // Queries (parallelized with Promise.all)
+    const [
+      { data: leadsSemana },
+      { data: leadsSemAnt },
+      { data: citasSemana },
+      { data: cierresSemana },
+      { data: cierresSemAnt }
+    ] = await Promise.all([
+      supabase.client.from('leads').select('*, properties(price)').gte('created_at', inicioSemana.toISOString()).lte('created_at', finSemana.toISOString()),
+      supabase.client.from('leads').select('id, source').gte('created_at', inicioSemAnt.toISOString()).lte('created_at', finSemAnt.toISOString()),
+      supabase.client.from('appointments').select('*').gte('scheduled_date', inicioSemana.toISOString().split('T')[0]).lte('scheduled_date', finSemana.toISOString().split('T')[0]),
+      supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioSemana.toISOString()).lte('status_changed_at', finSemana.toISOString()),
+      supabase.client.from('leads').select('id, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioSemAnt.toISOString()).lte('status_changed_at', finSemAnt.toISOString())
+    ]);
 
     const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
 
@@ -2447,7 +2437,10 @@ export async function enviarReporteSemanalMarketing(supabase: SupabaseService, m
       const msg = `📊 *REPORTE SEMANAL MARKETING*\nHola *${nombreCorto}* 👋\n\n━━━━━━━━━━━━━━━━━━━━━\n📣 *ESTA SEMANA*\n━━━━━━━━━━━━━━━━━━━━━\n• Leads: *${leadsSemana?.length || 0}* ${calcVar(leadsSemana?.length || 0, leadsSemAnt?.length || 0)}\n• Cierres: *${cierresSemana?.length || 0}* ${calcVar(cierresSemana?.length || 0, cierresSemAnt?.length || 0)}\n• Revenue: *$${(revenueSemana/1000000).toFixed(1)}M* ${calcVar(revenueSemana, revenueSemAnt)}\n\n━━━━━━━━━━━━━━━━━━━━━\n📈 *CONVERSIONES*\n━━━━━━━━━━━━━━━━━━━━━\n• Lead→Cita: *${convLeadCita}%*\n• Cita→Cierre: *${convCitaCierre}%*\n• Citas completadas: ${citasCompletadas}\n\n━━━━━━━━━━━━━━━━━━━━━\n📍 *PERFORMANCE POR FUENTE*\n━━━━━━━━━━━━━━━━━━━━━\n${fuentesStr}\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *INSIGHTS*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Éxito esta semana!_ 🚀`;
 
       try {
-        await meta.sendWhatsAppMessage(mkt.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, mkt, msg, {
+          tipoMensaje: 'resumen_semanal',
+          pendingKey: 'pending_resumen_semanal'
+        });
         console.log(`📊 Reporte semanal marketing enviado a ${mkt.name}`);
       } catch (e) {
         console.log(`Error enviando reporte a ${mkt.name}:`, e);
@@ -2457,6 +2450,7 @@ export async function enviarReporteSemanalMarketing(supabase: SupabaseService, m
     console.log(`✅ Reportes semanales enviados a ${marketing.length} de marketing`);
   } catch (e) {
     console.log('Error en reporte semanal marketing:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteSemanalMarketing', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2483,11 +2477,20 @@ export async function enviarReporteMensualMarketing(supabase: SupabaseService, m
     const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
     const nombreMes = meses[mesReporte];
 
-    const { data: leadsMes } = await supabase.client.from('leads').select('*, properties(price)').gte('created_at', inicioMesReporte.toISOString()).lte('created_at', finMesReporte.toISOString());
-    const { data: leadsMesAnt } = await supabase.client.from('leads').select('id, source').gte('created_at', inicioMesAnterior.toISOString()).lte('created_at', finMesAnterior.toISOString());
-    const { data: citasMes } = await supabase.client.from('appointments').select('*').gte('scheduled_date', inicioMesReporte.toISOString().split('T')[0]).lte('scheduled_date', finMesReporte.toISOString().split('T')[0]);
-    const { data: cierresMes } = await supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMesReporte.toISOString()).lte('status_changed_at', finMesReporte.toISOString());
-    const { data: cierresMesAnt } = await supabase.client.from('leads').select('id, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMesAnterior.toISOString()).lte('status_changed_at', finMesAnterior.toISOString());
+    // Queries (parallelized with Promise.all)
+    const [
+      { data: leadsMes },
+      { data: leadsMesAnt },
+      { data: citasMes },
+      { data: cierresMes },
+      { data: cierresMesAnt }
+    ] = await Promise.all([
+      supabase.client.from('leads').select('*, properties(price)').gte('created_at', inicioMesReporte.toISOString()).lte('created_at', finMesReporte.toISOString()),
+      supabase.client.from('leads').select('id, source').gte('created_at', inicioMesAnterior.toISOString()).lte('created_at', finMesAnterior.toISOString()),
+      supabase.client.from('appointments').select('*').gte('scheduled_date', inicioMesReporte.toISOString().split('T')[0]).lte('scheduled_date', finMesReporte.toISOString().split('T')[0]),
+      supabase.client.from('leads').select('*, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMesReporte.toISOString()).lte('status_changed_at', finMesReporte.toISOString()),
+      supabase.client.from('leads').select('id, properties(price)').in('status', ['closed', 'delivered']).gte('status_changed_at', inicioMesAnterior.toISOString()).lte('status_changed_at', finMesAnterior.toISOString())
+    ]);
 
     const calcVar = (a: number, b: number) => { if (b === 0) return a > 0 ? '↑' : '→'; if (a > b) return `↑${Math.round((a-b)/b*100)}%`; if (a < b) return `↓${Math.round((b-a)/b*100)}%`; return '→'; };
 
@@ -2549,7 +2552,10 @@ export async function enviarReporteMensualMarketing(supabase: SupabaseService, m
       const msg = `📊 *REPORTE MENSUAL MARKETING*\nHola *${nombreCorto}* 👋\n*${nombreMes.toUpperCase()} ${anioReporte}*\n\n━━━━━━━━━━━━━━━━━━━━━\n📣 *RESULTADOS DEL MES*\n━━━━━━━━━━━━━━━━━━━━━\n• Leads: *${leadsMes?.length || 0}* ${calcVar(leadsMes?.length || 0, leadsMesAnt?.length || 0)}\n• Cierres: *${cierresMes?.length || 0}* ${calcVar(cierresMes?.length || 0, cierresMesAnt?.length || 0)}\n• Revenue: *$${(revenueMes/1000000).toFixed(1)}M* ${calcVar(revenueMes, revenueMesAnt)}\n• Ticket promedio: *$${(ticketPromedio/1000000).toFixed(2)}M*\n\n━━━━━━━━━━━━━━━━━━━━━\n📈 *CONVERSIONES*\n━━━━━━━━━━━━━━━━━━━━━\n• Lead→Cita: *${convLeadCita}%*\n• Lead→Cierre: *${convLeadCierre}%*\n• Citas totales: ${citasTotal}\n• Citas completadas: ${citasCompletadas}\n\n━━━━━━━━━━━━━━━━━━━━━\n📍 *TOP FUENTES (por revenue)*\n━━━━━━━━━━━━━━━━━━━━━\n${fuentesStr}\n\n━━━━━━━━━━━━━━━━━━━━━\n💡 *INSIGHTS*\n━━━━━━━━━━━━━━━━━━━━━\n${insightsText}\n\n_¡Éxito en ${meses[mesActual]}!_ 🚀`;
 
       try {
-        await meta.sendWhatsAppMessage(mkt.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, mkt, msg, {
+          tipoMensaje: 'reporte_diario',
+          pendingKey: 'pending_reporte_diario'
+        });
         console.log(`📊 Reporte mensual marketing enviado a ${mkt.name}`);
       } catch (e) {
         console.log(`Error enviando reporte a ${mkt.name}:`, e);
@@ -2559,6 +2565,7 @@ export async function enviarReporteMensualMarketing(supabase: SupabaseService, m
     console.log(`✅ Reportes mensuales enviados a ${marketing.length} de marketing`);
   } catch (e) {
     console.log('Error en reporte mensual marketing:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteMensualMarketing', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 
@@ -2667,7 +2674,10 @@ ${resumen.slice(0, 5).join('\n')}
       for (const admin of admins) {
         try {
           if (admin.phone) {
-            await meta.sendWhatsAppMessage(admin.phone, mensaje);
+            await enviarMensajeTeamMember(supabase, meta, admin, mensaje, {
+              tipoMensaje: 'notificacion',
+              pendingKey: 'pending_mensaje'
+            });
           }
         } catch (error) {
           console.error(`❌ Error notificando aumento precios a admin:`, error);
@@ -2679,6 +2689,7 @@ ${resumen.slice(0, 5).join('\n')}
     console.log(`💰 Aumento aplicado: ${aplicados}/${propiedades.length} propiedades (+${INCREMENTO_MENSUAL * 100}%)`);
   } catch (e) {
     console.log('Error aplicando aumento de precios:', e);
+    logErrorToDB(supabase, 'cron_error', 'error', 'aplicarPreciosProgramados', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
   }
 }
 

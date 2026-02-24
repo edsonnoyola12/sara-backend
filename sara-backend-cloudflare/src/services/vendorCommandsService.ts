@@ -1,6 +1,6 @@
 import { SupabaseService } from './supabase';
 import { safeJsonParse } from '../utils/safeHelpers';
-import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
+import { formatPhoneForDisplay, findLeadByName } from '../handlers/whatsapp-utils';
 
 /**
  * Sanitiza notas para evitar corrupción.
@@ -1302,19 +1302,14 @@ export class VendorCommandsService {
       console.log(`🔄 cambiarEtapa: "${nombreLead}" → ${nuevoStatus}, vendedorId=${vendedorId}, esAdmin=${esAdmin}`);
 
       // Buscar leads por nombre
-      let query = this.supabase.client
-        .from('leads')
-        .select('id, name, status, assigned_to, lead_score, phone')
-        .ilike('name', `%${nombreLead}%`);
+      const leads = await findLeadByName(this.supabase, nombreLead, {
+        vendedorId: esAdmin ? undefined : vendedorId,
+        select: 'id, name, status, assigned_to, lead_score, phone',
+        limit: 10
+      });
+      console.log(`🔍 cambiarEtapa: encontrados=${leads?.length || 0}`);
 
-      if (!esAdmin) {
-        query = query.eq('assigned_to', vendedorId);
-      }
-
-      const { data: leads, error } = await query.limit(10);
-      console.log(`🔍 cambiarEtapa: encontrados=${leads?.length || 0}, error=${error?.message || 'ninguno'}`);
-
-      if (error || !leads || leads.length === 0) {
+      if (!leads || leads.length === 0) {
         return { success: false, error: `❌ No encontré a "${nombreLead}"` };
       }
 
@@ -1396,19 +1391,14 @@ export class VendorCommandsService {
       console.log(`🔍 moveFunnelStep: buscando "${nombreLead}", vendedorId=${vendedorId}, role=${role}, esAdmin=${esAdmin}`);
 
       // Buscar leads por nombre
-      let query = this.supabase.client
-        .from('leads')
-        .select('id, name, status, assigned_to')
-        .ilike('name', `%${nombreLead}%`);
+      const leads = await findLeadByName(this.supabase, nombreLead, {
+        vendedorId: esAdmin ? undefined : vendedorId,
+        select: 'id, name, status, assigned_to',
+        limit: 10
+      });
+      console.log(`🔍 moveFunnelStep: encontrados=${leads?.length || 0}`);
 
-      if (!esAdmin) {
-        query = query.eq('assigned_to', vendedorId);
-      }
-
-      const { data: leads, error } = await query.limit(10);
-      console.log(`🔍 moveFunnelStep: encontrados=${leads?.length || 0}, error=${error?.message || 'ninguno'}`);
-
-      if (error || !leads || leads.length === 0) {
+      if (!leads || leads.length === 0) {
         return { success: false, error: `❌ No encontré a "${nombreLead}"` };
       }
 
@@ -1582,16 +1572,11 @@ export class VendorCommandsService {
     archivar: boolean
   ): Promise<{ success: boolean; error?: string; lead?: any }> {
     try {
-      let query = this.supabase.client
-        .from('leads')
-        .select('id, name, stage')
-        .ilike('name', `%${nombreLead}%`);
-
-      if (!esAdmin) {
-        query = query.eq('assigned_to', vendedorId);
-      }
-
-      const { data: leads } = await query.limit(1);
+      const leads = await findLeadByName(this.supabase, nombreLead, {
+        vendedorId: esAdmin ? undefined : vendedorId,
+        select: 'id, name, stage',
+        limit: 1
+      });
 
       if (!leads || leads.length === 0) {
         return { success: false, error: `❌ No encontré a "${nombreLead}"` };
@@ -1653,12 +1638,9 @@ export class VendorCommandsService {
   ): Promise<{ success: boolean; error?: string; multipleLeads?: any[]; lead?: any; totalNotas?: number }> {
     try {
       // Buscar lead
-      const { data: leads } = await this.supabase.client
-        .from('leads')
-        .select('id, name, notes, assigned_to')
-        .ilike('name', `%${nombreLead}%`)
-        .eq('assigned_to', vendedorId)
-        .limit(5);
+      const leads = await findLeadByName(this.supabase, nombreLead, {
+        vendedorId, select: 'id, name, notes, assigned_to', limit: 5
+      });
 
       if (!leads || leads.length === 0) {
         return { success: false, error: `No encontré a "${nombreLead}" en tus leads.` };
@@ -1716,12 +1698,9 @@ export class VendorCommandsService {
 
   async getLeadNotas(nombreLead: string, vendedorId: string): Promise<{ success: boolean; error?: string; lead?: any }> {
     try {
-      const { data: leads } = await this.supabase.client
-        .from('leads')
-        .select('id, name, notes')
-        .ilike('name', `%${nombreLead}%`)
-        .eq('assigned_to', vendedorId)
-        .limit(1);
+      const leads = await findLeadByName(this.supabase, nombreLead, {
+        vendedorId, select: 'id, name, notes', limit: 1
+      });
 
       if (!leads || leads.length === 0) {
         return { success: false, error: `No encontré a "${nombreLead}"` };
@@ -1783,12 +1762,9 @@ export class VendorCommandsService {
 
   async getLlamarLead(nombreLead: string, vendedorId: string): Promise<{ found: boolean; lead?: any; error?: string }> {
     try {
-      const { data: leads } = await this.supabase.client
-        .from('leads')
-        .select('id, name, phone, property_interest, notes, assigned_to')
-        .ilike('name', `%${nombreLead}%`)
-        .eq('assigned_to', vendedorId)
-        .limit(1);
+      const leads = await findLeadByName(this.supabase, nombreLead, {
+        vendedorId, select: 'id, name, phone, property_interest, notes, assigned_to', limit: 1
+      });
 
       if (!leads || leads.length === 0) {
         return { found: false, error: `No encontré a "${nombreLead}"` };
