@@ -3058,7 +3058,12 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
   /** Precio mínimo global (equipada) formateado como "$X.XM" */
   static precioMinGlobal(properties: any[]): string {
     const precios = properties
-      .filter((p: any) => (p.price_equipped || p.price) && Number(p.price_equipped || p.price) > 100000)
+      .filter((p: any) => {
+        const name = (p.name || p.development_name || '').toLowerCase();
+        // Excluir terrenos (Villa Campelo/Galiano) — solo casas
+        if (name.includes('villa campelo') || name.includes('villa galiano')) return false;
+        return (p.price_equipped || p.price) && Number(p.price_equipped || p.price) > 100000;
+      })
       .map((p: any) => Number(p.price_equipped || p.price));
     if (precios.length === 0) return '$1.6M';
     return `$${(Math.min(...precios) / 1000000).toFixed(1)}M`;
@@ -4504,6 +4509,8 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
           { regex: new RegExp(`[Uu]bicado en ${nombreEscaped}`, 'gi'), prefix: 'ubicado en' },
           { regex: new RegExp(`[Qq]ueda en ${nombreEscaped}`, 'gi'), prefix: 'queda en' },
           { regex: new RegExp(`[Zz]ona de ${nombreEscaped}`, 'gi'), prefix: 'zona de' },
+          { regex: new RegExp(`[Aa]mbos en ${nombreEscaped}`, 'gi'), prefix: 'Ambos en' },
+          { regex: new RegExp(`[Ee]n ${nombreEscaped},? (?:Zacatecas|Guadalupe)`, 'gi'), prefix: 'en' },
         ];
 
         for (const { regex, prefix } of locationPatterns) {
