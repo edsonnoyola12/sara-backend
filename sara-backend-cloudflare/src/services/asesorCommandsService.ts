@@ -1374,6 +1374,57 @@ O sin vendedor (se asigna automáticamente):
     return `⚠️ *Lead ya existe*\n\n👤 ${lead.name}\n📱 ${formatPhoneForDisplay(lead.phone)}\n📌 Status: ${lead.status}`;
   }
 
+  async crearLeadHipotecario(
+    nombreLead: string,
+    telefono: string,
+    vendedorId: string,
+    vendedorName: string,
+    asesorId: string,
+    asesorName: string
+  ): Promise<{ lead?: any; error?: string }> {
+    try {
+      const phoneFormatted = telefono.replace(/\D/g, '');
+      const { data: lead, error } = await this.supabase.client
+        .from('leads')
+        .insert({
+          name: nombreLead,
+          phone: phoneFormatted,
+          source: 'asesor_manual',
+          status: 'new',
+          assigned_to: vendedorId,
+          notes: JSON.stringify({ created_by_asesor: asesorId, asesor_name: asesorName, vendedor_name: vendedorName }),
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+      if (error) return { error: error.message };
+      return { lead };
+    } catch (e: any) {
+      return { error: e.message || 'Error al crear lead' };
+    }
+  }
+
+  getVendedorRoundRobin(teamMembers: any[]): any {
+    const vendedores = teamMembers.filter((tm: any) => tm.role === 'vendedor' && tm.active);
+    if (vendedores.length === 0) return null;
+    return vendedores[Math.floor(Math.random() * vendedores.length)];
+  }
+
+  buscarVendedorPorNombre(teamMembers: any[], nombre: string): any[] {
+    const nombreLower = nombre.toLowerCase();
+    return teamMembers.filter((tm: any) =>
+      tm.role === 'vendedor' && tm.active && tm.name?.toLowerCase().includes(nombreLower)
+    );
+  }
+
+  formatNotificacionVendedorNuevoLead(nombreLead: string, telefono: string, asesorName: string): string {
+    return `📋 *Nuevo lead de crédito*\n\n👤 ${nombreLead}\n📱 ${formatPhoneForDisplay(telefono)}\n🏦 Asignado por: ${asesorName}`;
+  }
+
+  formatLeadHipotecaCreado(nombreLead: string, telefono: string, vendedorName: string, roundRobin: boolean): string {
+    return `✅ *Lead creado*\n\n👤 ${nombreLead}\n📱 ${formatPhoneForDisplay(telefono)}\n👨‍💼 Vendedor: ${vendedorName}${roundRobin ? ' (asignado automáticamente)' : ''}`;
+  }
+
   parseAgendarCita(body: string): { nombre: string; fecha: string; hora: string; lugar?: string } | null {
     // Formatos soportados:
     // cita Juan Garcia mañana 10am en oficina

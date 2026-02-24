@@ -35,7 +35,13 @@ export async function handleCalendarRoutes(
       const { summary, description, startTime, endTime, attendees } = body;
       
       // Crear evento en Google Calendar
-      const event = await calendar.createEvent(summary, description, startTime, endTime, attendees);
+      const event = await calendar.createEvent({
+        summary,
+        description,
+        start: { dateTime: startTime },
+        end: { dateTime: endTime },
+        attendees: attendees?.map((email: string) => ({ email }))
+      });
       
       // Notificar por WhatsApp
       if (event && event.id) {

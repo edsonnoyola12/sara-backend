@@ -117,8 +117,7 @@ export class ServiceFactory {
   getFollowup(): FollowupService {
     if (!this._followup) {
       this._followup = new FollowupService(
-        this.getSupabase(),
-        this.getClaude()
+        this.getSupabase()
       );
     }
     return this._followup;
@@ -138,8 +137,7 @@ export class ServiceFactory {
   getBroadcast(): BroadcastQueueService {
     if (!this._broadcast) {
       this._broadcast = new BroadcastQueueService(
-        this.getSupabase(),
-        this.getMeta()
+        this.getSupabase()
       );
     }
     return this._broadcast;

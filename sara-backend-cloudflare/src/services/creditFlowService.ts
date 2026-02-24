@@ -828,7 +828,7 @@ Te esperamos en nuestra oficina. Si tienes algún cambio, avísame 😊
 
         if (fechaHoraCita.fecha && !fechaHoraCita.hora) {
           return {
-            respuesta: `¡${fechaHora.fecha} me parece bien! ¿A qué hora te acomoda? ⏰
+            respuesta: `¡${fechaHoraCita.fecha} me parece bien! ¿A qué hora te acomoda? ⏰
 
 Atendemos de 9am a 6pm (sábados hasta 2pm)`,
             context

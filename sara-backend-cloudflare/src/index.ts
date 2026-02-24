@@ -691,6 +691,9 @@ export default {
     }
 
     if (url.pathname === '/webhook/meta' && request.method === 'POST') {
+      let from: string | undefined;
+      let messageId: string | undefined;
+      let kvDedupKey: string | null = null;
       try {
         console.log('📥 WEBHOOK META: Recibiendo mensaje...');
 
@@ -804,8 +807,8 @@ export default {
 
         if (messages && messages.length > 0) {
           const message = messages[0];
-          const from = message.from;
-          const messageId = message.id; // WhatsApp message ID para dedup
+          from = message.from;
+          messageId = message.id; // WhatsApp message ID para dedup
           const messageType = message.type; // text, image, document, interactive, etc.
 
           // ═══ EXTRAER TEXTO DEL MENSAJE (incluyendo respuestas interactivas) ═══
@@ -835,7 +838,6 @@ export default {
           // ═══ KV FAST DEDUP: Skip si ya procesamos este messageId ═══
           // MARK-BEFORE + RECOVERY: Marca KV antes de procesar, pero si el procesamiento
           // falla (catch línea ~1526), ELIMINA la entrada KV para que Meta pueda reintentar.
-          let kvDedupKey: string | null = null;
           if (messageId) {
             kvDedupKey = `wamsg:${messageId}`;
             try {
@@ -2114,7 +2116,8 @@ export default {
       const maxConcurrent = Math.min(concurrent, 50); // Cap at 50
 
       const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
-      const aiService = new AIConversationService(supabase, null, meta, null, claude, env);
+      const loadTestMeta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      const aiService = new AIConversationService(supabase, null, loadTestMeta, null, claude, env);
 
       // Obtener propiedades para contexto
       const { data: props } = await supabase.client.from('properties').select('*').limit(50);
@@ -2246,8 +2249,9 @@ export default {
       level: 'info'
     });
 
-    try {
     const supabase = new SupabaseService(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
+
+    try {
     const meta = await createMetaWithTracking(env, supabase);
 
     const now = new Date();

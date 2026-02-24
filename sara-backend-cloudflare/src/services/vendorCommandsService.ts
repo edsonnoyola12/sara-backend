@@ -1858,4 +1858,35 @@ export class VendorCommandsService {
 
     return msg;
   }
+
+  async getLeadsHot(vendedorId: string): Promise<any[]> {
+    try {
+      const { data: leads } = await this.supabase.client
+        .from('leads')
+        .select('*')
+        .eq('assigned_to', vendedorId)
+        .gte('score', 40)
+        .not('status', 'in', '("closed","delivered","fallen","lost","inactive")')
+        .order('score', { ascending: false })
+        .limit(20);
+      return leads || [];
+    } catch (e) {
+      console.error('Error en getLeadsHot:', e);
+      return [];
+    }
+  }
+
+  formatLeadsHot(leads: any[], nombre: string): string {
+    if (!leads || leads.length === 0) {
+      return `🔥 *${nombre}*, no tienes leads calientes en este momento.\n\n💡 _Los leads con score >= 40 aparecen aquí._`;
+    }
+    let msg = `🔥 *LEADS CALIENTES* (${leads.length})\n\n`;
+    leads.forEach((l, i) => {
+      msg += `${i + 1}. *${l.name}* — Score: ${l.score || 0}\n`;
+      msg += `   📌 ${this.STAGE_LABELS[l.status] || l.status}`;
+      if (l.property_interest) msg += ` | 🏠 ${l.property_interest}`;
+      msg += '\n';
+    });
+    return msg;
+  }
 }

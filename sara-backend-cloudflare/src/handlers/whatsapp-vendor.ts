@@ -7,6 +7,7 @@ import { VentasService } from '../services/ventasService';
 import { OfferTrackingService, CreateOfferParams, OfferStatus } from '../services/offerTrackingService';
 import { FollowupService } from '../services/followupService';
 import { BridgeService } from '../services/bridgeService';
+import { CalendarService } from '../services/calendar';
 import { isPendingExpired } from '../utils/teamMessaging';
 import { deliverPendingMessage, parseNotasSafe, formatPhoneForDisplay } from './whatsapp-utils';
 import { AppointmentService } from '../services/appointmentService';
@@ -1670,7 +1671,7 @@ export async function routeCoordinadorCommand(ctx: HandlerContext, handler: any,
 
       case 'citas_equipo': {
         const data = await vendorService.getCitasEquipoHoy();
-        await ctx.twilio.sendWhatsAppMessage(from, vendorService.formatCitasEquipoHoy(data));
+        await ctx.twilio.sendWhatsAppMessage(from, vendorService.formatCitasHoy(data, 'Equipo', true));
         return true;
       }
 
@@ -2572,7 +2573,7 @@ export async function archivarDesarchivarLead(ctx: HandlerContext, handler: any,
 
     if (!result.success) {
       if (result.multipleLeads) {
-        const msg = vendorService.formatMultipleLeadsArchivar(result.multipleLeads);
+        const msg = vendorService.formatMultipleLeads(result.multipleLeads);
         await ctx.twilio.sendWhatsAppMessage(from, msg);
       } else {
         await ctx.twilio.sendWhatsAppMessage(from, result.error || '❌ Error.');
@@ -2599,7 +2600,7 @@ export async function reactivarLead(ctx: HandlerContext, handler: any, from: str
 
     if (!result.success) {
       if (result.multipleLeads) {
-        const msg = vendorService.formatMultipleLeadsReactivar(result.multipleLeads);
+        const msg = vendorService.formatMultipleLeads(result.multipleLeads);
         await ctx.twilio.sendWhatsAppMessage(from, msg);
       } else {
         await ctx.twilio.sendWhatsAppMessage(from, result.error || '❌ Error.');
@@ -2807,7 +2808,7 @@ export async function vendedorCambiarEtapa(ctx: HandlerContext, handler: any, fr
       if (entregaResult.leadPhone) {
         await ctx.twilio.sendWhatsAppMessage(handler.formatPhoneMX(entregaResult.leadPhone), vendorService.formatMensajeEntregaCliente(entregaResult.leadNombre));
       }
-      respuesta = vendorService.formatConfirmacionVentaCerrada(lead.name);
+      respuesta = `🎉 *¡Entrega registrada!*\n\n${lead.name} ha sido marcado como *entregado*.\n\n🏠 ¡Felicidades por cerrar esta venta!`;
     }
 
     // Si se cayó (delegado a servicio)
@@ -2936,7 +2937,7 @@ export async function vendedorConsultarCredito(ctx: HandlerContext, handler: any
       return;
     }
 
-    let resp = mortgageService.formatCreditStatus(result.credits!);
+    let resp = mortgageService.formatCreditList(result.credits!);
 
     // Preguntar al asesor si hay solicitud activa
     if (result.hasPendingInquiry) {
@@ -3063,7 +3064,7 @@ export async function enviarMensajeLead(ctx: HandlerContext, handler: any, from:
       // Si hay múltiples leads, guardar opciones y mostrar lista
       if (result.multipleLeads && result.pendingSelection) {
         await vendorService.guardarPendingLeadSelection(usuario.id, result.pendingSelection);
-        const msg = vendorService.formatMultipleLeadsMensaje(result.multipleLeads);
+        const msg = vendorService.formatMultipleLeads(result.multipleLeads);
         await ctx.twilio.sendWhatsAppMessage(from, msg);
         return;
       }
@@ -5889,7 +5890,7 @@ export async function vendedorEnviarInfoALead(ctx: HandlerContext, handler: any,
       return;
     }
     if (leadResult.multiple) {
-      await ctx.twilio.sendWhatsAppMessage(from, vendorService.formatMultipleLeadsEnviarInfo(leadResult.multiple));
+      await ctx.twilio.sendWhatsAppMessage(from, vendorService.formatMultipleLeads(leadResult.multiple));
       return;
     }
 
@@ -5982,10 +5983,10 @@ export async function vendedorLlamarIA(ctx: HandlerContext, handler: any, from: 
       return;
     }
 
-    if (result.multiple) {
+    if ((result as any).multiple) {
       await ctx.twilio.sendWhatsAppMessage(from,
         `⚠️ Encontré varios leads con ese nombre:\n\n` +
-        result.leads?.map((l: any) => `• ${l.name} - ${l.phone ? formatPhoneForDisplay(l.phone) : 'Sin tel'}`).join('\n') +
+        ((result as any).leads || [result.lead]).map((l: any) => `• ${l.name} - ${l.phone ? formatPhoneForDisplay(l.phone) : 'Sin tel'}`).join('\n') +
         '\n\nSé más específico con el nombre.'
       );
       return;

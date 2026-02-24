@@ -5,8 +5,9 @@
 
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
-import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
+import { formatPhoneForDisplay, getMexicoNow } from '../handlers/whatsapp-utils';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
+import { ClaudeService } from '../services/claude';
 
 interface Env {
   SUPABASE_URL: string;
@@ -779,7 +780,7 @@ CASOS ESPECIALES:
             greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?',
             desarrollo_interes: '',
             vendedor_nombre: 'un asesor',
-            precio_desde: precioDesdeGlobal
+            precio_desde: '$1.5 millones'
           }
         }), {
           status: 200,
@@ -1312,12 +1313,13 @@ CASOS ESPECIALES:
           try {
             const vendorAsignado = (teamMembers || []).find((tm: any) => tm.id === lead.assigned_to);
             if (vendorAsignado) {
+              const metaNotif = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
               const msgReagendar = `📅 *CITA REAGENDADA*\n\n` +
                 `Cliente: ${lead.name || 'Cliente'}\n` +
                 `Antes: ${citaActual.scheduled_date} ${citaActual.scheduled_time}\n` +
                 `Ahora: ${nuevaFecha} ${nuevaHora}\n` +
                 `Desarrollo: ${citaActual.property_name || lead.property_interest || ''}`;
-              await enviarMensajeTeamMember(supabase, meta, vendorAsignado, msgReagendar, {
+              await enviarMensajeTeamMember(supabase, metaNotif, vendorAsignado, msgReagendar, {
                 tipoMensaje: 'alerta_lead',
                 pendingKey: 'pending_alerta_lead'
               });

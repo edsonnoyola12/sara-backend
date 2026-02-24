@@ -2468,6 +2468,12 @@ Por WhatsApp te atiendo 24/7 🙌
         console.warn('⚠️ Error logging AI response:', logErr);
       }
 
+      const intentsQueNecesitanVendedor = ['post_venta', 'queja', 'hablar_humano'];
+      if (intentsQueNecesitanVendedor.includes(parsed.intent)) {
+        console.log(`📌 Intent ${parsed.intent} detectado - activando contactar_vendedor`);
+        parsed.contactar_vendedor = true;
+      }
+
       return {
         intent: parsed.intent || 'otro',
         secondary_intents: secondaryIntents,
@@ -2480,19 +2486,10 @@ Por WhatsApp te atiendo 24/7 🙌
         send_matterport: parsed.send_matterport || false,
         send_contactos: parsed.send_contactos || false,
         contactar_vendedor: parsed.contactar_vendedor || false,
-        detected_language: detectedLang, // Idioma detectado para usar en executeAIDecision
+        detected_language: detectedLang,
         phase: phaseInfo.phase,
         phaseNumber: phaseInfo.phaseNumber
       };
-      
-      // ━━━━━━━━━━━━━━━
-      // INTENTS ESPECIALES: Forzar contactar_vendedor
-      // ━━━━━━━━━━━━━━━
-      const intentsQueNecesitanVendedor = ['post_venta', 'queja', 'hablar_humano'];
-      if (intentsQueNecesitanVendedor.includes(analysis.intent)) {
-        console.log(`📌 Intent ${analysis.intent} detectado - activando contactar_vendedor`);
-        analysis.contactar_vendedor = true;
-      }
       
     } catch (e) {
       console.error('❌ Error OpenAI:', e);
@@ -7038,14 +7035,14 @@ Mientras tanto, si tienes dudas estoy aquí para ayudarte 📌`;
       // CORRECCIÓN I: INSERT mortgage_applications INMEDIATO
       // ═══════════════════════════════════════════════════════════════
       await this.handler.crearOActualizarMortgageApplication(lead, teamMembers, {
-        desarrollo: desarrollo || lead.property_interest,
+        desarrollo: lead.property_interest,
         banco: bancoYaElegido || lead.banco_preferido,
         ingreso: lead.ingreso_mensual,
         enganche: lead.enganche_disponible,
         trigger: 'dijo_si_a_asesor'
       });
     }
-    
+
     // ━━━━━━━━━━━
     // FLUJO CRÉDITO PASO 5.5: Cliente dio NOMBRE/CELULAR ➜ Preguntar MODALIDAD
     // ━━━━━━━━━━━
@@ -7590,7 +7587,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       console.log('📋 Detectada respuesta genérica de crédito - Usando crearOActualizarMortgageApplication...');
       
       await this.handler.crearOActualizarMortgageApplication(lead, teamMembers, {
-        desarrollo: desarrollo || lead.property_interest,
+        desarrollo: lead.property_interest,
         banco: lead.banco_preferido,
         ingreso: lead.ingreso_mensual,
         enganche: lead.enganche_disponible,

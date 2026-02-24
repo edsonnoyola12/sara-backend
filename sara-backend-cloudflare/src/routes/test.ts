@@ -242,6 +242,7 @@ export async function handleTestRoutes(
         const messageId = sendResult?.messages?.[0]?.id;
         if (messageId) {
           try {
+            const { createTTSTrackingService } = await import('../services/ttsTrackingService');
             const ttsTracking = createTTSTrackingService(supabase);
             await ttsTracking.logTTSSent({
               messageId,
@@ -3618,10 +3619,10 @@ export async function handleTestRoutes(
         const { data: teamMembers } = await supabase.client.from('team_members').select('*');
 
         // Crear handler pero SIN enviar mensajes
-        const handler = new WhatsAppHandler(supabase, env);
-
-        // Simular análisis con Claude (usar el método interno)
         const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
+        const metaHandler = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+        const calendarHandler = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+        const handler = new WhatsAppHandler(supabase, claude, metaHandler as any, calendarHandler, metaHandler);
 
         // Construir catálogo simplificado
         let catalogo = '\\n═══ DESARROLLOS DISPONIBLES ═══\\n';
@@ -5049,7 +5050,7 @@ Mensaje: ${mensaje}`;
       try {
         // ── TEST 1: Prompt de Retell tiene reglas clave ──
         const { RetellService } = await import('../services/retellService');
-        const retell = new RetellService(env.RETELL_API_KEY, env.RETELL_AGENT_ID);
+        const retell = new RetellService(env.RETELL_API_KEY, env.RETELL_AGENT_ID, '');
         const agent = await retell.getAgent();
         const llmId = agent?.response_engine?.llm_id;
         const llm = llmId ? await retell.getLlm(llmId) : null;
@@ -8097,7 +8098,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       if (env.RETELL_API_KEY && env.RETELL_AGENT_ID) {
         try {
           const { RetellService } = await import('../services/retellService');
-          const retell = new RetellService(env.RETELL_API_KEY, env.RETELL_AGENT_ID);
+          const retell = new RetellService(env.RETELL_API_KEY, env.RETELL_AGENT_ID, '');
           const agent = await retell.getAgent();
           const llmId = agent?.response_engine?.llm_id;
           const llm = llmId ? await retell.getLlm(llmId) : null;
@@ -8116,7 +8117,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       if (env.RETELL_API_KEY && env.RETELL_AGENT_ID) {
         try {
           const { RetellService } = await import('../services/retellService');
-          const retell = new RetellService(env.RETELL_API_KEY, env.RETELL_AGENT_ID);
+          const retell = new RetellService(env.RETELL_API_KEY, env.RETELL_AGENT_ID, '');
           const agent = await retell.getAgent();
           const llmId = agent?.response_engine?.llm_id;
           const llm = llmId ? await retell.getLlm(llmId) : null;
