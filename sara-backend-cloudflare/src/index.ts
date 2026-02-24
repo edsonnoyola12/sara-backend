@@ -1985,7 +1985,7 @@ export default {
 
       // ── TEST 4: processRetryQueue processes & delivers test entry ──
       try {
-        const rqResult = await processRetryQueue(supabase, testMeta, '5610016226');
+        const rqResult = await processRetryQueue(supabase, testMeta, env.DEV_PHONE || '5610016226');
         tests.push({ name: 'processRetryQueue runs without error', pass: true, detail: `processed=${rqResult.processed} delivered=${rqResult.delivered} failed=${rqResult.failedPermanent}` });
       } catch (e: any) { tests.push({ name: 'processRetryQueue runs without error', pass: false, detail: e.message }); }
 
@@ -2329,6 +2329,11 @@ export default {
       .select('*')
       .eq('active', true);
 
+    // Helper para aislar errores de CRONs individuales
+    async function safeCron(label: string, fn: () => Promise<any>): Promise<void> {
+      try { await fn(); } catch (e) { console.error(`❌ Error en ${label}:`, e); }
+    }
+
     console.log(`👥 Vendedores activos: ${vendedores?.length || 0}`);
     if (vendedoresError) {
       console.error(`❌ Error obteniendo vendedores:`, vendedoresError);
@@ -2662,7 +2667,7 @@ export default {
               }
             }
             // Notify dev
-            await meta.sendWhatsAppMessage('5610016226',
+            await meta.sendWhatsAppMessage(env.DEV_PHONE || '5610016226',
               `🔍 *Dedup Scan Diario*\n\n` +
               `Encontrados ${highConfidence.length} posibles duplicados:\n\n` +
               highConfidence.slice(0, 5).map((d, i) =>
@@ -2886,76 +2891,65 @@ export default {
 
     // 8am L-V: Recordatorio a vendedores/asesores sobre leads sin contactar
     if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('💬 Enviando recordatorios a vendedores/asesores...');
-      await recordatorioAsesores(supabase, meta);
+      await safeCron('recordatorioAsesores', () => recordatorioAsesores(supabase, meta));
     }
 
     // 8am L-V: Reporte diario consolidado CEO/Admin (incluye supervisión + métricas)
-    // CONSOLIDADO: Antes se enviaban 2 mensajes separados, ahora es 1 solo
     if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📊 Enviando reporte diario consolidado a CEO/Admin...');
-      await enviarReporteDiarioConsolidadoCEO(supabase, meta);
+      await safeCron('enviarReporteDiarioConsolidadoCEO', () => enviarReporteDiarioConsolidadoCEO(supabase, meta));
     }
 
     // 8am LUNES: Reporte semanal CEO/Admin
     if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek === 1) {
-      console.log('📈 Enviando reporte semanal a CEO...');
-      await enviarReporteSemanalCEO(supabase, meta);
+      await safeCron('enviarReporteSemanalCEO', () => enviarReporteSemanalCEO(supabase, meta));
     }
 
     // 9am LUNES: Reporte semanal individual a vendedores
     if (mexicoHour === 9 && isFirstRunOfHour && dayOfWeek === 1) {
-      console.log('📊 Enviando reportes semanales a vendedores...');
-      await enviarReporteSemanalVendedores(supabase, meta);
+      await safeCron('enviarReporteSemanalVendedores', () => enviarReporteSemanalVendedores(supabase, meta));
     }
 
     // 9am LUNES: Reporte semanal individual a asesores hipotecarios
     if (mexicoHour === 9 && isFirstRunOfHour && dayOfWeek === 1) {
-      console.log('📊 Enviando reportes semanales a asesores...');
-      await enviarReporteSemanalAsesores(supabase, meta);
+      await safeCron('enviarReporteSemanalAsesores', () => enviarReporteSemanalAsesores(supabase, meta));
     }
 
     // 9am LUNES: Reporte semanal marketing
     if (mexicoHour === 9 && isFirstRunOfHour && dayOfWeek === 1) {
-      console.log('📊 Enviando reporte semanal a marketing...');
-      await enviarReporteSemanalMarketing(supabase, meta);
+      await safeCron('enviarReporteSemanalMarketing', () => enviarReporteSemanalMarketing(supabase, meta));
     }
 
     // 10am MARTES: Coaching automático personalizado a vendedores
     if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek === 2) {
-      console.log('🎓 Enviando coaching personalizado a vendedores...');
-      const coachingService = new IACoachingService(supabase, meta as any);
-      await coachingService.enviarCoachingEquipo(7); // Solo si no recibió en 7 días
+      await safeCron('coachingEquipo', async () => {
+        const coachingService = new IACoachingService(supabase, meta as any);
+        await coachingService.enviarCoachingEquipo(7);
+      });
     }
 
     // 8am DÍA 1 DE CADA MES: Reporte mensual CEO/Admin
     if (mexicoHour === 8 && isFirstRunOfHour && now.getUTCDate() === 1) {
-      console.log('📊 Enviando reporte mensual a CEO...');
-      await enviarReporteMensualCEO(supabase, meta);
+      await safeCron('enviarReporteMensualCEO', () => enviarReporteMensualCEO(supabase, meta));
     }
 
     // 9am DÍA 1 DE CADA MES: Reporte mensual individual a vendedores
     if (mexicoHour === 9 && isFirstRunOfHour && now.getUTCDate() === 1) {
-      console.log('📊 Enviando reportes mensuales a vendedores...');
-      await enviarReporteMensualVendedores(supabase, meta);
+      await safeCron('enviarReporteMensualVendedores', () => enviarReporteMensualVendedores(supabase, meta));
     }
 
     // 9am DÍA 1 DE CADA MES: Reporte mensual individual a asesores hipotecarios
     if (mexicoHour === 9 && isFirstRunOfHour && now.getUTCDate() === 1) {
-      console.log('📊 Enviando reportes mensuales a asesores...');
-      await enviarReporteMensualAsesores(supabase, meta);
+      await safeCron('enviarReporteMensualAsesores', () => enviarReporteMensualAsesores(supabase, meta));
     }
 
     // 9am DÍA 1 DE CADA MES: Reporte mensual marketing
     if (mexicoHour === 9 && isFirstRunOfHour && now.getUTCDate() === 1) {
-      console.log('📊 Enviando reporte mensual a marketing...');
-      await enviarReporteMensualMarketing(supabase, meta);
+      await safeCron('enviarReporteMensualMarketing', () => enviarReporteMensualMarketing(supabase, meta));
     }
 
     // 12:01am DÍA 1 DE CADA MES: Aplicar nuevos precios programados
     if (mexicoHour === 0 && isFirstRunOfHour && now.getUTCDate() === 1) {
-      console.log('💰 Aplicando precios programados del mes...');
-      await aplicarPreciosProgramados(supabase, meta);
+      await safeCron('aplicarPreciosProgramados', () => aplicarPreciosProgramados(supabase, meta));
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -2964,30 +2958,24 @@ export default {
     // ═══════════════════════════════════════════════════════════════
 
     // 7pm L-V: Reporte diario consolidado a vendedores (incluye recap + métricas)
-    // CONSOLIDADO: Antes se enviaban 2 mensajes separados (recap + reporte), ahora es 1 solo
     if (mexicoHour === 19 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📊 Enviando reporte diario consolidado a vendedores...');
-      await enviarReporteDiarioVendedores(supabase, meta);
+      await safeCron('enviarReporteDiarioVendedores', () => enviarReporteDiarioVendedores(supabase, meta));
     }
 
     // 7pm L-V: Reporte diario individual a asesores hipotecarios
     if (mexicoHour === 19 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📊 Enviando reportes diarios a asesores...');
-      await enviarReporteDiarioAsesores(supabase, meta);
+      await safeCron('enviarReporteDiarioAsesores', () => enviarReporteDiarioAsesores(supabase, meta));
     }
 
     // 10am L-V: Alertas de leads fríos (vendedores, asesores, CEO)
     if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('🥶 Enviando alertas de leads fríos...');
-      await enviarAlertasLeadsFrios(supabase, meta);
-      console.log('🔥 Verificando leads HOT sin seguimiento...');
-      await alertaLeadsHotSinSeguimiento(supabase, meta);
+      await safeCron('enviarAlertasLeadsFrios', () => enviarAlertasLeadsFrios(supabase, meta));
+      await safeCron('alertaLeadsHotSinSeguimiento', () => alertaLeadsHotSinSeguimiento(supabase, meta));
     }
 
     // 7pm L-V: Reporte diario marketing
     if (mexicoHour === 19 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📊 Enviando reporte diario a marketing...');
-      await enviarReporteDiarioMarketing(supabase, meta);
+      await safeCron('enviarReporteDiarioMarketing', () => enviarReporteDiarioMarketing(supabase, meta));
     }
 
     // 7pm diario: Digesto de errores al CEO
@@ -3002,17 +2990,17 @@ export default {
 
     // Sábado 2pm: Video semanal de logros con Veo 3 (solo primer ejecucion)
     if (mexicoHour === 14 && isFirstRunOfHour && dayOfWeek === 6) {
-      console.log('🎬 Generando video semanal de logros...');
-      await generarVideoSemanalLogros(supabase, meta, env);
+      await safeCron('generarVideoSemanalLogros', () => generarVideoSemanalLogros(supabase, meta, env));
     }
 
     // Sábado 2pm: Recap semanal
     if (mexicoHour === 14 && isFirstRunOfHour && dayOfWeek === 6 && vendedores) {
-      console.log('📊 Enviando recap semanal...');
-      for (const v of vendedores) {
-        if (!v.phone || !v.recibe_recap) continue;
-        await enviarRecapSemanal(supabase, meta, v);
-      }
+      await safeCron('recapSemanal', async () => {
+        for (const v of vendedores) {
+          if (!v.phone || !v.recibe_recap) continue;
+          await enviarRecapSemanal(supabase, meta, v);
+        }
+      });
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -3021,34 +3009,34 @@ export default {
     const notificationService = new NotificationService(supabase, meta, env.OPENAI_API_KEY);
 
     // RECORDATORIOS DE CITAS - cada ejecución del cron (24h y 2h antes)
-    // ✅ FIX 14-ENE-2026: Verificar consistencia ANTES de enviar mensajes
-    console.log('🔄 Verificando consistencia calendario...');
-    await verificarConsistenciaCalendario(supabase, env);
+    await safeCron('verificarConsistenciaCalendario', () => verificarConsistenciaCalendario(supabase, env));
 
-    console.log('🔔 Verificando recordatorios de citas...');
-    const recordatoriosResult = await notificationService.enviarRecordatoriosCitas();
-    if (recordatoriosResult.enviados > 0) {
-      console.log(`✅ ${recordatoriosResult.enviados} recordatorios enviados`);
-    }
+    await safeCron('enviarRecordatoriosCitas', async () => {
+      const recordatoriosResult = await notificationService.enviarRecordatoriosCitas();
+      if (recordatoriosResult.enviados > 0) {
+        console.log(`✅ ${recordatoriosResult.enviados} recordatorios enviados`);
+      }
+    });
 
     // ENCUESTAS POST-CITA - cada ejecución (2-24h después de cita completada)
-    console.log('📋 Verificando encuestas post-cita...');
-    const encuestasResult = await notificationService.enviarEncuestasPostCita();
-    if (encuestasResult.enviados > 0) {
-      console.log(`✅ ${encuestasResult.enviados} encuestas enviadas`);
-    }
+    await safeCron('enviarEncuestasPostCita_notif', async () => {
+      const encuestasResult = await notificationService.enviarEncuestasPostCita();
+      if (encuestasResult.enviados > 0) {
+        console.log(`✅ ${encuestasResult.enviados} encuestas enviadas`);
+      }
+    });
 
     // FOLLOW-UP POST-CITA - día siguiente de cita completada
-    console.log('📧 Verificando follow-ups post-cita...');
-    const followupPostCitaResult = await notificationService.enviarFollowupPostCita();
-    if (followupPostCitaResult.enviados > 0) {
-      console.log(`✅ ${followupPostCitaResult.enviados} follow-ups post-cita enviados`);
-      await logEvento(supabase, 'followup', `Follow-ups post-cita: ${followupPostCitaResult.enviados} enviados`, { enviados: followupPostCitaResult.enviados });
-    }
+    await safeCron('enviarFollowupPostCita', async () => {
+      const followupPostCitaResult = await notificationService.enviarFollowupPostCita();
+      if (followupPostCitaResult.enviados > 0) {
+        console.log(`✅ ${followupPostCitaResult.enviados} follow-ups post-cita enviados`);
+        await logEvento(supabase, 'followup', `Follow-ups post-cita: ${followupPostCitaResult.enviados} enviados`, { enviados: followupPostCitaResult.enviados });
+      }
+    });
 
     // NO-SHOWS - detectar citas donde no se presentó el lead (cada 2 min)
-    console.log('👻 Verificando no-shows...');
-    await detectarNoShows(supabase, meta);
+    await safeCron('detectarNoShows', () => detectarNoShows(supabase, meta));
 
     // ═══════════════════════════════════════════════════════════
     // 🚨 PRE-NO-SHOW ALERT: Citas en 2h sin confirmación
@@ -3126,24 +3114,23 @@ export default {
     }
 
     // TIMEOUT VENDEDOR - si no responde en 2hrs, enviar encuesta al lead
-    console.log('⏰ Verificando timeouts de confirmación...');
-    await verificarTimeoutConfirmaciones(supabase, meta);
+    await safeCron('verificarTimeoutConfirmaciones', () => verificarTimeoutConfirmaciones(supabase, meta));
 
     // Verificar videos pendientes
-    console.log('🎬 Verificando videos pendientes...');
-    await verificarVideosPendientes(supabase, meta, env);
+    await safeCron('verificarVideosPendientes', () => verificarVideosPendientes(supabase, meta, env));
 
     // FOLLOW-UPS AUTOMÁTICOS
-    console.log('📬 Procesando follow-ups pendientes...');
-    const followupService = new FollowupService(supabase);
-    await followupService.procesarFollowupsPendientes(async (phone, message) => {
-      try {
-        await meta.sendWhatsAppMessage(phone, message);
-        return true;
-      } catch (e) {
-        console.log('Error enviando follow-up:', e);
-        return false;
-      }
+    await safeCron('followupService', async () => {
+      const followupService = new FollowupService(supabase);
+      await followupService.procesarFollowupsPendientes(async (phone, message) => {
+        try {
+          await meta.sendWhatsAppMessage(phone, message);
+          return true;
+        } catch (e) {
+          console.log('Error enviando follow-up:', e);
+          return false;
+        }
+      });
     });
 
     // ═══════════════════════════════════════════════════════════
@@ -3152,8 +3139,7 @@ export default {
     const approvalService = new FollowupApprovalService(supabase);
 
     // Enviar propuestas pendientes a vendedores (cada ejecución)
-    console.log('📋 Enviando propuestas de follow-up a vendedores...');
-    await approvalService.enviarPropuestasPendientes(async (phone, message) => {
+    await safeCron('enviarPropuestasPendientes', () => approvalService.enviarPropuestasPendientes(async (phone, message) => {
       try {
         await meta.sendWhatsAppMessage(phone, message);
         return true;
@@ -3161,15 +3147,14 @@ export default {
         console.log('Error enviando propuesta:', e);
         return false;
       }
-    });
+    }));
 
     // Expirar aprobaciones viejas (cada ejecución)
-    await approvalService.expirarAprobacionesViejas();
+    await safeCron('expirarAprobacionesViejas', () => approvalService.expirarAprobacionesViejas());
 
     // 10am L-V: Pedir status a vendedores sobre leads estancados
     if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📊 Pidiendo status a vendedores sobre leads estancados...');
-      await approvalService.pedirStatusLeadsEstancados(async (phone, message) => {
+      await safeCron('pedirStatusLeadsEstancados', () => approvalService.pedirStatusLeadsEstancados(async (phone, message) => {
         try {
           await meta.sendWhatsAppMessage(phone, message);
           return true;
@@ -3177,21 +3162,18 @@ export default {
           console.log('Error pidiendo status:', e);
           return false;
         }
-      });
+      }));
     }
 
     // FLUJO POST-VISITA - pregunta al vendedor "¿Llegó el lead?" (30-90min después de cita)
-    console.log('📋 Verificando citas pasadas para flujo post-visita...');
-    await iniciarFlujosPostVisita(supabase, meta, env.SARA_CACHE);
+    await safeCron('iniciarFlujosPostVisita', () => iniciarFlujosPostVisita(supabase, meta, env.SARA_CACHE));
 
     // ENCUESTAS AUTOMÁTICAS - cada hora verifica citas completadas hace 2h
-    console.log('📋 Verificando encuestas post-cita pendientes...');
-    await enviarEncuestasPostCita(supabase, meta);
+    await safeCron('enviarEncuestasPostCita', () => enviarEncuestasPostCita(supabase, meta));
 
     // ENCUESTAS NPS - 10am L-V, 7 días después del cierre
     if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📊 Verificando encuestas NPS pendientes...');
-      await enviarEncuestasNPS(supabase, meta);
+      await safeCron('enviarEncuestasNPS', () => enviarEncuestasNPS(supabase, meta));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -3208,210 +3190,157 @@ export default {
 
     // 8am L-V: Alertas proactivas CEO (situaciones críticas) - JUNTO CON BRIEFING
     if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('🚨 Verificando alertas proactivas CEO...');
-      await enviarAlertasProactivasCEO(supabase, meta);
+      await safeCron('enviarAlertasProactivasCEO', () => enviarAlertasProactivasCEO(supabase, meta));
     }
 
     // MIÉRCOLES 8am: Remarketing leads fríos
     if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek === 3) {
-      console.log('📣 Ejecutando remarketing leads fríos...');
-      await remarketingLeadsFrios(supabase, meta);
+      await safeCron('remarketingLeadsFrios', () => remarketingLeadsFrios(supabase, meta));
     }
 
     // PRIMER LUNES DEL MES 10am: Reactivación de leads perdidos
     const dayOfMonth = new Date().getDate();
     if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek === 1 && dayOfMonth <= 7) {
-      console.log('🔄 Ejecutando reactivación de leads perdidos...');
-      await reactivarLeadsPerdidos(supabase, meta);
+      await safeCron('reactivarLeadsPerdidos', () => reactivarLeadsPerdidos(supabase, meta));
     }
 
     // 9am DIARIO (TODOS LOS DÍAS): Felicitaciones de cumpleaños (leads + equipo)
     if (mexicoHour === 9 && isFirstRunOfHour) {
-      console.log('🎂 Enviando felicitaciones de cumpleaños...');
-      await felicitarCumpleañosLeads(supabase, meta);
-      await felicitarCumpleañosEquipo(supabase, meta);
+      await safeCron('felicitarCumpleañosLeads', () => felicitarCumpleañosLeads(supabase, meta));
+      await safeCron('felicitarCumpleañosEquipo', () => felicitarCumpleañosEquipo(supabase, meta));
       // Aniversarios solo L-V
       if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-        console.log('🏠 Verificando aniversarios de compra...');
-        await felicitarAniversarioCompra(supabase, meta);
+        await safeCron('felicitarAniversarioCompra', () => felicitarAniversarioCompra(supabase, meta));
       }
       // Stale leads: alertar vendedores sobre leads >72h sin contacto (L-V)
       if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-        console.log('⏰ Verificando leads estancados (>72h)...');
-        try {
-          await alertarLeadsEstancados(supabase, meta);
-        } catch (staleErr) {
-          console.error('⚠️ Error en alertarLeadsEstancados:', staleErr);
-        }
+        await safeCron('alertarLeadsEstancados', () => alertarLeadsEstancados(supabase, meta));
       }
     }
 
     // 11am L-V: Follow-up automático a leads inactivos (3+ días sin responder)
     if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📬 Ejecutando follow-up de leads inactivos...');
-      await followUpLeadsInactivos(supabase, meta);
+      await safeCron('followUpLeadsInactivos', () => followUpLeadsInactivos(supabase, meta));
     }
 
-    // 10am DIARIO: Recordatorios de pago de apartados (5 días antes, 1 día antes, día del pago)
+    // 10am DIARIO: Recordatorios de pago de apartados
     if (mexicoHour === 10 && isFirstRunOfHour) {
-      console.log('💰 Verificando recordatorios de pago de apartados...');
-      await recordatoriosPagoApartado(supabase, meta);
+      await safeCron('recordatoriosPagoApartado', () => recordatoriosPagoApartado(supabase, meta));
     }
 
     // 2pm L-V: Alerta leads HOT sin contactar hoy
     if (mexicoHour === 14 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('🔥 Verificando leads HOT sin contactar hoy...');
-      await alertaLeadsHotUrgentes(supabase, meta);
+      await safeCron('alertaLeadsHotUrgentes', () => alertaLeadsHotUrgentes(supabase, meta));
     }
 
     // 5pm L-V: Recordatorio final del día - pendientes críticos
     if (mexicoHour === 17 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('⏰ Enviando recordatorio final del día...');
-      await recordatorioFinalDia(supabase, meta);
+      await safeCron('recordatorioFinalDia', () => recordatorioFinalDia(supabase, meta));
     }
 
-    // 11am L-V: Alerta de inactividad de vendedores a admins (consolidado - antes era 11am y 3pm)
+    // 11am L-V: Alerta de inactividad de vendedores a admins
     if (isFirstRunOfHour && mexicoHour === 11 && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('👔 Verificando inactividad de vendedores...');
-      await alertaInactividadVendedor(supabase, meta);
+      await safeCron('alertaInactividadVendedor', () => alertaInactividadVendedor(supabase, meta));
     }
 
-    // MARTES y JUEVES 8am: Seguimiento hipotecas estancadas (alerta adicional a asesores)
+    // MARTES y JUEVES 8am: Seguimiento hipotecas estancadas
     if (mexicoHour === 8 && isFirstRunOfHour && (dayOfWeek === 2 || dayOfWeek === 4)) {
-      console.log('🏦 Verificando hipotecas estancadas...');
-      await seguimientoHipotecas(supabase, meta);
+      await safeCron('seguimientoHipotecas', () => seguimientoHipotecas(supabase, meta));
     }
 
     // RE-ENGAGEMENT AUTOMÁTICO: Cada hora de 9am a 7pm L-V
-    // Envía mensajes a leads que no han respondido en 48h+
     if (isFirstRunOfHour && mexicoHour >= 9 && mexicoHour <= 19 && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('🔄 Verificando leads para re-engagement...');
-      await verificarReengagement(supabase, meta);
+      await safeCron('verificarReengagement', () => verificarReengagement(supabase, meta));
     }
 
-    // LEADS FRÍOS - Secuencia de mensajes directos al lead
-    // 11am y 5pm L-S: Día 3, Día 7, Día 14
+    // LEADS FRÍOS - Secuencia de mensajes directos al lead (11am y 5pm L-S)
     if (isFirstRunOfHour && (mexicoHour === 11 || mexicoHour === 17) && dayOfWeek >= 1 && dayOfWeek <= 6) {
-      console.log('❄️ Verificando leads fríos para re-engagement directo...');
-      await reengagementDirectoLeads(supabase, meta);
+      await safeCron('reengagementDirectoLeads', () => reengagementDirectoLeads(supabase, meta));
     }
 
     // SEGUIMIENTO POST-VENTA: 10am diario
-    // Mensajes a clientes que compraron: 30 días (cómo estás), 60 días (referidos), 90 días (recordatorio)
     if (mexicoHour === 10 && isFirstRunOfHour) {
-      console.log('🎉 Verificando seguimiento post-venta...');
-      await seguimientoPostVenta(supabase, meta);
+      await safeCron('seguimientoPostVenta', () => seguimientoPostVenta(supabase, meta));
     }
 
     // CUMPLEAÑOS: 9am diario
-    // Enviar felicitación a leads/clientes que cumplen años hoy
     if (mexicoHour === 9 && isFirstRunOfHour) {
-      console.log('🎂 Verificando cumpleaños del día...');
-      await enviarFelicitacionesCumple(supabase, meta);
+      await safeCron('enviarFelicitacionesCumple', () => enviarFelicitacionesCumple(supabase, meta));
     }
 
     // SEGUIMIENTO CRÉDITO: 12pm L-V
-    // Leads que necesitan crédito pero no han avanzado
     if (mexicoHour === 12 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('🏦 Verificando seguimiento de crédito...');
-      await seguimientoCredito(supabase, meta);
+      await safeCron('seguimientoCredito', () => seguimientoCredito(supabase, meta));
     }
 
     // FOLLOW-UP 24H LEADS NUEVOS: 10am y 4pm L-V
-    // Leads status='new' que no han respondido en 24h (usa campo alerta_enviada_24h)
     if (isFirstRunOfHour && (mexicoHour === 10 || mexicoHour === 16) && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('⏰ Verificando leads nuevos sin respuesta 24h...');
-      await followUp24hLeadsNuevos(supabase, meta);
+      await safeCron('followUp24hLeadsNuevos', () => followUp24hLeadsNuevos(supabase, meta));
     }
 
     // REMINDER DOCS CRÉDITO: 11am L-V
-    // Leads con credit_status='docs_requested' por 3+ días sin avanzar
     if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📄 Verificando leads pendientes de documentos...');
-      await reminderDocumentosCredito(supabase, meta);
+      await safeCron('reminderDocumentosCredito', () => reminderDocumentosCredito(supabase, meta));
     }
 
     // VIDEO FELICITACIÓN POST-VENTA: 10am diario
-    // Genera video personalizado Veo 3 para leads que acaban de comprar (status='sold')
     if (mexicoHour === 10 && isFirstRunOfHour) {
-      console.log('🎬 Verificando nuevas ventas para video felicitación...');
-      await videoFelicitacionPostVenta(supabase, meta, env);
+      await safeCron('videoFelicitacionPostVenta', () => videoFelicitacionPostVenta(supabase, meta, env));
     }
 
     // VIDEO BIENVENIDA LEADS NUEVOS: cada 2 horas en horario laboral (8am-8pm)
-    // Genera video personalizado Veo 3 para leads que acaban de entrar al sistema
     if (isFirstRunOfHour && mexicoHour >= 8 && mexicoHour <= 20 && mexicoHour % 2 === 0) {
-      console.log('🎬 Verificando leads nuevos para video de bienvenida...');
-      await videoBienvenidaLeadNuevo(supabase, meta, env);
+      await safeCron('videoBienvenidaLeadNuevo', () => videoBienvenidaLeadNuevo(supabase, meta, env));
     }
 
     // RECUPERACIÓN ABANDONOS CRÉDITO: 3pm L-V
-    // Re-engagement para leads que empezaron proceso de crédito pero no continuaron
     if (mexicoHour === 15 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('🏦 Verificando abandonos de crédito para recuperación...');
-      await recuperarAbandonosCredito(supabase, meta);
+      await safeCron('recuperarAbandonosCredito', () => recuperarAbandonosCredito(supabase, meta));
     }
 
     // LEAD SCORING AUTOMÁTICO: cada 2 horas en horario laboral
-    // Actualiza scores de leads basado en comportamiento y señales
     if (isFirstRunOfHour && mexicoHour >= 8 && mexicoHour <= 20 && mexicoHour % 2 === 0) {
-      console.log('📊 Actualizando lead scores...');
-      await actualizarLeadScores(supabase);
+      await safeCron('actualizarLeadScores', () => actualizarLeadScores(supabase));
     }
 
     // FOLLOW-UP POST-VISITA: 4pm L-V
-    // Re-engagement para leads que visitaron pero no avanzaron
     if (mexicoHour === 16 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📍 Verificando leads post-visita para follow-up...');
-      await followUpPostVisita(supabase, meta);
+      await safeCron('followUpPostVisita', () => followUpPostVisita(supabase, meta));
     }
 
     // NURTURING EDUCATIVO: Martes y Jueves 11am
-    // Contenido educativo sobre crédito y compra de casa
     if (mexicoHour === 11 && isFirstRunOfHour && (dayOfWeek === 2 || dayOfWeek === 4)) {
-      console.log('📚 Enviando nurturing educativo...');
-      await nurturingEducativo(supabase, meta);
+      await safeCron('nurturingEducativo', () => nurturingEducativo(supabase, meta));
     }
 
     // CHECK-IN 60 DÍAS POST-VENTA: Jueves 11am
     if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek === 4) {
-      console.log('📅 Enviando check-in 60 días post-venta...');
-      await checkIn60Dias(supabase, meta);
+      await safeCron('checkIn60Dias', () => checkIn60Dias(supabase, meta));
     }
 
     // PROGRAMA DE REFERIDOS: Miércoles 11am
-    // Solicitar referidos a clientes satisfechos (30-90 días post-venta)
     if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek === 3) {
-      console.log('🤝 Solicitando referidos a clientes...');
-      await solicitarReferidos(supabase, meta);
+      await safeCron('solicitarReferidos', () => solicitarReferidos(supabase, meta));
     }
 
     // ENCUESTAS NPS: Viernes 10am
-    // Medir satisfacción de clientes post-visita y post-venta
     if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek === 5) {
-      console.log('📊 Enviando encuestas NPS...');
-      await enviarEncuestaNPS(supabase, meta);
+      await safeCron('enviarEncuestaNPS', () => enviarEncuestaNPS(supabase, meta));
     }
 
     // SEGUIMIENTO POST-ENTREGA: Lunes y Jueves 10am
-    // Verificar que todo esté bien después de recibir las llaves (3-7 días post-entrega)
     if (mexicoHour === 10 && isFirstRunOfHour && (dayOfWeek === 1 || dayOfWeek === 4)) {
-      console.log('🔑 Enviando seguimiento post-entrega...');
-      await seguimientoPostEntrega(supabase, meta);
+      await safeCron('seguimientoPostEntrega', () => seguimientoPostEntrega(supabase, meta));
     }
 
     // ENCUESTA SATISFACCIÓN CASA: Martes 11am
-    // Preguntar cómo les va 3-6 meses después de la entrega
     if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek === 2) {
-      console.log('🏡 Enviando encuestas de satisfacción con la casa...');
-      await encuestaSatisfaccionCasa(supabase, meta);
+      await safeCron('encuestaSatisfaccionCasa', () => encuestaSatisfaccionCasa(supabase, meta));
     }
 
     // CHECK-IN MANTENIMIENTO: Sábado 10am
-    // Recordatorio anual de mantenimiento preventivo (~1 año post-entrega)
     if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek === 6) {
-      console.log('🔧 Enviando check-in de mantenimiento...');
-      await checkInMantenimiento(supabase, meta);
+      await safeCron('checkInMantenimiento', () => checkInMantenimiento(supabase, meta));
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -3419,57 +3348,38 @@ export default {
     // ═══════════════════════════════════════════════════════════
 
     // LLAMADAS POST-VISITA: Diario 11am L-V
-    // Seguimiento a leads que visitaron hace 1 día
     if (mexicoHour === 11 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📞 Ejecutando llamadas de seguimiento post-visita...');
-      await llamadasSeguimientoPostVisita(supabase, meta, env);
+      await safeCron('llamadasSeguimientoPostVisita', () => llamadasSeguimientoPostVisita(supabase, meta, env));
     }
 
     // LLAMADAS ESCALAMIENTO 48h: Diario 12pm L-V
-    // Llamar leads nuevos que no respondieron WhatsApp en 48h
     if (mexicoHour === 12 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📞 Ejecutando llamadas escalamiento 48h...');
-      await llamadasEscalamiento48h(supabase, meta, env);
+      await safeCron('llamadasEscalamiento48h', () => llamadasEscalamiento48h(supabase, meta, env));
     }
 
     // LLAMADAS REACTIVACIÓN: Martes y Jueves 10am
-    // Reactivar leads fríos (7+ días sin respuesta)
     if (mexicoHour === 10 && isFirstRunOfHour && (dayOfWeek === 2 || dayOfWeek === 4)) {
-      console.log('📞 Ejecutando llamadas de reactivación leads fríos...');
-      await llamadasReactivacionLeadsFrios(supabase, meta, env);
+      await safeCron('llamadasReactivacionLeadsFrios', () => llamadasReactivacionLeadsFrios(supabase, meta, env));
     }
 
     // LLAMADAS RECORDATORIO CITA: Diario 5pm L-V
-    // Recordar citas del día siguiente
     if (mexicoHour === 17 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📞 Ejecutando llamadas de recordatorio de cita...');
-      await llamadasRecordatorioCita(supabase, meta, env);
+      await safeCron('llamadasRecordatorioCita', () => llamadasRecordatorioCita(supabase, meta, env));
     }
 
     // LLAMADAS ESCALAMIENTO POST-VENTA: Diario 1pm L-V
-    // Si el lead NO respondió WhatsApp post-venta en 48h → llamar
     if (mexicoHour === 13 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
-      console.log('📞 Ejecutando llamadas escalamiento post-venta...');
-      await llamadasEscalamientoPostVenta(supabase, meta, env);
+      await safeCron('llamadasEscalamientoPostVenta', () => llamadasEscalamientoPostVenta(supabase, meta, env));
     }
 
-    // ═══════════════════════════════════════════════════════════
     // BRIDGES - Verificar bridges por expirar (cada 2 min)
-    // ═══════════════════════════════════════════════════════════
-    console.log('🔗 Verificando bridges por expirar...');
-    await verificarBridgesPorExpirar(supabase, meta);
+    await safeCron('verificarBridgesPorExpirar', () => verificarBridgesPorExpirar(supabase, meta));
 
-    // ═══════════════════════════════════════════════════════════
     // FOLLOW-UPS PENDIENTES - Enviar si pasaron 30 min (cada 2 min)
-    // ═══════════════════════════════════════════════════════════
-    console.log('📤 Verificando follow-ups pendientes expirados...');
-    await procesarFollowupsPendientes(supabase, meta);
+    await safeCron('procesarFollowupsPendientes', () => procesarFollowupsPendientes(supabase, meta));
 
-    // ═══════════════════════════════════════════════════════════
     // BROADCAST QUEUE - Procesar broadcasts encolados (cada 2 min)
-    // ═══════════════════════════════════════════════════════════
-    console.log('📤 Procesando broadcasts encolados...');
-    await procesarBroadcastQueue(supabase, meta);
+    await safeCron('procesarBroadcastQueue', () => procesarBroadcastQueue(supabase, meta));
 
     // ═══════════════════════════════════════════════════════════
     // HEALTH CHECK - Verificar servicios externos (cada 10 min, offset :05)
@@ -3499,7 +3409,7 @@ export default {
     // ═══════════════════════════════════════════════════════════
     if (mexicoMinute % 4 === 0) {
       try {
-        const retryResult = await processRetryQueue(supabase, meta, '5610016226');
+        const retryResult = await processRetryQueue(supabase, meta, env.DEV_PHONE || '5610016226');
         if (retryResult.processed > 0) {
           console.log(`📬 Retry queue: ${retryResult.delivered} delivered, ${retryResult.failedPermanent} failed of ${retryResult.processed} processed`);
         }
@@ -3514,7 +3424,7 @@ export default {
     // ═══════════════════════════════════════════════════════════
     if (mexicoMinute % 10 === 0) {
       try {
-        const deliveryResult = await verificarDeliveryTeamMessages(supabase, meta, '5610016226', env);
+        const deliveryResult = await verificarDeliveryTeamMessages(supabase, meta, env.DEV_PHONE || '5610016226', env);
         if (deliveryResult.undelivered > 0) {
           console.log(`⚠️ ${deliveryResult.undelivered} mensajes sin entregar al equipo`);
         }
