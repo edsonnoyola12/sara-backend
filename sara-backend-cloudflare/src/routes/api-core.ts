@@ -122,6 +122,11 @@ export async function handleApiCoreRoutes(
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/api/events' && request.method === 'POST') {
       const body = await request.json() as any;
+
+      const reqErr = validateRequired(body, ['name', 'event_date']);
+      if (reqErr) return corsResponse(JSON.stringify({ error: reqErr }), 400);
+      if (!validateDateISO(body.event_date)) return corsResponse(JSON.stringify({ error: 'event_date debe ser formato YYYY-MM-DD' }), 400);
+
       // Solo campos básicos que sabemos que existen
       const insertData: any = {
         name: body.name,
@@ -152,6 +157,9 @@ export async function handleApiCoreRoutes(
     if (url.pathname === '/api/events/invite' && request.method === 'POST') {
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       const body = await request.json() as { event_id: string, segment: string, send_image: boolean, send_video: boolean, send_pdf: boolean };
+
+      const reqErr2 = validateRequired(body, ['event_id', 'segment']);
+      if (reqErr2) return corsResponse(JSON.stringify({ error: reqErr2 }), 400);
 
       // 1. Obtener evento
       const { data: event } = await supabase.client.from('events').select('*').eq('id', body.event_id).single();
@@ -443,8 +451,17 @@ Responde *SI* para confirmar tu asistencia.`;
 
     if (url.pathname.match(/^\/api\/leads\/[^\/]+$/) && request.method === 'PUT') {
       const id = url.pathname.split('/').pop();
-      const body = await request.json() as any;
-      
+      const rawBody = await request.json() as any;
+
+      // Whitelist de campos permitidos para actualización de leads
+      const ALLOWED_LEAD_UPDATE_FIELDS = ['name', 'phone', 'email', 'status', 'property_interest', 'notes', 'score', 'assigned_to', 'source', 'budget', 'bedrooms', 'do_not_contact', 'lead_score', 'lead_category', 'temperature'];
+      const body: any = Object.fromEntries(
+        Object.entries(rawBody).filter(([k]) => ALLOWED_LEAD_UPDATE_FIELDS.includes(k))
+      );
+      if (Object.keys(body).length === 0) {
+        return corsResponse(JSON.stringify({ error: 'No valid fields to update' }), 400);
+      }
+
       // Verificar si cambió el assigned_to para notificar
       const { data: oldLead } = await supabase.client
         .from('leads')
@@ -1159,6 +1176,13 @@ Cancelada por: ${body.cancelled_by || 'CRM'}`;
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/appointments/notify-change' && request.method === 'POST') {
       const body = await request.json() as any;
+
+      const reqErrNotify = validateRequired(body, ['action', 'lead_name']);
+      if (reqErrNotify) return corsResponse(JSON.stringify({ error: reqErrNotify }), 400);
+      if (!['cambio', 'cancelacion'].includes(body.action)) {
+        return corsResponse(JSON.stringify({ error: 'action debe ser "cambio" o "cancelacion"' }), 400);
+      }
+
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
 
       console.log('📋 Notificación de cita:', body.action, body.lead_name);
@@ -1268,6 +1292,10 @@ Para reagendar, contáctanos. ¡Estamos para servirte! 🏠`;
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/leads/notify-note' && request.method === 'POST') {
       const body = await request.json() as any;
+
+      const reqErrNote = validateRequired(body, ['lead_name', 'nota', 'vendedor_phone']);
+      if (reqErrNote) return corsResponse(JSON.stringify({ error: reqErrNote }), 400);
+
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
 
       console.log('📝 Nota de coordinador para:', body.lead_name);
@@ -1302,6 +1330,10 @@ ${body.nota}
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/leads/notify-reassign' && request.method === 'POST') {
       const body = await request.json() as any;
+
+      const reqErrReassign = validateRequired(body, ['lead_name', 'vendedor_phone', 'vendedor_name']);
+      if (reqErrReassign) return corsResponse(JSON.stringify({ error: reqErrReassign }), 400);
+
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
 
       console.log('🔄 Lead reasignado a:', body.vendedor_name);
@@ -1561,9 +1593,14 @@ Creada desde CRM`;
     if (url.pathname.match(/^\/api\/appointments\/[^/]+$/) && request.method === 'PUT') {
       const id = url.pathname.split('/')[3];
       const body = await request.json() as any;
-      
+
+      // Validar fecha ISO si viene
+      if (body.scheduled_date && !validateDateISO(body.scheduled_date)) {
+        return corsResponse(JSON.stringify({ error: 'scheduled_date debe ser formato YYYY-MM-DD' }), 400);
+      }
+
       console.log('📅 Reagendando cita:', id, body);
-      
+
       try {
         // Actualizar en DB primero
         const updateData: any = {};
@@ -1754,17 +1791,23 @@ Tu ${tipoTexto} ha sido modificada:
 
     if ((url.pathname.match(/^\/api\/mortgages\/[^\/]+$/) || url.pathname.match(/^\/api\/mortgage_applications\/[^\/]+$/)) && request.method === 'PUT') {
       const id = url.pathname.split('/').pop();
-      const body = await request.json() as any;
+      const rawBody = await request.json() as any;
 
-      console.log('🏦 Actualizando hipoteca:', id, body);
+      console.log('🏦 Actualizando hipoteca:', id, rawBody);
 
       // Extraer campos que NO van a la DB (solo para notificaciones)
-      const changed_by_id = body.changed_by_id;
-      const changed_by_name = body.changed_by_name;
-      const previous_status = body.previous_status;
-      delete body.changed_by_id;
-      delete body.changed_by_name;
-      delete body.previous_status;
+      const changed_by_id = rawBody.changed_by_id;
+      const changed_by_name = rawBody.changed_by_name;
+      const previous_status = rawBody.previous_status;
+
+      // Whitelist de campos permitidos para actualización de hipotecas
+      const ALLOWED_MORTGAGE_UPDATE_FIELDS = ['status', 'bank', 'lead_name', 'lead_phone', 'assigned_advisor_id', 'assigned_advisor_name', 'amount', 'monthly_income', 'employment_type', 'credit_score', 'down_payment', 'term_years', 'interest_rate', 'monthly_payment', 'notes', 'documents', 'pre_approved_amount', 'rejection_reason'];
+      const body: any = Object.fromEntries(
+        Object.entries(rawBody).filter(([k]) => ALLOWED_MORTGAGE_UPDATE_FIELDS.includes(k))
+      );
+      if (Object.keys(body).length === 0) {
+        return corsResponse(JSON.stringify({ error: 'No valid fields to update' }), 400);
+      }
 
       // Obtener datos anteriores para comparar
       const { data: oldMortgage } = await supabase.client
@@ -1889,9 +1932,19 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
 
     if (url.pathname === '/api/properties' && request.method === 'POST') {
       const body = await request.json() as any;
+
+      const reqErrProp = validateRequired(body, ['name']);
+      if (reqErrProp) return corsResponse(JSON.stringify({ error: reqErrProp }), 400);
+
+      // Whitelist de campos permitidos
+      const ALLOWED_PROPERTY_FIELDS = ['name', 'development_name', 'price', 'price_equipped', 'price_min', 'price_max', 'bedrooms', 'bathrooms', 'construction_size', 'land_size', 'floors', 'description', 'gps_link', 'youtube_link', 'matterport_link', 'brochure_urls', 'photo_url', 'gallery_urls', 'features'];
+      const safeBody = Object.fromEntries(
+        Object.entries(body).filter(([k]) => ALLOWED_PROPERTY_FIELDS.includes(k))
+      );
+
       const { data } = await supabase.client
         .from('properties')
-        .insert([body])
+        .insert([safeBody])
         .select()
         .single();
       return corsResponse(JSON.stringify(data), 201);
@@ -1899,7 +1952,17 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
 
     if (url.pathname.startsWith('/api/properties/') && request.method === 'PUT') {
       const id = url.pathname.split('/')[3];
-      const body = await request.json() as any;
+      const rawBody = await request.json() as any;
+
+      // Whitelist de campos permitidos para actualización de propiedades
+      const ALLOWED_PROPERTY_UPDATE_FIELDS = ['name', 'development_name', 'price', 'price_equipped', 'price_min', 'price_max', 'bedrooms', 'bathrooms', 'construction_size', 'land_size', 'floors', 'description', 'gps_link', 'youtube_link', 'matterport_link', 'brochure_urls', 'photo_url', 'gallery_urls', 'features'];
+      const body = Object.fromEntries(
+        Object.entries(rawBody).filter(([k]) => ALLOWED_PROPERTY_UPDATE_FIELDS.includes(k))
+      );
+      if (Object.keys(body).length === 0) {
+        return corsResponse(JSON.stringify({ error: 'No valid fields to update' }), 400);
+      }
+
       const { data } = await supabase.client
         .from('properties')
         .update(body)
@@ -2073,6 +2136,15 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
             return corsResponse(JSON.stringify({
               success: false,
               error: 'Se requieren los campos "primaryId" y "secondaryId"'
+            }), 400, 'application/json', request);
+          }
+
+          // Validar formato UUID para prevenir inyección SQL
+          const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          if (!uuidRegex.test(body.primaryId) || !uuidRegex.test(body.secondaryId)) {
+            return corsResponse(JSON.stringify({
+              success: false,
+              error: 'primaryId y secondaryId deben ser UUIDs válidos'
             }), 400, 'application/json', request);
           }
 
