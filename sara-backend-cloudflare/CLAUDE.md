@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-23 (Sesión 63)
+> Última actualización: 2026-02-24 (Sesión 64)
 
 ---
 
@@ -6262,4 +6262,85 @@ Retorna: current voice_id, voice_model, lista de voces con provider, accent, age
 | CRM | https://sara-crm-new.vercel.app |
 | Videos | https://sara-videos.onrender.com |
 
-**Sistema 100% completo y operativo — Última verificación: 2026-02-23 (Sesión 63)**
+---
+
+### 2026-02-24 (Sesión 64) - Retell Anti-Loop + API Validation + findLeadByName + Error Logging
+
+**3 mejoras principales:**
+
+#### 1. Fix Retell Voice Loop "te lo envío" (commit `67aa9636`)
+
+**Problema:** SARA se quedaba repitiendo "te lo envío, te lo envío" como disco rayado durante llamadas Retell.
+
+**Causa raíz:** `speak_during_execution: true` en 7 tools de Retell causaba que el agente de voz repitiera `execution_message_description` durante la latencia HTTP.
+
+**Fix (3 cambios en `src/routes/retell.ts`):**
+
+| Cambio | Descripción |
+|--------|-------------|
+| `speak_during_execution: false` | Desactivado en 7/9 tools |
+| Timeouts reducidos | 10s→8s (tools simples), 15s→12s (cambiar_cita) |
+| REGLA #6.1 ANTI-LOOP | "Di UNA sola frase corta y ESPERA en silencio. NUNCA repitas." |
+
+#### 2. Validación de Inputs en 8 Endpoints POST/PUT (commit `045ad9bf`)
+
+**Archivo:** `src/routes/api-core.ts`
+
+| Endpoint | Validación |
+|----------|------------|
+| POST /api/events | Requiere name + event_date (ISO) |
+| POST /api/events/send-invitations | Requiere event_id + segment |
+| PUT /api/leads/:id | Whitelist 15 campos permitidos |
+| POST /api/appointments/notify-change | Requiere action + lead_name, valida enum |
+| POST /api/leads/notify-note | Requiere lead_name + nota + vendedor_phone |
+| POST /api/leads/notify-reassign | Requiere lead_name + vendedor_phone + vendedor_name |
+| PUT /api/appointments/:id | Valida scheduled_date ISO |
+| PUT /api/mortgages/:id | Whitelist 18 campos permitidos |
+
+**Patrón:** `ALLOWED_*_FIELDS` arrays + `Object.fromEntries(Object.entries(body).filter(...))` para sanitizar.
+
+#### 3. Consolidar findLeadByName + Error Logging (commit `df572440`)
+
+**Nuevo helper:** `findLeadByName()` en `src/handlers/whatsapp-utils.ts`
+- Reemplaza ~46 patrones duplicados de `.ilike('name', ...)`
+- Búsqueda tolerante a acentos con fallback NFD-normalized
+- Opciones: vendedorId, statusFilter, limit, select, orderBy
+
+**Error logging:** `logErrorToDB()` instrumentado en ~30 catch blocks de CRONs:
+- `alerts.ts`, `briefings.ts`, `dashboard.ts`, `followups.ts`, `leadScoring.ts`, `maintenance.ts`, `nurturing.ts`, `reports.ts`, `videos.ts`
+
+**20 archivos modificados** en total (+805/-715 líneas).
+
+**Tests:** 692/692 pasando
+**Deploy:** Completado
+
+---
+
+**Estado final del sistema:**
+
+| Métrica | Valor |
+|---------|-------|
+| Tests | 692/692 ✅ |
+| Test files | 20 |
+| Servicios | 85+ |
+| Comandos verificados | 342/342 (4 roles) |
+| CRONs activos | 27+ |
+| Capas de resilience | 9 |
+| Templates WA aprobados | 3 |
+| Propiedades en catálogo | 32 |
+| Desarrollos | 9 (Monte Verde, Monte Real, Andes, Falco, Encinos, Miravalle, Colorines, Alpes, Citadella) |
+| **pending_auto_response types** | **16** |
+| **CRM UX/UI Rounds** | **8 completados** |
+| **Precios dinámicos** | **100% — 0 hardcoded (WhatsApp + Retell)** |
+| **Voz Retell** | **ElevenLabs LatAm Spanish** |
+| **Motivos Retell** | **12 context-aware prompts** |
+
+**URLs de producción:**
+
+| Servicio | URL |
+|----------|-----|
+| Backend | https://sara-backend.edson-633.workers.dev |
+| CRM | https://sara-crm-new.vercel.app |
+| Videos | https://sara-videos.onrender.com |
+
+**Sistema 100% completo y operativo — Última verificación: 2026-02-24 (Sesión 64)**
