@@ -654,25 +654,25 @@ export default {
     // ═══════════════════════════════════════════════════════════════
     // RETELL ROUTES (extracted to src/routes/retell.ts)
     // ═══════════════════════════════════════════════════════════════
-    const retellResp = await handleRetellRoutes(url, request, env, supabase, corsResponse, checkApiAuth);
+    const retellResp = await handleRetellRoutes(url, request, env, supabase, corsResponse, checkApiAuth as any);
     if (retellResp) return retellResp;
 
     // ═══════════════════════════════════════════════════════════════
     // TEST/DEBUG ROUTES (extracted to src/routes/test.ts)
     // ═══════════════════════════════════════════════════════════════
-    const testResp = await handleTestRoutes(url, request, env, supabase, corsResponse, checkApiAuth, cache);
+    const testResp = await handleTestRoutes(url, request, env, supabase, corsResponse, checkApiAuth as any, cache);
     if (testResp) return testResp;
 
     // ═══════════════════════════════════════════════════════════════
     // API CORE ROUTES (extracted to src/routes/api-core.ts)
     // ═══════════════════════════════════════════════════════════════
-    const apiCoreResp = await handleApiCoreRoutes(url, request, env, supabase, corsResponse, checkApiAuth);
+    const apiCoreResp = await handleApiCoreRoutes(url, request, env, supabase, corsResponse, checkApiAuth as any);
     if (apiCoreResp) return apiCoreResp;
 
     // ═══════════════════════════════════════════════════════════════
     // API BI ROUTES (extracted to src/routes/api-bi.ts)
     // ═══════════════════════════════════════════════════════════════
-    const apiBiResp = await handleApiBiRoutes(url, request, env, supabase, cache, corsResponse, checkApiAuth);
+    const apiBiResp = await handleApiBiRoutes(url, request, env, supabase, cache, corsResponse, checkApiAuth as any);
     if (apiBiResp) return apiBiResp;
 
 
