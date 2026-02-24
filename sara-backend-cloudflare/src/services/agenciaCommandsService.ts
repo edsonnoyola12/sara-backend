@@ -119,8 +119,18 @@ export class AgenciaCommandsService {
     }
 
     // Fuentes
-    if (msg === 'fuentes' || msg === 'sources') {
+    if (msg === 'fuentes' || msg === 'sources' || msg === 'leads por fuente') {
       return { action: 'call_handler', handlerName: 'agenciaLeads' };
+    }
+
+    // UTM / Tracking
+    if (msg === 'utm' || msg === 'tracking' || msg === 'links' || msg === 'atribucion' || msg === 'atribución') {
+      return { action: 'call_handler', handlerName: 'agenciaUTM' };
+    }
+
+    // A/B Test (guía informativa)
+    if (msg === 'ab test' || msg === 'a/b test' || msg === 'prueba ab' || msg === 'test ab' || msg === 'split test') {
+      return { action: 'call_handler', handlerName: 'agenciaABTest' };
     }
 
     return {
@@ -141,11 +151,13 @@ export class AgenciaCommandsService {
       `• *campañas* - Campañas activas\n` +
       `• *metricas* - Métricas del mes\n` +
       `• *leads* / *fuentes* - Leads por fuente\n` +
+      `• *utm* / *tracking* - Atribución UTM\n` +
       `• *resumen* - Dashboard general\n` +
       `• *roi* - Retorno de inversión\n` +
       `• *cpl* - Costo por lead\n` +
       `• *gasto* - Gasto vs presupuesto\n` +
-      `• *mejor* / *peor* - Mejor/peor campaña\n\n` +
+      `• *mejor* / *peor* - Mejor/peor campaña\n` +
+      `• *ab test* - Guía A/B testing\n\n` +
       `📤 *Envíos:*\n` +
       `• *segmentos* - Ver segmentos\n` +
       `• *preview [segmento]* - Ver leads del segmento\n` +

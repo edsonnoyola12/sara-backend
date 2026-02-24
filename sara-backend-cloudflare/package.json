@@ -4,18 +4,20 @@
   "scripts": {
     "deploy": "wrangler deploy",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "^1.30.0",
     "@supabase/supabase-js": "^2.39.0",
-    "hono": "^4.0.0",
     "itty-router": "^5.0.22",
     "toucan-js": "^4.1.1"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.5.41",
+    "@cloudflare/workers-types": "^4.20260303.0",
     "husky": "^9.1.7",
+    "typescript": "^5.9.3",
     "vitest": "^2.1.9",
     "wrangler": "^4.49.0"
   }

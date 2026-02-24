@@ -86,6 +86,12 @@ export async function executeAgenciaHandler(ctx: HandlerContext, handler: any, f
     case 'agenciaResumen':
       await agenciaResumen(ctx, from, nombreAgencia);
       break;
+    case 'agenciaUTM':
+      await agenciaUTM(ctx, from, nombreAgencia);
+      break;
+    case 'agenciaABTest':
+      await agenciaABTest(ctx, from);
+      break;
 
     // ━━━ CITAS ━━━
     case 'vendedorCancelarCita':
@@ -222,6 +228,14 @@ export async function executeAgenciaHandlerForCEO(ctx: HandlerContext, handler: 
       const r = new AgenciaReportingService(ctx.supabase);
       const data = await r.getResumenMarketing();
       await ctx.meta.sendWhatsAppMessage(cleanPhone, r.formatResumenMarketing(data, nombreCEO));
+      break;
+    }
+    case 'agenciaUTM': {
+      await agenciaUTMForCEO(ctx, cleanPhone, nombreCEO);
+      break;
+    }
+    case 'agenciaABTest': {
+      await agenciaABTestForCEO(ctx, cleanPhone);
       break;
     }
     case 'previewSegmento': {
@@ -439,6 +453,188 @@ export async function agenciaResumen(ctx: HandlerContext, from: string, nombre: 
     console.error('Error en agenciaResumen:', e);
     await ctx.twilio.sendWhatsAppMessage(from, 'Error al obtener resumen.');
   }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// UTM / TRACKING / ATRIBUCIÓN
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export async function agenciaUTM(ctx: HandlerContext, from: string, nombre: string): Promise<void> {
+  try {
+    // Try lead_attributions table first
+    const { data: attributions, error: attrError } = await ctx.supabase.client
+      .from('lead_attributions')
+      .select('utm_source, utm_medium, utm_campaign, created_at')
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (!attrError && attributions && attributions.length > 0) {
+      // Group by source
+      const porFuente: Record<string, number> = {};
+      const porCampana: Record<string, number> = {};
+      for (const a of attributions) {
+        const src = a.utm_source || 'directo';
+        porFuente[src] = (porFuente[src] || 0) + 1;
+        if (a.utm_campaign) {
+          porCampana[a.utm_campaign] = (porCampana[a.utm_campaign] || 0) + 1;
+        }
+      }
+
+      let msg = `📊 *ATRIBUCIÓN UTM*\n${nombre}\n\n`;
+      msg += `*Por fuente (últimos ${attributions.length} registros):*\n`;
+      const sortedFuentes = Object.entries(porFuente).sort((a, b) => b[1] - a[1]);
+      for (const [fuente, count] of sortedFuentes.slice(0, 10)) {
+        const pct = Math.round((count / attributions.length) * 100);
+        msg += `• ${fuente}: ${count} (${pct}%)\n`;
+      }
+
+      if (Object.keys(porCampana).length > 0) {
+        msg += `\n*Por campaña:*\n`;
+        const sortedCampanas = Object.entries(porCampana).sort((a, b) => b[1] - a[1]);
+        for (const [campana, count] of sortedCampanas.slice(0, 5)) {
+          msg += `• ${campana}: ${count}\n`;
+        }
+      }
+
+      await ctx.twilio.sendWhatsAppMessage(from, msg);
+      return;
+    }
+
+    // Fallback: use leads.source field
+    const { data: leads } = await ctx.supabase.client
+      .from('leads')
+      .select('source, notes')
+      .not('source', 'is', null);
+
+    const porFuente: Record<string, number> = {};
+    if (leads) {
+      for (const l of leads) {
+        const src = l.source || 'sin fuente';
+        porFuente[src] = (porFuente[src] || 0) + 1;
+      }
+    }
+
+    let msg = `📊 *ATRIBUCIÓN DE LEADS*\n${nombre}\n\n`;
+    if (Object.keys(porFuente).length === 0) {
+      msg += `No hay datos de atribución aún.\n\nPara trackear fuentes, usa UTM params en tus links:\n` +
+        `_?utm_source=facebook&utm_medium=cpc&utm_campaign=nombre_`;
+    } else {
+      msg += `*Leads por fuente:*\n`;
+      const sorted = Object.entries(porFuente).sort((a, b) => b[1] - a[1]);
+      const total = sorted.reduce((sum, [, c]) => sum + c, 0);
+      for (const [fuente, count] of sorted.slice(0, 10)) {
+        const pct = Math.round((count / total) * 100);
+        msg += `• ${fuente}: ${count} (${pct}%)\n`;
+      }
+      msg += `\n_Total: ${total} leads con fuente identificada_`;
+    }
+
+    await ctx.twilio.sendWhatsAppMessage(from, msg);
+  } catch (e) {
+    console.error('Error en agenciaUTM:', e);
+    await ctx.twilio.sendWhatsAppMessage(from, 'Error al obtener datos de atribución.');
+  }
+}
+
+export async function agenciaUTMForCEO(ctx: HandlerContext, phone: string, nombre: string): Promise<void> {
+  try {
+    const { data: attributions, error: attrError } = await ctx.supabase.client
+      .from('lead_attributions')
+      .select('utm_source, utm_medium, utm_campaign, created_at')
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (!attrError && attributions && attributions.length > 0) {
+      const porFuente: Record<string, number> = {};
+      const porCampana: Record<string, number> = {};
+      for (const a of attributions) {
+        const src = a.utm_source || 'directo';
+        porFuente[src] = (porFuente[src] || 0) + 1;
+        if (a.utm_campaign) {
+          porCampana[a.utm_campaign] = (porCampana[a.utm_campaign] || 0) + 1;
+        }
+      }
+
+      let msg = `📊 *ATRIBUCIÓN UTM*\n${nombre}\n\n`;
+      msg += `*Por fuente (últimos ${attributions.length} registros):*\n`;
+      const sortedFuentes = Object.entries(porFuente).sort((a, b) => b[1] - a[1]);
+      for (const [fuente, count] of sortedFuentes.slice(0, 10)) {
+        const pct = Math.round((count / attributions.length) * 100);
+        msg += `• ${fuente}: ${count} (${pct}%)\n`;
+      }
+
+      if (Object.keys(porCampana).length > 0) {
+        msg += `\n*Por campaña:*\n`;
+        const sortedCampanas = Object.entries(porCampana).sort((a, b) => b[1] - a[1]);
+        for (const [campana, count] of sortedCampanas.slice(0, 5)) {
+          msg += `• ${campana}: ${count}\n`;
+        }
+      }
+
+      await ctx.meta.sendWhatsAppMessage(phone, msg);
+      return;
+    }
+
+    // Fallback
+    const { data: leads } = await ctx.supabase.client
+      .from('leads')
+      .select('source')
+      .not('source', 'is', null);
+
+    const porFuente: Record<string, number> = {};
+    if (leads) {
+      for (const l of leads) {
+        const src = l.source || 'sin fuente';
+        porFuente[src] = (porFuente[src] || 0) + 1;
+      }
+    }
+
+    let msg = `📊 *ATRIBUCIÓN DE LEADS*\n${nombre}\n\n`;
+    if (Object.keys(porFuente).length === 0) {
+      msg += `No hay datos de atribución aún.\n\nPara trackear fuentes, usa UTM params en tus links:\n` +
+        `_?utm_source=facebook&utm_medium=cpc&utm_campaign=nombre_`;
+    } else {
+      msg += `*Leads por fuente:*\n`;
+      const sorted = Object.entries(porFuente).sort((a, b) => b[1] - a[1]);
+      const total = sorted.reduce((sum, [, c]) => sum + c, 0);
+      for (const [fuente, count] of sorted.slice(0, 10)) {
+        const pct = Math.round((count / total) * 100);
+        msg += `• ${fuente}: ${count} (${pct}%)\n`;
+      }
+      msg += `\n_Total: ${total} leads con fuente identificada_`;
+    }
+
+    await ctx.meta.sendWhatsAppMessage(phone, msg);
+  } catch (e) {
+    console.error('Error en agenciaUTM (CEO):', e);
+    await ctx.meta.sendWhatsAppMessage(phone, 'Error al obtener datos de atribución.');
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// A/B TEST (GUÍA INFORMATIVA)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const AB_TEST_GUIDE = `🧪 *GUÍA DE A/B TESTING CON SEGMENTOS*\n\n` +
+  `Usa los segmentos existentes para hacer pruebas A/B manuales:\n\n` +
+  `*Paso 1:* Divide tu audiencia\n` +
+  `• Escribe *segmentos* para ver opciones\n` +
+  `• Usa *preview [segmento]* para ver leads\n\n` +
+  `*Paso 2:* Envía versión A\n` +
+  `• _enviar a hot: Versión A del mensaje_\n\n` +
+  `*Paso 3:* Envía versión B\n` +
+  `• _enviar a warm: Versión B del mensaje_\n\n` +
+  `*Paso 4:* Compara resultados\n` +
+  `• Escribe *metricas* para ver respuestas\n` +
+  `• Escribe *fuentes* para ver conversiones\n\n` +
+  `💡 *Tip:* Cambia solo UNA variable por prueba (texto, hora, o segmento).`;
+
+export async function agenciaABTest(ctx: HandlerContext, from: string): Promise<void> {
+  await ctx.twilio.sendWhatsAppMessage(from, AB_TEST_GUIDE);
+}
+
+export async function agenciaABTestForCEO(ctx: HandlerContext, phone: string): Promise<void> {
+  await ctx.meta.sendWhatsAppMessage(phone, AB_TEST_GUIDE);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

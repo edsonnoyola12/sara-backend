@@ -937,6 +937,43 @@ export async function handleTestRoutes(
               respuesta = reportingService.formatResumenMarketing(data, nombreAgencia);
               break;
             }
+            case 'agenciaUTM': {
+              // Try lead_attributions first, fallback to leads.source
+              const { data: attrs, error: attrErr } = await supabase.client
+                .from('lead_attributions')
+                .select('utm_source, utm_campaign')
+                .limit(50);
+
+              if (!attrErr && attrs && attrs.length > 0) {
+                const porFuente: Record<string, number> = {};
+                for (const a of attrs) {
+                  const src = (a as any).utm_source || 'directo';
+                  porFuente[src] = (porFuente[src] || 0) + 1;
+                }
+                respuesta = `Atribución UTM: ${Object.entries(porFuente).map(([k, v]) => `${k}=${v}`).join(', ')}`;
+              } else {
+                const { data: leads2 } = await supabase.client
+                  .from('leads')
+                  .select('source')
+                  .not('source', 'is', null)
+                  .limit(50);
+                const porFuente: Record<string, number> = {};
+                if (leads2) {
+                  for (const l of leads2) {
+                    const src = (l as any).source || 'sin fuente';
+                    porFuente[src] = (porFuente[src] || 0) + 1;
+                  }
+                }
+                respuesta = Object.keys(porFuente).length > 0
+                  ? `Leads por fuente: ${Object.entries(porFuente).map(([k, v]) => `${k}=${v}`).join(', ')}`
+                  : 'No hay datos de atribución aún';
+              }
+              break;
+            }
+            case 'agenciaABTest': {
+              respuesta = 'Guía de A/B testing con segmentos (informativo)';
+              break;
+            }
             default:
               needsExternalHandler = true;
               respuesta = `Handler "${detected.handlerName}" no ejecutable desde test`;

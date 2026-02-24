@@ -5,8 +5,8 @@
 
 export {
   // Interfaces
-  ParsedFecha,
-  IntencionCita,
+  type ParsedFecha,
+  type IntencionCita,
 
   // Funciones de timezone
   getMexicoNow,
