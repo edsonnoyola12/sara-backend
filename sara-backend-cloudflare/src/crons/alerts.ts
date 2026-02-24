@@ -123,7 +123,9 @@ export async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: M
 
         mensaje += `⚡ *¡Contacta hoy para no perderlos!*`;
 
-        await meta.sendWhatsAppMessage(vendedor.phone, mensaje);
+        await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
+          tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+        });
         alertasEnviadas++;
         console.log(`📤 Alerta enviada a ${vendedor.name}: ${leadsDelVendedor.length} leads fríos`);
       } catch (error) {
@@ -178,7 +180,9 @@ export async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: M
 
           mensaje += `⚡ *¡Dar seguimiento para no perder la venta!*`;
 
-          await meta.sendWhatsAppMessage(asesor.phone, mensaje);
+          await enviarMensajeTeamMember(supabase, meta, asesor, mensaje, {
+            tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+          });
           alertasEnviadas++;
           console.log(`📤 Alerta créditos enviada a ${asesor.name}: ${hipotecas.length} créditos fríos`);
         } catch (error) {
@@ -232,7 +236,9 @@ export async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: M
         for (const admin of admins) {
           try {
             if (admin.phone) {
-              await meta.sendWhatsAppMessage(admin.phone, mensaje);
+              await enviarMensajeTeamMember(supabase, meta, admin, mensaje, {
+                tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+              });
               alertasEnviadas++;
               console.log(`📤 Resumen enviado a ${admin.name} (${admin.role})`);
             }
@@ -511,7 +517,9 @@ Responde para *${leadName}*:
 2️⃣ No llegó`;
       }
 
-      await meta.sendWhatsAppMessage(vendedor.phone, mensajeVendedor);
+      await enviarMensajeTeamMember(supabase, meta, vendedor, mensajeVendedor, {
+        tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+      });
       console.log(`📤 Pregunta de asistencia enviada a ${vendedor.name} para cita ${cita.id}`);
 
       // Guardar en team_member_notes que estamos esperando confirmación
@@ -604,13 +612,14 @@ export async function verificarTimeoutConfirmaciones(supabase: SupabaseService, 
 
           // NO enviamos encuesta automáticamente - solo recordamos al vendedor
           if (vendedor.phone) {
-            await meta.sendWhatsAppMessage(vendedor.phone,
+            await enviarMensajeTeamMember(supabase, meta, vendedor,
               `⏰ *Recordatorio pendiente*\n\n` +
               `No respondiste sobre la cita con *${confirmacion.lead_name}*.\n\n` +
               `¿Llegó a la visita?\n` +
               `1️⃣ Sí llegó\n` +
               `2️⃣ No llegó\n\n` +
-              `_Responde para que pueda dar seguimiento adecuado._`
+              `_Responde para que pueda dar seguimiento adecuado._`,
+              { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
             );
             console.log(`📤 Recordatorio enviado a ${vendedor.name} sobre ${confirmacion.lead_name}`);
           }
@@ -730,7 +739,9 @@ export async function enviarAlertasProactivasCEO(supabase: SupabaseService, meta
       telefonosEnviados.add(tel);
 
       try {
-        await meta.sendWhatsAppMessage(admin.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, admin, msg, {
+          tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+        });
         console.log(`🚨 Alerta enviada a ${admin.name}`);
       } catch (e) {
         console.log(`Error enviando alerta a ${admin.name}:`, e);
@@ -861,7 +872,9 @@ export async function alertaInactividadVendedor(supabase: SupabaseService, meta:
       telefonosEnviados.add(tel);
 
       try {
-        await meta.sendWhatsAppMessage(admin.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, admin, msg, {
+          tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+        });
         console.log(`👔 Alerta inactividad enviada a ${admin.name}`);
       } catch (e) {
         console.log(`Error enviando alerta inactividad a ${admin.name}:`, e);
@@ -1006,7 +1019,9 @@ export async function alertaLeadsHotUrgentes(supabase: SupabaseService, meta: Me
       msg += '\n💡 _Los leads contactados rápido tienen 9x más probabilidad de cerrar_';
 
       try {
-        await meta.sendWhatsAppMessage(vendedor.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, vendedor, msg, {
+          tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+        });
         console.log(`⚡ Alerta 2pm enviada a ${vendedor.name} (${todosUrgentes.length} leads)`);
       } catch (e) {
         console.log(`Error enviando alerta 2pm a ${vendedor.name}:`, e);
@@ -1095,7 +1110,9 @@ export async function recordatorioFinalDia(supabase: SupabaseService, meta: Meta
         : '✨ _¡Buen trabajo hoy! Descansa bien_';
 
       try {
-        await meta.sendWhatsAppMessage(vendedor.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, vendedor, msg, {
+          tipoMensaje: 'notificacion', pendingKey: 'pending_mensaje'
+        });
         console.log(`🌅 Recordatorio 5pm enviado a ${vendedor.name}`);
       } catch (e) {
         console.log(`Error enviando recordatorio 5pm a ${vendedor.name}:`, e);
@@ -1123,8 +1140,10 @@ export async function recordatorioFinalDia(supabase: SupabaseService, meta: Meta
         for (const admin of admins) {
           if (!admin.phone) continue;
           try {
-            await meta.sendWhatsAppMessage(admin.phone, adminMsg);
-            console.error(`⚠️ Alerta admin 5pm enviada a ${admin.name}`);
+            await enviarMensajeTeamMember(supabase, meta, admin, adminMsg, {
+              tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+            });
+            console.log(`⚠️ Alerta admin 5pm enviada a ${admin.name}`);
           } catch (e) {
             console.log(`Error enviando alerta admin 5pm:`, e);
           }
@@ -1188,7 +1207,9 @@ export async function enviarCoachingProactivo(supabase: SupabaseService, meta: M
       const msg = `${emoji} *TIP DEL DÍA*\n${nombre}\n\n${tip}\n\n_Escribe *coach ${leadNombre}* para más estrategias_`;
 
       try {
-        await meta.sendWhatsAppMessage(vendedor.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, vendedor, msg, {
+          tipoMensaje: 'notificacion', pendingKey: 'pending_mensaje'
+        });
         console.log(`🎯 Coaching enviado a ${vendedor.name}`);
       } catch (e) {
         console.log(`Error enviando coaching a ${vendedor.name}:`, e);
@@ -1486,7 +1507,9 @@ export async function followUpLeadsInactivos(supabase: SupabaseService, meta: Me
         const vendedor = vendedores?.find(v => v.id === vendedorId);
         if (vendedor?.phone) {
           const msg = `📬 *Follow-up automático enviado*\n\nSARA contactó a ${leadNames.length} lead(s) inactivos que tienes asignados:\n\n${leadNames.map(n => `• ${n}`).join('\n')}\n\n💡 Si responden, te avisaré para que les des seguimiento.`;
-          await meta.sendWhatsAppMessage(vendedor.phone, msg);
+          await enviarMensajeTeamMember(supabase, meta, vendedor, msg, {
+            tipoMensaje: 'notificacion', pendingKey: 'pending_mensaje'
+          });
         }
       }
     }
@@ -1642,7 +1665,9 @@ export async function recordatoriosPagoApartado(supabase: SupabaseService, meta:
 
           // Enviar al vendedor
           if (vendedor?.phone && mensajeVendedor) {
-            await meta.sendWhatsAppMessage(vendedor.phone, mensajeVendedor);
+            await enviarMensajeTeamMember(supabase, meta, vendedor, mensajeVendedor, {
+              tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+            });
           }
 
           // Actualizar contador de recordatorios
@@ -1796,7 +1821,9 @@ export async function reactivarLeadsPerdidos(supabase: SupabaseService, meta: Me
         if (leads.length > 5) msg += `\n_...y ${leads.length - 5} más_\n`;
         msg += `\n💡 *Si responden, ya están en tu pipeline como "contactados".*`;
 
-        await meta.sendWhatsAppMessage(vendedor.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, vendedor, msg, {
+          tipoMensaje: 'notificacion', pendingKey: 'pending_mensaje'
+        });
       } catch (error) {
         console.error(`❌ Error notificando reactivación a vendedor ${vendedorId}:`, error);
         continue;
@@ -1961,7 +1988,9 @@ export async function procesarCumpleañosLeads(
     msg += `_Es buen momento para dar seguimiento personalizado._`;
 
     try {
-      await meta.sendWhatsAppMessage(vendedor.phone, msg);
+      await enviarMensajeTeamMember(supabase, meta, vendedor, msg, {
+        tipoMensaje: 'notificacion', pendingKey: 'pending_mensaje'
+      });
       console.log(`📤 Notificación de cumpleaños enviada a vendedor ${vendedor.name}`);
     } catch (e) {
       console.log(`Error notificando a vendedor:`, e);
@@ -2020,7 +2049,9 @@ export async function felicitarCumpleañosEquipo(supabase: SupabaseService, meta
           `¡Que se cumplan todos tus sueños este nuevo año de vida! 🌟\n\n` +
           `_Con cariño, tu equipo SARA_ 💝`;
 
-        await meta.sendWhatsAppMessage(persona.phone, mensajeCumpleanero);
+        await enviarMensajeTeamMember(supabase, meta, persona, mensajeCumpleanero, {
+          tipoMensaje: 'notificacion', pendingKey: 'pending_mensaje'
+        });
         console.log(`🎂 Felicitación enviada a ${persona.name}`);
 
         // Notificar al resto del equipo
@@ -2031,7 +2062,9 @@ export async function felicitarCumpleañosEquipo(supabase: SupabaseService, meta
             `No olvides felicitarlo(a) 🎉`;
 
           try {
-            await meta.sendWhatsAppMessage(member.phone, notificacion);
+            await enviarMensajeTeamMember(supabase, meta, member, notificacion, {
+              tipoMensaje: 'notificacion', pendingKey: 'pending_mensaje'
+            });
           } catch (e) {
             // Silent fail para notificaciones secundarias
           }
@@ -2140,7 +2173,21 @@ export async function alertaCalidadRespuestas(
         (problemas.length > 5 ? `\n...y ${problemas.length - 5} más` : '') +
         `\n\n💡 Revisar: /api/metrics/quality`;
 
-      await meta.sendWhatsAppMessage(ceoPhone, mensaje);
+      // Buscar team member por teléfono para enviar 24h-safe
+      const cleanCeoPhone = ceoPhone.replace(/\D/g, '');
+      const { data: ceoMember } = await supabase.client
+        .from('team_members')
+        .select('id, name, phone')
+        .or(`phone.eq.${cleanCeoPhone},phone.like.%${cleanCeoPhone.slice(-10)}`)
+        .maybeSingle();
+
+      if (ceoMember) {
+        await enviarMensajeTeamMember(supabase, meta, ceoMember, mensaje, {
+          tipoMensaje: 'notificacion', pendingKey: 'pending_mensaje'
+        });
+      } else {
+        await meta.sendWhatsAppMessage(ceoPhone, mensaje);
+      }
       console.log(`⚠️ Alerta de calidad enviada: ${problemas.length} problemas`);
     } else {
       console.log(`✅ Calidad OK: ${totalRespuestas} respuestas, ${problemas.length} problemas (${tasaProblemas.toFixed(1)}%)`);

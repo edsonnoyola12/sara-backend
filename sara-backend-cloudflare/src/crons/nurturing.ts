@@ -155,7 +155,7 @@ Si te interesa retomar, solo responde "quiero crédito" 🏡`;
         if (lead.assigned_to) {
           const { data: vendedor } = await supabase.client
             .from('team_members')
-            .select('name, phone')
+            .select('id, name, phone')
             .eq('id', lead.assigned_to)
             .single();
 
@@ -168,7 +168,9 @@ Etapa abandonada: ${etapa}
 
 💡 Si responde, podrás continuar con: bridge ${nombre}`;
 
-            await meta.sendWhatsAppMessage(vendedor.phone, notifVendedor);
+            await enviarMensajeTeamMember(supabase, meta, vendedor, notifVendedor, {
+              tipoMensaje: 'notificacion', pendingKey: 'pending_mensaje'
+            });
           }
         }
 
@@ -313,7 +315,7 @@ Si aún estás buscando casa, me encantaría:
         if (lead.assigned_to) {
           const { data: vendedor } = await supabase.client
             .from('team_members')
-            .select('name, phone')
+            .select('id, name, phone')
             .eq('id', lead.assigned_to)
             .single();
 
@@ -326,7 +328,9 @@ Hace: ${diasDesdeVisita} días
 
 💡 Si responde: bridge ${nombre}`;
 
-            await meta.sendWhatsAppMessage(vendedor.phone, notifVendedor);
+            await enviarMensajeTeamMember(supabase, meta, vendedor, notifVendedor, {
+              tipoMensaje: 'notificacion', pendingKey: 'pending_mensaje'
+            });
           }
         }
 
@@ -737,7 +741,7 @@ Solo responde con el nombre y teléfono de quien creas que le interese, y yo me 
         if (cliente.assigned_to) {
           const { data: vendedor } = await supabase.client
             .from('team_members')
-            .select('name, phone')
+            .select('id, name, phone')
             .eq('id', cliente.assigned_to)
             .single();
 
@@ -750,7 +754,9 @@ Hace: ${diasDesdeCompra} días
 
 💡 Si responde con un referido, agrégalo al CRM con fuente "referido"`;
 
-            await meta.sendWhatsAppMessage(vendedor.phone, notifVendedor);
+            await enviarMensajeTeamMember(supabase, meta, vendedor, notifVendedor, {
+              tipoMensaje: 'notificacion', pendingKey: 'pending_mensaje'
+            });
           }
         }
 
