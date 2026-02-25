@@ -452,15 +452,11 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
         // ━━━ FALLBACK 2: Intentar comandos de vendedor ━━━
         console.log('📤 CEO: Comando no es asesor, intentando comandos de vendedor...');
         const vendorService = new VendorCommandsService(ctx.supabase);
-        const vendorResult = (vendorService as any).detectCommand(mensaje, nombreCEO);
+        const vendorResult = vendorService.detectRouteCommand(body, mensaje);
 
-        if (vendorResult.action === 'call_handler') {
+        if (vendorResult.matched && vendorResult.handlerName) {
           console.log('📤 CEO: Comando reconocido como vendedor:', vendorResult.handlerName);
-          await handler.executeVendedorHandler(from, body, ceo, nombreCEO, teamMembers, vendorResult.handlerName!, vendorResult.handlerParams);
-          return;
-        }
-        if (vendorResult.action === 'send_message') {
-          await ctx.meta.sendWhatsAppMessage(cleanPhone, vendorResult.message!);
+          await handler.executeVendedorHandler(from, body, ceo, nombreCEO, teamMembers, vendorResult.handlerName, vendorResult.handlerParams);
           return;
         }
 

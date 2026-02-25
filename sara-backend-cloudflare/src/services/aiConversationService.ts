@@ -5299,7 +5299,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             await new Promise(r => setTimeout(r, 300));
             await this.meta.sendCTAButton(from,
               '📍 Ubicación de *Oficinas Grupo Santa Rita*',
-              'Abrir en Google Maps 📍',
+              'Ver ubicación 📍',
               gpsOficinas
             );
             console.log(`✅ GPS CTA enviado (oficinas): ${gpsOficinas}`);
@@ -5334,7 +5334,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                 await new Promise(r => setTimeout(r, 300));
                 await this.meta.sendCTAButton(from,
                   `📍 Ubicación de *${devParaGPSSolo}*`,
-                  'Abrir en Google Maps 📍',
+                  'Ver ubicación 📍',
                   propGPSSolo.gps_link
                 );
                 console.log(`✅ GPS CTA enviado (SOLO) con recordatorio de cita: ${devParaGPSSolo}`);
@@ -5342,7 +5342,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               } else {
                 await this.meta.sendCTAButton(from,
                   `📍 Ubicación de *${devParaGPSSolo}*\n\n${primerNombreGPS ? primerNombreGPS + ', ¿te' : '¿Te'} gustaría agendar una visita? 🏠`,
-                  'Abrir en Google Maps 📍',
+                  'Ver ubicación 📍',
                   propGPSSolo.gps_link
                 );
                 console.log(`✅ GPS CTA enviado (SOLO) con oferta de cita: ${devParaGPSSolo}`);
@@ -5435,7 +5435,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   await new Promise(r => setTimeout(r, 300));
                   await this.meta.sendCTAButton(from,
                     `📍 Ubicación de *${gpsLabel}*`,
-                    'Abrir en Google Maps 📍',
+                    'Ver ubicación 📍',
                     gpsLink
                   );
                   recursosDesc.push('GPS');
@@ -8332,7 +8332,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
         // GPS de oficinas centrales Grupo Santa Rita — CTA Button
         const gpsOficinas = 'https://maps.app.goo.gl/hUk6aH8chKef6NRY7';
         await new Promise(resolve => setTimeout(resolve, 300));
-        await this.meta.sendCTAButton(from, '📍 Ubicación de Oficinas Grupo Santa Rita', 'Abrir en Google Maps 📍', gpsOficinas);
+        await this.meta.sendCTAButton(from, '📍 Ubicación de Oficinas Grupo Santa Rita', 'Ver ubicación 📍', gpsOficinas);
         console.log(`✅ GPS CTA enviado (oficinas): ${gpsOficinas}`);
         await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS (CTA)', 'Oficinas Grupo Santa Rita');
       } else {
@@ -8347,7 +8347,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
 
           if (gpsUrl) {
             await new Promise(resolve => setTimeout(resolve, 300));
-            await this.meta.sendCTAButton(from, `📍 Ubicación de *${desarrolloParaGPS}*`, 'Abrir en Google Maps 📍', gpsUrl);
+            await this.meta.sendCTAButton(from, `📍 Ubicación de *${desarrolloParaGPS}*`, 'Ver ubicación 📍', gpsUrl);
             console.log(`✅ GPS CTA enviado (solo): ${desarrolloParaGPS} - ${gpsUrl}`);
             await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS (CTA)', desarrolloParaGPS);
           } else {

@@ -1416,7 +1416,7 @@ export class MetaWhatsAppService {
   // ═══ CTA URL BUTTON ═══
   async sendCTAButton(to: string, bodyText: string, buttonText: string, url: string, headerText?: string, footerText?: string): Promise<any> {
     const phone = this.normalizePhone(to);
-    if (!this.isTestPhoneAllowed(phone)) return { messages: [{ id: 'blocked' }] };
+    if (!isTestPhoneAllowed(phone)) return { messages: [{ id: 'blocked' }] };
 
     const interactive: any = {
       type: 'cta_url',
@@ -1462,7 +1462,7 @@ export class MetaWhatsAppService {
   // ═══ REACTION ═══
   async sendReaction(to: string, messageId: string, emoji: string): Promise<any> {
     const phone = this.normalizePhone(to);
-    if (!this.isTestPhoneAllowed(phone)) return {};
+    if (!isTestPhoneAllowed(phone)) return {};
 
     const payload = {
       messaging_product: 'whatsapp',
@@ -1489,7 +1489,7 @@ export class MetaWhatsAppService {
   // ═══ CONTACT CARD (vCard) ═══
   async sendContactCard(to: string, contact: { name: string; phone: string; company?: string; title?: string }): Promise<any> {
     const phone = this.normalizePhone(to);
-    if (!this.isTestPhoneAllowed(phone)) return { messages: [{ id: 'blocked' }] };
+    if (!isTestPhoneAllowed(phone)) return { messages: [{ id: 'blocked' }] };
 
     const nameParts = contact.name.split(' ');
     const firstName = nameParts[0] || contact.name;
@@ -1545,7 +1545,7 @@ export class MetaWhatsAppService {
   // ═══ LOCATION REQUEST ═══
   async sendLocationRequest(to: string, bodyText: string): Promise<any> {
     const phone = this.normalizePhone(to);
-    if (!this.isTestPhoneAllowed(phone)) return { messages: [{ id: 'blocked' }] };
+    if (!isTestPhoneAllowed(phone)) return { messages: [{ id: 'blocked' }] };
 
     const payload = {
       messaging_product: 'whatsapp',
