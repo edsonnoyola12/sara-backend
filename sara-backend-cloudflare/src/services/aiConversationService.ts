@@ -3323,9 +3323,14 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
       const slug = devName.toLowerCase().replace(/\s+/g, '_').replace(/[áéíóú]/g, (m: string) =>
         ({ á: 'a', é: 'e', í: 'i', ó: 'o', ú: 'u' }[m] || m));
 
+      // 2 params per card to comply with Meta's param-to-text ratio limit
+      const param1 = isTerreno
+        ? `${devName} - Citadella del Nogal`
+        : `${devName} - ${recText} en ${zona}`;
+
       cards.push({
         imageUrl,
-        bodyParams: [devName, `Desde ${precioTexto}`, recText, zona],
+        bodyParams: [param1, precioTexto],
         quickReplyPayload: `carousel_ver_${slug}`,
         quickReplyPayload2: `carousel_cita_${slug}`
       });

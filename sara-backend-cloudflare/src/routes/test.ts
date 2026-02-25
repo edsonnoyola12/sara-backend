@@ -10379,5 +10379,232 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       return corsResponse(JSON.stringify({ ok: true, message: `Alerta 5pm enviada a ${phoneFormatted}`, pendientes, citas }));
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // Create Carousel Templates in Meta Business Manager
+    // Usage: /create-carousel-templates?api_key=XXX&template=all
+    // Options: template=casas_economicas|casas_premium|terrenos_nogal|all
+    // TEMPORARY - Remove after templates are approved
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/create-carousel-templates' && request.method === 'GET') {
+      const templateParam = url.searchParams.get('template') || 'all';
+      const WABA_ID = '1227849769248437';
+
+      // Image URLs per development
+      const FOTOS: Record<string, string> = {
+        'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg',
+        'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2021/07/M4215335.jpg',
+        'Andes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg',
+        'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-min-scaled-e1740520053367.jpg',
+        'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
+        'Paseo Colorines': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/ACACIA-1-scaled.jpg',
+        'Alpes': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg',
+        'Villa Campelo': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
+        'Villa Galiano': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
+      };
+
+      // Step 1: Get app_id from debug_token
+      let appId: string;
+      try {
+        const debugUrl = `https://graph.facebook.com/debug_token?input_token=${env.META_ACCESS_TOKEN}&access_token=${env.META_ACCESS_TOKEN}`;
+        const debugResp = await fetch(debugUrl);
+        const debugData: any = await debugResp.json();
+        appId = debugData?.data?.app_id;
+        if (!appId) {
+          return corsResponse(JSON.stringify({ error: 'Could not get app_id', debugData }, null, 2), 500);
+        }
+        console.log(`✅ Got app_id: ${appId}`);
+      } catch (err: any) {
+        return corsResponse(JSON.stringify({ error: `debug_token failed: ${err.message}` }), 500);
+      }
+
+      // Helper: Upload image to Meta Resumable Upload API → get header_handle
+      async function uploadImageToMeta(imageUrl: string, fileName: string): Promise<string> {
+        // 1. Fetch image from URL
+        const imgResp = await fetch(imageUrl);
+        if (!imgResp.ok) throw new Error(`Failed to fetch image ${imageUrl}: ${imgResp.status}`);
+        const imgBuffer = await imgResp.arrayBuffer();
+        const imgType = imgResp.headers.get('content-type') || 'image/jpeg';
+        console.log(`📥 Downloaded ${fileName}: ${imgBuffer.byteLength} bytes (${imgType})`);
+
+        // 2. Create upload session
+        const sessionResp = await fetch(`https://graph.facebook.com/v22.0/${appId}/uploads`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${env.META_ACCESS_TOKEN}`,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: new URLSearchParams({
+            file_length: String(imgBuffer.byteLength),
+            file_type: imgType.split(';')[0], // strip charset if any
+            file_name: fileName
+          })
+        });
+        const sessionData: any = await sessionResp.json();
+        if (!sessionData.id) throw new Error(`Upload session failed: ${JSON.stringify(sessionData)}`);
+        console.log(`📤 Upload session: ${sessionData.id}`);
+
+        // 3. Upload file data
+        const uploadResp = await fetch(`https://graph.facebook.com/v22.0/${sessionData.id}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `OAuth ${env.META_ACCESS_TOKEN}`,
+            'file_offset': '0',
+            'Content-Type': imgType.split(';')[0]
+          },
+          body: imgBuffer
+        });
+        const uploadData: any = await uploadResp.json();
+        if (!uploadData.h) throw new Error(`Upload data failed: ${JSON.stringify(uploadData)}`);
+        console.log(`✅ Got header_handle for ${fileName}`);
+
+        return uploadData.h;
+      }
+
+      // Template definitions — 2 params per card to pass Meta's param-to-text ratio
+      const TEMPLATE_DEFS: Record<string, {
+        developments: string[];
+        bodyText: string;
+        bodyExample: string[][] | null;
+        cardBody: string;
+        cardExamples: string[][];
+      }> = {
+        casas_economicas: {
+          developments: ['Monte Verde', 'Andes', 'Alpes'],
+          bodyText: 'Conoce nuestras casas en Zacatecas desde {{1}} 🏠',
+          bodyExample: [['$1.6M']],
+          cardBody: '🏠 {{1}}\n💰 Casas desde {{2}} equipadas con cocina y closets',
+          cardExamples: [
+            ['Monte Verde - 2 a 3 recámaras en Colinas del Padre', '$1.6M'],
+            ['Priv. Andes - 2 a 3 recámaras en Guadalupe', '$1.6M'],
+            ['Alpes - 2 a 3 recámaras en Colinas del Padre', '$1.6M'],
+          ]
+        },
+        casas_premium: {
+          developments: ['Los Encinos', 'Miravalle', 'Paseo Colorines', 'Distrito Falco'],
+          bodyText: 'Conoce nuestras casas premium en Zacatecas desde {{1}} 🏠',
+          bodyExample: [['$3.0M']],
+          cardBody: '🏠 {{1}}\n💰 Casas desde {{2}} equipadas con cocina y closets',
+          cardExamples: [
+            ['Los Encinos - 3 recámaras en Colinas del Padre', '$3.0M'],
+            ['Miravalle - 3 recámaras en Colinas del Padre', '$3.0M'],
+            ['Paseo Colorines - 3 recámaras en Colinas del Padre', '$3.0M'],
+            ['Distrito Falco - 3 recámaras en Guadalupe', '$3.7M'],
+          ]
+        },
+        terrenos_nogal: {
+          developments: ['Villa Campelo', 'Villa Galiano'],
+          bodyText: 'Invierte en terrenos residenciales en Citadella del Nogal, Guadalupe 🏗',
+          bodyExample: null,
+          cardBody: '🏗 {{1}}\n💰 Terrenos residenciales desde {{2}} por metro cuadrado',
+          cardExamples: [
+            ['Villa Campelo - Citadella del Nogal', '$8,500'],
+            ['Villa Galiano - Citadella del Nogal', '$6,400'],
+          ]
+        }
+      };
+
+      const templatesToCreate = templateParam === 'all'
+        ? Object.keys(TEMPLATE_DEFS)
+        : [templateParam];
+
+      const results: any[] = [];
+
+      for (const tplName of templatesToCreate) {
+        const tpl = TEMPLATE_DEFS[tplName];
+        if (!tpl) {
+          results.push({ template: tplName, error: 'Template definition not found' });
+          continue;
+        }
+
+        try {
+          // Upload images for each card
+          const handles: string[] = [];
+          for (let i = 0; i < tpl.developments.length; i++) {
+            const dev = tpl.developments[i];
+            const imageUrl = FOTOS[dev] || FOTOS['Monte Verde'];
+            console.log(`📤 [${tplName}] Uploading image for ${dev}...`);
+            const handle = await uploadImageToMeta(imageUrl, `${tplName}_card${i + 1}.jpg`);
+            handles.push(handle);
+          }
+
+          // Build carousel cards
+          const cards = tpl.developments.map((dev: string, i: number) => ({
+            components: [
+              {
+                type: 'HEADER',
+                format: 'IMAGE',
+                example: { header_handle: [handles[i]] }
+              },
+              {
+                type: 'BODY',
+                text: tpl.cardBody,
+                example: { body_text: [tpl.cardExamples[i]] }
+              },
+              {
+                type: 'BUTTONS',
+                buttons: [
+                  { type: 'QUICK_REPLY', text: 'Ver mas' },
+                  { type: 'QUICK_REPLY', text: 'Agendar visita' }
+                ]
+              }
+            ]
+          }));
+
+          // Build full template payload
+          const components: any[] = [];
+
+          // Bubble body (above cards)
+          const bodyComponent: any = { type: 'BODY', text: tpl.bodyText };
+          if (tpl.bodyExample) {
+            bodyComponent.example = { body_text: tpl.bodyExample };
+          }
+          components.push(bodyComponent);
+
+          // Carousel component
+          components.push({ type: 'CAROUSEL', cards });
+
+          const payload = {
+            name: tplName,
+            language: 'es_MX',
+            category: 'MARKETING',
+            components
+          };
+
+          // Create template via Meta API
+          const createUrl = `https://graph.facebook.com/v22.0/${WABA_ID}/message_templates`;
+          const resp = await fetch(createUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${env.META_ACCESS_TOKEN}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          const result: any = await resp.json();
+          results.push({
+            template: tplName,
+            success: resp.ok,
+            status: resp.status,
+            cards_count: tpl.developments.length,
+            developments: tpl.developments,
+            result
+          });
+
+          console.log(`${resp.ok ? '✅' : '❌'} Template ${tplName}: ${resp.status} - ${JSON.stringify(result)}`);
+        } catch (error: any) {
+          results.push({ template: tplName, error: error.message });
+          console.error(`❌ Template ${tplName} failed:`, error.message);
+        }
+      }
+
+      return corsResponse(JSON.stringify({
+        app_id: appId,
+        waba_id: WABA_ID,
+        templates_requested: templatesToCreate,
+        results
+      }, null, 2));
+    }
+
     return null; // Not a test route
 }
