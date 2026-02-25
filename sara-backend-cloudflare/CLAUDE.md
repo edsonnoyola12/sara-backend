@@ -199,6 +199,11 @@ Si no hay ventana abierta → el mensaje NO LLEGA.
 - `reporte_vendedor` (UTILITY, APPROVED) → params: nombre, leads_nuevos, citas_completadas, citas_total, pipeline, insight
 - `reporte_asesor` (UTILITY, APPROVED) → params: nombre, solicitudes, aprobadas, pipeline_activo
 
+**Templates de Carousel (MARKETING, APPROVED, es_MX):**
+- `casas_economicas` — 3 cards: Monte Verde, Andes, Alpes (body: 1 param)
+- `casas_premium` — 4 cards: Los Encinos, Miravalle, Paseo Colorines, Distrito Falco (body: 1 param)
+- `terrenos_nogal` — 2 cards: Villa Campelo, Villa Galiano (body: 0 params)
+
 **Implementado via `templateOverride` en opciones de `enviarMensajeTeamMember()`:**
 ```typescript
 await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
@@ -666,6 +671,7 @@ Ver documentación en `docs/`:
 | `/run-health-monitor?api_key=Z` | Forzar health monitor (ping Supabase/Meta/OpenAI, guardar en `health_checks`) |
 | `/run-backup?api_key=Z` | Forzar backup R2 (conversations + leads JSONL al bucket `sara-backups`) |
 | `POST /test-load-test?api_key=Z` | Load test: simula N leads concurrentes (body: `{concurrent, desarrollos}`) |
+| `/test-carousel?phone=X&segment=Y&api_key=Z` | Enviar carousel template (segment: economico/premium/terrenos/all) |
 
 ---
 
@@ -6390,13 +6396,26 @@ Cuando lead toca un botón del carousel:
 
 `notes.carousel_sent_at` trackea último envío. No reenvía hasta que el lead haya enviado 5+ mensajes después.
 
-#### Templates en Meta (PENDIENTE)
+#### Templates en Meta (APPROVED ✅)
 
-Los 3 templates deben crearse manualmente en Meta Business Manager (aprobación ~24h). El código ya está listo.
+| Template | ID Meta | Status | Language |
+|----------|---------|--------|----------|
+| `casas_economicas` | `917049031059726` | APPROVED | es_MX |
+| `casas_premium` | `1163195915737324` | APPROVED | es_MX |
+| `terrenos_nogal` | `1552207123246175` | APPROVED | es_MX |
+
+**WABA ID:** `1227849769248437`
+
+**Fixes aplicados durante testing:**
+- Template language `es` → `es_MX` (Meta rechazaba con error #132001)
+- `terrenos_nogal` body sin parámetros → enviar `[]` (error #132000 si se enviaba `[param]`)
+- Terrenos precio per-m²: DB guarda precio total del lote → computar `price / land_size` ($8,500/m²)
+
+**Endpoint de prueba:** `/test-carousel?phone=X&segment=Y&api_key=Z` (segment: economico/premium/terrenos/all)
 
 **Tests:** 692/692 pasando
-**Commit:** `159400f0`
-**Deploy:** Completado
+**Commits:** `159400f0` (implementación), `686c7f2b` (fixes de templates + precios)
+**Deploy:** Completado y verificado — 3 carousels enviados exitosamente
 
 ---
 
@@ -6410,7 +6429,7 @@ Los 3 templates deben crearse manualmente en Meta Business Manager (aprobación 
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 27+ |
 | Capas de resilience | 9 |
-| Templates WA aprobados | 3 (+3 carousel PENDIENTES aprobación Meta) |
+| Templates WA aprobados | 6 (3 equipo + 3 carousel) |
 | Propiedades en catálogo | 32 |
 | Desarrollos | 9 (Monte Verde, Monte Real, Andes, Falco, Encinos, Miravalle, Colorines, Alpes, Citadella) |
 | **pending_auto_response types** | **16** |
