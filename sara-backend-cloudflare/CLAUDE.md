@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-24 (Sesión 65)
+> Última actualización: 2026-02-25 (Sesión 66)
 
 ---
 
@@ -6447,4 +6447,127 @@ Cuando lead toca un botón del carousel:
 | CRM | https://sara-crm-new.vercel.app |
 | Videos | https://sara-videos.onrender.com |
 
-**Sistema 100% completo y operativo — Última verificación: 2026-02-24 (Sesión 65)**
+### 2026-02-25 (Sesión 66) - 4 WhatsApp UX Features: CTA Buttons, Reactions, Contact Cards, Location Request
+
+**4 features de WhatsApp Business API implementadas para mejorar la UX de leads:**
+
+#### Feature 1: CTA URL Buttons
+
+Reemplaza links de texto plano por botones clickeables profesionales.
+
+**Nuevo método en `meta-whatsapp.ts`:**
+```typescript
+async sendCTAButton(to: string, bodyText: string, buttonText: string, url: string, headerText?: string, footerText?: string): Promise<any>
+```
+
+| Recurso | Antes (texto plano) | Después (CTA button) |
+|---------|---------------------|---------------------|
+| GPS link | `📍 Ubicación: https://maps.app...` | Botón "Abrir en Google Maps 📍" |
+| Matterport | `🏠 Recorrido 3D: https://matterport...` | Botón "Ver recorrido 3D 🏠" |
+| Brochure HTML | `📋 Brochure: https://brochures-...` | Botón "Ver brochure 📋" |
+| YouTube | `🎬 Video: https://youtube...` | Botón "Ver video 🎬" |
+
+**Cambio clave:** El combined message ahora envía cada recurso como mensaje interactivo separado con CTA button, en vez de 1 texto con todos los links.
+
+#### Feature 2: Reactions (✅ al recibir mensaje)
+
+**Nuevo método en `meta-whatsapp.ts`:**
+```typescript
+async sendReaction(to: string, messageId: string, emoji: string): Promise<any>
+```
+
+- Se envía ✅ instantáneamente al recibir mensaje de LEAD (fire-and-forget via `ctx.waitUntil`)
+- NO se envía a team members (vendedores/CEO)
+- Ubicado después del KV dedup check en `index.ts`
+- Sin tracking (no es un mensaje real, es indicador visual)
+
+#### Feature 3: Contact Cards (vCard)
+
+**Nuevo método en `meta-whatsapp.ts`:**
+```typescript
+async sendContactCard(to: string, contact: { name: string; phone: string; company?: string; title?: string }): Promise<any>
+```
+
+| Flujo | Quién recibe | Qué recibe |
+|-------|-------------|------------|
+| **Handoff a vendedor** (`contactar_vendedor`) | Lead | vCard del vendedor (nombre, teléfono, "Grupo Santa Rita", "Asesor(a) de Ventas") |
+| **Comando `llamar [nombre]`** | Vendedor | vCard del lead (nombre, teléfono, "Lead - Grupo Santa Rita") |
+
+**Bonus fix:** `contactar_vendedor` usaba raw `sendWhatsAppMessage` → cambiado a `enviarMensajeTeamMember()` (24h-safe). También mejoró lookup de vendedor para priorizar `lead.assigned_to`.
+
+#### Feature 4: Location Request + Haversine Distance
+
+**Nuevo método en `meta-whatsapp.ts`:**
+```typescript
+async sendLocationRequest(to: string, bodyText: string): Promise<any>
+```
+
+**Nuevo flag en AI analysis:** `send_location_request?: boolean`
+
+**Trigger:** Cuando lead pregunta "cuál me queda más cerca" o no sabe qué zona le conviene.
+
+**Handler de respuesta de ubicación mejorado** en `index.ts`:
+- GPS coordinates para 8 desarrollos (Haversine formula)
+- Calcula distancia a cada desarrollo
+- Muestra top 3 más cercanos con precios dinámicos (`precioMinDesarrollo()`)
+- Envía CTA button del GPS del más cercano
+- Fallback sin coordenadas usa `listaBulletDesarrollos()` para precios dinámicos
+
+**Coordenadas GPS de desarrollos:**
+
+| Desarrollo | Zona | Lat/Lon |
+|------------|------|---------|
+| Monte Verde | Colinas del Padre | 22.7685, -102.5557 |
+| Los Encinos | Colinas del Padre | 22.7690, -102.5560 |
+| Miravalle | Colinas del Padre | 22.7695, -102.5555 |
+| Paseo Colorines | Colinas del Padre | 22.7680, -102.5550 |
+| Andes | Guadalupe (Siglo XXI) | 22.7650, -102.5100 |
+| Distrito Falco | Guadalupe (Solidaridad) | 22.7700, -102.5200 |
+| Villa Campelo | Citadella del Nogal | 22.7600, -102.5150 |
+| Villa Galiano | Citadella del Nogal | 22.7605, -102.5155 |
+
+#### Archivos modificados
+
+| Archivo | Cambio | Líneas |
+|---------|--------|--------|
+| `src/services/meta-whatsapp.ts` | 4 nuevos métodos (CTA, Reaction, Contact Card, Location Request) | +168 |
+| `src/index.ts` | Reaction post-dedup + location handler con Haversine + precios dinámicos | +73 |
+| `src/services/aiConversationService.ts` | CTA buttons en resources + contact card en handoff + `send_location_request` flag + fix raw send → 24h-safe | +219/-82 |
+| `src/handlers/whatsapp-vendor.ts` | Contact card del lead en comando `llamar` | +13 |
+
+**Tests:** 692/692 pasando
+**Commit:** `c486f3fb`
+**Deploy:** Version ID `e55b6340`
+
+---
+
+**Estado final del sistema:**
+
+| Métrica | Valor |
+|---------|-------|
+| Tests | 692/692 ✅ |
+| Test files | 20 |
+| Servicios | 85+ |
+| Comandos verificados | 342/342 (4 roles) |
+| CRONs activos | 27+ |
+| Capas de resilience | 9 |
+| Templates WA aprobados | 6 (3 equipo + 3 carousel) |
+| Propiedades en catálogo | 32 |
+| Desarrollos | 9 (Monte Verde, Monte Real, Andes, Falco, Encinos, Miravalle, Colorines, Alpes, Citadella) |
+| **pending_auto_response types** | **16** |
+| **CRM UX/UI Rounds** | **8 completados** |
+| **Precios dinámicos** | **100% — 0 hardcoded (WhatsApp + Retell)** |
+| **Voz Retell** | **ElevenLabs LatAm Spanish** |
+| **Motivos Retell** | **12 context-aware prompts** |
+| **Carousel Templates** | **3 segmentos (economico, premium, terrenos)** |
+| **WhatsApp UX Features** | **CTA buttons, reactions, contact cards, location request** |
+
+**URLs de producción:**
+
+| Servicio | URL |
+|----------|-----|
+| Backend | https://sara-backend.edson-633.workers.dev |
+| CRM | https://sara-crm-new.vercel.app |
+| Videos | https://sara-videos.onrender.com |
+
+**Sistema 100% completo y operativo — Última verificación: 2026-02-25 (Sesión 66)**
