@@ -971,10 +971,12 @@ export default {
           const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
 
           // ═══ REACTION ✅ al lead (fire-and-forget, después de crear meta) ═══
-          if (messageId && !teamMember) {
-            ctx.waitUntil(
-              meta.sendReaction(from, messageId, '✅').catch(() => {})
-            );
+          if (messageId && !teamMember && meta) {
+            try {
+              ctx.waitUntil(
+                meta.sendReaction(from, messageId, '✅').catch(() => {})
+              );
+            } catch (_) { /* never fail main flow */ }
           }
 
           // ═══ AVISO FUERA DE HORARIO — DESACTIVADO ═══
@@ -1364,11 +1366,15 @@ export default {
               );
               if (nearestProp?.gps_link) {
                 await new Promise(r => setTimeout(r, 300));
-                await meta.sendCTAButton(from,
-                  `📍 ${nearest.name} es el más cercano a ti (~${nearest.distancia.toFixed(1)} km)`,
-                  'Ver ubicación 📍',
-                  nearestProp.gps_link
-                );
+                try {
+                  await meta.sendCTAButton(from,
+                    `📍 ${nearest.name} es el más cercano a ti (~${nearest.distancia.toFixed(1)} km)`,
+                    'Ver ubicación 📍',
+                    nearestProp.gps_link
+                  );
+                } catch (ctaErr: any) {
+                  console.error(`❌ CTA location falló: ${ctaErr.message?.slice(0, 200)}`);
+                }
               }
             } else {
               // Sin coordenadas válidas — fallback con precios dinámicos

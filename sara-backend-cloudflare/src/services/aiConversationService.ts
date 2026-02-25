@@ -68,6 +68,27 @@ export class AIConversationService {
   }
 
   /**
+   * Envía CTA button de forma segura — si falla, no interrumpe el flujo principal.
+   * Valida que la URL sea válida antes de enviar.
+   */
+  private async safeSendCTA(
+    to: string, bodyText: string, buttonText: string, url: string,
+    headerText?: string, footerText?: string
+  ): Promise<boolean> {
+    try {
+      if (!url || typeof url !== 'string' || url.trim().length < 5) {
+        console.warn(`⚠️ CTA skipped — URL inválida: "${url}"`);
+        return false;
+      }
+      await this.meta.sendCTAButton(to, bodyText, buttonText, url.trim(), headerText, footerText);
+      return true;
+    } catch (err: any) {
+      console.error(`❌ CTA falló (${buttonText}): ${err.message?.slice(0, 200)}`);
+      return false;
+    }
+  }
+
+  /**
    * Envía respuesta de texto y opcionalmente también como audio (TTS)
    * Se usa cuando el lead prefiere audio o envió un mensaje de audio
    */
@@ -5288,7 +5309,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             // GPS de oficinas centrales Grupo Santa Rita → CTA button
             const gpsOficinas = 'https://maps.app.goo.gl/hUk6aH8chKef6NRY7';
             await new Promise(r => setTimeout(r, 300));
-            await this.meta.sendCTAButton(from,
+            await this.safeSendCTA(from,
               '📍 Ubicación de *Oficinas Grupo Santa Rita*',
               'Ver ubicación 📍',
               gpsOficinas
@@ -5323,7 +5344,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   `${primerNombreGPS ? primerNombreGPS + ', recuerda' : 'Recuerda'} que tu cita es el *${cita.date}* a las *${cita.time}* 📅\n¡Ahí te esperamos! 🏠`
                 );
                 await new Promise(r => setTimeout(r, 300));
-                await this.meta.sendCTAButton(from,
+                await this.safeSendCTA(from,
                   `📍 Ubicación de *${devParaGPSSolo}*`,
                   'Ver ubicación 📍',
                   propGPSSolo.gps_link
@@ -5331,7 +5352,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                 console.log(`✅ GPS CTA enviado (SOLO) con recordatorio de cita: ${devParaGPSSolo}`);
                 await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS (CTA)', `${devParaGPSSolo} - con recordatorio de cita ${cita.date} ${cita.time}`);
               } else {
-                await this.meta.sendCTAButton(from,
+                await this.safeSendCTA(from,
                   `📍 Ubicación de *${devParaGPSSolo}*\n\n${primerNombreGPS ? primerNombreGPS + ', ¿te' : '¿Te'} gustaría agendar una visita? 🏠`,
                   'Ver ubicación 📍',
                   propGPSSolo.gps_link
@@ -5424,12 +5445,12 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   const gpsLabel = propiedadMatch.gps_link ? dev : 'Oficinas Grupo Santa Rita';
                   if (!propiedadMatch.gps_link) console.warn(`⚠️ GPS NULL para ${dev} — enviado GPS de oficinas como fallback`);
                   await new Promise(r => setTimeout(r, 300));
-                  await this.meta.sendCTAButton(from,
+                  const gpsOk = await this.safeSendCTA(from,
                     `📍 Ubicación de *${gpsLabel}*`,
                     'Ver ubicación 📍',
                     gpsLink
                   );
-                  recursosDesc.push('GPS');
+                  if (gpsOk) recursosDesc.push('GPS');
                 }
 
                 // Brochure HTML → CTA button (prioridad 2)
@@ -5441,13 +5462,15 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   if (esHTML) {
                     const cleanUrl = brochureUrl.replace(/\.html$/, '');
                     await new Promise(r => setTimeout(r, 300));
-                    await this.meta.sendCTAButton(from,
+                    const brochureOk = await this.safeSendCTA(from,
                       `📋 Brochure de *${dev}* — fotos, planos, precios y características`,
                       'Ver brochure 📋',
                       cleanUrl
                     );
-                    brochuresEnviados.push(brochureUrl);
-                    recursosDesc.push('brochure');
+                    if (brochureOk) {
+                      brochuresEnviados.push(brochureUrl);
+                      recursosDesc.push('brochure');
+                    }
                   } else {
                     brochurePDF = true;
                   }
@@ -5456,12 +5479,12 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                 // Video YouTube → CTA button (prioridad 3)
                 if (propiedadMatch.youtube_link) {
                   await new Promise(r => setTimeout(r, 300));
-                  await this.meta.sendCTAButton(from,
+                  const videoOk = await this.safeSendCTA(from,
                     `🎬 Video de *${dev}*`,
                     'Ver video 🎬',
                     propiedadMatch.youtube_link
                   );
-                  recursosDesc.push('video');
+                  if (videoOk) recursosDesc.push('video');
                 } else if (analysis.send_video_desarrollo === true) {
                   console.warn(`⚠️ Video prometido pero youtube_link NULL para ${dev}`);
                 }
@@ -5469,12 +5492,12 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                 // Matterport → CTA button (prioridad 4)
                 if (propiedadMatch.matterport_link && !pidioPlanos) {
                   await new Promise(r => setTimeout(r, 300));
-                  await this.meta.sendCTAButton(from,
+                  const matterOk = await this.safeSendCTA(from,
                     `🏠 Recorrido virtual 3D de *${dev}*`,
                     'Ver recorrido 3D 🏠',
                     propiedadMatch.matterport_link
                   );
-                  recursosDesc.push('recorrido 3D');
+                  if (matterOk) recursosDesc.push('recorrido 3D');
                 }
 
                 if (recursosDesc.length > 0) {
@@ -5484,7 +5507,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   // Fallback: desarrollo en DB pero SIN recursos — enviar brochure HTML como CTA
                   const brochureFallback = brochureUrl || `https://brochures-santarita.pages.dev/${dev.toLowerCase().replace(/\s+/g, '_')}`;
                   await new Promise(r => setTimeout(r, 300));
-                  await this.meta.sendCTAButton(from,
+                  await this.safeSendCTA(from,
                     `📋 Información de *${dev}* — fotos, planos y precios`,
                     'Ver brochure 📋',
                     brochureFallback
@@ -8323,7 +8346,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
         // GPS de oficinas centrales Grupo Santa Rita — CTA Button
         const gpsOficinas = 'https://maps.app.goo.gl/hUk6aH8chKef6NRY7';
         await new Promise(resolve => setTimeout(resolve, 300));
-        await this.meta.sendCTAButton(from, '📍 Ubicación de Oficinas Grupo Santa Rita', 'Ver ubicación 📍', gpsOficinas);
+        await this.safeSendCTA(from, '📍 Ubicación de Oficinas Grupo Santa Rita', 'Ver ubicación 📍', gpsOficinas);
         console.log(`✅ GPS CTA enviado (oficinas): ${gpsOficinas}`);
         await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS (CTA)', 'Oficinas Grupo Santa Rita');
       } else {
@@ -8338,7 +8361,7 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
 
           if (gpsUrl) {
             await new Promise(resolve => setTimeout(resolve, 300));
-            await this.meta.sendCTAButton(from, `📍 Ubicación de *${desarrolloParaGPS}*`, 'Ver ubicación 📍', gpsUrl);
+            await this.safeSendCTA(from, `📍 Ubicación de *${desarrolloParaGPS}*`, 'Ver ubicación 📍', gpsUrl);
             console.log(`✅ GPS CTA enviado (solo): ${desarrolloParaGPS} - ${gpsUrl}`);
             await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS (CTA)', desarrolloParaGPS);
           } else {
