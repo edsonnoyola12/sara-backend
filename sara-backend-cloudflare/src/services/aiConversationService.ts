@@ -1457,10 +1457,10 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
 - NO usar si ya preguntó por UN desarrollo específico (ej: "Monte Verde")
 - NO usar si ya se envió carousel en esta conversación
 
-📍 UBICACIÓN: Si el lead pregunta "cuál me queda más cerca", "cuál es el más cercano", o no sabe qué zona le conviene:
-→ send_location_request: true
-- NO usar si el lead ya dijo en qué zona/colonia vive
-- NO usar si ya pidió un desarrollo específico
+📍 UBICACIÓN: Si el lead pregunta "cuál me queda más cerca" o no sabe qué zona:
+→ send_location_request: false (SIEMPRE)
+→ Pregunta conversacionalmente: "¿En qué zona de Zacatecas vives o trabajas?"
+→ Según la zona, recomienda el desarrollo más cercano
 
 ⚠️ DETECCIÓN DE MÚLTIPLES INTENCIONES:
 - "intent" es la intención PRINCIPAL (la más importante)
@@ -5236,17 +5236,8 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         }
       }
 
-      // 5.6 LOCATION REQUEST: Enviar botón "Enviar ubicación" si Claude lo indicó
-      if (analysis.send_location_request) {
-        try {
-          await new Promise(r => setTimeout(r, 300));
-          await this.meta.sendLocationRequest(from, '📍 ¿Desde dónde nos visitas? Comparte tu ubicación y te digo cuál desarrollo te queda más cerca.');
-          console.log('📍 Location request button enviado');
-          await this.guardarAccionEnHistorial(lead.id, 'Envié solicitud de ubicación', '');
-        } catch (locReqErr) {
-          console.log('⚠️ Error enviando location request:', locReqErr);
-        }
-      }
+      // 5.6 LOCATION REQUEST: DESACTIVADO — SARA pregunta zona conversacionalmente
+      // El botón de ubicación no aporta valor porque todos los desarrollos están en Zacatecas/Guadalupe
 
       // 6. Si hay DESARROLLO → Enviar recursos (solo si se completó el flujo principal)
       // ✅ FIX 07-ENE-2026: Recursos se envían SIN requerir nombre
