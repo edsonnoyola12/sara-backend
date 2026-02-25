@@ -10606,5 +10606,107 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       }, null, 2));
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // Test Carousel Send
+    // Usage: /test-carousel?api_key=XXX&template=casas_economicas&phone=5610016226
+    // Options: template=casas_economicas|casas_premium|terrenos_nogal
+    //          action=status (just check status, no send)
+    // TEMPORARY - Remove after testing
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname === '/test-carousel' && request.method === 'GET') {
+      const templateName = url.searchParams.get('template') || 'casas_economicas';
+      const phone = url.searchParams.get('phone') || '5610016226';
+      const action = url.searchParams.get('action') || 'send';
+      const WABA_ID = '1227849769248437';
+
+      // Step 1: Check template status via Meta API
+      const statusResp = await fetch(
+        `https://graph.facebook.com/v22.0/${WABA_ID}/message_templates?name=${templateName}`,
+        { headers: { 'Authorization': `Bearer ${env.META_ACCESS_TOKEN}` } }
+      );
+      const statusData: any = await statusResp.json();
+
+      const templateInfo = statusData?.data?.[0];
+      const templateStatus = templateInfo?.status || 'NOT_FOUND';
+
+      if (action === 'status') {
+        return corsResponse(JSON.stringify({
+          template: templateName,
+          status: templateStatus,
+          id: templateInfo?.id,
+          components: templateInfo?.components,
+          raw: statusData
+        }, null, 2));
+      }
+
+      if (templateStatus !== 'APPROVED') {
+        return corsResponse(JSON.stringify({
+          error: `Template "${templateName}" status: ${templateStatus}. Must be APPROVED to send.`,
+          template: templateName,
+          status: templateStatus,
+          id: templateInfo?.id
+        }, null, 2));
+      }
+
+      // Step 2: Create meta service and build cards using properties from DB
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      const { data: properties } = await supabase.client
+        .from('properties')
+        .select('*');
+
+      const segmentMap: Record<string, 'economico' | 'premium' | 'terrenos'> = {
+        casas_economicas: 'economico',
+        casas_premium: 'premium',
+        terrenos_nogal: 'terrenos'
+      };
+      const segment = segmentMap[templateName];
+      if (!segment) {
+        return corsResponse(JSON.stringify({ error: `Unknown template: ${templateName}` }));
+      }
+
+      const { AIConversationService } = await import('../services/aiConversationService');
+      const cards = AIConversationService.buildCarouselCards(properties || [], segment);
+
+      if (cards.length === 0) {
+        return corsResponse(JSON.stringify({ error: 'No cards built (no matching properties in DB)' }));
+      }
+
+      // Step 3: Build body params (terrenos_nogal has no body params)
+      const bodyParams = segment === 'terrenos'
+        ? []
+        : [AIConversationService.precioMinDesarrollo(properties || [],
+            segment === 'economico' ? 'Monte Verde' : 'Los Encinos')];
+
+      // Step 4: Send carousel
+      try {
+        const result = await meta.sendCarouselTemplate(
+          phone,
+          templateName,
+          bodyParams,
+          cards,
+          'es_MX'
+        );
+
+        return corsResponse(JSON.stringify({
+          ok: true,
+          template: templateName,
+          status: templateStatus,
+          phone,
+          cards_sent: cards.length,
+          cards_detail: cards.map(c => ({ params: c.bodyParams, image: c.imageUrl.substring(0, 60) + '...' })),
+          body_params: bodyParams,
+          meta_response: result
+        }, null, 2));
+      } catch (error: any) {
+        return corsResponse(JSON.stringify({
+          ok: false,
+          template: templateName,
+          phone,
+          error: error.message,
+          cards_attempted: cards.length
+        }, null, 2));
+      }
+    }
+
     return null; // Not a test route
 }

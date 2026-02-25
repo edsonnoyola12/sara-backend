@@ -1289,7 +1289,7 @@ export class MetaWhatsAppService {
       quickReplyPayload: string;
       quickReplyPayload2?: string;
     }>,
-    languageCode: string = 'es'
+    languageCode: string = 'es_MX'
   ): Promise<any> {
     const phone = this.normalizePhone(to);
 

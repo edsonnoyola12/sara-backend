@@ -3291,9 +3291,17 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
       let precioTexto: string;
 
       if (isTerreno) {
-        const priceMin = devProps[0].price_min || devProps[0].price || 0;
-        const priceMax = devProps[0].price_max || priceMin;
-        precioTexto = `$${(priceMin / 1000).toFixed(0)}-$${(priceMax / 1000).toFixed(0)}/m²`;
+        // Compute per-m² price from total price / land_size
+        const prices = devProps.map((p: any) => {
+          const total = Number(p.price || 0);
+          const landSize = Number(p.land_size || 0);
+          return landSize > 0 ? Math.round(total / landSize) : total;
+        }).filter((v: number) => v > 0);
+        const priceMin = prices.length > 0 ? Math.min(...prices) : 0;
+        const priceMax = prices.length > 0 ? Math.max(...prices) : priceMin;
+        precioTexto = priceMin === priceMax
+          ? `$${priceMin.toLocaleString('es-MX')}/m²`
+          : `$${priceMin.toLocaleString('es-MX')}-$${priceMax.toLocaleString('es-MX')}/m²`;
       } else {
         const precios = devProps
           .map((p: any) => Number(p.price_equipped || p.price || 0))
@@ -5174,13 +5182,14 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               const templateName = AIConversationService.CAROUSEL_SEGMENTS[segment]?.template;
 
               if (cards.length > 0 && templateName) {
-                const bodyParam = segment === 'terrenos'
-                  ? 'Terrenos en Citadella del Nogal'
-                  : (segment === 'economico' ? AIConversationService.precioMinGlobal(properties) : '$3M+');
+                // terrenos_nogal template has no body params; casas templates have 1
+                const bodyParams = segment === 'terrenos'
+                  ? []
+                  : [segment === 'economico' ? AIConversationService.precioMinGlobal(properties) : '$3M+'];
 
                 await new Promise(r => setTimeout(r, 500));
                 try {
-                  await this.meta.sendCarouselTemplate(from, templateName, [bodyParam], cards);
+                  await this.meta.sendCarouselTemplate(from, templateName, bodyParams, cards);
                   console.log(`🎠 Carousel "${templateName}" enviado (${cards.length} cards)`);
                 } catch (carouselErr: any) {
                   // Template might not be approved yet — fallback silently
