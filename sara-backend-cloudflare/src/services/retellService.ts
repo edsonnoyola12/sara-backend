@@ -5,6 +5,25 @@
 // SARA puede llamar a leads para seguimiento, calificación o recordatorios
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Fetch with AbortController timeout — prevents Worker from hanging if Retell API is unresponsive.
+ */
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 15000): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error(`Retell API timeout after ${timeoutMs}ms: ${url.split('?')[0]}`);
+    }
+    throw err;
+  }
+}
+
 export interface CallContext {
   leadId: string;
   leadName: string;
@@ -124,7 +143,7 @@ export class RetellService {
     try {
       console.log(`📞 Retell: Iniciando llamada a ${toNumber} (lead: ${context.leadName})`);
 
-      const response = await fetch(`${this.baseUrl}/v2/create-phone-call`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/v2/create-phone-call`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
@@ -196,7 +215,7 @@ export class RetellService {
     }
 
     try {
-      const response = await fetch(`${this.baseUrl}/v2/get-call/${callId}`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/v2/get-call/${callId}`, {
         headers: {
           'Authorization': `Bearer ${this.apiKey}`
         }
@@ -240,7 +259,7 @@ export class RetellService {
     }
 
     try {
-      const response = await fetch(`${this.baseUrl}/v2/list-calls?limit=${limit}`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/v2/list-calls?limit=${limit}`, {
         headers: {
           'Authorization': `Bearer ${this.apiKey}`
         }
@@ -381,7 +400,7 @@ export class RetellService {
     }
 
     try {
-      const response = await fetch(`${this.baseUrl}/list-phone-numbers`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/list-phone-numbers`, {
         headers: { 'Authorization': `Bearer ${this.apiKey}` }
       });
 
@@ -406,7 +425,7 @@ export class RetellService {
 
     try {
       const encoded = encodeURIComponent(phoneNumber);
-      const response = await fetch(`${this.baseUrl}/get-phone-number/${encoded}`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/get-phone-number/${encoded}`, {
         headers: { 'Authorization': `Bearer ${this.apiKey}` }
       });
 
@@ -429,7 +448,7 @@ export class RetellService {
 
     try {
       const encoded = encodeURIComponent(phoneNumber);
-      const response = await fetch(`${this.baseUrl}/update-phone-number/${encoded}`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/update-phone-number/${encoded}`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
@@ -464,7 +483,7 @@ export class RetellService {
       return { success: false, error: 'RETELL_API_KEY no configurado' };
     }
     try {
-      const response = await fetch(`${this.baseUrl}/update-agent/${agentId}`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/update-agent/${agentId}`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
@@ -492,7 +511,7 @@ export class RetellService {
     if (!this.apiKey) return null;
     try {
       const id = agentId || this.agentId;
-      const response = await fetch(`${this.baseUrl}/get-agent/${id}`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/get-agent/${id}`, {
         headers: { 'Authorization': `Bearer ${this.apiKey}` }
       });
       if (!response.ok) {
@@ -512,7 +531,7 @@ export class RetellService {
   async getLlm(llmId: string): Promise<any> {
     if (!this.apiKey) return null;
     try {
-      const response = await fetch(`${this.baseUrl}/get-retell-llm/${llmId}`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/get-retell-llm/${llmId}`, {
         headers: { 'Authorization': `Bearer ${this.apiKey}` }
       });
       if (!response.ok) {
@@ -535,7 +554,7 @@ export class RetellService {
       return { success: false, error: 'RETELL_API_KEY no configurado' };
     }
     try {
-      const response = await fetch(`${this.baseUrl}/update-retell-llm/${llmId}`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/update-retell-llm/${llmId}`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
@@ -565,7 +584,7 @@ export class RetellService {
       return { success: false, error: 'RETELL_API_KEY no configurado' };
     }
     try {
-      const response = await fetch(`${this.baseUrl}/update-retell-llm/${llmId}`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/update-retell-llm/${llmId}`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,
@@ -592,7 +611,7 @@ export class RetellService {
   async getConcurrency(): Promise<any> {
     if (!this.apiKey) return null;
     try {
-      const response = await fetch(`${this.baseUrl}/get-concurrency`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/get-concurrency`, {
         headers: { 'Authorization': `Bearer ${this.apiKey}` }
       });
       if (!response.ok) return { error: `HTTP ${response.status}` };
@@ -609,7 +628,7 @@ export class RetellService {
     if (!this.apiKey) return { success: false, error: 'No API key' };
     try {
       const id = agentId || this.agentId;
-      const response = await fetch(`${this.baseUrl}/publish-agent/${id}`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/publish-agent/${id}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${this.apiKey}` }
       });
@@ -630,7 +649,7 @@ export class RetellService {
   async listVoices(): Promise<any[]> {
     if (!this.apiKey) return [];
     try {
-      const response = await fetch(`${this.baseUrl}/list-voices`, {
+      const response = await fetchWithTimeout(`${this.baseUrl}/list-voices`, {
         headers: { 'Authorization': `Bearer ${this.apiKey}` }
       });
       if (!response.ok) {

@@ -1185,12 +1185,11 @@ export class WhatsAppHandler {
 
         // Guardar mensaje en conversation_history
         try {
-          const { data: histLead } = await this.supabase.client
-            .from('leads').select('conversation_history').eq('id', lead.id).single();
-          const history = Array.isArray(histLead?.conversation_history) ? histLead.conversation_history : [];
-          history.push({ role: 'user', content: body, timestamp: new Date().toISOString() });
-          await this.supabase.client.from('leads').update({ conversation_history: history }).eq('id', lead.id);
-        } catch (_) {}
+          await this.supabase.client.rpc('append_to_conversation_history', {
+            p_lead_id: lead.id,
+            p_entries: JSON.stringify([{ role: 'user', content: body, timestamp: new Date().toISOString() }])
+          });
+        } catch (e) { console.error('Error appending to history:', e); }
 
         // Notificar vendedor asignado
         const assignedVendor = teamMembers?.find((tm: any) => tm.id === lead.assigned_to);
@@ -1201,7 +1200,7 @@ export class WhatsAppHandler {
               tipoMensaje: 'alerta_lead',
               pendingKey: 'pending_alerta_lead'
             });
-          } catch (_) {}
+          } catch (e) { console.error('Error notifying vendor:', e); }
         }
 
         return; // No enviar respuesta automática al lead
@@ -1220,17 +1219,17 @@ export class WhatsAppHandler {
         const fullName = lead.name;
         const nombre = fullName?.split(' ')[0];
         const fallbackMsg = `Hola${nombre && fullName !== 'Sin nombre' && fullName !== 'Cliente' ? ' ' + nombre : ''}, gracias por tu mensaje. Estoy teniendo un problema técnico. Un asesor te contactará en breve para ayudarte.`;
-        try { await this.meta.sendWhatsAppMessage(cleanPhone, fallbackMsg); } catch (_) {}
+        try { await this.meta.sendWhatsAppMessage(cleanPhone, fallbackMsg); } catch (e) { console.error('Error sending fallback to lead:', e); }
 
         // 2. Notify assigned vendor (24h-safe)
         const vendor = teamMembers?.find((tm: any) => tm.id === lead.assigned_to);
         if (vendor) {
           const vendorMsg = `⚠️ SARA tuvo problema técnico al responder a ${lead.name || 'lead'} (${cleanPhone}).\n\nMensaje: "${body.substring(0, 200)}"\n\nContactalo directamente.`;
-          try { await enviarMensajeTeamMember(this.supabase, this.meta, vendor, vendorMsg, { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }); } catch (_) {}
+          try { await enviarMensajeTeamMember(this.supabase, this.meta, vendor, vendorMsg, { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }); } catch (e) { console.error('Error notifying vendor of AI failure:', e); }
         }
 
         // 3. Log to error_logs
-        try { await logErrorToDB(this.supabase, 'ai_service_error', aiError?.message || 'AI failed', { severity: 'critical', source: 'whatsapp:leadMessage:AI', stack: aiError?.stack, context: { leadId: lead.id, phone: cleanPhone } }); } catch (_) {}
+        try { await logErrorToDB(this.supabase, 'ai_service_error', aiError?.message || 'AI failed', { severity: 'critical', source: 'whatsapp:leadMessage:AI', stack: aiError?.stack, context: { leadId: lead.id, phone: cleanPhone } }); } catch (e) { console.error('Error logging to DB:', e); }
 
         return;
       }
@@ -1318,8 +1317,8 @@ export class WhatsAppHandler {
 
     } catch (error: any) {
       console.error('❌ Error en handleIncomingMessage:', error?.message || error, error?.stack);
-      try { await logErrorToDB(this.supabase, 'lead_message_error', error?.message || 'Unknown error', { severity: 'critical', source: 'whatsapp:handleIncomingMessage', stack: error?.stack, context: { from, body: body?.substring(0, 200) } }); } catch (_) {}
-      try { await this.meta.sendWhatsAppMessage(from, 'Disculpa, tuve un problema técnico. ¿Puedes repetir tu mensaje? 🙏'); } catch (_) {}
+      try { await logErrorToDB(this.supabase, 'lead_message_error', error?.message || 'Unknown error', { severity: 'critical', source: 'whatsapp:handleIncomingMessage', stack: error?.stack, context: { from, body: body?.substring(0, 200) } }); } catch (e) { console.error('Error logging to DB:', e); }
+      try { await this.meta.sendWhatsAppMessage(from, 'Disculpa, tuve un problema técnico. ¿Puedes repetir tu mensaje? 🙏'); } catch (e) { console.error('Error sending error fallback to lead:', e); }
     }
   }
 

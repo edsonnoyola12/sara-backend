@@ -55,6 +55,7 @@ import {
 } from './crons/reports';
 
 // Utils
+import { isAllowedCrmOrigin, ALLOWED_CRM_ORIGINS } from './routes/cors';
 import { enviarMensajeTeamMember, EnviarMensajeTeamResult, isPendingExpired, getPendingMessages, verificarPendingParaLlamar, verificarDeliveryTeamMessages, CALL_CONFIG } from './utils/teamMessaging';
 import { parseFechaEspanol, detectarIntencionCita, getMexicoNow } from './handlers/dateParser';
 
@@ -218,35 +219,15 @@ export interface Env {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CORS: Dominios permitidos (whitelist)
+// CORS: Uses canonical whitelist from routes/cors.ts
 // ═══════════════════════════════════════════════════════════════════════════
-const ALLOWED_ORIGINS = [
-  'https://sara-crm.vercel.app',
-  'https://sara-crm-new.vercel.app',
-  'https://sara-crm.netlify.app',
-  'https://gruposantarita.com',
-  'https://www.gruposantarita.com',
-  'http://localhost:3000',
-  'http://localhost:5173',
-];
-
-// Función para verificar orígenes dinámicos de Vercel
-function isAllowedOrigin(origin: string | null): boolean {
-  if (!origin) return true; // Webhooks sin Origin
-  if (ALLOWED_ORIGINS.includes(origin)) return true;
-  // Permitir cualquier subdominio de vercel.app para el proyecto sara-crm
-  if (origin.match(/^https:\/\/sara-crm.*\.vercel\.app$/)) return true;
-  return false;
-}
-
 function getCorsOrigin(request: Request): string {
   const origin = request.headers.get('Origin');
-  // Validar contra whitelist
-  if (origin && isAllowedOrigin(origin)) {
+  if (origin && isAllowedCrmOrigin(origin)) {
     return origin;
   }
-  // Para webhooks de Meta/Facebook que no tienen Origin header
-  return ALLOWED_ORIGINS[0];
+  // Webhooks (Meta/Facebook) don't send Origin — return default
+  return ALLOWED_CRM_ORIGINS[0];
 }
 
 function corsResponse(body: string | null, status: number = 200, contentType: string = 'application/json', request?: Request): Response {

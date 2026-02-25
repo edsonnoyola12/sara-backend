@@ -5,6 +5,25 @@
 // Permite que SARA envíe notas de voz además de texto
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Fetch with AbortController timeout — prevents Worker from hanging if OpenAI TTS API is unresponsive.
+ */
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 15000): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error(`TTS API timeout after ${timeoutMs}ms`);
+    }
+    throw err;
+  }
+}
+
 export type TTSVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
 export type TTSModel = 'tts-1' | 'tts-1-hd';
 export type TTSFormat = 'mp3' | 'opus' | 'aac' | 'flac' | 'wav' | 'pcm';
@@ -78,7 +97,7 @@ export class TTSService {
     try {
       console.log(`🔊 TTS: Generando audio (${truncatedText.length} chars, voice=${voice}, format=${format})`);
 
-      const response = await fetch('https://api.openai.com/v1/audio/speech', {
+      const response = await fetchWithTimeout('https://api.openai.com/v1/audio/speech', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.openaiApiKey}`,

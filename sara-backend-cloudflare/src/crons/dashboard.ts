@@ -1083,7 +1083,7 @@ export async function backupSemanalR2(
       { fecha, tipo: 'conversations', file_key: convKey, row_count: convRows, size_bytes: convBytes },
       { fecha, tipo: 'leads', file_key: leadsKey, row_count: leadsRows, size_bytes: leadsBytes }
     ]);
-  } catch (_) { /* tabla puede no existir aún */ }
+  } catch (e) { console.error('Error inserting backup_log:', e); }
 
   // 4. Retención: borrar backups > 30 (los más viejos)
   try {
@@ -1095,12 +1095,12 @@ export async function backupSemanalR2(
     if (oldBackups && oldBackups.length > 60) { // 60 = 30 semanas × 2 tipos
       const toDelete = oldBackups.slice(0, oldBackups.length - 60);
       for (const old of toDelete) {
-        try { await r2.delete(old.file_key); } catch (_) {}
+        try { await r2.delete(old.file_key); } catch (e) { console.error('Error deleting old R2 file:', e); }
       }
       const idsToDelete = toDelete.map(o => o.id);
       await supabase.client.from('backup_log').delete().in('id', idsToDelete);
     }
-  } catch (_) { /* silent */ }
+  } catch (e) { console.error('Error in backup retention cleanup:', e); }
 
   console.log(`💾 R2 Backup completado: ${convRows} conversations (${Math.round(convBytes/1024)}KB), ${leadsRows} leads (${Math.round(leadsBytes/1024)}KB)`);
 
@@ -1118,7 +1118,8 @@ export async function getBackupLog(supabase: SupabaseService): Promise<any[]> {
       .order('fecha', { ascending: false })
       .limit(10); // 5 semanas × 2 tipos
     return data || [];
-  } catch (_) {
+  } catch (e) {
+    console.error('Error reading backup_log:', e);
     return [];
   }
 }

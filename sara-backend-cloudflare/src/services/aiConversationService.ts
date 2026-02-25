@@ -414,33 +414,23 @@ export class AIConversationService {
   async guardarAccionesEnHistorialBatch(leadId: string, acciones: Array<{accion: string, detalles?: string}>): Promise<void> {
     if (acciones.length === 0) return;
     try {
-      const { data: leadData } = await this.supabase.client
-        .from('leads')
-        .select('conversation_history')
-        .eq('id', leadId)
-        .single();
-
-      const historial = leadData?.conversation_history || [];
       const now = new Date().toISOString();
-
-      for (const { accion, detalles } of acciones) {
-        const mensajeAccion = detalles
+      const entries = acciones.map(({ accion, detalles }) => ({
+        role: 'assistant',
+        content: detalles
           ? `[ACCIÓN SARA: ${accion} - ${detalles}]`
-          : `[ACCIÓN SARA: ${accion}]`;
-        historial.push({
-          role: 'assistant',
-          content: mensajeAccion,
-          timestamp: now,
-          type: 'action'
-        });
-      }
+          : `[ACCIÓN SARA: ${accion}]`,
+        timestamp: now,
+        type: 'action'
+      }));
 
-      await this.supabase.client
-        .from('leads')
-        .update({ conversation_history: historial.slice(-30) })
-        .eq('id', leadId);
+      await this.supabase.client.rpc('append_to_conversation_history', {
+        p_lead_id: leadId,
+        p_entries: JSON.stringify(entries),
+        p_max_entries: 30
+      });
 
-      console.log(`📝 ${acciones.length} acciones guardadas en historial (batch)`);
+      console.log(`📝 ${acciones.length} acciones guardadas en historial (batch, atomic)`);
     } catch (e) {
       console.error('⚠️ Error guardando acciones en historial (batch):', e);
     }

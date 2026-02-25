@@ -137,7 +137,7 @@ export async function processRetryQueue(
             `❌ Error: ${errMsg.substring(0, 200)}\n` +
             `🔄 Intentos: ${newAttempts}/${entry.max_attempts}`
           );
-        } catch (_) { /* silent */ }
+        } catch (alertErr) { console.error('Error sending permanent failure alert:', alertErr); }
 
         console.error(`❌ Retry queue: permanent failure for ${entry.recipient_phone} after ${newAttempts} attempts`);
       } else {

@@ -242,16 +242,29 @@ export class MetaWhatsAppService {
   private async fetchWithRetry(url: string, options: RequestInit, context: string): Promise<Response> {
     return retry(
       async () => {
-        const response = await fetch(url, options);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        try {
+          const response = await fetch(url, { ...options, signal: controller.signal });
+          clearTimeout(timeoutId);
 
-        // Si es error 5xx o 429, lanzar para reintentar
-        if (response.status >= 500 || response.status === 429) {
-          const error = new Error(`Meta API Error: ${response.status} ${response.statusText}`);
-          (error as any).status = response.status;
-          throw error;
+          // Si es error 5xx o 429, lanzar para reintentar
+          if (response.status >= 500 || response.status === 429) {
+            const error = new Error(`Meta API Error: ${response.status} ${response.statusText}`);
+            (error as any).status = response.status;
+            throw error;
+          }
+
+          return response;
+        } catch (err: any) {
+          clearTimeout(timeoutId);
+          if (err.name === 'AbortError') {
+            const timeoutError = new Error(`Meta API timeout after 15s: ${context}`);
+            (timeoutError as any).status = 408;
+            throw timeoutError;
+          }
+          throw err;
         }
-
-        return response;
       },
       {
         ...RetryPresets.meta,
@@ -290,7 +303,7 @@ export class MetaWhatsAppService {
             context,
             errorMessage: retryError?.message || String(retryError)
           });
-        } catch (_) { /* silent */ }
+        } catch (cbErr) { console.error('failedMessageCallback error:', cbErr); }
       }
       throw retryError;
     }
@@ -458,7 +471,7 @@ export class MetaWhatsAppService {
             context: `sendMessage:${phone}`,
             errorMessage: retryError?.message || String(retryError)
           });
-        } catch (_) { /* silent */ }
+        } catch (cbErr) { console.error('failedMessageCallback error:', cbErr); }
       }
       throw retryError;
     }
@@ -1291,7 +1304,7 @@ export class MetaWhatsAppService {
             context: `sendTemplate:${templateName}:${phone}`,
             errorMessage: retryError?.message || String(retryError)
           });
-        } catch (_) { /* silent */ }
+        } catch (cbErr) { console.error('failedMessageCallback error:', cbErr); }
       }
       throw retryError;
     }
@@ -1431,7 +1444,7 @@ export class MetaWhatsAppService {
             context: `sendCarousel:${templateName}:${phone}`,
             errorMessage: retryError?.message || String(retryError)
           });
-        } catch (_) { /* silent */ }
+        } catch (cbErr) { console.error('failedMessageCallback error:', cbErr); }
       }
       throw retryError;
     }
