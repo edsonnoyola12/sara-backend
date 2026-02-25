@@ -135,6 +135,14 @@ export class LeadScoringService {
       details.push('Promovido a SCHEDULED por confirmar cita');
     }
 
+    // Promover NEW → CONTACTED cuando SARA responde a un lead (cualquier intent real)
+    if (currentStatus === 'new' && !statusChanged && intent &&
+        !['despedida', 'otro'].includes(intent)) {
+      effectiveStatus = 'contacted';
+      statusChanged = true;
+      details.push('Promovido a CONTACTED por respuesta SARA');
+    }
+
     // 2. Obtener rango de score para la etapa
     const range = SCORE_FUNNEL[effectiveStatus] || SCORE_FUNNEL['new'];
     const baseScore = range.min;

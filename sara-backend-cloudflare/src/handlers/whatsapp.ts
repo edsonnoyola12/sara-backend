@@ -306,6 +306,24 @@ export class WhatsAppHandler {
         }
       }
 
+      // ╔════════════════════════════════════════════════════════════════════════╗
+      // ║  CRÍTICO: ACTUALIZAR last_message_at + last_activity_at TEMPRANO      ║
+      // ║  Movido aquí para que TODOS los mensajes de leads se registren,       ║
+      // ║  incluso si el flujo hace early return (DNC, encuestas, etc.)         ║
+      // ╚════════════════════════════════════════════════════════════════════════╝
+      if (lead?.id) {
+        try {
+          const ahora = new Date().toISOString();
+          await this.supabase.client
+            .from('leads')
+            .update({ last_message_at: ahora, last_activity_at: ahora })
+            .eq('id', lead.id);
+          console.log(`✅ last_message_at actualizado temprano para lead ${lead.id}`);
+        } catch (e) {
+          console.error('⚠️ Error actualizando last_message_at:', e);
+        }
+      }
+
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // 🚫 VERIFICAR SI LEAD ESTÁ MARCADO COMO DO NOT CONTACT
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -317,10 +335,6 @@ export class WhatsAppHandler {
         }
       }
 
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-      // NOTA: last_activity_at se actualiza junto con last_message_at
-      // más abajo (~línea 1062) para ahorrar 1 subrequest
-      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // 🚨 DETECCIÓN DE "NO ME MOLESTES" (DNC - Do Not Contact)
@@ -933,20 +947,7 @@ export class WhatsAppHandler {
 
       const msgLower = body.toLowerCase();
 
-      // ╔════════════════════════════════════════════════════════════════════════╗
-      // ║  CRÍTICO: ACTUALIZAR last_message_at + last_activity_at EN 1 QUERY     ║
-      // ║  Esto es fundamental para detectar la ventana de 24h de WhatsApp       ║
-      // ╚════════════════════════════════════════════════════════════════════════╝
-      try {
-        const ahora = new Date().toISOString();
-        await this.supabase.client
-          .from('leads')
-          .update({ last_message_at: ahora, last_activity_at: ahora })
-          .eq('id', lead.id);
-        console.log(`✅ last_message_at + last_activity_at actualizado para lead ${lead.id}`);
-      } catch (e) {
-        console.error('⚠️ Error actualizando last_message_at:', e);
-      }
+      // NOTA: last_message_at ya se actualizó temprano (~línea 310)
 
       // ═══ SLA TRACKING: Registrar mensaje entrante de lead ═══
       if (lead.assigned_to && this.env?.SARA_CACHE) {
