@@ -1817,32 +1817,39 @@ CASOS ESPECIALES:
               console.log(`⚠️ call_logs no disponible, continuando...`);
             }
 
-            // Detectar desarrollo mencionado en el transcript (antes de if(lead) para que esté en scope)
+            // Detectar TODOS los desarrollos mencionados en el transcript (por SARA o el lead)
             // Transcript puede ser string ("Agent: ...\nUser: ...") o array ([{role, content}])
             let desarrolloDelTranscript = '';
+            let todosDesarrollosTranscript: string[] = [];
             const desarrollosConocidos = ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano'];
             if (call.transcript) {
-              let userMessages: string[] = [];
+              let allMessages: string[] = [];
               if (typeof call.transcript === 'string') {
                 const lines = call.transcript.split('\n');
                 for (const line of lines) {
-                  if (line.startsWith('User:')) {
-                    userMessages.push(line.substring(5).trim().toLowerCase());
-                  }
+                  // Check BOTH agent and user messages (SARA offers developments)
+                  const content = line.replace(/^(Agent|User):\s*/, '').trim().toLowerCase();
+                  if (content) allMessages.push(content);
                 }
               } else if (Array.isArray(call.transcript)) {
                 for (const entry of call.transcript) {
-                  if (entry.role === 'user') {
-                    userMessages.push(entry.content.toLowerCase());
+                  allMessages.push(entry.content.toLowerCase());
+                }
+              }
+              // Collect ALL unique developments mentioned in transcript
+              const encontrados = new Set<string>();
+              for (const msg of allMessages) {
+                for (const d of desarrollosConocidos) {
+                  if (msg.includes(d)) {
+                    encontrados.add(d.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' '));
                   }
                 }
               }
-              for (let i = userMessages.length - 1; i >= 0; i--) {
-                const encontrado = desarrollosConocidos.find(d => userMessages[i].includes(d));
-                if (encontrado) {
-                  desarrolloDelTranscript = encontrado.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                  break;
-                }
+              todosDesarrollosTranscript = Array.from(encontrados);
+              // Primary: last user-mentioned, or first from all
+              desarrolloDelTranscript = todosDesarrollosTranscript[0] || '';
+              if (todosDesarrollosTranscript.length > 0) {
+                console.log(`🏠 Desarrollos detectados en transcript: ${todosDesarrollosTranscript.join(', ')}`);
               }
             }
 
@@ -2280,54 +2287,72 @@ Reglas:
                   } else {
                     mensajeFollowUp += `Soy Sara de Grupo Santa Rita. Gracias por la llamada. `;
                   }
-                  if (desarrolloInteres) {
-                    mensajeFollowUp += `Me da gusto que te interese *${desarrolloInteres}*. `;
+                  // Use ALL developments from transcript, not just one
+                  const desarrollosMencionados = todosDesarrollosTranscript.length > 0
+                    ? todosDesarrollosTranscript
+                    : (desarrolloInteres ? [desarrolloInteres] : []);
+
+                  if (desarrollosMencionados.length > 1) {
+                    mensajeFollowUp += `Me da gusto que te interesen *${desarrollosMencionados.join('* y *')}*. `;
+                  } else if (desarrollosMencionados.length === 1) {
+                    mensajeFollowUp += `Me da gusto que te interese *${desarrollosMencionados[0]}*. `;
                   }
                   mensajeFollowUp += `\n\nTe comparto información por aquí para que la revises con calma. `;
                   mensajeFollowUp += `Si tienes cualquier duda, aquí estoy para ayudarte. 🏠`;
 
-                  debugLog.push({ t: Date.now(), step: 'sending_whatsapp', desarrollo: desarrolloInteres, ventana: 'abierta' });
+                  debugLog.push({ t: Date.now(), step: 'sending_whatsapp', desarrollos: desarrollosMencionados, ventana: 'abierta' });
                   await meta.sendWhatsAppMessage(leadPhone, mensajeFollowUp);
                   debugLog.push({ t: Date.now(), step: 'whatsapp_sent_ok' });
                   console.log(`📱 WhatsApp directo enviado a ${leadPhone}`);
 
-                  // Enviar recursos con CTA buttons (no texto plano)
+                  // Load all properties once for carousels + resources
                   await new Promise(resolve => setTimeout(resolve, 1500));
-                  if (desarrolloInteres) {
-                    const desarrolloNormalizado = desarrolloInteres.toLowerCase()
-                      .replace('priv.', 'privada').replace('priv ', 'privada ').trim();
+                  const { data: allProps } = await supabase.client
+                    .from('properties')
+                    .select('name, development, development_name, brochure_urls, gps_link, youtube_link, matterport_link, price, price_equipped, photo_url, price_min, price_max, bedrooms, area_m2, land_size');
 
-                    const { data: props } = await supabase.client
-                      .from('properties')
-                      .select('name, development, development_name, brochure_urls, gps_link, youtube_link, matterport_link, price, price_equipped, photo_url, price_min, price_max, bedrooms, area_m2, land_size')
-                      .or(`name.ilike.%${desarrolloNormalizado}%,development.ilike.%${desarrolloNormalizado}%`)
-                      .limit(5);
-
-                    if (props && props.length > 0) {
-                      await enviarRecursosCTARetell(meta, leadPhone, desarrolloInteres, props);
-                      console.log(`📋 Recursos CTA enviados para ${desarrolloInteres}`);
+                  if (allProps && allProps.length > 0) {
+                    // 1. ALWAYS send carousels for relevant segments
+                    const segmentosEnviados = new Set<string>();
+                    for (const dev of desarrollosMencionados) {
+                      const seg = getCarouselSegmentForDesarrollo(dev);
+                      if (seg && !segmentosEnviados.has(seg)) segmentosEnviados.add(seg);
                     }
-                  } else {
-                    // Sin desarrollo específico → enviar carousels
-                    const { data: allProps } = await supabase.client
-                      .from('properties')
-                      .select('name, development, development_name, price_equipped, price, price_min, price_max, bedrooms, area_m2, land_size, photo_url');
-                    if (allProps && allProps.length > 0) {
-                      for (const seg of ['economico', 'premium'] as const) {
-                        try {
-                          const cards = AIConversationService.buildCarouselCards(allProps, seg);
-                          const templateName = AIConversationService.CAROUSEL_SEGMENTS[seg]?.template;
-                          if (cards.length > 0 && templateName) {
-                            const bodyParams = seg === 'economico'
+                    // If no specific segments found, send both
+                    if (segmentosEnviados.size === 0) {
+                      segmentosEnviados.add('economico');
+                      segmentosEnviados.add('premium');
+                    }
+                    for (const seg of segmentosEnviados) {
+                      try {
+                        const cards = AIConversationService.buildCarouselCards(allProps, seg as any);
+                        const templateName = (AIConversationService.CAROUSEL_SEGMENTS as any)[seg]?.template;
+                        if (cards.length > 0 && templateName) {
+                          const bodyParams = seg === 'terrenos'
+                            ? []
+                            : seg === 'economico'
                               ? [AIConversationService.precioMinGlobal(allProps)]
                               : ['$3M+'];
-                            await meta.sendCarouselTemplate(leadPhone, templateName, bodyParams, cards);
-                            await new Promise(r => setTimeout(r, 500));
-                            console.log(`🎠 Carousel "${templateName}" post-call enviado`);
-                          }
-                        } catch (err: any) {
-                          console.log(`⚠️ Carousel post-call ${seg} falló:`, err?.message);
+                          await meta.sendCarouselTemplate(leadPhone, templateName, bodyParams, cards);
+                          await new Promise(r => setTimeout(r, 500));
+                          console.log(`🎠 Carousel "${templateName}" post-call enviado`);
                         }
+                      } catch (err: any) {
+                        console.log(`⚠️ Carousel post-call ${seg} falló:`, err?.message);
+                      }
+                    }
+
+                    // 2. Send CTA resources for EACH mentioned development
+                    for (const dev of desarrollosMencionados) {
+                      const devNorm = dev.toLowerCase().replace('priv.', 'privada').replace('priv ', 'privada ').trim();
+                      const devProps = allProps.filter((p: any) => {
+                        const pName = (p.development || p.development_name || p.name || '').toLowerCase();
+                        return pName.includes(devNorm) || devNorm.includes(pName);
+                      });
+                      if (devProps.length > 0) {
+                        await new Promise(r => setTimeout(r, 500));
+                        await enviarRecursosCTARetell(meta, leadPhone, dev, devProps);
+                        console.log(`📋 Recursos CTA enviados para ${dev}`);
                       }
                     }
                   }
