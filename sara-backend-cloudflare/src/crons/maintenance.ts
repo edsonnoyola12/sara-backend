@@ -8,6 +8,7 @@ import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { registrarMensajeAutomatico } from './followups';
 import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 import { logErrorToDB } from './healthCheck';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 
 // ═══════════════════════════════════════════════════════════
 // VERIFICAR BRIDGES POR EXPIRAR
@@ -42,11 +43,12 @@ export async function verificarBridgesPorExpirar(supabase: SupabaseService, meta
         const phoneLimpio = miembro.phone.replace(/\D/g, '');
         const leadName = bridge.lead_name || 'el lead';
 
-        // Mensaje al vendedor - incluir comando para extender
-        await meta.sendWhatsAppMessage(phoneLimpio,
+        // Mensaje al vendedor - incluir comando para extender (24h-safe)
+        await enviarMensajeTeamMember(supabase, meta, miembro,
           '⏰ Por terminar con ' + leadName + '\n\n' +
           '*#mas* = 6 min más\n' +
-          '*#cerrar* = terminar'
+          '*#cerrar* = terminar',
+          { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
         );
 
         // Mensaje al lead - simple, sin tecnicismos
@@ -147,8 +149,9 @@ export async function procesarFollowupsPendientes(supabase: SupabaseService, met
           .single();
 
         if (vendedor?.phone) {
-          await meta.sendWhatsAppMessage(vendedor.phone.replace(/\D/g, ''),
-            `✅ Follow-up enviado automáticamente a *${lead.name}*\n\n(No respondiste en 30 min)`
+          await enviarMensajeTeamMember(supabase, meta, vendedor,
+            `✅ Follow-up enviado automáticamente a *${lead.name}*\n\n(No respondiste en 30 min)`,
+            { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
           );
         }
 
@@ -261,15 +264,15 @@ export async function verificarLeadsEstancados(supabase: SupabaseService, meta: 
 
     if (!leads || leads.length === 0) continue;
 
-    const porVendedor: Record<string, any[]> = {};
+    const porVendedor: Record<string, { vendedor: any; leads: any[] }> = {};
     for (const lead of leads) {
       const vendedor = lead.team_members;
       if (!vendedor?.phone) continue;
-      if (!porVendedor[vendedor.phone]) porVendedor[vendedor.phone] = [];
-      porVendedor[vendedor.phone].push(lead);
+      if (!porVendedor[vendedor.phone]) porVendedor[vendedor.phone] = { vendedor, leads: [] };
+      porVendedor[vendedor.phone].leads.push(lead);
     }
 
-    for (const [phone, leadsVendedor] of Object.entries(porVendedor)) {
+    for (const [, { vendedor, leads: leadsVendedor }] of Object.entries(porVendedor)) {
       const mensaje = `⚠️ *ALERTA: ${leadsVendedor.length} lead(s) estancado(s)*\n\n` +
         leadsVendedor.slice(0, 5).map((l: any) =>
           `• ${l.name || 'Sin nombre'} - ${accionStatus[status]}`
@@ -277,7 +280,9 @@ export async function verificarLeadsEstancados(supabase: SupabaseService, meta: 
         (leadsVendedor.length > 5 ? `\n...y ${leadsVendedor.length - 5} más` : '') +
         `\n\n👆 Actualiza su status en el CRM`;
 
-      await meta.sendWhatsAppMessage(phone, mensaje);
+      await enviarMensajeTeamMember(supabase, meta, vendedor, mensaje, {
+        tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+      });
     }
   }
 }
@@ -455,7 +460,9 @@ Esperamos que sigas disfrutando tu casa y creando recuerdos increíbles. ¡Graci
       msg += `_Buen momento para pedir referidos 🎁_`;
 
       try {
-        await meta.sendWhatsAppMessage(vendedor.phone, msg);
+        await enviarMensajeTeamMember(supabase, meta, vendedor, msg, {
+          tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+        });
         console.log(`📤 Notificación de aniversarios enviada a ${vendedor.name}`);
       } catch (e) {
         console.log('Error notificando vendedor:', e);

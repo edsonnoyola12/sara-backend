@@ -1017,10 +1017,10 @@ export async function crearOActualizarMortgageApplication(
 }
 
 export function getMexicoNow(): Date {
+  // DST-aware: uses Intl API (UTC-6 winter, UTC-5 summer)
   const now = new Date();
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const mexicoOffset = -6 * 60 * 60000;
-  return new Date(utc + mexicoOffset);
+  const mexicoStr = now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' });
+  return new Date(mexicoStr);
 }
 
 export function parseFecha(fecha: string, hora: string): Date {

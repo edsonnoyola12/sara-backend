@@ -321,6 +321,14 @@ async function guardarMensajePending(
 
   if (pendingError) {
     console.error(`   ⚠️ Error guardando pending:`, pendingError);
+    try {
+      const { logErrorToDB } = await import('../crons/healthCheck');
+      await logErrorToDB(supabase, 'pending_message_save_failed', `Error guardando ${pendingKey} para team member ${teamMemberId}: ${pendingError.message || JSON.stringify(pendingError)}`, {
+        severity: 'error',
+        source: 'teamMessaging.guardarMensajePending',
+        context: { teamMemberId, pendingKey, tipoMensaje, dbError: pendingError.code || pendingError.message }
+      });
+    } catch (_) { /* best effort */ }
   } else {
     console.log(`   💾 Mensaje guardado como ${pendingKey} (expira en ${expirationHours}h)${wamid ? `, wamid: ${wamid.substring(0, 15)}...` : ''}`);
   }
@@ -395,9 +403,8 @@ export async function llamarTeamMemberConRetell(
 ): Promise<{ success: boolean; callId?: string; error?: string }> {
   const nombreCorto = teamMember.name?.split(' ')[0] || 'Hola';
 
-  // Verificar horario permitido (hora México = UTC-6)
-  const horaMexico = new Date().getUTCHours() - 6;
-  const horaAjustada = horaMexico < 0 ? horaMexico + 24 : horaMexico;
+  // Verificar horario permitido (DST-aware)
+  const horaAjustada = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getHours();
 
   if (horaAjustada < CALL_CONFIG.horasPermitidas.inicio || horaAjustada >= CALL_CONFIG.horasPermitidas.fin) {
     console.log(`   ⏰ Fuera de horario para llamar (${horaAjustada}h México)`);
@@ -577,8 +584,10 @@ export async function verificarPendingParaLlamar(
  * Verifica si es horario permitido para llamar
  */
 export function esHorarioParaLlamar(): boolean {
-  const horaMexico = new Date().getUTCHours() - 6;
-  const horaAjustada = horaMexico < 0 ? horaMexico + 24 : horaMexico;
+  // DST-aware: uses Intl API via getMexicoNow()
+  const now = new Date();
+  const mexicoStr = now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' });
+  const horaAjustada = new Date(mexicoStr).getHours();
   return horaAjustada >= CALL_CONFIG.horasPermitidas.inicio && horaAjustada < CALL_CONFIG.horasPermitidas.fin;
 }
 

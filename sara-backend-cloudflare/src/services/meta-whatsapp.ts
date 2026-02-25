@@ -270,6 +270,32 @@ export class MetaWhatsAppService {
     );
   }
 
+  /**
+   * Wrapper: fetchWithRetry + failedMessageCallback para retry queue.
+   * Usar en TODOS los métodos de envío de mensajes.
+   */
+  private async _fetchWithCallback(
+    url: string,
+    options: RequestInit,
+    context: string,
+    callbackInfo: { recipientPhone: string; messageType: string; payload: any }
+  ): Promise<Response> {
+    try {
+      return await this.fetchWithRetry(url, options, context);
+    } catch (retryError: any) {
+      if (this.failedMessageCallback) {
+        try {
+          await this.failedMessageCallback({
+            ...callbackInfo,
+            context,
+            errorMessage: retryError?.message || String(retryError)
+          });
+        } catch (_) { /* silent */ }
+      }
+      throw retryError;
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // 📤 ENVIAR MENSAJE DE WHATSAPP
   // ═══════════════════════════════════════════════════════════════════════════
@@ -537,13 +563,15 @@ export class MetaWhatsAppService {
     };
     if (caption) payload.image.caption = sanitizeUTF8(caption);
 
-    const response = await fetch(url, {
+    const response = await this._fetchWithCallback(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
+    }, `sendImage:${phone}`, {
+      recipientPhone: phone, messageType: 'image', payload: { url: imageUrl, caption }
     });
     const data = await response.json() as any;
 
@@ -575,13 +603,15 @@ export class MetaWhatsAppService {
     };
     if (caption) payload.video.caption = sanitizeUTF8(caption);
 
-    const response = await fetch(url, {
+    const response = await this._fetchWithCallback(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
+    }, `sendVideo:${phone}`, {
+      recipientPhone: phone, messageType: 'video', payload: { url: videoUrl, caption }
     });
     const data = await response.json() as any;
 
@@ -618,13 +648,15 @@ export class MetaWhatsAppService {
 
     console.log(`📄 Enviando documento ${filename} a ${phone}`);
 
-    const response = await fetch(url, {
+    const response = await this._fetchWithCallback(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
+    }, `sendDocument:${phone}`, {
+      recipientPhone: phone, messageType: 'document', payload: { url: documentUrl, filename }
     });
 
     const data = await response.json() as any;
@@ -664,13 +696,15 @@ export class MetaWhatsAppService {
 
     console.log(`📤 Enviando video por media_id ${mediaId} a ${phone}`);
 
-    const response = await fetch(url, {
+    const response = await this._fetchWithCallback(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
+    }, `sendVideoById:${phone}`, {
+      recipientPhone: phone, messageType: 'video', payload: { mediaId, caption }
     });
 
     const data = await response.json() as any;
@@ -787,13 +821,15 @@ export class MetaWhatsAppService {
 
     console.log(`🔊 Enviando audio por URL a ${phone}`);
 
-    const response = await fetch(url, {
+    const response = await this._fetchWithCallback(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
+    }, `sendAudio:${phone}`, {
+      recipientPhone: phone, messageType: 'audio', payload: { url: audioUrl }
     });
 
     const data = await response.json() as any;
@@ -835,13 +871,15 @@ export class MetaWhatsAppService {
 
     console.log(`🔊 Enviando audio por media_id ${mediaId} a ${phone}`);
 
-    const response = await fetch(url, {
+    const response = await this._fetchWithCallback(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
+    }, `sendAudioById:${phone}`, {
+      recipientPhone: phone, messageType: 'audio', payload: { mediaId }
     });
 
     const data = await response.json() as any;
@@ -922,13 +960,15 @@ export class MetaWhatsAppService {
 
     console.log(`📱 Enviando botones a ${phone}: ${buttons.map(b => b.title).join(', ')}`);
 
-    const response = await fetch(url, {
+    const response = await this._fetchWithCallback(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
+    }, `sendButtons:${phone}`, {
+      recipientPhone: phone, messageType: 'buttons', payload: { bodyText, buttons: buttons.map(b => b.title) }
     });
     const data = await response.json() as any;
 
@@ -999,13 +1039,15 @@ export class MetaWhatsAppService {
 
     console.log(`📋 Enviando lista a ${phone}: ${buttonText}`);
 
-    const response = await fetch(url, {
+    const response = await this._fetchWithCallback(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
+    }, `sendList:${phone}`, {
+      recipientPhone: phone, messageType: 'list', payload: { bodyText, buttonText }
     });
     const data = await response.json() as any;
 
@@ -1036,13 +1078,15 @@ export class MetaWhatsAppService {
       location: { latitude, longitude, name: name || '', address: address || '' }
     };
 
-    const response = await fetch(url, {
+    const response = await this._fetchWithCallback(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
+    }, `sendLocation:${phone}`, {
+      recipientPhone: phone, messageType: 'location', payload: { latitude, longitude, name }
     });
     const data = await response.json() as any;
 
@@ -1437,10 +1481,12 @@ export class MetaWhatsAppService {
       interactive
     };
 
-    const response = await fetch(`https://graph.facebook.com/v21.0/${this.phoneNumberId}/messages`, {
+    const response = await this._fetchWithCallback(`https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
+    }, `sendCTA:${phone}`, {
+      recipientPhone: phone, messageType: 'cta_button', payload: { bodyText, buttonText, url }
     });
 
     const data = await response.json() as any;
@@ -1472,7 +1518,7 @@ export class MetaWhatsAppService {
       reaction: { message_id: messageId, emoji }
     };
 
-    const response = await fetch(`https://graph.facebook.com/v21.0/${this.phoneNumberId}/messages`, {
+    const response = await fetch(`https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -1520,10 +1566,12 @@ export class MetaWhatsAppService {
       contacts: [contactPayload]
     };
 
-    const response = await fetch(`https://graph.facebook.com/v21.0/${this.phoneNumberId}/messages`, {
+    const response = await this._fetchWithCallback(`https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
+    }, `sendContactCard:${phone}`, {
+      recipientPhone: phone, messageType: 'contacts', payload: { contact }
     });
 
     const data = await response.json() as any;
@@ -1559,10 +1607,12 @@ export class MetaWhatsAppService {
       }
     };
 
-    const response = await fetch(`https://graph.facebook.com/v21.0/${this.phoneNumberId}/messages`, {
+    const response = await this._fetchWithCallback(`https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
+    }, `sendLocationRequest:${phone}`, {
+      recipientPhone: phone, messageType: 'location_request', payload: { bodyText }
     });
 
     const data = await response.json() as any;

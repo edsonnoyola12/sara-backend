@@ -16,12 +16,25 @@ export interface IntencionCita {
   textoOriginal?: string;
 }
 
-// Obtener fecha/hora actual en zona horaria de México (UTC-6)
+// Obtener fecha/hora actual en zona horaria de México (DST-aware)
+// Uses Intl API which automatically handles DST (UTC-6 winter, UTC-5 summer)
 export function getMexicoNow(): Date {
   const now = new Date();
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const mexicoOffset = -6 * 60 * 60000; // UTC-6
-  return new Date(utc + mexicoOffset);
+  const mexicoStr = now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' });
+  return new Date(mexicoStr);
+}
+
+// Obtener solo la hora actual en México (DST-aware)
+export function getMexicoHour(): number {
+  return getMexicoNow().getHours();
+}
+
+// Obtener offset UTC actual de México (6 en invierno, 5 en verano/DST)
+export function getMexicoUTCOffset(): number {
+  const now = new Date();
+  const mexicoStr = now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' });
+  const mexicoDate = new Date(mexicoStr);
+  return Math.round((now.getTime() - mexicoDate.getTime()) / (60 * 60 * 1000));
 }
 
 // Obtener el próximo día de la semana

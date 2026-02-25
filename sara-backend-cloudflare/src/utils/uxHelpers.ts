@@ -6,14 +6,11 @@
  */
 
 /**
- * Obtiene el saludo apropiado según la hora en México (UTC-6)
+ * Obtiene el saludo apropiado según la hora en México (DST-aware)
  */
 export function getSaludoPorHora(): string {
-  const now = new Date();
-  // Convertir a hora de México (UTC-6)
-  const mexicoOffset = -6;
-  const utcHour = now.getUTCHours();
-  const mexicoHour = (utcHour + mexicoOffset + 24) % 24;
+  // DST-aware: uses Intl API (UTC-6 winter, UTC-5 summer)
+  const mexicoHour = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getHours();
 
   if (mexicoHour >= 5 && mexicoHour < 12) {
     return '¡Buenos días';
@@ -28,10 +25,8 @@ export function getSaludoPorHora(): string {
  * Obtiene emoji según la hora del día
  */
 export function getEmojiPorHora(): string {
-  const now = new Date();
-  const mexicoOffset = -6;
-  const utcHour = now.getUTCHours();
-  const mexicoHour = (utcHour + mexicoOffset + 24) % 24;
+  // DST-aware
+  const mexicoHour = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' })).getHours();
 
   if (mexicoHour >= 5 && mexicoHour < 12) {
     return '☀️';

@@ -413,9 +413,10 @@ export async function detectarNoShows(supabase: SupabaseService, meta: MetaWhats
       const fechaHoraCita = new Date(hoyStr + 'T00:00:00Z'); // Forzar UTC
       fechaHoraCita.setUTCHours(horas || 12, minutos || 0, 0, 0);
 
-      // La hora de la cita está en tiempo México (UTC-6)
-      // Convertir a UTC sumando 6 horas
-      const fechaHoraCitaUTC = new Date(fechaHoraCita.getTime() + 6 * 60 * 60 * 1000);
+      // La hora de la cita está en tiempo México — convertir a UTC (DST-aware)
+      const mexicoNowForOffset = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+      const mexicoUTCOffset = Math.round((new Date().getTime() - mexicoNowForOffset.getTime()) / (60 * 60 * 1000));
+      const fechaHoraCitaUTC = new Date(fechaHoraCita.getTime() + mexicoUTCOffset * 60 * 60 * 1000);
 
       // Buffer de 1 HORA después de la hora de la cita para preguntar
       const tiempoParaPreguntar = new Date(fechaHoraCitaUTC.getTime() + 60 * 60 * 1000);

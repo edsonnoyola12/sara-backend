@@ -354,10 +354,13 @@ async function checkRateLimit(request: Request, env: Env, requestId: string, max
 // SEGURIDAD: Verificación de API Key para endpoints protegidos
 // ═══════════════════════════════════════════════════════════════════════════
 function checkApiAuth(request: Request, env: Env): Response | null {
-  // Si no hay API_SECRET configurado, permitir acceso (desarrollo local)
+  // Si no hay API_SECRET configurado, bloquear acceso (seguridad restrictiva)
   if (!env.API_SECRET) {
-    console.warn('⚠️ API_SECRET no configurado - endpoints desprotegidos');
-    return null;
+    console.error('🚨 API_SECRET no configurado - bloqueando endpoints protegidos');
+    return corsResponse(JSON.stringify({
+      error: 'Configuración de seguridad incompleta',
+      hint: 'API_SECRET no está configurado en el entorno'
+    }), 500);
   }
 
   const authHeader = request.headers.get('Authorization');

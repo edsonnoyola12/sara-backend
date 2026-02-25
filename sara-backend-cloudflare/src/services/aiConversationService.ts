@@ -3591,15 +3591,16 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             }).eq('id', citaActiva.id);
             console.log('✅ Cita cancelada en BD');
 
-            // Notificar al vendedor
+            // Notificar al vendedor (24h-safe)
             if (vendedorCita?.phone) {
-              await this.meta.sendWhatsAppMessage(vendedorCita.phone,
-                `❌ *CITA CANCELADA*\n\n` +
+              const cancelMsg = `❌ *CITA CANCELADA*\n\n` +
                 `👤 ${nombreCliente}\n` +
                 `📅 Era: ${fechaCita} a las ${horaCita}\n` +
                 `📍 ${lugarCita}\n\n` +
-                `_El cliente canceló por WhatsApp_`
-              );
+                `_El cliente canceló por WhatsApp_`;
+              await enviarMensajeTeamMember(this.supabase, this.meta, vendedorCita, cancelMsg, {
+                tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+              });
               console.log('📤 Vendedor notificado de cancelación:', vendedorCita.name);
             }
 
@@ -3852,7 +3853,9 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 ━━━━━━━━━━━━━━━━━━━━
 ⚠️ *TOMA NOTA DEL CAMBIO* ⚠️`;
                   }
-                  await this.meta.sendWhatsAppMessage(vendedorCita.phone, msgVendedor);
+                  await enviarMensajeTeamMember(this.supabase, this.meta, vendedorCita, msgVendedor, {
+                    tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+                  });
                   console.log('✅ Notificación de REAGENDAMIENTO enviada al vendedor');
                 }
 
@@ -4197,7 +4200,9 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             } else {
               notifVendedor = `💬 *${lead.name} respondió a la encuesta*\n📱 ${leadPhone}\n\nSu respuesta:\n"${originalMessage}"\n\n💡 Dale seguimiento según su comentario.`;
             }
-            await this.meta.sendWhatsAppMessage(vendedor.phone, notifVendedor);
+            await enviarMensajeTeamMember(this.supabase, this.meta, vendedor, notifVendedor, {
+              tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+            });
             console.log(`📤 Notificación enviada a vendedor ${vendedor.name}`);
           }
         }
@@ -4282,7 +4287,9 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 
 ¡Contáctalo pronto!`;
 
-              await this.meta.sendWhatsAppMessage(asesor.phone, msgAsesor);
+              await enviarMensajeTeamMember(this.supabase, this.meta, asesor, msgAsesor, {
+                tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+              });
               console.log('✅ Asesor notificado:', asesor.name);
 
               // Enviar info del asesor al cliente (delay reducido)
@@ -4939,10 +4946,9 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 
             // SOLO notificar si NO existe solicitud previa Y está activo
             if (!yaNotificado && asesor.phone && asesor.is_active !== false) {
-              await this.meta.sendWhatsAppMessage(
-                'whatsapp:+52' + asesor.phone.replace(/\D/g, '').slice(-10),
-                notifAsesor
-              );
+              await enviarMensajeTeamMember(this.supabase, this.meta, asesor, notifAsesor, {
+                tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+              });
               console.log('✅ Notificación enviada a asesor:', asesor.name);
             }
             
@@ -5923,15 +5929,16 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 
             if (vendedorAsignado?.phone) {
               const tempEmoji = temperatura === 'HOT' ? '🔥' : temperatura === 'WARM' ? '🟡' : '🔵';
-              await this.meta.sendWhatsAppMessage(vendedorAsignado.phone,
-                `🔥 *LEAD SE CALENTÓ*\n\n` +
+              const scoreMsg = `🔥 *LEAD SE CALENTÓ*\n\n` +
                 `👤 *${lead.name || 'Sin nombre'}*\n` +
                 `📊 Score: ${scoreAnterior} → ${nuevoScore} (+${scoreJump})\n` +
                 `🌡️ ${tempEmoji} ${temperatura}\n` +
                 `🏠 ${lead.property_interest || 'Sin desarrollo'}\n\n` +
                 `💡 Este lead mostró señales de interés fuerte.\n` +
-                `Responde *info ${lead.name?.split(' ')[0]}* para ver detalles.`
-              );
+                `Responde *info ${lead.name?.split(' ')[0]}* para ver detalles.`;
+              await enviarMensajeTeamMember(this.supabase, this.meta, vendedorAsignado, scoreMsg, {
+                tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+              });
               console.log(`🔥 ALERTA enviada a ${vendedorAsignado.name}: Lead ${lead.name} subió ${scoreJump} puntos`);
             }
           } catch (alertErr) {

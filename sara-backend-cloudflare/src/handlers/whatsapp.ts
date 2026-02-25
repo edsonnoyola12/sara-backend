@@ -422,12 +422,13 @@ export class WhatsAppHandler {
 
                 if (puedeNotificar) {
                   const scoreTemp = lead.lead_score >= 70 ? '🔥' : lead.lead_score >= 40 ? '🟡' : '🔵';
-                  await this.meta.sendWhatsAppMessage(vendedorAsignado.phone,
-                    `📲 *${lead.name || 'Lead'} respondió*\n\n` +
+                  const notifMsg = `📲 *${lead.name || 'Lead'} respondió*\n\n` +
                     `💬 "${trimmedBody.substring(0, 80)}${trimmedBody.length > 80 ? '...' : ''}"\n\n` +
                     `${scoreTemp} Score: ${lead.lead_score || 0} | 🏠 ${lead.property_interest || 'Sin desarrollo'}\n\n` +
-                    `💡 *bridge ${lead.name?.split(' ')[0] || 'lead'}* para chat directo`
-                  );
+                    `💡 *bridge ${lead.name?.split(' ')[0] || 'lead'}* para chat directo`;
+                  await enviarMensajeTeamMember(this.supabase, this.meta, vendedorAsignado, notifMsg, {
+                    tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+                  });
                   console.log(`📲 Notificación en tiempo real enviada a ${vendedorAsignado.name}`);
 
                   // Actualizar timestamp de última notificación

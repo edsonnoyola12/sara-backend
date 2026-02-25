@@ -1929,7 +1929,7 @@ CASOS ESPECIALES:
                 const callbackPrompt = `Analiza este transcript de una llamada telefónica y determina si el lead (User) pidió que le volvieran a llamar/marcar, agendar una cita, o cualquier tipo de seguimiento con fecha/hora.
 
 FECHA DE HOY: ${fechaHoy} (${diaSemanaHoy})
-HORA ACTUAL: ${horaActual} (zona horaria México Central, UTC-6)
+HORA ACTUAL: ${horaActual} (zona horaria México Central)
 
 TRANSCRIPT:
 ${transcriptText}
