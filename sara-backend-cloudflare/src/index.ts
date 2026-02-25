@@ -925,13 +925,6 @@ export default {
             if (dedupTmErr) console.error('❌ Dedup team_member write failed:', dedupTmErr.message);
             else console.log(`👤 [TEAM] Deduplicación OK para team_member ${teamMember.id}`);
           } else {
-            // ═══ REACTION ✅ al lead (fire-and-forget, antes de procesar) ═══
-            if (messageId) {
-              ctx.waitUntil(
-                meta.sendReaction(from, messageId, '✅').catch(() => {})
-              );
-            }
-
             // ═══ DEDUPLICACIÓN LEADS ═══
             const { data: recentMsg } = await supabase.client
               .from('leads')
@@ -976,6 +969,13 @@ export default {
           const meta = await createMetaWithTracking(env, supabase);
           const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
           const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
+
+          // ═══ REACTION ✅ al lead (fire-and-forget, después de crear meta) ═══
+          if (messageId && !teamMember) {
+            ctx.waitUntil(
+              meta.sendReaction(from, messageId, '✅').catch(() => {})
+            );
+          }
 
           // ═══ AVISO FUERA DE HORARIO — DESACTIVADO ═══
           // SARA responde 24/7 con IA. No enviamos "fuera de horario" a leads.
@@ -1366,7 +1366,7 @@ export default {
                 await new Promise(r => setTimeout(r, 300));
                 await meta.sendCTAButton(from,
                   `📍 ${nearest.name} es el más cercano a ti (~${nearest.distancia.toFixed(1)} km)`,
-                  'Ver ubicación en Google Maps 📍',
+                  'Ver ubicación 📍',
                   nearestProp.gps_link
                 );
               }
