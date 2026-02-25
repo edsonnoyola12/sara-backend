@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-24 (Sesión 64)
+> Última actualización: 2026-02-24 (Sesión 65)
 
 ---
 
@@ -6343,4 +6343,89 @@ Retorna: current voice_id, voice_model, lista de voces con provider, accent, age
 | CRM | https://sara-crm-new.vercel.app |
 | Videos | https://sara-videos.onrender.com |
 
-**Sistema 100% completo y operativo — Última verificación: 2026-02-24 (Sesión 64)**
+### 2026-02-24 (Sesión 65) - WhatsApp Carousel Templates por Segmento de Presupuesto
+
+**Sistema de carousels (tarjetas deslizables) para mostrar desarrollos organizados por presupuesto.**
+
+Cuando un lead pregunta por casas sin especificar un desarrollo, SARA envía tarjetas horizontales deslizables con foto, precio, recámaras y zona, con botones "Ver más" y "Agendar visita".
+
+#### 3 Templates por Segmento
+
+| Template | Segmento | Desarrollos | Cards |
+|----------|----------|-------------|-------|
+| `casas_economicas` | Económico (<$3M) | Monte Verde, Andes, Alpes | 3 |
+| `casas_premium` | Premium ($3M+) | Los Encinos, Miravalle, Paseo Colorines, Distrito Falco | 4 |
+| `terrenos_nogal` | Terrenos | Villa Campelo, Villa Galiano | 2 |
+
+#### Componentes Implementados
+
+| Componente | Archivo | Descripción |
+|------------|---------|-------------|
+| `sendCarouselTemplate()` | `meta-whatsapp.ts` | Envío de carousel via Meta API con rate limiting + tracking |
+| `buildCarouselCards()` | `aiConversationService.ts` | Construye cards dinámicos desde DB (precios, fotos, zonas) |
+| `FOTOS_DESARROLLO` | `aiConversationService.ts` | Fallback de fotos por desarrollo |
+| `CAROUSEL_SEGMENTS` | `aiConversationService.ts` | Config de segmentos (developments + template name) |
+| `send_carousel` en AIAnalysis | `aiConversationService.ts` | Claude decide: `"economico"`, `"premium"`, `"all"`, `"terrenos"`, o `null` |
+| Carousel en `executeAIDecision()` | `aiConversationService.ts` | Envío después de respuesta texto, con dedup (5 msgs cooldown) |
+| Handler `carousel_ver_*` / `carousel_cita_*` | `index.ts` | Intercepta quick reply → reescribe como texto natural para IA |
+
+#### Lógica de Activación
+
+```
+Lead pregunta por casas (sin desarrollo específico)
+├── Presupuesto < $3M o "económico" → send_carousel: "economico"
+├── Presupuesto $3M+ o "premium" → send_carousel: "premium"
+├── Sin presupuesto claro → send_carousel: "all" (ambos)
+├── Terrenos/lotes → send_carousel: "terrenos"
+└── Desarrollo específico → send_carousel: null (no carousel)
+```
+
+#### Handler de Quick Reply
+
+Cuando lead toca un botón del carousel:
+- `carousel_ver_monte_verde` → reescribe como `"Quiero ver información de Monte Verde"` → flujo de recursos
+- `carousel_cita_monte_verde` → reescribe como `"Quiero agendar una visita a Monte Verde"` → flujo de citas
+
+#### Dedup
+
+`notes.carousel_sent_at` trackea último envío. No reenvía hasta que el lead haya enviado 5+ mensajes después.
+
+#### Templates en Meta (PENDIENTE)
+
+Los 3 templates deben crearse manualmente en Meta Business Manager (aprobación ~24h). El código ya está listo.
+
+**Tests:** 692/692 pasando
+**Commit:** `159400f0`
+**Deploy:** Completado
+
+---
+
+**Estado final del sistema:**
+
+| Métrica | Valor |
+|---------|-------|
+| Tests | 692/692 ✅ |
+| Test files | 20 |
+| Servicios | 85+ |
+| Comandos verificados | 342/342 (4 roles) |
+| CRONs activos | 27+ |
+| Capas de resilience | 9 |
+| Templates WA aprobados | 3 (+3 carousel PENDIENTES aprobación Meta) |
+| Propiedades en catálogo | 32 |
+| Desarrollos | 9 (Monte Verde, Monte Real, Andes, Falco, Encinos, Miravalle, Colorines, Alpes, Citadella) |
+| **pending_auto_response types** | **16** |
+| **CRM UX/UI Rounds** | **8 completados** |
+| **Precios dinámicos** | **100% — 0 hardcoded (WhatsApp + Retell)** |
+| **Voz Retell** | **ElevenLabs LatAm Spanish** |
+| **Motivos Retell** | **12 context-aware prompts** |
+| **Carousel Templates** | **3 segmentos (economico, premium, terrenos)** |
+
+**URLs de producción:**
+
+| Servicio | URL |
+|----------|-----|
+| Backend | https://sara-backend.edson-633.workers.dev |
+| CRM | https://sara-crm-new.vercel.app |
+| Videos | https://sara-videos.onrender.com |
+
+**Sistema 100% completo y operativo — Última verificación: 2026-02-24 (Sesión 65)**
