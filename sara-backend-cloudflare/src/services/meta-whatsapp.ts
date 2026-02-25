@@ -1412,4 +1412,172 @@ export class MetaWhatsAppService {
 
     return data;
   }
+
+  // ═══ CTA URL BUTTON ═══
+  async sendCTAButton(to: string, bodyText: string, buttonText: string, url: string, headerText?: string, footerText?: string): Promise<any> {
+    const phone = this.normalizePhone(to);
+    if (!this.isTestPhoneAllowed(phone)) return { messages: [{ id: 'blocked' }] };
+
+    const interactive: any = {
+      type: 'cta_url',
+      body: { text: bodyText },
+      action: {
+        name: 'cta_url',
+        parameters: { display_text: buttonText, url }
+      }
+    };
+    if (headerText) interactive.header = { type: 'text', text: headerText };
+    if (footerText) interactive.footer = { text: footerText };
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'interactive',
+      interactive
+    };
+
+    const response = await fetch(`https://graph.facebook.com/v21.0/${this.phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json() as any;
+    if (!response.ok) {
+      console.error('❌ Error CTA button:', JSON.stringify(data));
+      throw new Error(data.error?.message || 'Error enviando CTA button');
+    }
+
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId, recipientPhone: phone, messageType: 'interactive',
+        categoria: 'cta_button', contenido: `${buttonText} → ${url.slice(0, 100)}`
+      });
+    }
+    return data;
+  }
+
+  // ═══ REACTION ═══
+  async sendReaction(to: string, messageId: string, emoji: string): Promise<any> {
+    const phone = this.normalizePhone(to);
+    if (!this.isTestPhoneAllowed(phone)) return {};
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'reaction',
+      reaction: { message_id: messageId, emoji }
+    };
+
+    const response = await fetch(`https://graph.facebook.com/v21.0/${this.phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json() as any;
+    if (!response.ok) {
+      console.error('❌ Error reaction:', JSON.stringify(data));
+    }
+    // No tracking for reactions (not a real message, just a visual indicator)
+    return data;
+  }
+
+  // ═══ CONTACT CARD (vCard) ═══
+  async sendContactCard(to: string, contact: { name: string; phone: string; company?: string; title?: string }): Promise<any> {
+    const phone = this.normalizePhone(to);
+    if (!this.isTestPhoneAllowed(phone)) return { messages: [{ id: 'blocked' }] };
+
+    const nameParts = contact.name.split(' ');
+    const firstName = nameParts[0] || contact.name;
+    const lastName = nameParts.slice(1).join(' ') || '';
+
+    const contactPhone = contact.phone.replace(/\D/g, '');
+    const formattedPhone = contactPhone.startsWith('+') ? contactPhone : `+${contactPhone.startsWith('52') ? '' : '52'}${contactPhone}`;
+
+    const contactPayload: any = {
+      name: {
+        formatted_name: contact.name,
+        first_name: firstName,
+        ...(lastName && { last_name: lastName })
+      },
+      phones: [{ phone: formattedPhone, type: 'WORK' }]
+    };
+    if (contact.company || contact.title) {
+      contactPayload.org = {};
+      if (contact.company) contactPayload.org.company = contact.company;
+      if (contact.title) contactPayload.org.title = contact.title;
+    }
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'contacts',
+      contacts: [contactPayload]
+    };
+
+    const response = await fetch(`https://graph.facebook.com/v21.0/${this.phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json() as any;
+    if (!response.ok) {
+      console.error('❌ Error contact card:', JSON.stringify(data));
+      throw new Error(data.error?.message || 'Error enviando contact card');
+    }
+
+    const msgId = data.messages?.[0]?.id;
+    if (msgId) {
+      await this.track({
+        messageId: msgId, recipientPhone: phone, messageType: 'contacts',
+        categoria: 'contacto_vendedor', contenido: contact.name
+      });
+    }
+    return data;
+  }
+
+  // ═══ LOCATION REQUEST ═══
+  async sendLocationRequest(to: string, bodyText: string): Promise<any> {
+    const phone = this.normalizePhone(to);
+    if (!this.isTestPhoneAllowed(phone)) return { messages: [{ id: 'blocked' }] };
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'interactive',
+      interactive: {
+        type: 'location_request_message',
+        body: { text: bodyText },
+        action: { name: 'send_location' }
+      }
+    };
+
+    const response = await fetch(`https://graph.facebook.com/v21.0/${this.phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json() as any;
+    if (!response.ok) {
+      console.error('❌ Error location request:', JSON.stringify(data));
+      throw new Error(data.error?.message || 'Error enviando location request');
+    }
+
+    const msgId = data.messages?.[0]?.id;
+    if (msgId) {
+      await this.track({
+        messageId: msgId, recipientPhone: phone, messageType: 'interactive',
+        categoria: 'solicitud_ubicacion', contenido: 'Location request button'
+      });
+    }
+    return data;
+  }
 }

@@ -5874,6 +5874,19 @@ export async function vendedorLlamar(ctx: HandlerContext, handler: any, from: st
 
     const mensaje = vendorService.formatLlamarLead(result, nombreLead);
     await ctx.twilio.sendWhatsAppMessage(from, mensaje);
+
+    // Enviar contact card del lead al vendedor (si encontró uno solo)
+    if (result.found && result.lead && !result.multiple && result.lead.phone && result.lead.name) {
+      try {
+        await ctx.meta.sendContactCard(from, {
+          name: result.lead.name,
+          phone: result.lead.phone,
+          company: 'Lead - Grupo Santa Rita'
+        });
+      } catch (ccErr) {
+        console.log('⚠️ Error enviando contact card del lead:', ccErr);
+      }
+    }
   } catch (e) {
     console.log('Error en llamar:', e);
     await ctx.twilio.sendWhatsAppMessage(from, 'Error al procesar llamada.');

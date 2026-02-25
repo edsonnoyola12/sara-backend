@@ -13,6 +13,7 @@ import { TwilioService } from './twilio';
 import { MetaWhatsAppService } from './meta-whatsapp';
 import { CalendarService } from './calendar';
 import { ClaudeService } from './claude';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { scoringService } from './leadScoring';
 import { PromocionesService } from './promocionesService';
 import { HORARIOS, parsearDesarrollosYModelos } from '../handlers/constants';
@@ -46,6 +47,7 @@ interface AIAnalysis {
   phaseNumber?: number;
   secondary_intents?: string[];
   send_carousel?: 'economico' | 'premium' | 'all' | 'terrenos';
+  send_location_request?: boolean;
 }
 
 // Handler reference para acceder a métodos auxiliares
@@ -1443,7 +1445,8 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
   "send_matterport": false,
   "send_contactos": false,
   "contactar_vendedor": false,
-  "send_carousel": null
+  "send_carousel": null,
+  "send_location_request": false
 }
 
 📋 CAROUSEL: Si el lead pregunta por opciones de casas SIN especificar un desarrollo concreto:
@@ -1453,6 +1456,11 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
 - Pregunta por terrenos/lotes → send_carousel: "terrenos"
 - NO usar si ya preguntó por UN desarrollo específico (ej: "Monte Verde")
 - NO usar si ya se envió carousel en esta conversación
+
+📍 UBICACIÓN: Si el lead pregunta "cuál me queda más cerca", "cuál es el más cercano", o no sabe qué zona le conviene:
+→ send_location_request: true
+- NO usar si el lead ya dijo en qué zona/colonia vive
+- NO usar si ya pidió un desarrollo específico
 
 ⚠️ DETECCIÓN DE MÚLTIPLES INTENCIONES:
 - "intent" es la intención PRINCIPAL (la más importante)
@@ -2504,7 +2512,8 @@ Por WhatsApp te atiendo 24/7 🙌
         detected_language: detectedLang,
         phase: phaseInfo.phase,
         phaseNumber: phaseInfo.phaseNumber,
-        send_carousel: parsed.send_carousel || null
+        send_carousel: parsed.send_carousel || null,
+        send_location_request: parsed.send_location_request || false
       };
       
     } catch (e) {
@@ -5035,7 +5044,8 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         } else {
           // Proceder con escalación
           try {
-            const vendedor = teamMembers.find((t: any) => t.role === 'vendedor' && t.active);
+            const vendedor = teamMembers.find((t: any) => t.role === 'vendedor' && t.active && t.id === lead.assigned_to)
+              || teamMembers.find((t: any) => t.role === 'vendedor' && t.active);
             if (vendedor?.phone) {
               const presupuesto = ingresoCliente > 0 ? ingresoCliente * 70 : 0;
               let notifVend = `🏠 *LEAD SOLICITA ATENCIÓN*\n\n👤 *${nombreCliente || 'Sin nombre'}*\n📱 ${lead.phone}`;
@@ -5045,11 +5055,27 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               if (esUrgente) notifVend += `\n\n🚨 *URGENTE - ${analysis.intent.toUpperCase()}*`;
               else notifVend += `\n\n⏰ Contactar pronto`;
 
-              await this.meta.sendWhatsAppMessage(
-                'whatsapp:+52' + vendedor.phone.replace(/\D/g, '').slice(-10),
-                notifVend
-              );
-              console.log('✅ Notificación enviada a vendedor:', vendedor.name);
+              // 24h-safe: usa enviarMensajeTeamMember en vez de raw send
+              await enviarMensajeTeamMember(this.supabase, this.meta, vendedor, notifVend, {
+                tipoMensaje: 'alerta_lead',
+                pendingKey: 'pending_alerta_lead'
+              });
+              console.log('✅ Notificación 24h-safe enviada a vendedor:', vendedor.name);
+
+              // Enviar contact card del vendedor al lead
+              if (vendedor.name) {
+                try {
+                  await this.meta.sendContactCard(from, {
+                    name: vendedor.name,
+                    phone: vendedor.phone,
+                    company: 'Grupo Santa Rita',
+                    title: 'Asesor(a) de Ventas'
+                  });
+                  console.log('📇 Contact card del vendedor enviado al lead');
+                } catch (ccErr) {
+                  console.log('⚠️ Error enviando contact card:', ccErr);
+                }
+              }
 
               // Marcar que se notificó para evitar spam
               await this.supabase.client
@@ -5210,6 +5236,18 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         }
       }
 
+      // 5.6 LOCATION REQUEST: Enviar botón "Enviar ubicación" si Claude lo indicó
+      if (analysis.send_location_request) {
+        try {
+          await new Promise(r => setTimeout(r, 300));
+          await this.meta.sendLocationRequest(from, '📍 ¿Desde dónde nos visitas? Comparte tu ubicación y te digo cuál desarrollo te queda más cerca.');
+          console.log('📍 Location request button enviado');
+          await this.guardarAccionEnHistorial(lead.id, 'Envié solicitud de ubicación', '');
+        } catch (locReqErr) {
+          console.log('⚠️ Error enviando location request:', locReqErr);
+        }
+      }
+
       // 6. Si hay DESARROLLO → Enviar recursos (solo si se completó el flujo principal)
       // ✅ FIX 07-ENE-2026: Recursos se envían SIN requerir nombre
       if (desarrolloInteres) {
@@ -5256,14 +5294,16 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             msgLowerGPS.includes('oficinas centrales');
 
           if (pideOficinasGPS) {
-            // GPS de oficinas centrales Grupo Santa Rita
+            // GPS de oficinas centrales Grupo Santa Rita → CTA button
             const gpsOficinas = 'https://maps.app.goo.gl/hUk6aH8chKef6NRY7';
-            await new Promise(r => setTimeout(r, 400));
-            await this.meta.sendWhatsAppMessage(from,
-              `📍 *Ubicación de Oficinas Grupo Santa Rita:*\n${gpsOficinas}\n\n_Ahí te lleva directo en Google Maps_`
+            await new Promise(r => setTimeout(r, 300));
+            await this.meta.sendCTAButton(from,
+              '📍 Ubicación de *Oficinas Grupo Santa Rita*',
+              'Abrir en Google Maps 📍',
+              gpsOficinas
             );
-            console.log(`✅ GPS enviado (oficinas): ${gpsOficinas}`);
-            await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', 'Oficinas Grupo Santa Rita');
+            console.log(`✅ GPS CTA enviado (oficinas): ${gpsOficinas}`);
+            await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS (CTA)', 'Oficinas Grupo Santa Rita');
           } else {
           const devParaGPSSolo = desarrolloInteres || analysis.extracted_data?.desarrollo || '';
           if (devParaGPSSolo) {
@@ -5283,25 +5323,30 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               const tieneCitaGPS = citaParaGPS && citaParaGPS.length > 0;
               const primerNombreGPS = nombreCliente ? nombreCliente.split(' ')[0] : '';
 
-              await new Promise(r => setTimeout(r, 400));
+              await new Promise(r => setTimeout(r, 300));
 
               if (tieneCitaGPS) {
                 const cita = citaParaGPS[0];
+                // Primero el mensaje con recordatorio de cita, luego el CTA
                 await this.meta.sendWhatsAppMessage(from,
-                  `📍 *Ubicación de ${devParaGPSSolo}:*\n${propGPSSolo.gps_link}\n\n` +
                   `${primerNombreGPS ? primerNombreGPS + ', recuerda' : 'Recuerda'} que tu cita es el *${cita.date}* a las *${cita.time}* 📅\n¡Ahí te esperamos! 🏠`
                 );
-                console.log(`✅ GPS enviado (SOLO) con recordatorio de cita: ${devParaGPSSolo}`);
-                // Guardar acción en historial para contexto
-                await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', `${devParaGPSSolo} - con recordatorio de cita ${cita.date} ${cita.time}`);
-              } else {
-                await this.meta.sendWhatsAppMessage(from,
-                  `📍 *Ubicación de ${devParaGPSSolo}:*\n${propGPSSolo.gps_link}\n\n` +
-                  `${primerNombreGPS ? primerNombreGPS + ', ¿te' : '¿Te'} gustaría agendar una visita? 🏠`
+                await new Promise(r => setTimeout(r, 300));
+                await this.meta.sendCTAButton(from,
+                  `📍 Ubicación de *${devParaGPSSolo}*`,
+                  'Abrir en Google Maps 📍',
+                  propGPSSolo.gps_link
                 );
-                console.log(`✅ GPS enviado (SOLO) con oferta de cita: ${devParaGPSSolo}`);
-                // Guardar acción en historial para contexto
-                await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', `${devParaGPSSolo} - pregunté si quiere agendar visita`);
+                console.log(`✅ GPS CTA enviado (SOLO) con recordatorio de cita: ${devParaGPSSolo}`);
+                await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS (CTA)', `${devParaGPSSolo} - con recordatorio de cita ${cita.date} ${cita.time}`);
+              } else {
+                await this.meta.sendCTAButton(from,
+                  `📍 Ubicación de *${devParaGPSSolo}*\n\n${primerNombreGPS ? primerNombreGPS + ', ¿te' : '¿Te'} gustaría agendar una visita? 🏠`,
+                  'Abrir en Google Maps 📍',
+                  propGPSSolo.gps_link
+                );
+                console.log(`✅ GPS CTA enviado (SOLO) con oferta de cita: ${devParaGPSSolo}`);
+                await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS (CTA)', `${devParaGPSSolo} - pregunté si quiere agendar visita`);
               }
             } else {
               console.error(`⚠️ ${devParaGPSSolo} no tiene gps_link en DB`);
@@ -5377,35 +5422,26 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               });
 
               if (propiedadMatch) {
-                // Collect ALL resource parts for this development in 1 message
-                const partes: string[] = [];
+                // ═══ CTA BUTTONS: Enviar recursos como botones interactivos ═══
                 const recursosDesc: string[] = [];
-
-                if (propiedadMatch.youtube_link) {
-                  partes.push(`🎬 *Video:* ${propiedadMatch.youtube_link}`);
-                  recursosDesc.push('video');
-                } else if (analysis.send_video_desarrollo === true) {
-                  console.warn(`⚠️ Video prometido pero youtube_link NULL para ${dev}`);
-                }
                 const msgLowerRes = (originalMessage || '').toLowerCase();
                 const pidioPlanos = msgLowerRes.includes('plano') || msgLowerRes.includes('planos');
-                if (propiedadMatch.matterport_link && !pidioPlanos) {
-                  partes.push(`🏠 *Recorrido 3D:* ${propiedadMatch.matterport_link}`);
-                  recursosDesc.push('recorrido 3D');
-                }
+
+                // GPS → CTA button (prioridad 1)
                 if (analysis.send_gps === true) {
-                  if (propiedadMatch.gps_link) {
-                    partes.push(`📍 *Ubicación:* ${propiedadMatch.gps_link}\n_Ahí te lleva directo en Google Maps_`);
-                    recursosDesc.push('GPS');
-                  } else {
-                    // RESOURCES NULL FIX: GPS prometido pero no existe en DB — fallback oficinas
-                    partes.push(`📍 *Ubicación:* https://maps.app.goo.gl/hUk6aH8chKef6NRY7\n_Oficinas Grupo Santa Rita — ahí te damos la ubicación exacta del desarrollo_`);
-                    recursosDesc.push('GPS (oficinas)');
-                    console.warn(`⚠️ GPS NULL para ${dev} — enviado GPS de oficinas como fallback`);
-                  }
+                  const gpsLink = propiedadMatch.gps_link || 'https://maps.app.goo.gl/hUk6aH8chKef6NRY7';
+                  const gpsLabel = propiedadMatch.gps_link ? dev : 'Oficinas Grupo Santa Rita';
+                  if (!propiedadMatch.gps_link) console.warn(`⚠️ GPS NULL para ${dev} — enviado GPS de oficinas como fallback`);
+                  await new Promise(r => setTimeout(r, 300));
+                  await this.meta.sendCTAButton(from,
+                    `📍 Ubicación de *${gpsLabel}*`,
+                    'Abrir en Google Maps 📍',
+                    gpsLink
+                  );
+                  recursosDesc.push('GPS');
                 }
 
-                // Brochure HTML link goes in the combined message (PDF sent separately)
+                // Brochure HTML → CTA button (prioridad 2)
                 const brochureRaw = propiedadMatch.brochure_urls;
                 const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
                 let brochurePDF = false;
@@ -5413,37 +5449,63 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   const esHTML = brochureUrl.includes('.html') || brochureUrl.includes('pages.dev');
                   if (esHTML) {
                     const cleanUrl = brochureUrl.replace(/\.html$/, '');
-                    partes.push(`📋 *Brochure:* ${cleanUrl}\n_Fotos, planos, precios y características_`);
+                    await new Promise(r => setTimeout(r, 300));
+                    await this.meta.sendCTAButton(from,
+                      `📋 Brochure de *${dev}* — fotos, planos, precios y características`,
+                      'Ver brochure 📋',
+                      cleanUrl
+                    );
                     brochuresEnviados.push(brochureUrl);
                     recursosDesc.push('brochure');
                   } else {
-                    brochurePDF = true; // Will send as separate document below
+                    brochurePDF = true;
                   }
                 }
 
-                // Send 1 combined message with all resources for this development
-                if (partes.length > 0) {
-                  await new Promise(r => setTimeout(r, 400));
-                  const intro = tieneNombre
-                    ? `*${primerNombre}*, aquí te comparto *${dev}*:`
-                    : `Aquí te comparto *${dev}*:`;
-                  await this.meta.sendWhatsAppMessage(from, `${intro}\n\n${partes.join('\n\n')}`);
-                  console.log(`✅ Recursos combinados enviados para ${dev}: ${recursosDesc.join(', ')}`);
-                  accionesHistorial.push({ accion: `Envié ${recursosDesc.join(', ')}`, detalles: dev });
-                } else if (!brochurePDF) {
-                  // Fallback: desarrollo en DB pero SIN video/matterport/GPS — enviar brochure HTML
-                  const brochureFallback = brochureUrl || `https://brochures-santarita.pages.dev/${dev.toLowerCase().replace(/\s+/g, '_')}`;
-                  await new Promise(r => setTimeout(r, 400));
-                  await this.meta.sendWhatsAppMessage(from,
-                    `📋 Aquí te comparto información de *${dev}*:\n${brochureFallback}\n\n_Fotos, planos y precios_`);
-                  console.log(`⚠️ ${dev} sin video/GPS — enviado brochure como fallback`);
-                  accionesHistorial.push({ accion: 'Envié brochure (sin video disponible)', detalles: dev });
+                // Video YouTube → CTA button (prioridad 3)
+                if (propiedadMatch.youtube_link) {
+                  await new Promise(r => setTimeout(r, 300));
+                  await this.meta.sendCTAButton(from,
+                    `🎬 Video de *${dev}*`,
+                    'Ver video 🎬',
+                    propiedadMatch.youtube_link
+                  );
+                  recursosDesc.push('video');
+                } else if (analysis.send_video_desarrollo === true) {
+                  console.warn(`⚠️ Video prometido pero youtube_link NULL para ${dev}`);
                 }
 
-                // PDF brochure must be sent as separate document
+                // Matterport → CTA button (prioridad 4)
+                if (propiedadMatch.matterport_link && !pidioPlanos) {
+                  await new Promise(r => setTimeout(r, 300));
+                  await this.meta.sendCTAButton(from,
+                    `🏠 Recorrido virtual 3D de *${dev}*`,
+                    'Ver recorrido 3D 🏠',
+                    propiedadMatch.matterport_link
+                  );
+                  recursosDesc.push('recorrido 3D');
+                }
+
+                if (recursosDesc.length > 0) {
+                  console.log(`✅ CTA buttons enviados para ${dev}: ${recursosDesc.join(', ')}`);
+                  accionesHistorial.push({ accion: `Envié ${recursosDesc.join(', ')} (CTA)`, detalles: dev });
+                } else if (!brochurePDF) {
+                  // Fallback: desarrollo en DB pero SIN recursos — enviar brochure HTML como CTA
+                  const brochureFallback = brochureUrl || `https://brochures-santarita.pages.dev/${dev.toLowerCase().replace(/\s+/g, '_')}`;
+                  await new Promise(r => setTimeout(r, 300));
+                  await this.meta.sendCTAButton(from,
+                    `📋 Información de *${dev}* — fotos, planos y precios`,
+                    'Ver brochure 📋',
+                    brochureFallback
+                  );
+                  console.log(`⚠️ ${dev} sin video/GPS — enviado brochure CTA como fallback`);
+                  accionesHistorial.push({ accion: 'Envié brochure CTA (sin video disponible)', detalles: dev });
+                }
+
+                // PDF brochure must be sent as separate document (no CTA, es descargable)
                 if (brochurePDF && brochureUrl) {
                   brochuresEnviados.push(brochureUrl);
-                  await new Promise(r => setTimeout(r, 400));
+                  await new Promise(r => setTimeout(r, 300));
                   try {
                     const filename = `Brochure_${dev.replace(/\s+/g, '_')}.pdf`;
                     await this.meta.sendWhatsAppDocument(from, brochureUrl, filename, `📋 Brochure ${dev} - Modelos, precios y características`);
@@ -8267,15 +8329,14 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
         msgLower.includes('oficinas centrales');
 
       if (pideOficinas) {
-        // GPS de oficinas centrales Grupo Santa Rita
+        // GPS de oficinas centrales Grupo Santa Rita — CTA Button
         const gpsOficinas = 'https://maps.app.goo.gl/hUk6aH8chKef6NRY7';
-        await new Promise(resolve => setTimeout(resolve, 400));
-        const msgGPS = `📍 *Ubicación de Oficinas Grupo Santa Rita:*\n${gpsOficinas}\n\n_Ahí te lleva directo en Google Maps_`;
-        await this.meta.sendWhatsAppMessage(from, msgGPS);
-        console.log(`✅ GPS enviado (oficinas): ${gpsOficinas}`);
-        await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', 'Oficinas Grupo Santa Rita');
+        await new Promise(resolve => setTimeout(resolve, 300));
+        await this.meta.sendCTAButton(from, '📍 Ubicación de Oficinas Grupo Santa Rita', 'Abrir en Google Maps 📍', gpsOficinas);
+        console.log(`✅ GPS CTA enviado (oficinas): ${gpsOficinas}`);
+        await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS (CTA)', 'Oficinas Grupo Santa Rita');
       } else {
-        // GPS de desarrollo
+        // GPS de desarrollo — CTA Button
         const desarrolloParaGPS = analysis.extracted_data?.desarrollo || desarrollo || todosDesarrollos[0] || lead.property_interest || '';
         if (desarrolloParaGPS) {
           const propConGPS = properties.find(p =>
@@ -8285,12 +8346,10 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
           const gpsUrl = propConGPS?.gps_link;
 
           if (gpsUrl) {
-            await new Promise(resolve => setTimeout(resolve, 400));
-            const msgGPS = `📍 *Ubicación de ${desarrolloParaGPS}:*\n${gpsUrl}\n\n_Ahí te lleva directo en Google Maps_`;
-            await this.meta.sendWhatsAppMessage(from, msgGPS);
-            console.log(`✅ GPS enviado (solo): ${desarrolloParaGPS} - ${gpsUrl}`);
-            // Guardar acción en historial
-            await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS', desarrolloParaGPS);
+            await new Promise(resolve => setTimeout(resolve, 300));
+            await this.meta.sendCTAButton(from, `📍 Ubicación de *${desarrolloParaGPS}*`, 'Abrir en Google Maps 📍', gpsUrl);
+            console.log(`✅ GPS CTA enviado (solo): ${desarrolloParaGPS} - ${gpsUrl}`);
+            await this.guardarAccionEnHistorial(lead.id, 'Envié ubicación GPS (CTA)', desarrolloParaGPS);
           } else {
             console.error(`⚠️ ${desarrolloParaGPS} NO tiene gps_link en DB`);
             // Enviar mensaje indicando que no tenemos GPS

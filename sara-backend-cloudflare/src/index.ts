@@ -925,6 +925,13 @@ export default {
             if (dedupTmErr) console.error('❌ Dedup team_member write failed:', dedupTmErr.message);
             else console.log(`👤 [TEAM] Deduplicación OK para team_member ${teamMember.id}`);
           } else {
+            // ═══ REACTION ✅ al lead (fire-and-forget, antes de procesar) ═══
+            if (messageId) {
+              ctx.waitUntil(
+                meta.sendReaction(from, messageId, '✅').catch(() => {})
+              );
+            }
+
             // ═══ DEDUPLICACIÓN LEADS ═══
             const { data: recentMsg } = await supabase.client
               .from('leads')
@@ -1307,8 +1314,70 @@ export default {
               console.error('Error guardando ubicación:', locErr);
             }
 
-            await meta.sendWhatsAppMessage(from,
-              `📍 ¡Gracias por tu ubicación!\n\nNuestros desarrollos están en *Zacatecas, México*:\n\n🏘️ *Monte Verde* - Desde $1.6M\n🏘️ *Los Encinos* - Desde $3.0M\n🏘️ *Miravalle* - Desde $3.0M\n🏘️ *Distrito Falco* - Desde $3.7M\n\n¿Cuál te gustaría conocer?`);
+            // ═══ HAVERSINE: Calcular distancia a cada desarrollo ═══
+            const GPS_DESARROLLOS: Array<{ name: string; lat: number; lon: number; zona: string }> = [
+              { name: 'Monte Verde', lat: 22.7685, lon: -102.5557, zona: 'Colinas del Padre' },
+              { name: 'Los Encinos', lat: 22.7690, lon: -102.5560, zona: 'Colinas del Padre' },
+              { name: 'Miravalle', lat: 22.7695, lon: -102.5555, zona: 'Colinas del Padre' },
+              { name: 'Paseo Colorines', lat: 22.7680, lon: -102.5550, zona: 'Colinas del Padre' },
+              { name: 'Andes', lat: 22.7650, lon: -102.5100, zona: 'Guadalupe' },
+              { name: 'Distrito Falco', lat: 22.7700, lon: -102.5200, zona: 'Guadalupe' },
+              { name: 'Villa Campelo', lat: 22.7600, lon: -102.5150, zona: 'Citadella del Nogal' },
+              { name: 'Villa Galiano', lat: 22.7605, lon: -102.5155, zona: 'Citadella del Nogal' },
+            ];
+
+            if (lat && lon) {
+              // Haversine formula
+              const toRad = (deg: number) => deg * Math.PI / 180;
+              const haversine = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+                const R = 6371; // km
+                const dLat = toRad(lat2 - lat1);
+                const dLon = toRad(lon2 - lon1);
+                const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+                return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+              };
+
+              const distancias = GPS_DESARROLLOS.map(d => ({
+                ...d,
+                distancia: haversine(lat, lon, d.lat, d.lon)
+              })).sort((a, b) => a.distancia - b.distancia);
+
+              // Top 3 más cercanos con precios dinámicos
+              const { data: locProps } = await supabase.client.from('properties').select('development_name, name, price_equipped, price, gps_link').limit(50);
+              const allProps = locProps || [];
+              const top3 = distancias.slice(0, 3);
+
+              let respuesta = `📍 ¡Gracias por tu ubicación! Los desarrollos más cercanos a ti son:\n`;
+              for (const dev of top3) {
+                const distKm = dev.distancia.toFixed(1);
+                const precio = AIConversationService.precioMinDesarrollo(allProps, dev.name);
+                respuesta += `\n🏘️ *${dev.name}* (${dev.zona})\n   📏 ~${distKm} km — Desde ${precio}\n`;
+              }
+              respuesta += `\n¿Cuál te gustaría visitar?`;
+
+              await meta.sendWhatsAppMessage(from, respuesta);
+
+              // CTA button del más cercano (si tiene GPS link)
+              const nearest = top3[0];
+              const nearestProp = allProps.find(p =>
+                (p.development_name || '').toLowerCase().includes(nearest.name.toLowerCase()) && p.gps_link
+              );
+              if (nearestProp?.gps_link) {
+                await new Promise(r => setTimeout(r, 300));
+                await meta.sendCTAButton(from,
+                  `📍 ${nearest.name} es el más cercano a ti (~${nearest.distancia.toFixed(1)} km)`,
+                  'Ver ubicación en Google Maps 📍',
+                  nearestProp.gps_link
+                );
+              }
+            } else {
+              // Sin coordenadas válidas — fallback con precios dinámicos
+              const { data: fallbackProps } = await supabase.client.from('properties').select('development_name, name, price_equipped, price').limit(50);
+              const fbProps = fallbackProps || [];
+              const listaDesarrollos = AIConversationService.listaBulletDesarrollos(fbProps);
+              await meta.sendWhatsAppMessage(from,
+                `📍 ¡Gracias por tu ubicación!\n\nNuestros desarrollos en *Zacatecas*:\n\n${listaDesarrollos}\n\n¿Cuál te gustaría conocer?`);
+            }
             return new Response('OK', { status: 200 });
           }
           // ═══ FIN MANEJO DE UBICACIÓN ═══
