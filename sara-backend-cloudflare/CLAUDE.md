@@ -6495,49 +6495,39 @@ async sendContactCard(to: string, contact: { name: string; phone: string; compan
 
 **Bonus fix:** `contactar_vendedor` usaba raw `sendWhatsAppMessage` → cambiado a `enviarMensajeTeamMember()` (24h-safe). También mejoró lookup de vendedor para priorizar `lead.assigned_to`.
 
-#### Feature 4: Location Request + Haversine Distance
+#### Feature 4: Location Request — REMOVIDA
 
-**Nuevo método en `meta-whatsapp.ts`:**
-```typescript
-async sendLocationRequest(to: string, bodyText: string): Promise<any>
-```
+**Método `sendLocationRequest()` existe en `meta-whatsapp.ts`** pero NO se usa. Se evaluó en producción y no aporta valor:
+- Todos los desarrollos están en Zacatecas/Guadalupe
+- Si el lead está en CDMX, las distancias (600+ km) no sirven
+- Rompe el flujo conversacional de venta
+- SARA ahora pregunta "¿En qué zona de Zacatecas vives?" y recomienda según la respuesta
 
-**Nuevo flag en AI analysis:** `send_location_request?: boolean`
+**Handler de ubicación voluntaria** sigue activo en `index.ts` (líneas 1291-1382): si un lead comparte su ubicación por su cuenta, SARA calcula distancias con Haversine y responde con top 3 más cercanos. Pero SARA ya NO pide la ubicación activamente.
 
-**Trigger:** Cuando lead pregunta "cuál me queda más cerca" o no sabe qué zona le conviene.
+#### 5 Bugs corregidos en producción
 
-**Handler de respuesta de ubicación mejorado** en `index.ts`:
-- GPS coordinates para 8 desarrollos (Haversine formula)
-- Calcula distancia a cada desarrollo
-- Muestra top 3 más cercanos con precios dinámicos (`precioMinDesarrollo()`)
-- Envía CTA button del GPS del más cercano
-- Fallback sin coordenadas usa `listaBulletDesarrollos()` para precios dinámicos
-
-**Coordenadas GPS de desarrollos:**
-
-| Desarrollo | Zona | Lat/Lon |
-|------------|------|---------|
-| Monte Verde | Colinas del Padre | 22.7685, -102.5557 |
-| Los Encinos | Colinas del Padre | 22.7690, -102.5560 |
-| Miravalle | Colinas del Padre | 22.7695, -102.5555 |
-| Paseo Colorines | Colinas del Padre | 22.7680, -102.5550 |
-| Andes | Guadalupe (Siglo XXI) | 22.7650, -102.5100 |
-| Distrito Falco | Guadalupe (Solidaridad) | 22.7700, -102.5200 |
-| Villa Campelo | Citadella del Nogal | 22.7600, -102.5150 |
-| Villa Galiano | Citadella del Nogal | 22.7605, -102.5155 |
+| Bug | Causa | Fix | Commit |
+|-----|-------|-----|--------|
+| `this.isTestPhoneAllowed is not a function` | Standalone function llamada con `this.` | Quitar `this.` en 4 métodos de `meta-whatsapp.ts` | `e1ae075a` |
+| `vendorService.detectCommand is not a function` | Método incorrecto en CEO fallback | `detectCommand` → `detectRouteCommand` en `whatsapp-ceo.ts` | `e1ae075a` |
+| Meta `#131009 Parameter value is not valid` | CTA `display_text` > 20 chars | Acortar a ≤20 chars en `aiConversationService.ts` | `e1ae075a` |
+| `Cannot access 'meta' before initialization` | `sendReaction()` antes de declarar `meta` (TDZ) | Mover reaction después de crear `meta` en `index.ts` | `922aa0dc` |
+| Location request no aporta valor | GPS rompe flujo de venta | Desactivar, SARA pregunta zona conversacionalmente | `1b248098` |
 
 #### Archivos modificados
 
-| Archivo | Cambio | Líneas |
-|---------|--------|--------|
-| `src/services/meta-whatsapp.ts` | 4 nuevos métodos (CTA, Reaction, Contact Card, Location Request) | +168 |
-| `src/index.ts` | Reaction post-dedup + location handler con Haversine + precios dinámicos | +73 |
-| `src/services/aiConversationService.ts` | CTA buttons en resources + contact card en handoff + `send_location_request` flag + fix raw send → 24h-safe | +219/-82 |
-| `src/handlers/whatsapp-vendor.ts` | Contact card del lead en comando `llamar` | +13 |
+| Archivo | Cambio |
+|---------|--------|
+| `src/services/meta-whatsapp.ts` | 4 nuevos métodos (CTA, Reaction, Contact Card, Location Request) + fix `isTestPhoneAllowed` |
+| `src/index.ts` | Reaction después de meta init + location handler Haversine (voluntario) |
+| `src/services/aiConversationService.ts` | CTA buttons en resources + contact card en handoff + location request desactivado + fix raw send → 24h-safe |
+| `src/handlers/whatsapp-vendor.ts` | Contact card del lead en comando `llamar` |
+| `src/handlers/whatsapp-ceo.ts` | Fix `detectRouteCommand` en CEO vendor fallback |
 
 **Tests:** 692/692 pasando
-**Commit:** `c486f3fb`
-**Deploy:** Version ID `e55b6340`
+**Commits:** `c486f3fb`, `e1ae075a`, `922aa0dc`, `1b248098`
+**Deploy:** Version ID `89423877`
 
 ---
 
@@ -6560,7 +6550,7 @@ async sendLocationRequest(to: string, bodyText: string): Promise<any>
 | **Voz Retell** | **ElevenLabs LatAm Spanish** |
 | **Motivos Retell** | **12 context-aware prompts** |
 | **Carousel Templates** | **3 segmentos (economico, premium, terrenos)** |
-| **WhatsApp UX Features** | **CTA buttons, reactions, contact cards, location request** |
+| **WhatsApp UX Features** | **3 activas: CTA buttons, reactions, contact cards** |
 
 **URLs de producción:**
 
