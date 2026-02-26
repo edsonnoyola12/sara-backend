@@ -1010,6 +1010,15 @@ CASOS ESPECIALES:
         });
 
         if (result.success) {
+          // 0. Save KV flag so call_analyzed skips Claude callback analysis (prevents duplicate appointments)
+          const callIdForFlag = callObj.call_id || body.call_id || '';
+          if (callIdForFlag && env.SARA_CACHE) {
+            try {
+              await env.SARA_CACHE.put(`retell_cita_created:${callIdForFlag}`, '1', { expirationTtl: 3600 });
+              console.log(`🔒 KV flag retell_cita_created:${callIdForFlag} saved — will skip Claude callback`);
+            } catch (_) { /* ignore KV errors */ }
+          }
+
           // 1. Actualizar nombre del lead si dio uno real
           const nombreReal = nombre && nombre !== 'Lead Telefónico' && nombre !== 'Lead' ? nombre : '';
           if (nombreReal) {
@@ -1349,15 +1358,20 @@ CASOS ESPECIALES:
         console.log(`🔧 RETELL TOOL enviar-whatsapp: tipo=${tipo}, desarrollo=${desarrollo} — DEFERRED to call_analyzed`);
 
         // Guardar en KV qué se pidió para que call_analyzed lo envíe
+        // VALIDAR contra desarrollos conocidos para evitar "Zacatecas" u otros no-desarrollos
         const callObj = body.call || {};
         const callId = callObj.call_id || body.call_id || '';
-        if (callId && env.SARA_CACHE) {
+        const desarrollosValidos = ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano', 'monte real', 'alpes'];
+        const esDesarrolloValido = desarrollo && desarrollosValidos.some(d => desarrollo.toLowerCase().includes(d) || d.includes(desarrollo.toLowerCase()));
+        if (callId && env.SARA_CACHE && esDesarrolloValido) {
           const existingRaw = await env.SARA_CACHE.get(`retell_send_queue:${callId}`);
           const existing: string[] = existingRaw ? JSON.parse(existingRaw) : [];
-          if (desarrollo && !existing.includes(desarrollo)) {
+          if (!existing.includes(desarrollo)) {
             existing.push(desarrollo);
             await env.SARA_CACHE.put(`retell_send_queue:${callId}`, JSON.stringify(existing), { expirationTtl: 3600 });
           }
+        } else if (desarrollo && !esDesarrolloValido) {
+          console.log(`⚠️ enviar-whatsapp: "${desarrollo}" no es un desarrollo conocido, no se agrega a KV queue`);
         }
 
         const devLabel = desarrollo ? ` de ${desarrollo}` : '';
@@ -1829,7 +1843,21 @@ CASOS ESPECIALES:
             // ═══════════════════════════════════════════════════════════════
             // Solo analizar con Claude si la llamada duró >30s (skip spam/wrong number/quick hang-ups)
             const durationSeconds = call.duration_ms ? Math.round(call.duration_ms / 1000) : 0;
-            if (event === 'call_analyzed' && lead && call.transcript && durationSeconds > 30) {
+
+            // Check if agendar-cita tool already created an appointment during this call
+            let citaYaCreada = false;
+            if (call.call_id && env.SARA_CACHE) {
+              try {
+                const citaFlag = await env.SARA_CACHE.get(`retell_cita_created:${call.call_id}`);
+                if (citaFlag) {
+                  citaYaCreada = true;
+                  console.log(`🔒 Skip Claude callback: agendar-cita ya creó cita durante la llamada ${call.call_id}`);
+                  debugLog.push({ t: Date.now(), step: 'skip_callback_analysis', reason: 'cita_already_created_by_tool' });
+                }
+              } catch (_) { /* ignore KV errors */ }
+            }
+
+            if (event === 'call_analyzed' && lead && call.transcript && durationSeconds > 30 && !citaYaCreada) {
               try {
                 // Obtener transcript como texto plano
                 let transcriptText = '';
@@ -2104,9 +2132,10 @@ Reglas:
                 console.error('Error detectando callback:', callbackError?.message);
                 debugLog.push({ t: Date.now(), step: 'callback_error', error: callbackError?.message });
               }
-            } else if (event === 'call_analyzed' && (!lead || durationSeconds <= 30)) {
-              console.log(`⏭️ Skip Claude analysis: lead=${!!lead}, duration=${durationSeconds}s (min 30s)`);
-              debugLog.push({ t: Date.now(), step: 'skip_claude_analysis', reason: !lead ? 'no_lead' : 'short_call', duration: durationSeconds });
+            } else if (event === 'call_analyzed' && (!lead || durationSeconds <= 30 || citaYaCreada)) {
+              const skipReason = citaYaCreada ? 'cita_created_by_tool' : !lead ? 'no_lead' : 'short_call';
+              console.log(`⏭️ Skip Claude analysis: lead=${!!lead}, duration=${durationSeconds}s, citaYaCreada=${citaYaCreada} (reason: ${skipReason})`);
+              debugLog.push({ t: Date.now(), step: 'skip_claude_analysis', reason: skipReason, duration: durationSeconds });
             }
 
             // ═══════════════════════════════════════════════════════════════
@@ -2158,18 +2187,24 @@ Reglas:
                     : (desarrolloInteres ? [desarrolloInteres] : []);
 
                   // Merge in developments from KV queue (saved by enviar_info_whatsapp tool during call)
+                  // VALIDATE against known developments to avoid "Zacatecas" etc.
                   try {
                     if (call.call_id && env.SARA_CACHE) {
                       const kvQueueRaw = await env.SARA_CACHE.get(`retell_send_queue:${call.call_id}`);
                       if (kvQueueRaw) {
                         const kvDevs: string[] = JSON.parse(kvQueueRaw);
                         for (const kvDev of kvDevs) {
-                          if (!desarrollosMencionados.some((d: string) => d.toLowerCase() === kvDev.toLowerCase())) {
+                          // Double-check: only merge if it matches a known development
+                          const kvDevLower = kvDev.toLowerCase();
+                          const esConocido = desarrollosConocidos.some(d => kvDevLower.includes(d) || d.includes(kvDevLower));
+                          if (esConocido && !desarrollosMencionados.some((d: string) => d.toLowerCase() === kvDevLower)) {
                             desarrollosMencionados.push(kvDev);
+                          } else if (!esConocido) {
+                            console.log(`⚠️ KV queue: "${kvDev}" filtrado (no es desarrollo conocido)`);
                           }
                         }
                         await env.SARA_CACHE.delete(`retell_send_queue:${call.call_id}`);
-                        console.log(`📋 KV queue merged: +${kvDevs.join(', ')} → total: ${desarrollosMencionados.join(', ')}`);
+                        console.log(`📋 KV queue merged (filtered): total: ${desarrollosMencionados.join(', ')}`);
                       }
                     }
                   } catch (kvMergeErr) { /* ignore KV errors */ }
