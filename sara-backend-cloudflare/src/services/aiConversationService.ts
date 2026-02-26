@@ -4106,15 +4106,14 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
           });
 
           // Preguntar al vendedor si quiere agendar
-          setTimeout(async () => {
-            await this.meta.sendWhatsAppMessage(bridgeData.vendedor_phone,
-              `📅 *${lead.name} mencionó una fecha*\n\n` +
-              `¿Agendo ${intencionLead.tipo}?\n` +
-              `📆 ${fechaFormateada}\n` +
-              `🕐 ${horaFormateada}\n\n` +
-              `Responde *#si* o *#no*`
-            );
-          }, 1500);
+          await new Promise(r => setTimeout(r, 1500));
+          await this.meta.sendWhatsAppMessage(bridgeData.vendedor_phone,
+            `📅 *${lead.name} mencionó una fecha*\n\n` +
+            `¿Agendo ${intencionLead.tipo}?\n` +
+            `📆 ${fechaFormateada}\n` +
+            `🕐 ${horaFormateada}\n\n` +
+            `Responde *#si* o *#no*`
+          );
         }
 
         // Extender el bridge 5 minutos más

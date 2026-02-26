@@ -6,6 +6,7 @@ import { HORARIOS } from '../handlers/constants';
 import { parseFecha as parseFechaCentral, parseFechaISO as parseFechaISOCentral, parseHoraISO as parseHoraISOCentral } from '../utils/dateParser';
 import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
+import { logErrorToDB } from '../crons/healthCheck';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // INTERFACES
@@ -114,6 +115,7 @@ export class AppointmentService {
       
     } catch (error) {
       console.error('❌ Error general en cancelAppointment:', error);
+      await logErrorToDB(this.supabase, 'appointment_error', (error as Error)?.message || String(error), { severity: 'error', source: 'appointmentService/cancelAppointment', stack: (error as Error)?.stack });
       return false;
     }
   }
@@ -939,11 +941,30 @@ ${infoContactos}
           `🕐 *${hora}*\n\n` +
           `⏰ El cliente espera tu llamada`;
 
-        await this.twilio.sendWhatsAppMessage(
-          'whatsapp:+52' + vendedor.phone.replace(/\D/g, '').slice(-10),
-          notifVendedor
-        );
-        console.log('✅ Notificación de llamada enviada a:', vendedor.name);
+        // Usar enviarMensajeTeamMember (24h-safe) si meta está disponible
+        if (this.meta) {
+          try {
+            await enviarMensajeTeamMember(this.supabase, this.meta, vendedor, notifVendedor, {
+              tipoMensaje: 'alerta_lead',
+              pendingKey: 'pending_alerta_lead'
+            });
+            console.log('✅ Notificación de llamada enviada (24h-safe) a:', vendedor.name);
+          } catch (notifErr) {
+            console.error('⚠️ Error en enviarMensajeTeamMember para llamada, fallback:', notifErr);
+            await this.twilio.sendWhatsAppMessage(
+              'whatsapp:+52' + vendedor.phone.replace(/\D/g, '').slice(-10),
+              notifVendedor
+            );
+            console.log('✅ Notificación de llamada enviada (fallback) a:', vendedor.name);
+          }
+        } else {
+          // Fallback: raw send (legacy, si meta no disponible)
+          await this.twilio.sendWhatsAppMessage(
+            'whatsapp:+52' + vendedor.phone.replace(/\D/g, '').slice(-10),
+            notifVendedor
+          );
+          console.log('✅ Notificación de llamada enviada (legacy) a:', vendedor.name);
+        }
       }
 
       // Crear follow-up para 30 minutos después de la llamada programada
@@ -975,6 +996,7 @@ ${infoContactos}
 
     } catch (e) {
       console.error('❌ Error general en crearCitaLlamada:', e);
+      await logErrorToDB(this.supabase, 'appointment_error', (e as Error)?.message || String(e), { severity: 'error', source: 'appointmentService/crearCitaLlamada', stack: (e as Error)?.stack });
       return { success: false, error: String(e) };
     }
   }
