@@ -1732,6 +1732,11 @@ CASOS ESPECIALES:
             let desarrolloDelTranscript = '';
             let todosDesarrollosTranscript: string[] = [];
             const desarrollosConocidos = ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano'];
+            // Sentinel values que Retell retorna cuando no detectó desarrollo — FILTRAR siempre
+            const sentinelValues = ['no_mencionado', 'general', 'por definir', 'no mencionado', 'sin desarrollo', 'n/a', 'none', 'null', 'undefined', ''];
+            const isSentinel = (v: string) => !v || sentinelValues.includes(v.toLowerCase().trim());
+            // Normalize development name for dedup
+            const normDev = (d: string) => d.toLowerCase().trim().replace(/^priv\.?\s*/, 'privada ');
             if (call.transcript) {
               let allMessages: string[] = [];
               if (typeof call.transcript === 'string') {
@@ -1763,10 +1768,12 @@ CASOS ESPECIALES:
               }
             }
 
-            const nuevoDesarrollo = call.call_analysis?.custom_analysis_data?.desarrollo_interes ||
+            const nuevoDesarrolloRaw = call.call_analysis?.custom_analysis_data?.desarrollo_interes ||
                                     call.call_analysis?.custom_analysis?.desarrollo_interes ||
                                     call.metadata?.desarrollo_interes ||
-                                    call.metadata?.desarrollo;
+                                    call.metadata?.desarrollo || '';
+            // Filter out sentinel values like "no_mencionado"
+            const nuevoDesarrollo = isSentinel(nuevoDesarrolloRaw) ? '' : nuevoDesarrolloRaw;
             const desarrolloFinal = desarrolloDelTranscript || nuevoDesarrollo;
 
             // Agregar nota al lead
@@ -1800,7 +1807,7 @@ CASOS ESPECIALES:
               notesObj.notas = notasArray;
 
               const updateData: any = { notes: notesObj };
-              if (desarrolloFinal) {
+              if (desarrolloFinal && !isSentinel(desarrolloFinal)) {
                 updateData.property_interest = desarrolloFinal;
                 console.log(`🏠 Actualizado property_interest: ${desarrolloFinal}`);
               }
@@ -2065,8 +2072,8 @@ Reglas de fecha:
 
                       // Buscar GPS del desarrollo para incluir en notificaciones
                       let gpsLink = '';
-                      let desarrolloNombre = desarrolloFinal || 'General';
-                      if (desarrolloFinal && (citaTipo === 'visita' || citaTipo === 'seguimiento')) {
+                      let desarrolloNombre = (desarrolloFinal && !isSentinel(desarrolloFinal)) ? desarrolloFinal : '';
+                      if (desarrolloNombre && (citaTipo === 'visita' || citaTipo === 'seguimiento')) {
                         try {
                           const { data: propGps } = await supabase.client
                             .from('properties')
@@ -2105,7 +2112,7 @@ Reglas de fecha:
                           }
                           msgVendedor += `👤 *Lead:* ${lead.name || 'Sin nombre'}\n`;
                           msgVendedor += `📱 *Teléfono:* wa.me/${formatPhoneForDisplay(leadPhone).replace('+', '')}\n`;
-                          msgVendedor += `🏠 *Desarrollo:* ${desarrolloNombre}\n`;
+                          if (desarrolloNombre) msgVendedor += `🏠 *Desarrollo:* ${desarrolloNombre}\n`;
                           msgVendedor += `📅 *Fecha:* ${fechaBonita}\n`;
                           if (citaTipo === 'visita' && gpsLink) {
                             msgVendedor += `📍 *Ubicación:* ${gpsLink}\n`;
@@ -2133,7 +2140,7 @@ Reglas de fecha:
                                 tipoTituloVendedor,
                                 lead.name || 'Sin nombre',
                                 `wa.me/${formatPhoneForDisplay(leadPhone).replace('+', '')}`,
-                                desarrolloNombre,
+                                desarrolloNombre || 'Por confirmar',
                                 fechaBonita
                               ]
                             }
@@ -2151,7 +2158,7 @@ Reglas de fecha:
                       const tipoTexto = citaTipo === 'visita' ? 'visita' : citaTipo === 'llamada' ? 'llamada' : 'seguimiento';
                       const primerNombreLead = lead.name?.split(' ')[0] || '';
                       let msgLead = `📅 ¡Listo${primerNombreLead ? ', ' + primerNombreLead : ''}! Queda agendado tu *${tipoTexto}* para el *${fechaBonita}*.\n\n`;
-                      msgLead += `🏠 *Desarrollo:* ${desarrolloNombre}\n`;
+                      if (desarrolloNombre) msgLead += `🏠 *Desarrollo:* ${desarrolloNombre}\n`;
                       if (citaTipo === 'visita' && gpsLink) {
                         msgLead += `📍 *Ubicación:* ${gpsLink}\n`;
                       }
@@ -2173,7 +2180,7 @@ Reglas de fecha:
                         tipo: citaTipo,
                         fecha: fechaBonita,
                         hora: citaHora,
-                        desarrollo: desarrolloNombre,
+                        desarrollo: desarrolloNombre || 'Por confirmar',
                         gpsLink: gpsLink
                       };
 
@@ -2218,12 +2225,14 @@ Reglas de fecha:
                 console.log(`📱 Ventana 24h para ${leadPhone}: ${ventanaAbierta ? 'ABIERTA' : 'CERRADA'}`);
                 debugLog.push({ t: Date.now(), step: 'ventana_check', abierta: ventanaAbierta, leadPhone });
 
-                const desarrolloInteres = desarrolloDelTranscript ||
+                const desarrolloInteresRaw = desarrolloDelTranscript ||
                                           call.call_analysis?.custom_analysis_data?.desarrollo_interes ||
                                           call.call_analysis?.custom_analysis?.desarrollo_interes ||
                                           call.metadata?.desarrollo_interes ||
                                           call.metadata?.desarrollo ||
-                                          lead?.property_interest;
+                                          lead?.property_interest || '';
+                // Filter sentinel values
+                const desarrolloInteres = isSentinel(desarrolloInteresRaw) ? '' : desarrolloInteresRaw;
 
                 if (ventanaAbierta) {
                   // VENTANA ABIERTA → enviar mensajes directos
@@ -2247,10 +2256,13 @@ Reglas de fecha:
                       if (kvQueueRaw) {
                         const kvDevs: string[] = JSON.parse(kvQueueRaw);
                         for (const kvDev of kvDevs) {
+                          if (isSentinel(kvDev)) continue; // Skip sentinel values
                           // Double-check: only merge if it matches a known development
-                          const kvDevLower = kvDev.toLowerCase();
-                          const esConocido = desarrollosConocidos.some(d => kvDevLower.includes(d) || d.includes(kvDevLower));
-                          if (esConocido && !desarrollosMencionados.some((d: string) => d.toLowerCase() === kvDevLower)) {
+                          const kvDevNorm = normDev(kvDev);
+                          const esConocido = desarrollosConocidos.some(d => kvDevNorm.includes(d) || d.includes(kvDevNorm));
+                          // Dedup with normalized comparison
+                          const yaExiste = desarrollosMencionados.some((d: string) => normDev(d) === kvDevNorm);
+                          if (esConocido && !yaExiste) {
                             desarrollosMencionados.push(kvDev);
                           } else if (!esConocido) {
                             console.log(`⚠️ KV queue: "${kvDev}" filtrado (no es desarrollo conocido)`);
@@ -2262,10 +2274,14 @@ Reglas de fecha:
                     }
                   } catch (kvMergeErr) { /* ignore KV errors */ }
 
-                  if (desarrollosMencionados.length > 1) {
-                    mensajeFollowUp += `Me da gusto que te interesen *${desarrollosMencionados.join('* y *')}*. `;
-                  } else if (desarrollosMencionados.length === 1) {
-                    mensajeFollowUp += `Me da gusto que te interese *${desarrollosMencionados[0]}*. `;
+                  // Filter sentinels from greeting list
+                  const devsParaGreeting = desarrollosMencionados.filter((d: string) => !isSentinel(d));
+                  if (devsParaGreeting.length > 1) {
+                    // Proper Spanish: "A, B y C" instead of "A y B y C"
+                    const last = devsParaGreeting.pop()!;
+                    mensajeFollowUp += `Me da gusto que te interesen *${devsParaGreeting.join('*, *')}* y *${last}*. `;
+                  } else if (devsParaGreeting.length === 1) {
+                    mensajeFollowUp += `Me da gusto que te interese *${devsParaGreeting[0]}*. `;
                   }
                   mensajeFollowUp += `\n\nTe comparto información por aquí para que la revises con calma. `;
                   mensajeFollowUp += `Si tienes cualquier duda, aquí estoy para ayudarte. 🏠`;
@@ -2409,9 +2425,11 @@ Reglas de fecha:
                 // CTA buttons SÍ necesitan ventana → fallback a texto plano si cerrada
                 // ═══════════════════════════════════════════════════════════════
                 // Collect all developments mentioned (same logic as ventana abierta, but accessible outside)
-                const desarrollosMencionadosFinal = todosDesarrollosTranscript.length > 0
-                  ? [...todosDesarrollosTranscript]
-                  : (desarrolloInteres ? [desarrolloInteres] : []);
+                // Filter sentinels from transcript results
+                const transcriptFiltered = todosDesarrollosTranscript.filter((d: string) => !isSentinel(d));
+                const desarrollosMencionadosFinal = transcriptFiltered.length > 0
+                  ? [...transcriptFiltered]
+                  : (desarrolloInteres && !isSentinel(desarrolloInteres) ? [desarrolloInteres] : []);
 
                 // Merge in developments from KV queue
                 try {
@@ -2420,9 +2438,11 @@ Reglas de fecha:
                     if (kvQueueRaw2) {
                       const kvDevs2: string[] = JSON.parse(kvQueueRaw2);
                       for (const kvDev of kvDevs2) {
-                        const kvDevLower = kvDev.toLowerCase();
-                        const esConocido = desarrollosConocidos.some((d: string) => kvDevLower.includes(d) || d.includes(kvDevLower));
-                        if (esConocido && !desarrollosMencionadosFinal.some((d: string) => d.toLowerCase() === kvDevLower)) {
+                        if (isSentinel(kvDev)) continue; // Skip sentinel values
+                        const kvDevNorm = normDev(kvDev);
+                        const esConocido = desarrollosConocidos.some((d: string) => kvDevNorm.includes(d) || d.includes(kvDevNorm));
+                        const yaExiste = desarrollosMencionadosFinal.some((d: string) => normDev(d) === kvDevNorm);
+                        if (esConocido && !yaExiste) {
                           desarrollosMencionadosFinal.push(kvDev);
                         }
                       }
