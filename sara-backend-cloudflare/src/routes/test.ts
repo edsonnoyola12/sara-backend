@@ -10391,6 +10391,33 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       const actionParam = url.searchParams.get('action') || 'create';
       const WABA_ID = '1227849769248437';
 
+      // If action=status, just query template status from Meta
+      if (actionParam === 'status') {
+        const namesToCheck = templateParam === 'all'
+          ? ['casas_economicas_v2', 'casas_premium_v2', 'terrenos_nogal']
+          : [templateParam];
+        const statusResults: any[] = [];
+        for (const tplName of namesToCheck) {
+          try {
+            const resp = await fetch(
+              `https://graph.facebook.com/v22.0/${WABA_ID}/message_templates?name=${tplName}`,
+              { headers: { 'Authorization': `Bearer ${env.META_ACCESS_TOKEN}` } }
+            );
+            const data: any = await resp.json();
+            const tpl = data?.data?.[0];
+            statusResults.push({
+              template: tplName,
+              status: tpl?.status || 'NOT_FOUND',
+              id: tpl?.id || null,
+              category: tpl?.category || null,
+            });
+          } catch (err: any) {
+            statusResults.push({ template: tplName, error: err.message });
+          }
+        }
+        return corsResponse(JSON.stringify({ action: 'status', results: statusResults }, null, 2));
+      }
+
       // If action=delete, delete templates first
       if (actionParam === 'delete' || actionParam === 'recreate') {
         const templatesToDelete = templateParam === 'all'
@@ -10646,7 +10673,13 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     // TEMPORARY - Remove after testing
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/test-carousel' && request.method === 'GET') {
-      const templateName = url.searchParams.get('template') || 'casas_economicas';
+      const segParam = url.searchParams.get('segment') || url.searchParams.get('template') || 'casas_economicas_v2';
+      // Map segment shortcuts to v2 template names
+      const segToTemplate: Record<string, string> = {
+        economico: 'casas_economicas_v2', premium: 'casas_premium_v2', terrenos: 'terrenos_nogal',
+        casas_economicas: 'casas_economicas_v2', casas_premium: 'casas_premium_v2',
+      };
+      const templateName = segToTemplate[segParam] || segParam;
       const phone = url.searchParams.get('phone') || '5610016226';
       const action = url.searchParams.get('action') || 'send';
       const WABA_ID = '1227849769248437';
