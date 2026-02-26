@@ -1887,11 +1887,20 @@ Responde SOLO con JSON válido, sin markdown ni texto adicional:
 {"callback_requested": true/false, "type": "llamada" | "visita" | "seguimiento" | "none", "date": "YYYY-MM-DD" o null, "time": "HH:MM" (24h) o null, "description": "breve descripción", "raw_text": "frase exacta del lead"}
 
 Tipos:
-- "visita" = el lead quiere IR PRESENCIALMENTE a ver casas/desarrollo
-- "llamada" = el lead pide que le VUELVAN A MARCAR/LLAMAR
+- "visita" = el lead quiere IR PRESENCIALMENTE a ver casas/desarrollo. ESTA ES LA MÁS COMÚN.
+- "llamada" = el lead pide EXPLÍCITAMENTE que le VUELVAN A MARCAR/LLAMAR por teléfono
 - "seguimiento" = acordaron dar seguimiento general (enviar info, WhatsApp, contactar después) SIN ser visita ni llamada específica
 
-Reglas:
+REGLA CRÍTICA DE TIPO:
+- Si el lead mencionó un DESARROLLO (Monte Verde, Andes, Los Encinos, Distrito Falco, Miravalle, Paseo Colorines, Citadella, etc.) Y quiere ir a verlo → type: "visita" SIEMPRE
+- "quiero ir a ver las casas" → type: "visita" (NO "llamada")
+- "quiero conocer el desarrollo" → type: "visita" (NO "llamada")
+- "el sábado paso" → type: "visita"
+- "voy a ir" / "me gustaría ir" → type: "visita"
+- SOLO usa "llamada" si EXPLÍCITAMENTE dice "márcame", "llámame", "marca", "llama"
+- Si hay DUDA entre visita y llamada → usa "visita"
+
+Reglas de fecha:
 - "márcame el viernes" → callback_requested: true, type: "llamada", date: próximo viernes
 - "en 15 minutos" → callback_requested: true, type: "llamada", date: hoy, time: hora actual + 15 min
 - "la próxima semana" → callback_requested: true, type: "seguimiento", date: próximo lunes
@@ -1922,7 +1931,20 @@ Reglas:
 
                   const citaFecha = callbackData.date;
                   const citaHora = callbackData.time || '10:00';
-                  const citaTipo = callbackData.type === 'visita' ? 'visita' : callbackData.type === 'seguimiento' ? 'seguimiento' : 'llamada';
+                  // Si Claude dice "visita" o "seguimiento", respetar.
+                  // Si dice "llamada" PERO hay un desarrollo mencionado, corregir a "visita" (el lead quiere ir a ver, no que le llamen).
+                  // Default: si hay desarrollo → "visita", si no → "llamada"
+                  let citaTipo: string;
+                  if (callbackData.type === 'visita') {
+                    citaTipo = 'visita';
+                  } else if (callbackData.type === 'seguimiento') {
+                    citaTipo = 'seguimiento';
+                  } else if (callbackData.type === 'llamada' && !desarrolloFinal) {
+                    citaTipo = 'llamada';
+                  } else {
+                    // Default: si hay desarrollo mencionado → visita (quiere ir a ver), sino → llamada
+                    citaTipo = desarrolloFinal ? 'visita' : 'llamada';
+                  }
 
                   // Calcular si es callback rápido (< 2 horas) o cita formal (>= 2 horas)
                   const mexicoNowCb = getMexicoNow();
@@ -1987,7 +2009,7 @@ Reglas:
                         scheduled_time: citaHora,
                         appointment_type: citaTipo,
                         status: 'scheduled',
-                        property_name: desarrolloFinal || lead.property_interest || (citaTipo === 'visita' ? null : citaTipo === 'llamada' ? 'Llamada programada' : 'Seguimiento'),
+                        property_name: desarrolloFinal || lead.property_interest || null,
                         location: citaTipo === 'llamada' ? 'Llamada telefónica' : citaTipo === 'seguimiento' ? 'Seguimiento por WhatsApp' : null,
                         duration_minutes: citaTipo === 'visita' ? 60 : 15,
                         created_at: new Date().toISOString()
@@ -2095,7 +2117,7 @@ Reglas:
                       }
 
                       // Guardar confirmación para enviar DESPUÉS de greeting/recursos (orden correcto)
-                      const tipoTexto = citaTipo === 'visita' ? 'visita presencial' : citaTipo === 'llamada' ? 'llamada telefónica' : 'seguimiento';
+                      const tipoTexto = citaTipo === 'visita' ? 'visita' : citaTipo === 'llamada' ? 'llamada' : 'seguimiento';
                       const primerNombreLead = lead.name?.split(' ')[0] || '';
                       let msgLead = `📅 ¡Listo${primerNombreLead ? ', ' + primerNombreLead : ''}! Queda agendado tu *${tipoTexto}* para el *${fechaBonita}*.\n\n`;
                       msgLead += `🏠 *Desarrollo:* ${desarrolloNombre}\n`;
@@ -2203,8 +2225,8 @@ Reglas:
                             console.log(`⚠️ KV queue: "${kvDev}" filtrado (no es desarrollo conocido)`);
                           }
                         }
-                        await env.SARA_CACHE.delete(`retell_send_queue:${call.call_id}`);
-                        console.log(`📋 KV queue merged (filtered): total: ${desarrollosMencionados.join(', ')}`);
+                        // NOTE: Do NOT delete KV here — the outside block reads it too
+                        console.log(`📋 KV queue merged for greeting: total: ${desarrollosMencionados.join(', ')}`);
                       }
                     }
                   } catch (kvMergeErr) { /* ignore KV errors */ }
@@ -2222,62 +2244,8 @@ Reglas:
                   debugLog.push({ t: Date.now(), step: 'whatsapp_sent_ok' });
                   console.log(`📱 WhatsApp directo enviado a ${leadPhone}`);
 
-                  // Load all properties once for carousels + resources
-                  await new Promise(resolve => setTimeout(resolve, 1500));
-                  const { data: allProps } = await supabase.client
-                    .from('properties')
-                    .select('name, development, development_name, brochure_urls, gps_link, youtube_link, matterport_link, price, price_equipped, photo_url, price_min, price_max, bedrooms, area_m2, land_size');
-
-                  if (allProps && allProps.length > 0) {
-                    // 1. ALWAYS send carousels for relevant segments
-                    const segmentosEnviados = new Set<string>();
-                    for (const dev of desarrollosMencionados) {
-                      const seg = getCarouselSegmentForDesarrollo(dev);
-                      if (seg && !segmentosEnviados.has(seg)) segmentosEnviados.add(seg);
-                    }
-                    // If no specific segments found, send both
-                    if (segmentosEnviados.size === 0) {
-                      segmentosEnviados.add('economico');
-                      segmentosEnviados.add('premium');
-                    }
-                    for (const seg of segmentosEnviados) {
-                      try {
-                        const cards = AIConversationService.buildCarouselCards(allProps, seg as any);
-                        const templateName = (AIConversationService.CAROUSEL_SEGMENTS as any)[seg]?.template;
-                        if (cards.length > 0 && templateName) {
-                          const bodyParams = seg === 'terrenos'
-                            ? []
-                            : seg === 'economico'
-                              ? [AIConversationService.precioMinGlobal(allProps)]
-                              : ['$3M+'];
-                          await meta.sendCarouselTemplate(leadPhone, templateName, bodyParams, cards);
-                          await new Promise(r => setTimeout(r, 500));
-                          console.log(`🎠 Carousel "${templateName}" post-call enviado`);
-                        }
-                      } catch (err: any) {
-                        console.error(`❌ Carousel post-call "${seg}" falló:`, err?.message);
-                        // Log full error details for debugging carousel failures
-                        try {
-                          const errDetails = err?.response ? JSON.stringify(err.response) : (err?.data ? JSON.stringify(err.data) : err?.stack?.substring(0, 300));
-                          if (errDetails) console.error(`❌ Carousel error details:`, errDetails);
-                        } catch (_) { /* ignore */ }
-                      }
-                    }
-
-                    // 2. Send CTA resources for EACH mentioned development
-                    for (const dev of desarrollosMencionados) {
-                      const devNorm = dev.toLowerCase().replace('priv.', 'privada').replace('priv ', 'privada ').trim();
-                      const devProps = allProps.filter((p: any) => {
-                        const pName = (p.development || p.development_name || p.name || '').toLowerCase();
-                        return pName.includes(devNorm) || devNorm.includes(pName);
-                      });
-                      if (devProps.length > 0) {
-                        await new Promise(r => setTimeout(r, 500));
-                        await enviarRecursosCTARetell(meta, leadPhone, dev, devProps);
-                        console.log(`📋 Recursos CTA enviados para ${dev}`);
-                      }
-                    }
-                  }
+                  // CTA resources require 24h window — skip for closed window
+                  // (carousels + resources sent below OUTSIDE ventana check)
                 } else {
                   // VENTANA CERRADA → enviar template info_desarrollo con datos REALES
                   console.log(`📱 Ventana cerrada, enviando template con info real a ${leadPhone}`);
@@ -2401,6 +2369,98 @@ Reglas:
                     };
                     await supabase.client.from('leads').update({ notes: pendingNotes }).eq('id', lead.id);
                     console.log(`💾 Recursos pendientes guardados para ${lead.id} (${desarrolloInteres})`);
+                  }
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // CAROUSELS + RECURSOS — FUERA del check de ventana 24h
+                // Carousels son TEMPLATES → no necesitan ventana 24h
+                // CTA buttons SÍ necesitan ventana → fallback a texto plano si cerrada
+                // ═══════════════════════════════════════════════════════════════
+                // Collect all developments mentioned (same logic as ventana abierta, but accessible outside)
+                const desarrollosMencionadosFinal = todosDesarrollosTranscript.length > 0
+                  ? [...todosDesarrollosTranscript]
+                  : (desarrolloInteres ? [desarrolloInteres] : []);
+
+                // Merge in developments from KV queue
+                try {
+                  if (call.call_id && env.SARA_CACHE) {
+                    const kvQueueRaw2 = await env.SARA_CACHE.get(`retell_send_queue:${call.call_id}`);
+                    if (kvQueueRaw2) {
+                      const kvDevs2: string[] = JSON.parse(kvQueueRaw2);
+                      for (const kvDev of kvDevs2) {
+                        const kvDevLower = kvDev.toLowerCase();
+                        const esConocido = desarrollosConocidos.some((d: string) => kvDevLower.includes(d) || d.includes(kvDevLower));
+                        if (esConocido && !desarrollosMencionadosFinal.some((d: string) => d.toLowerCase() === kvDevLower)) {
+                          desarrollosMencionadosFinal.push(kvDev);
+                        }
+                      }
+                      await env.SARA_CACHE.delete(`retell_send_queue:${call.call_id}`);
+                    }
+                  }
+                } catch (_kvErr) { /* ignore */ }
+
+                if (desarrollosMencionadosFinal.length > 0) {
+                  await new Promise(resolve => setTimeout(resolve, 1500));
+                  const { data: allProps } = await supabase.client
+                    .from('properties')
+                    .select('name, development, development_name, brochure_urls, gps_link, youtube_link, matterport_link, price, price_equipped, photo_url, price_min, price_max, bedrooms, area_m2, land_size');
+
+                  if (allProps && allProps.length > 0) {
+                    // 1. ALWAYS send carousels — they are TEMPLATES (no 24h window needed)
+                    const segmentosEnviados = new Set<string>();
+                    for (const dev of desarrollosMencionadosFinal) {
+                      const seg = getCarouselSegmentForDesarrollo(dev);
+                      if (seg && !segmentosEnviados.has(seg)) segmentosEnviados.add(seg);
+                    }
+                    // If no specific segments found, send both
+                    if (segmentosEnviados.size === 0) {
+                      segmentosEnviados.add('economico');
+                      segmentosEnviados.add('premium');
+                    }
+                    for (const seg of segmentosEnviados) {
+                      try {
+                        const cards = AIConversationService.buildCarouselCards(allProps, seg as any);
+                        const templateName = (AIConversationService.CAROUSEL_SEGMENTS as any)[seg]?.template;
+                        if (cards.length > 0 && templateName) {
+                          const bodyParams = seg === 'terrenos'
+                            ? []
+                            : seg === 'economico'
+                              ? [AIConversationService.precioMinGlobal(allProps)]
+                              : ['$3M+'];
+                          await meta.sendCarouselTemplate(leadPhone, templateName, bodyParams, cards);
+                          await new Promise(r => setTimeout(r, 500));
+                          console.log(`🎠 Carousel "${templateName}" post-call enviado (ventana: ${ventanaAbierta ? 'abierta' : 'cerrada'})`);
+                        }
+                      } catch (err: any) {
+                        console.error(`❌ Carousel post-call "${seg}" falló:`, err?.message);
+                        try {
+                          const errDetails = err?.response ? JSON.stringify(err.response) : (err?.data ? JSON.stringify(err.data) : err?.stack?.substring(0, 300));
+                          if (errDetails) console.error(`❌ Carousel error details:`, errDetails);
+                        } catch (_) { /* ignore */ }
+                      }
+                    }
+
+                    // 2. Send resources for EACH mentioned development
+                    for (const dev of desarrollosMencionadosFinal) {
+                      const devNorm = dev.toLowerCase().replace('priv.', 'privada').replace('priv ', 'privada ').trim();
+                      const devProps = allProps.filter((p: any) => {
+                        const pName = (p.development || p.development_name || p.name || '').toLowerCase();
+                        return pName.includes(devNorm) || devNorm.includes(pName);
+                      });
+                      if (devProps.length > 0) {
+                        await new Promise(r => setTimeout(r, 500));
+                        if (ventanaAbierta) {
+                          // CTA buttons (interactive) — require 24h window
+                          await enviarRecursosCTARetell(meta, leadPhone, dev, devProps);
+                          console.log(`📋 Recursos CTA enviados para ${dev}`);
+                        } else {
+                          // Ventana cerrada → enviar como texto plano (no interactivo)
+                          await enviarRecursosTextoRetell(meta, leadPhone, dev, devProps);
+                          console.log(`📋 Recursos texto (ventana cerrada) enviados para ${dev}`);
+                        }
+                      }
+                    }
                   }
                 }
 
@@ -2586,4 +2646,50 @@ async function enviarRecursosCTARetell(
       await meta.sendCTAButton(phone, `📋 *Brochure de ${devName}*\nToda la info y precios`, 'Ver brochure', htmlUrl);
     }
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// HELPER: Enviar recursos como texto plano (ventana 24h cerrada)
+// CTA buttons requieren ventana abierta; este fallback usa texto
+// ═══════════════════════════════════════════════════════════════
+async function enviarRecursosTextoRetell(
+  meta: MetaWhatsAppService,
+  phone: string,
+  desarrollo: string,
+  props: any[]
+): Promise<void> {
+  const prop = props[0];
+  const devName = prop.development || prop.development_name || prop.name || desarrollo;
+
+  // Precio mínimo
+  const precioDesde = props.reduce((min: number, p: any) => {
+    const precio = Number(p.price_equipped || p.price || 0);
+    return precio > 0 && precio < min ? precio : min;
+  }, Infinity);
+  const precioStr = precioDesde < Infinity ? `$${(precioDesde / 1000000).toFixed(1)}M` : '';
+
+  // Build a single text message with all available resources
+  let msg = `🏡 *${devName}*${precioStr ? ` — Desde ${precioStr} equipada` : ''}\n`;
+
+  if (prop.youtube_link) {
+    msg += `\n🎬 Video: ${prop.youtube_link}`;
+  }
+  if (prop.matterport_link) {
+    msg += `\n🏠 Recorrido 3D: ${prop.matterport_link}`;
+  }
+  if (prop.gps_link) {
+    msg += `\n📍 Ubicación: ${prop.gps_link}`;
+  }
+
+  const brochureRaw = prop.brochure_urls;
+  if (brochureRaw) {
+    const urls = Array.isArray(brochureRaw) ? brochureRaw : [brochureRaw];
+    const htmlUrl = urls.find((u: string) => u.includes('.html') || u.includes('pages.dev'));
+    if (htmlUrl) {
+      msg += `\n📋 Brochure: ${htmlUrl}`;
+    }
+  }
+
+  msg += `\n\n¿Te gustaría agendar una visita? 🏠`;
+  await meta.sendWhatsAppMessage(phone, msg);
 }
