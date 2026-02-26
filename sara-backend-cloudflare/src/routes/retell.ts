@@ -9,6 +9,7 @@ import { formatPhoneForDisplay, getMexicoNow } from '../handlers/whatsapp-utils'
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { ClaudeService } from '../services/claude';
 import { AIConversationService } from '../services/aiConversationService';
+import { logErrorToDB } from '../crons/healthCheck';
 
 interface Env {
   SUPABASE_URL: string;
@@ -789,6 +790,7 @@ CASOS ESPECIALES:
         }
       } catch (error) {
         console.error('❌ Retell Lookup Error:', error);
+        try { await logErrorToDB(supabase, 'retell_lookup_error', (error as Error).message || String(error), { severity: 'error', source: 'retell.ts', stack: (error as Error).stack?.substring(0, 1000) }); } catch {}
         return new Response(JSON.stringify({
           dynamic_variables: {
             call_direction: 'inbound',
@@ -1158,6 +1160,7 @@ CASOS ESPECIALES:
         }
       } catch (e: any) {
         console.error('❌ Retell tool agendar-cita error:', e.message, e.stack?.split('\n')[1]);
+        try { await logErrorToDB(supabase, 'retell_tool_error', e.message || String(e), { severity: 'error', source: 'retell.ts', stack: e.stack?.substring(0, 1000), context: { tool: 'agendar-cita' } }); } catch {}
         return new Response(JSON.stringify({ result: 'Hubo un problema técnico. Confírmale la cita verbalmente y dile que le mandas confirmación por WhatsApp.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     }
@@ -1222,6 +1225,7 @@ CASOS ESPECIALES:
         }
       } catch (e: any) {
         console.error('❌ Retell tool cancelar-cita error:', e);
+        try { await logErrorToDB(supabase, 'retell_tool_error', (e as Error).message || String(e), { severity: 'error', source: 'retell.ts', stack: (e as Error).stack?.substring(0, 1000), context: { tool: 'cancelar-cita' } }); } catch {}
         return new Response(JSON.stringify({ result: 'Error cancelando cita. Le confirmo por WhatsApp.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     }
@@ -1361,6 +1365,7 @@ CASOS ESPECIALES:
         }
       } catch (e: any) {
         console.error('❌ Retell tool cambiar-cita error:', e);
+        try { await logErrorToDB(supabase, 'retell_tool_error', (e as Error).message || String(e), { severity: 'error', source: 'retell.ts', stack: (e as Error).stack?.substring(0, 1000), context: { tool: 'cambiar-cita' } }); } catch {}
         return new Response(JSON.stringify({ result: 'Error reagendando. Le confirmo por WhatsApp.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     }
@@ -2669,6 +2674,7 @@ Reglas de fecha:
         try {
           await env.SARA_CACHE.put(`retell_error_${Date.now()}`, JSON.stringify({ error: error?.message, stack: error?.stack?.substring(0, 500) }), { expirationTtl: 3600 });
         } catch (kvErr) { /* ignore */ }
+        try { await logErrorToDB(supabase, 'retell_webhook_error', error?.message || String(error), { severity: 'critical', source: 'retell.ts', stack: error?.stack?.substring(0, 1000), context: { url: url.pathname } }); } catch {}
         return new Response('OK', { status: 200 });
       }
     }

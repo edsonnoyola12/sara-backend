@@ -9,7 +9,7 @@ import { FollowupService } from '../services/followupService';
 import { BridgeService } from '../services/bridgeService';
 import { CalendarService } from '../services/calendar';
 import { isPendingExpired } from '../utils/teamMessaging';
-import { deliverPendingMessage, parseNotasSafe, formatPhoneForDisplay, findLeadByName } from './whatsapp-utils';
+import { deliverPendingMessage, parseNotasSafe, formatPhoneForDisplay, findLeadByName, freshNotesUpdate } from './whatsapp-utils';
 import { AppointmentService } from '../services/appointmentService';
 import { safeJsonParse } from '../utils/safeHelpers';
 import { formatVendorFeedback } from './whatsapp-utils';
@@ -83,10 +83,11 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
   // ║  Cuando responden al template, entregar mensaje pendiente y salir      ║
   // ╚════════════════════════════════════════════════════════════════════════╝
 
-  // Actualizar last_sara_interaction (ventana 24h ahora está abierta)
+  // Actualizar last_sara_interaction (ventana 24h ahora está abierta) — atomic
   if (notasVendedor) {
     notasVendedor.last_sara_interaction = new Date().toISOString();
   }
+  await freshNotesUpdate(ctx, vendedor.id, n => { n.last_sara_interaction = new Date().toISOString(); });
 
   // ═══════════════════════════════════════════════════════════
   // PENDING MESSAGES: Usa deliverPendingMessage() que resuelve:
@@ -669,16 +670,18 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
           // Formatear teléfono para mostrar
           const telLimpio = leadPhone.replace(/\D/g, '').slice(-10);
 
-          // Guardar contexto para selección de template
-          notasVendedor.pending_template_selection = {
-            lead_id: activeBridge.lead_id,
-            lead_name: activeBridge.lead_name,
-            lead_phone: leadPhone,
-            mensaje_original: body,
-            from_bridge: true,
-            timestamp: new Date().toISOString()
-          };
-          await ctx.supabase.client.from('team_members').update({ notes: notasVendedor }).eq('id', vendedor.id);
+          // Guardar contexto para selección de template (atomic)
+          await freshNotesUpdate(ctx, vendedor.id, n => {
+            n.pending_template_selection = {
+              lead_id: activeBridge.lead_id,
+              lead_name: activeBridge.lead_name,
+              lead_phone: leadPhone,
+              mensaje_original: body,
+              from_bridge: true,
+              timestamp: new Date().toISOString()
+            };
+            n.last_sara_interaction = new Date().toISOString();
+          });
 
           await ctx.meta.sendWhatsAppMessage(from,
             `⚠️ *${activeBridge.lead_name} no ha escrito en 24h*\n\n` +
@@ -705,12 +708,12 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
           } catch (slaErr) { console.error('⚠️ SLA bridge track error (non-blocking):', slaErr); }
         }
 
-        // Actualizar last_activity
-        notasVendedor.active_bridge.last_activity = new Date().toISOString();
-        await ctx.supabase.client
-          .from('team_members')
-          .update({ notes: notasVendedor })
-          .eq('id', vendedor.id);
+        // Actualizar last_activity (atomic — avoid stale overwrite from CRONs)
+        await freshNotesUpdate(ctx, vendedor.id, n => {
+          if (n.active_bridge) {
+            n.active_bridge.last_activity = new Date().toISOString();
+          }
+        });
 
         // Registrar actividad
         if (activeBridge.lead_id) {

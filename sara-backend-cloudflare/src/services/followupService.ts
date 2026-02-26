@@ -3,6 +3,7 @@
 // =====================================================
 
 import { SupabaseService } from './supabase';
+import { logErrorToDB } from '../crons/healthCheck';
 
 interface FollowupRule {
   id: string;
@@ -112,6 +113,7 @@ export class FollowupService {
 
     } catch (e) {
       console.error('❌ Error en programarFollowups:', e);
+      try { await logErrorToDB(this.supabase, 'followup_error', (e as Error).message || String(e), { severity: 'error', source: 'followupService.ts', stack: (e as Error).stack?.substring(0, 1000), context: { method: 'programarFollowups' } }); } catch {}
       return 0;
     }
   }
@@ -206,6 +208,7 @@ export class FollowupService {
 
     } catch (e) {
       console.error('❌ Error en procesarFollowupsPendientes:', e);
+      try { await logErrorToDB(this.supabase, 'followup_error', (e as Error).message || String(e), { severity: 'error', source: 'followupService.ts', stack: (e as Error).stack?.substring(0, 1000), context: { method: 'procesarFollowupsPendientes' } }); } catch {}
     }
 
     return results;

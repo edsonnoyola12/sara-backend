@@ -5,7 +5,7 @@
 
 import { HandlerContext } from './whatsapp-types';
 import * as utils from './whatsapp-utils';
-import { deliverPendingMessage, findLeadByName } from './whatsapp-utils';
+import { deliverPendingMessage, findLeadByName, freshNotesUpdate } from './whatsapp-utils';
 import { isPendingExpired } from '../utils/teamMessaging';
 import { CEOCommandsService } from '../services/ceoCommandsService';
 import { AgenciaCommandsService } from '../services/agenciaCommandsService';
@@ -44,8 +44,9 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
     // ║  CRÍTICO: VERIFICAR PENDING MESSAGES PRIMERO (CEO también los recibe)  ║
     // ╚════════════════════════════════════════════════════════════════════════╝
 
-    // Actualizar last_sara_interaction (ventana 24h ahora está abierta)
+    // Actualizar last_sara_interaction (ventana 24h ahora está abierta) — atomic
     notasCEO.last_sara_interaction = new Date().toISOString();
+    await freshNotesUpdate(ctx, ceo.id, n => { n.last_sara_interaction = new Date().toISOString(); });
 
     // ═══════════════════════════════════════════════════════════
     // PENDING MESSAGES: Usa deliverPendingMessage() que resuelve:
@@ -342,18 +343,24 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
 
           if (actionType === 'bridge') {
             // ═══ ACTIVAR BRIDGE ═══
-            await ctx.supabase.client.from('team_members').update({ notes: notasCEO }).eq('id', ceo.id);
+            await freshNotesUpdate(ctx, ceo.id, n => {
+              delete n.pending_lead_selection;
+              n.last_sara_interaction = new Date().toISOString();
+            });
             await ceoBridgeLeadDirect(ctx, handler, cleanPhone, selectedLead, ceo, nombreCEO);
           } else {
             // ═══ MENSAJE INTERMEDIADO ═══
             const leadPhone = selectedLead.phone?.replace(/\D/g, '');
-            notasCEO.pending_message_to_lead = {
-              lead_id: selectedLead.id,
-              lead_name: selectedLead.name,
-              lead_phone: leadPhone?.startsWith('521') ? leadPhone : '521' + leadPhone?.slice(-10),
-              timestamp: new Date().toISOString()
-            };
-            await ctx.supabase.client.from('team_members').update({ notes: notasCEO }).eq('id', ceo.id);
+            await freshNotesUpdate(ctx, ceo.id, n => {
+              delete n.pending_lead_selection;
+              n.pending_message_to_lead = {
+                lead_id: selectedLead.id,
+                lead_name: selectedLead.name,
+                lead_phone: leadPhone?.startsWith('521') ? leadPhone : '521' + leadPhone?.slice(-10),
+                timestamp: new Date().toISOString()
+              };
+              n.last_sara_interaction = new Date().toISOString();
+            });
 
             await ctx.meta.sendWhatsAppMessage(cleanPhone,
               `💬 ¿Qué le quieres decir a *${selectedLead.name}*?\n\n_Escribe tu mensaje y se lo enviaré._`
@@ -363,8 +370,7 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
         }
       } else {
         // Expirado, limpiar
-        delete notasCEO.pending_lead_selection;
-        await ctx.supabase.client.from('team_members').update({ notes: notasCEO }).eq('id', ceo.id);
+        await freshNotesUpdate(ctx, ceo.id, n => { delete n.pending_lead_selection; });
       }
     }
 
@@ -400,9 +406,11 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
         };
         await ctx.supabase.client.from('leads').update({ notes: leadNotes }).eq('id', pendingMsgToLead.lead_id);
 
-        // Limpiar pending y confirmar al CEO
-        delete notasCEO.pending_message_to_lead;
-        await ctx.supabase.client.from('team_members').update({ notes: notasCEO }).eq('id', ceo.id);
+        // Limpiar pending y confirmar al CEO (atomic)
+        await freshNotesUpdate(ctx, ceo.id, n => {
+          delete n.pending_message_to_lead;
+          n.last_sara_interaction = new Date().toISOString();
+        });
 
         await ctx.meta.sendWhatsAppMessage(cleanPhone,
           `✅ *Mensaje enviado a ${pendingMsgToLead.lead_name}*\n\n` +
@@ -412,9 +420,8 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
 
         return;
       } else {
-        // Expirado, limpiar
-        delete notasCEO.pending_message_to_lead;
-        await ctx.supabase.client.from('team_members').update({ notes: notasCEO }).eq('id', ceo.id);
+        // Expirado, limpiar (atomic)
+        await freshNotesUpdate(ctx, ceo.id, n => { delete n.pending_message_to_lead; });
       }
     }
 

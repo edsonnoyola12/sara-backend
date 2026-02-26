@@ -139,27 +139,31 @@ export class MarketIntelligenceService {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    // Get leads in period
-    const { data: leads } = await this.supabase.client
-      .from('leads')
-      .select('*')
-      .gte('created_at', startDate.toISOString())
-      .order('created_at', { ascending: false });
-
-    // Get previous period for comparison
+    // Previous period start date for comparison
     const prevStartDate = new Date(startDate);
     prevStartDate.setDate(prevStartDate.getDate() - days);
-    const { data: prevLeads } = await this.supabase.client
-      .from('leads')
-      .select('id, property_interest, status')
-      .gte('created_at', prevStartDate.toISOString())
-      .lt('created_at', startDate.toISOString());
 
-    // Get appointments
-    const { data: appointments } = await this.supabase.client
-      .from('appointments')
-      .select('*')
-      .gte('created_at', startDate.toISOString());
+    // Get leads, previous period leads, and appointments in parallel
+    const [
+      { data: leads },
+      { data: prevLeads },
+      { data: appointments }
+    ] = await Promise.all([
+      this.supabase.client
+        .from('leads')
+        .select('*')
+        .gte('created_at', startDate.toISOString())
+        .order('created_at', { ascending: false }),
+      this.supabase.client
+        .from('leads')
+        .select('id, property_interest, status')
+        .gte('created_at', prevStartDate.toISOString())
+        .lt('created_at', startDate.toISOString()),
+      this.supabase.client
+        .from('appointments')
+        .select('*')
+        .gte('created_at', startDate.toISOString())
+    ]);
 
     const allLeads = leads || [];
     const previousLeads = prevLeads || [];

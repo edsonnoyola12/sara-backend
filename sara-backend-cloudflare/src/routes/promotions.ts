@@ -1,6 +1,7 @@
 // Ruta para enviar promociones
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { SupabaseService } from '../services/supabase';
+import { logErrorToDB } from '../crons/healthCheck';
 
 interface SendPromoBody {
   promotion_id: string;
@@ -132,6 +133,7 @@ export async function handlePromotionRoutes(
             .eq('id', lead.id);
         } catch (e) {
           console.log('Error guardando historial promo:', e);
+          try { await logErrorToDB(supabase, 'promotion_error', (e as Error).message || String(e), { severity: 'warning', source: 'promotions.ts', context: { method: 'save_conversation_history', leadId: lead.id } }); } catch {}
         }
 
         // Enviar video
@@ -157,6 +159,7 @@ export async function handlePromotionRoutes(
         sent++;
       } catch (err: any) {
         console.error('Error promo ' + lead.phone + ':', err.message);
+        try { await logErrorToDB(supabase, 'promotion_error', err.message || String(err), { severity: 'error', source: 'promotions.ts', stack: err.stack?.substring(0, 1000), context: { method: 'send_promo_loop', leadPhone: lead.phone } }); } catch {}
         errors++;
       }
     }

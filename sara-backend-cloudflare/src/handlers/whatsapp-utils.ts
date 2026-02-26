@@ -100,6 +100,34 @@ export async function deliverPendingMessage(
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// HELPER: Atomic read-merge-write for team_members notes
+// Re-reads fresh notes from DB, applies mutations, writes back.
+// Prevents stale data overwrites from concurrent CRONs.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export async function freshNotesUpdate(
+  ctx: HandlerContext,
+  memberId: string,
+  mutate: (notes: any) => void
+): Promise<void> {
+  const { data: fresh } = await ctx.supabase.client
+    .from('team_members')
+    .select('notes')
+    .eq('id', memberId)
+    .maybeSingle();
+
+  const freshNotes = parseNotasSafe(fresh?.notes);
+  mutate(freshNotes);
+
+  const { error } = await ctx.supabase.client
+    .from('team_members')
+    .update({ notes: freshNotes })
+    .eq('id', memberId);
+
+  if (error) console.error('⚠️ freshNotesUpdate write error:', error);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // HELPER FUNCTIONS (from lines 105-330)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

@@ -348,6 +348,7 @@ Responde *SI* para confirmar tu asistencia.`;
         return corsResponse(JSON.stringify({ success: true, deleted: leadId }));
       } catch (err: any) {
         console.error('❌ Error en delete lead:', err);
+        try { await logErrorToDB(supabase, 'api_error', err.message || String(err), { severity: 'error', source: 'api-core.ts', stack: err.stack?.substring(0, 1000), context: { endpoint: 'DELETE /api/leads/:id' } }); } catch {}
         return corsResponse(JSON.stringify({ error: err.message }), 500);
       }
     }
@@ -1172,6 +1173,7 @@ Cancelada por: ${body.cancelled_by || 'CRM'}`;
         return corsResponse(JSON.stringify(data));
       } catch (e: any) {
         console.error('❌ Error cancelando cita:', e);
+        try { await logErrorToDB(supabase, 'api_error', e.message || String(e), { severity: 'error', source: 'api-core.ts', stack: e.stack?.substring(0, 1000), context: { endpoint: 'DELETE /api/appointments/:id' } }); } catch {}
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
     }
@@ -1288,6 +1290,7 @@ Para reagendar, contáctanos. ¡Estamos para servirte! 🏠`;
         return corsResponse(JSON.stringify({ success: true, action: body.action }));
       } catch (e: any) {
         console.error('❌ Error enviando notificación:', e);
+        try { await logErrorToDB(supabase, 'api_error', e.message || String(e), { severity: 'error', source: 'api-core.ts', stack: e.stack?.substring(0, 1000), context: { endpoint: 'POST /api/appointments/notify-change' } }); } catch {}
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
     }
@@ -1590,6 +1593,7 @@ Creada desde CRM`;
         return corsResponse(JSON.stringify(data), 201);
       } catch (e: any) {
         console.error('❌ Error creando cita:', e);
+        try { await logErrorToDB(supabase, 'api_error', e.message || String(e), { severity: 'error', source: 'api-core.ts', stack: e.stack?.substring(0, 1000), context: { endpoint: 'POST /api/appointments' } }); } catch {}
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
     }
@@ -1768,6 +1772,7 @@ Tu ${tipoTexto} ha sido modificada:
         return corsResponse(JSON.stringify(data));
       } catch (e: any) {
         console.error('❌ Error actualizando cita:', e);
+        try { await logErrorToDB(supabase, 'api_error', e.message || String(e), { severity: 'error', source: 'api-core.ts', stack: e.stack?.substring(0, 1000), context: { endpoint: 'PUT /api/appointments/:id' } }); } catch {}
         return corsResponse(JSON.stringify({ error: e.message }), 500);
       }
     }
