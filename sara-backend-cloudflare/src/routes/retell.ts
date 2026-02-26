@@ -1580,6 +1580,16 @@ CASOS ESPECIALES:
           return new Response('OK', { status: 200 });
         }
 
+        // KV dedup — prevent duplicate processing of same call+event combo
+        try {
+          const retellDedupKey = `retell:${call.call_id}:${event}`;
+          if (await env.SARA_CACHE.get(retellDedupKey)) {
+            console.log(`⏭️ Retell event ya procesado: ${event} ${call.call_id}`);
+            return new Response('OK', { status: 200 });
+          }
+          await env.SARA_CACHE.put(retellDedupKey, '1', { expirationTtl: 86400 });
+        } catch (_kvErr) { /* KV failure: process anyway, side-effects are mostly idempotent */ }
+
         // Procesar evento según tipo
         if (event === 'call_started') {
           const isInbound = call.direction === 'inbound';

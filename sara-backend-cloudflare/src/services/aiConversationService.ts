@@ -374,6 +374,31 @@ export class AIConversationService {
    * Guarda una acción (envío de recursos) en el historial de conversación
    * Esto permite que Claude sepa qué recursos se enviaron y responda coherentemente
    */
+  /**
+   * Atomic append to conversation_history — fresh READ + push + WRITE.
+   * Prevents stale-overwrite when concurrent CRONs/webhooks modify history.
+   */
+  async appendToHistory(leadId: string, entries: Array<{role: string, content: string}>, maxEntries = 30): Promise<void> {
+    try {
+      const { data } = await this.supabase.client
+        .from('leads')
+        .select('conversation_history')
+        .eq('id', leadId)
+        .single();
+      const historial = data?.conversation_history || [];
+      const now = new Date().toISOString();
+      for (const entry of entries) {
+        historial.push({ ...entry, timestamp: now });
+      }
+      await this.supabase.client
+        .from('leads')
+        .update({ conversation_history: historial.slice(-maxEntries) })
+        .eq('id', leadId);
+    } catch (e) {
+      console.error('⚠️ Error en appendToHistory:', e);
+    }
+  }
+
   async guardarAccionEnHistorial(leadId: string, accion: string, detalles?: string): Promise<void> {
     try {
       const { data: leadData } = await this.supabase.client
@@ -3513,11 +3538,11 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 
         await this.meta.sendWhatsAppMessage(from, respuestaConfirm);
 
-        // Guardar en historial
-        const historialAct = lead.conversation_history || [];
-        historialAct.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
-        historialAct.push({ role: 'assistant', content: respuestaConfirm, timestamp: new Date().toISOString() });
-        await this.supabase.client.from('leads').update({ conversation_history: historialAct.slice(-30) }).eq('id', lead.id);
+        // Guardar en historial (atomic)
+        await this.appendToHistory(lead.id, [
+          { role: 'user', content: originalMessage },
+          { role: 'assistant', content: respuestaConfirm }
+        ]);
 
         return; // Terminar aquí
       }
@@ -3639,11 +3664,11 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             await this.meta.sendWhatsAppMessage(from, respuestaCancelacion);
             console.log('✅ Confirmación de cancelación enviada al lead');
 
-            // Guardar en historial
-            const historialActual = lead.conversation_history || [];
-            historialActual.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
-            historialActual.push({ role: 'assistant', content: respuestaCancelacion, timestamp: new Date().toISOString() });
-            await this.supabase.client.from('leads').update({ conversation_history: historialActual.slice(-30) }).eq('id', lead.id);
+            // Guardar en historial (atomic)
+            await this.appendToHistory(lead.id, [
+              { role: 'user', content: originalMessage },
+              { role: 'assistant', content: respuestaCancelacion }
+            ]);
 
             return; // Terminar aquí
           } else {
@@ -3883,11 +3908,11 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   console.log('✅ Notificación de REAGENDAMIENTO enviada al vendedor');
                 }
 
-                // Guardar en historial
-                const historialActual = lead.conversation_history || [];
-                historialActual.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
-                historialActual.push({ role: 'assistant', content: msgLead, timestamp: new Date().toISOString() });
-                await this.supabase.client.from('leads').update({ conversation_history: historialActual.slice(-30) }).eq('id', lead.id);
+                // Guardar en historial (atomic)
+                await this.appendToHistory(lead.id, [
+                  { role: 'user', content: originalMessage },
+                  { role: 'assistant', content: msgLead }
+                ]);
 
                 console.log('✅ REAGENDAMIENTO COMPLETADO');
                 return;
@@ -3917,11 +3942,11 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                 .update({ pending_reschedule: true, pending_reschedule_appointment_id: citaActiva.id })
                 .eq('id', lead.id);
 
-              // Guardar en historial
-              const historialActual = lead.conversation_history || [];
-              historialActual.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
-              historialActual.push({ role: 'assistant', content: respuestaReagendar, timestamp: new Date().toISOString() });
-              await this.supabase.client.from('leads').update({ conversation_history: historialActual.slice(-30) }).eq('id', lead.id);
+              // Guardar en historial (atomic)
+              await this.appendToHistory(lead.id, [
+                { role: 'user', content: originalMessage },
+                { role: 'assistant', content: respuestaReagendar }
+              ]);
 
               return;
             }
@@ -3983,11 +4008,11 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             await this.meta.sendWhatsAppMessage(from, respuestaInfo);
             console.log(`✅ Info de ${tipoCita} enviada: ${fechaCita} ${horaCita}`);
 
-            // Guardar en historial
-            const historialActual = lead.conversation_history || [];
-            historialActual.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
-            historialActual.push({ role: 'assistant', content: respuestaInfo, timestamp: new Date().toISOString() });
-            await this.supabase.client.from('leads').update({ conversation_history: historialActual.slice(-30) }).eq('id', lead.id);
+            // Guardar en historial (atomic)
+            await this.appendToHistory(lead.id, [
+              { role: 'user', content: originalMessage },
+              { role: 'assistant', content: respuestaInfo }
+            ]);
 
             return;
           } else {
@@ -4149,19 +4174,10 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
           }
         }
 
-        // Registrar en historial de conversación
-        const historialActual = lead.conversation_history || [];
-        historialActual.push({
-          role: 'user',
-          content: mensajeOriginal,
-          timestamp: new Date().toISOString(),
-          bridge_active: true,
-          forwarded_to: bridgeData.vendedor_name
-        });
-        await this.supabase.client
-          .from('leads')
-          .update({ conversation_history: historialActual.slice(-50) })
-          .eq('id', lead.id);
+        // Registrar en historial de conversación (atomic, maxEntries=50 for bridge)
+        await this.appendToHistory(lead.id, [
+          { role: 'user', content: mensajeOriginal }
+        ], 50);
 
         // Registrar actividad
         await this.supabase.client.from('lead_activities').insert({
@@ -4248,15 +4264,11 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 
         console.log(`✅ Encuesta post-visita procesada: ${tipoRespuesta}`);
 
-        // Guardar en historial
-        const nuevoHistorial = [...historialCompleto];
-        nuevoHistorial.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
-        nuevoHistorial.push({ role: 'assistant', content: contextoDecision.respuesta, timestamp: new Date().toISOString() });
-
-        await this.supabase.client
-          .from('leads')
-          .update({ conversation_history: nuevoHistorial })
-          .eq('id', lead.id);
+        // Guardar en historial (atomic)
+        await this.appendToHistory(lead.id, [
+          { role: 'user', content: originalMessage },
+          { role: 'assistant', content: contextoDecision.respuesta }
+        ]);
 
         return;
       }
@@ -4340,16 +4352,12 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         }
         console.log('✅ Respuesta de CONTEXTO INTELIGENTE enviada');
         
-        // Guardar en historial
-        const nuevoHistorial = [...historialCompleto];
-        nuevoHistorial.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
-        nuevoHistorial.push({ role: 'assistant', content: contextoDecision.respuesta, timestamp: new Date().toISOString() });
-        
-        await this.supabase.client
-          .from('leads')
-          .update({ conversation_history: nuevoHistorial })
-          .eq('id', lead.id);
-        
+        // Guardar en historial (atomic)
+        await this.appendToHistory(lead.id, [
+          { role: 'user', content: originalMessage },
+          { role: 'assistant', content: contextoDecision.respuesta }
+        ]);
+
         // Si es flujo de crédito y llegó al final (enganche), crear mortgage y notificar
         if (contextoDecision.flujoActivo === 'credito' && contextoDecision.datos?.enganche !== undefined) {
           await this.handler.finalizarFlujoCredito(lead, from, teamMembers);
@@ -4558,17 +4566,10 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         await this.meta.sendWhatsAppMessage(from, respuestaForzada);
         console.log('✅ Pregunta de nombre FORZADA enviada');
 
-        // Guardar en historial
-        try {
-          const historialActual = lead.conversation_history || [];
-          historialActual.push({ role: 'assistant', content: respuestaForzada, timestamp: new Date().toISOString() });
-          await this.supabase.client
-            .from('leads')
-            .update({ conversation_history: historialActual.slice(-30) })
-            .eq('id', lead.id);
-        } catch (e) {
-          console.error('❌ Error guardando historial:', e);
-        }
+        // Guardar en historial (atomic)
+        await this.appendToHistory(lead.id, [
+          { role: 'assistant', content: respuestaForzada }
+        ]);
 
         interceptoCita = true;
         // ✅ FIX: NO hacer return - continuar para enviar recursos
@@ -4839,19 +4840,12 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
           console.log('⚠️ No se pudieron enviar opciones:', btnErr);
         }
 
-        // ═══ GUARDAR HISTORIAL CON RESPUESTA CORRECTA (después de validar horario) ═══
-        try {
-          const historialActual = lead.conversation_history || [];
-          historialActual.push({ role: 'user', content: originalMessage, timestamp: new Date().toISOString() });
-          historialActual.push({ role: 'assistant', content: respuestaLimpia, timestamp: new Date().toISOString() });
-          await this.supabase.client
-            .from('leads')
-            .update({ conversation_history: historialActual.slice(-30) })
-            .eq('id', lead.id);
-          console.log('🧠 Historial guardado (respuesta correcta)');
-        } catch (e) {
-          console.error('⚠️ Error guardando historial');
-        }
+        // ═══ GUARDAR HISTORIAL CON RESPUESTA CORRECTA (atomic — fresh read before write) ═══
+        await this.appendToHistory(lead.id, [
+          { role: 'user', content: originalMessage },
+          { role: 'assistant', content: respuestaLimpia }
+        ]);
+        console.log('🧠 Historial guardado (respuesta correcta)');
 
         // Marcar tiempo de última respuesta y guardar memoria de conversación
         // Leer notas frescas de BD (evitar sobreescribir cambios de otros procesos)
@@ -8682,22 +8676,11 @@ ${msgContacto}`;
         await this.meta.sendWhatsAppMessage(from, msgConfirmacionCliente);
         console.log('📤 Confirmación de asesor enviada al cliente');
         
-        // Agregar confirmación al historial para evitar duplicados
-        try {
-          const historialActual = lead.conversation_history || [];
-          historialActual.push({ 
-            role: 'assistant', 
-            content: msgConfirmacionCliente, 
-            timestamp: new Date().toISOString() 
-          });
-          await this.supabase.client
-            .from('leads')
-            .update({ conversation_history: historialActual.slice(-30) })
-            .eq('id', lead.id);
-          console.log('📝 Confirmación de asesor agregada al historial');
-        } catch (e) {
-          console.error('⚠️ Error agregando confirmación al historial');
-        }
+        // Agregar confirmación al historial (atomic)
+        await this.appendToHistory(lead.id, [
+          { role: 'assistant', content: msgConfirmacionCliente }
+        ]);
+        console.log('📝 Confirmación de asesor agregada al historial');
         
         // 3. CREAR CITA DE ASESORÍÍA EN DB (si tiene fecha/hora del análisis)
         const fechaAnalisis = analysis.extracted_data?.fecha;

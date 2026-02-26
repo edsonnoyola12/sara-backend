@@ -16,7 +16,7 @@ export const ALLOWED_CRM_ORIGINS = [
 export function isAllowedCrmOrigin(origin: string | null): boolean {
   if (!origin) return false;
   if (ALLOWED_CRM_ORIGINS.includes(origin)) return true;
-  if (/^https:\/\/sara-crm.*\.vercel\.app$/.test(origin)) return true;
+  if (/^https:\/\/sara-crm(-new)?(-[a-z0-9]+)?\.vercel\.app$/.test(origin)) return true;
   return false;
 }
 

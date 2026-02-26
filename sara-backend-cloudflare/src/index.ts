@@ -749,6 +749,16 @@ export default {
           for (const status of statuses) {
             const messageId = status.id;
             const statusType = status.status; // sent, delivered, read, failed
+
+            // KV dedup — same message+status combo only processed once
+            try {
+              const statusDedupKey = `wast:${messageId}:${statusType}`;
+              if (await env.SARA_CACHE.get(statusDedupKey)) {
+                console.log(`⏭️ Status ya procesado: ${statusType} ${messageId?.substring(0, 20)}...`);
+                continue;
+              }
+              await env.SARA_CACHE.put(statusDedupKey, '1', { expirationTtl: 86400 });
+            } catch (_kvErr) { /* fallback: DB upsert is idempotent */ }
             const recipientId = status.recipient_id;
             const timestamp = status.timestamp;
             const errorCode = status.errors?.[0]?.code;
@@ -1690,6 +1700,16 @@ export default {
           const pageId = changes.value.page_id;
           const createdTime = changes.value.created_time;
 
+          // KV dedup — prevent duplicate processing of same Facebook lead
+          try {
+            const fbDedupKey = `fblead:${leadgenId}`;
+            if (await env.SARA_CACHE.get(fbDedupKey)) {
+              console.log(`⏭️ Facebook lead ya procesado: ${leadgenId}`);
+              return new Response('OK', { status: 200 });
+            }
+            await env.SARA_CACHE.put(fbDedupKey, '1', { expirationTtl: 86400 });
+          } catch (_kvErr) { /* fallback: DB phone dedup below */ }
+
           console.log(`🎯 Nuevo lead de Facebook: ${leadgenId}`);
 
           // Obtener datos reales del lead desde Graph API
@@ -1699,9 +1719,13 @@ export default {
           let leadNotes = '';
 
           try {
+            const fbCtrl = new AbortController();
+            const fbTimer = setTimeout(() => fbCtrl.abort(), 10_000);
             const graphResponse = await fetch(
-              `https://graph.facebook.com/v18.0/${leadgenId}?access_token=${env.META_ACCESS_TOKEN}`
+              `https://graph.facebook.com/v18.0/${leadgenId}?access_token=${env.META_ACCESS_TOKEN}`,
+              { signal: fbCtrl.signal }
             );
+            clearTimeout(fbTimer);
 
             if (graphResponse.ok) {
               const leadData = await graphResponse.json() as any;

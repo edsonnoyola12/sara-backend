@@ -34,14 +34,18 @@ export class AudioTranscriptionService {
   async downloadAudio(mediaId: string): Promise<ArrayBuffer | null> {
     try {
       // 1. Obtener URL del media
+      const mediaCtrl = new AbortController();
+      const mediaTimer = setTimeout(() => mediaCtrl.abort(), 10_000);
       const mediaResponse = await fetch(
         `https://graph.facebook.com/v18.0/${mediaId}`,
         {
           headers: {
             'Authorization': `Bearer ${this.metaAccessToken}`
-          }
+          },
+          signal: mediaCtrl.signal,
         }
       );
+      clearTimeout(mediaTimer);
 
       if (!mediaResponse.ok) {
         console.error('Error obteniendo URL del media:', await mediaResponse.text());
@@ -51,11 +55,15 @@ export class AudioTranscriptionService {
       const mediaData = await mediaResponse.json() as { url: string };
 
       // 2. Descargar el archivo de audio
+      const dlCtrl = new AbortController();
+      const dlTimer = setTimeout(() => dlCtrl.abort(), 15_000);
       const audioResponse = await fetch(mediaData.url, {
         headers: {
           'Authorization': `Bearer ${this.metaAccessToken}`
-        }
+        },
+        signal: dlCtrl.signal,
       });
+      clearTimeout(dlTimer);
 
       if (!audioResponse.ok) {
         console.error('Error descargando audio:', await audioResponse.text());
@@ -101,13 +109,17 @@ export class AudioTranscriptionService {
       formData.append('language', 'es'); // Principalmente español
       formData.append('response_format', 'verbose_json');
 
+      const whisperCtrl = new AbortController();
+      const whisperTimer = setTimeout(() => whisperCtrl.abort(), 30_000);
       const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.openaiApiKey}`
         },
-        body: formData
+        body: formData,
+        signal: whisperCtrl.signal,
       });
+      clearTimeout(whisperTimer);
 
       if (!response.ok) {
         const error = await response.text();
