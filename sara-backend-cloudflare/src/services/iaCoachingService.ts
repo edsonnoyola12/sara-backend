@@ -3,6 +3,7 @@ import { MetaWhatsAppService } from './meta-whatsapp';
 import { ClaudeService } from './claude';
 import { safeJsonParse } from '../utils/safeHelpers';
 import { findLeadByName } from '../handlers/whatsapp-utils';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 
 interface VendorMetrics {
   id: string;
@@ -260,7 +261,11 @@ export class IACoachingService {
     }
 
     try {
-      await this.meta.sendWhatsAppMessage(metrics.phone, mensaje);
+      const teamMember = { id: metrics.id, name: metrics.name, phone: metrics.phone };
+      await enviarMensajeTeamMember(this.supabase, this.meta, teamMember as any, mensaje, {
+        tipoMensaje: 'notificacion',
+        pendingKey: 'pending_mensaje'
+      });
       console.log(`🎓 Coaching enviado a ${metrics.name}`);
 
       // Guardar en notas que se envió coaching

@@ -8,6 +8,7 @@ import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { createTTSService } from '../services/ttsService';
 import { createTTSTrackingService } from '../services/ttsTrackingService';
 import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
+import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { logErrorToDB } from './healthCheck';
 
 // ═══════════════════════════════════════════════════════════
@@ -286,7 +287,10 @@ export async function alertarLeadCaliente(
 ${señales.some(s => s.tipo === 'visita') ? '→ Agendar visita HOY si es posible\n' : ''}${señales.some(s => s.tipo === 'precio') ? '→ Enviar cotización personalizada\n' : ''}${señales.some(s => s.tipo === 'credito') ? '→ Explicar opciones de crédito\n' : ''}${señales.some(s => s.tipo === 'apartado') ? '→ Explicar proceso de apartado\n' : ''}${señales.some(s => s.tipo === 'urgencia') ? '→ CONTACTAR INMEDIATAMENTE\n' : ''}
 📞 Responde: bridge ${nombreCorto}`;
 
-    await meta.sendWhatsAppMessage(vendedor.phone, alertaMsg);
+    await enviarMensajeTeamMember(supabase, meta, vendedor, alertaMsg, {
+      tipoMensaje: 'alerta_lead',
+      pendingKey: 'pending_alerta_lead'
+    });
     console.log(`🔥 Alerta enviada a ${vendedor.name} por lead caliente: ${lead.name} (${tiposDetectados})`);
 
     // ═══ TTS: Enviar audio de alerta urgente ═══
@@ -646,8 +650,11 @@ Si quieres, te puedo enviar información detallada para que la revisen juntos. T
 
     alertaMsg += `\n📞 Responde: bridge ${nombreCortoObj}`;
 
-    await meta.sendWhatsAppMessage(vendedor.phone, alertaMsg);
-    console.error(`⚠️ Alerta de objeción enviada a ${vendedor.name}: ${lead.name} (${tiposObjecion})`);
+    await enviarMensajeTeamMember(supabase, meta, vendedor, alertaMsg, {
+      tipoMensaje: 'alerta_lead',
+      pendingKey: 'pending_alerta_lead'
+    });
+    console.log(`⚠️ Alerta de objeción enviada a ${vendedor.name}: ${lead.name} (${tiposObjecion})`);
 
     // Guardar en notas
     const notasActualizadas = {

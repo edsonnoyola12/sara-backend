@@ -1001,14 +1001,16 @@ export class WhatsAppHandler {
           const vendedorNombre = vendedorAsignado.name || 'Tu asesor';
           const rol = vendedorAsignado.role?.includes('asesor') ? 'asesor' : 'vendedor';
 
-          // Notificar al vendedor
-          await this.meta.sendWhatsAppMessage(vendedorPhone,
-            `📞 *${lead.name} quiere hablar contigo*\n\n` +
+          // Notificar al vendedor (24h-safe)
+          const handoffNotifMsg = `📞 *${lead.name} quiere hablar contigo*\n\n` +
             `Mensaje: "${body.substring(0, 100)}${body.length > 100 ? '...' : ''}"\n\n` +
             `💡 Responde con:\n` +
             `• *mensaje ${lead.name.split(' ')[0]}* - Enviar mensaje vía Sara\n` +
-            `• *bridge ${lead.name.split(' ')[0]}* - Chat directo 10 min`
-          );
+            `• *bridge ${lead.name.split(' ')[0]}* - Chat directo 10 min`;
+          await enviarMensajeTeamMember(this.supabase, this.meta, vendedorAsignado, handoffNotifMsg, {
+            tipoMensaje: 'alerta_lead',
+            pendingKey: 'pending_alerta_lead'
+          });
 
           // Dar al lead los links para contactar directo
           await this.meta.sendWhatsAppMessage(cleanPhone,
@@ -1063,7 +1065,20 @@ export class WhatsAppHandler {
       if (pendingResponse && pendingResponse.expires_at && new Date(pendingResponse.expires_at) > new Date()) {
         console.log('📨 Lead respondiendo a mensaje intermediado de:', pendingResponse.team_member_name);
         const msgForTeamMember = `💬 *Respuesta de ${lead.name}:*\n\n"${body}"\n\n_Usa "mensaje ${lead.name.split(' ')[0]}" para responder._`;
-        await this.meta.sendWhatsAppMessage(pendingResponse.team_member_phone, msgForTeamMember);
+        // Buscar team member para envío 24h-safe
+        const { data: intermediaryTM } = await this.supabase.client
+          .from('team_members')
+          .select('id, name, phone, role')
+          .or(`phone.eq.${pendingResponse.team_member_phone},phone.like.%${pendingResponse.team_member_phone?.slice(-10)}`)
+          .maybeSingle();
+        if (intermediaryTM) {
+          await enviarMensajeTeamMember(this.supabase, this.meta, intermediaryTM, msgForTeamMember, {
+            tipoMensaje: 'alerta_lead',
+            pendingKey: 'pending_alerta_lead'
+          });
+        } else {
+          await this.meta.sendWhatsAppMessage(pendingResponse.team_member_phone, msgForTeamMember);
+        }
 
         // Confirmar al lead
         await this.meta.sendWhatsAppMessage(cleanPhone, `✅ Tu mensaje fue enviado a ${pendingResponse.team_member_name}.`);
@@ -1104,9 +1119,21 @@ export class WhatsAppHandler {
           await this.meta.sendWhatsAppMessage(cleanPhone, fallback);
         }
 
-        // Notificar al vendedor si es necesario
+        // Notificar al vendedor si es necesario (24h-safe)
         if (leadMsgResult.notifyVendor && typeof leadMsgResult.notifyVendor === 'object') {
-          await this.meta.sendWhatsAppMessage(leadMsgResult.notifyVendor.phone, leadMsgResult.notifyVendor.message);
+          const { data: notifyTM } = await this.supabase.client
+            .from('team_members')
+            .select('id, name, phone, role')
+            .or(`phone.eq.${leadMsgResult.notifyVendor.phone},phone.like.%${leadMsgResult.notifyVendor.phone?.slice(-10)}`)
+            .maybeSingle();
+          if (notifyTM) {
+            await enviarMensajeTeamMember(this.supabase, this.meta, notifyTM, leadMsgResult.notifyVendor.message, {
+              tipoMensaje: 'alerta_lead',
+              pendingKey: 'pending_alerta_lead'
+            });
+          } else {
+            await this.meta.sendWhatsAppMessage(leadMsgResult.notifyVendor.phone, leadMsgResult.notifyVendor.message);
+          }
         }
 
         // Borrar evento de Google Calendar si es necesario (cancelación)
@@ -1122,9 +1149,21 @@ export class WhatsAppHandler {
         return;
       }
 
-      // Si hay notificación de vendedor pendiente (ej: respuesta a broadcast), enviarla
+      // Si hay notificación de vendedor pendiente (ej: respuesta a broadcast), enviarla (24h-safe)
       if (leadMsgResult.notifyVendor && typeof leadMsgResult.notifyVendor === 'object') {
-        await this.meta.sendWhatsAppMessage(leadMsgResult.notifyVendor.phone, leadMsgResult.notifyVendor.message);
+        const { data: broadcastNotifyTM } = await this.supabase.client
+          .from('team_members')
+          .select('id, name, phone, role')
+          .or(`phone.eq.${leadMsgResult.notifyVendor.phone},phone.like.%${leadMsgResult.notifyVendor.phone?.slice(-10)}`)
+          .maybeSingle();
+        if (broadcastNotifyTM) {
+          await enviarMensajeTeamMember(this.supabase, this.meta, broadcastNotifyTM, leadMsgResult.notifyVendor.message, {
+            tipoMensaje: 'alerta_lead',
+            pendingKey: 'pending_alerta_lead'
+          });
+        } else {
+          await this.meta.sendWhatsAppMessage(leadMsgResult.notifyVendor.phone, leadMsgResult.notifyVendor.message);
+        }
         console.log('📢 Notificación de broadcast enviada a vendedor');
       }
 
