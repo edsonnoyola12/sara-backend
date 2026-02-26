@@ -355,6 +355,12 @@ export async function handleRetellRoutes(
         const todosPrecios = [precioMonteVerde, precioEncinos, precioMiravalle, precioColorines, precioAndes, precioFalco].filter(p => p > 0 && p < Infinity);
         const precioMinimoGlobal = todosPrecios.length > 0 ? Math.min(...todosPrecios) : 1600000;
 
+        // Lista dinámica de desarrollos desde DB (para tool descriptions)
+        const desarrollosFromDB = allProperties
+          ? [...new Set(allProperties.map((p: any) => p.development || p.name || '').filter((d: string) => d && d.length > 2))]
+          : ['Monte Verde', 'Los Encinos', 'Miravalle', 'Distrito Falco', 'Andes', 'Paseo Colorines', 'Citadella del Nogal', 'Villa Campelo', 'Villa Galiano'];
+        const desarrollosListStr = desarrollosFromDB.join(', ');
+
         // 4. Definir las custom tools de SARA
         const baseUrl = 'https://sara-backend.edson-633.workers.dev';
         const saraTools: any[] = [
@@ -376,7 +382,7 @@ export async function handleRetellRoutes(
               properties: {
                 desarrollo: {
                   type: 'string',
-                  description: 'Nombre del desarrollo. Opciones: Monte Verde, Los Encinos, Miravalle, Distrito Falco, Andes, Paseo Colorines, Citadella del Nogal, Villa Campelo, Villa Galiano'
+                  description: `Nombre del desarrollo. Opciones: ${desarrollosListStr}`
                 }
               },
               required: ['desarrollo']
@@ -477,7 +483,7 @@ export async function handleRetellRoutes(
           {
             type: 'custom',
             name: 'consultar_credito',
-            description: 'Consulta información sobre crédito hipotecario, INFONAVIT, FOVISSSTE, o bancario. Calcula capacidad de crédito aproximada basada en ingreso.',
+            description: 'Consulta información sobre crédito hipotecario. Soporta: INFONAVIT (subcuenta+salario), FOVISSSTE (gobierno), bancario (BBVA, Banorte, Santander, HSBC, Scotiabank), y Cofinavit (INFONAVIT+banco). Calcula capacidad de crédito basada en ingreso mensual. Usa cuando el cliente pregunte por financiamiento, crédito, enganche, mensualidades, o cómo pagar.',
             url: `${baseUrl}/webhook/retell/tool/info-credito`,
             method: 'POST',
             speak_during_execution: false,
@@ -1351,8 +1357,9 @@ CASOS ESPECIALES:
               });
               console.log(`✅ Vendedor ${vendorAsignado.name} notificado de reagendamiento via Retell`);
             }
-          } catch (notifErr) {
+          } catch (notifErr: any) {
             console.error('⚠️ Error notificando reagendamiento al vendedor:', notifErr);
+            logErrorToDB(supabase, 'retell_notification_error', 'warning', 'retell/cambiar-cita/notify', notifErr?.message, notifErr?.stack, { tool: 'cambiar-cita' });
           }
 
           return new Response(JSON.stringify({
@@ -1385,7 +1392,13 @@ CASOS ESPECIALES:
         // VALIDAR contra desarrollos conocidos para evitar "Zacatecas" u otros no-desarrollos
         const callObj = body.call || {};
         const callId = callObj.call_id || body.call_id || '';
-        const desarrollosValidos = ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano', 'monte real', 'alpes'];
+        // Obtener desarrollos válidos dinámicamente desde DB
+        const { data: devProps } = await supabase.client
+          .from('properties')
+          .select('development, development_name, name');
+        const desarrollosValidos = devProps
+          ? [...new Set(devProps.flatMap((p: any) => [p.development, p.development_name, p.name].filter(Boolean).map((d: string) => d.toLowerCase())))]
+          : ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano', 'monte real', 'alpes'];
         const esDesarrolloValido = desarrollo && desarrollosValidos.some(d => desarrollo.toLowerCase().includes(d) || d.includes(desarrollo.toLowerCase()));
         if (callId && env.SARA_CACHE && esDesarrolloValido) {
           const existingRaw = await env.SARA_CACHE.get(`retell_send_queue:${callId}`);
@@ -1404,6 +1417,7 @@ CASOS ESPECIALES:
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } catch (e: any) {
         console.error('❌ Retell tool enviar-whatsapp error:', e);
+        logErrorToDB(supabase, 'retell_tool_error', 'error', 'retell/enviar-whatsapp', e?.message, e?.stack, { tool: 'enviar-whatsapp' });
         return new Response(JSON.stringify({ result: 'Le mando la información por WhatsApp al terminar la llamada.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     }
@@ -1438,6 +1452,7 @@ CASOS ESPECIALES:
         return new Response(JSON.stringify({ result: respuesta }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } catch (e: any) {
         console.error('❌ Retell tool info-credito error:', e);
+        logErrorToDB(supabase, 'retell_tool_error', 'error', 'retell/info-credito', e?.message, e?.stack, { tool: 'info-credito' });
         return new Response(JSON.stringify({ result: 'Error consultando crédito. Dile que le mando info por WhatsApp.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     }
@@ -1489,6 +1504,7 @@ CASOS ESPECIALES:
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } catch (e: any) {
         console.error('❌ Retell tool consultar-citas error:', e);
+        logErrorToDB(supabase, 'retell_tool_error', 'error', 'retell/consultar-citas', e?.message, e?.stack, { tool: 'consultar-citas' });
         return new Response(JSON.stringify({ result: 'Error consultando citas.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     }
@@ -1541,9 +1557,10 @@ CASOS ESPECIALES:
 
         let resultado = `Con presupuesto de ${precioAPalabras(presupuesto)}${recamaras ? ` y ${recamaras} o más recámaras` : ''}, tienes estas opciones: `;
 
+        // Mapa de zonas dinámico basado en properties (con fallback)
+        const colPadreDevs = new Set(['Monte Verde', 'Los Encinos', 'Miravalle', 'Paseo Colorines', 'Monte Real', 'Alpes']);
         for (const [dev, modelos] of Object.entries(porDesarrollo)) {
-          const zona = ['Monte Verde', 'Los Encinos', 'Miravalle', 'Paseo Colorines'].includes(dev)
-            ? 'Colinas del Padre' : 'Guadalupe';
+          const zona = colPadreDevs.has(dev) ? 'Colinas del Padre' : 'Guadalupe';
           resultado += `En ${dev}, ${zona}: `;
           resultado += modelos.map((m: any) => {
             const precio = m.price_equipped || m.price || 0;
@@ -1560,6 +1577,7 @@ CASOS ESPECIALES:
         return new Response(JSON.stringify({ result: resultado }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } catch (e: any) {
         console.error('❌ Retell tool buscar-por-presupuesto error:', e);
+        logErrorToDB(supabase, 'retell_tool_error', 'error', 'retell/buscar-por-presupuesto', e?.message, e?.stack, { tool: 'buscar-por-presupuesto' });
         return new Response(JSON.stringify({ result: 'Error buscando opciones. Dile que le mando info por WhatsApp.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     }
@@ -1746,7 +1764,13 @@ CASOS ESPECIALES:
             // Transcript puede ser string ("Agent: ...\nUser: ...") o array ([{role, content}])
             let desarrolloDelTranscript = '';
             let todosDesarrollosTranscript: string[] = [];
-            const desarrollosConocidos = ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano'];
+            // Obtener desarrollos dinámicamente desde DB (con fallback)
+            const { data: devPropsAnalyzed } = await supabase.client
+              .from('properties')
+              .select('development, development_name, name');
+            const desarrollosConocidos = devPropsAnalyzed
+              ? [...new Set(devPropsAnalyzed.flatMap((p: any) => [p.development, p.development_name, p.name].filter(Boolean).map((d: string) => d.toLowerCase().trim())))]
+              : ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano'];
             // Sentinel values que Retell retorna cuando no detectó desarrollo — FILTRAR siempre
             const sentinelValues = ['no_mencionado', 'general', 'por definir', 'no mencionado', 'sin desarrollo', 'n/a', 'none', 'null', 'undefined', ''];
             const isSentinel = (v: string) => !v || sentinelValues.includes(v.toLowerCase().trim());
@@ -2221,6 +2245,7 @@ Reglas de fecha:
                 }
               } catch (callbackError: any) {
                 console.error('Error detectando callback:', callbackError?.message);
+                logErrorToDB(supabase, 'retell_callback_error', 'error', 'retell/call_analyzed/callback', callbackError?.message, callbackError?.stack, { call_id: call?.call_id });
                 debugLog.push({ t: Date.now(), step: 'callback_error', error: callbackError?.message });
               }
             } else if (event === 'call_analyzed' && (!lead || durationSeconds <= 30 || citaYaCreada)) {

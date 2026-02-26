@@ -43,21 +43,22 @@ export interface CallContext {
 export function getMotivoInstrucciones(motivo: string): string {
   const instrucciones: Record<string, string> = {
     // Pre-venta
-    'seguimiento': 'Llamada de seguimiento. Objetivo: saber si el cliente tiene dudas y agendar visita. Tono amigable y consultivo.',
-    'calificacion': 'Llamada de calificación. Objetivo: entender necesidades (zona, recámaras, presupuesto) y recomendar desarrollo. Tono profesional.',
-    'recordatorio_cita': 'Recordatorio de cita. Objetivo: confirmar que asistirá a su cita. Sé breve: "Solo te llamo para confirmar tu cita de mañana a las X. ¿Todo bien?" Si cancela, ofrece reagendar.',
-    'encuesta': 'Encuesta de satisfacción. Objetivo: preguntar qué tal su experiencia. Tono cálido y agradecido.',
+    'seguimiento': 'Llamada de seguimiento. Objetivo: saber si el cliente tiene dudas y agendar visita. Tono amigable y consultivo. Pregunta qué le pareció la información que le enviamos. Si muestra interés, cierra con: "¿Le gustaría visitar el desarrollo este fin de semana?"',
+    'calificacion': 'Llamada de calificación. Objetivo: entender necesidades (zona, recámaras, presupuesto) y recomendar desarrollo. Tono profesional. Al terminar, recomienda un desarrollo y cierra con: "¿Le agendo una visita para conocerlo?"',
+    'recordatorio_cita': 'Recordatorio de cita. Objetivo: confirmar que asistirá. Sé breve: "Solo te llamo para confirmar tu cita de mañana a las X. ¿Todo bien?" Si cancela, ofrece reagendar: "¿Le funciona otro día esta semana?"',
+    'encuesta': 'Encuesta de satisfacción post-visita. Objetivo: preguntar qué tal su experiencia visitando el desarrollo. Tono cálido. Si le gustó, cierra con: "¿Le gustaría avanzar con el proceso de compra?"',
+    'reactivacion': 'Reactivación de lead inactivo. El cliente no ha respondido en 30+ días. Tono amigable sin presión: "Hola, soy SARA de Grupo Santa Rita. Hace tiempo platicamos sobre casas. ¿Sigue buscando? Tenemos opciones nuevas." Si dice que no, despídete amablemente.',
 
     // Post-venta (escalamiento desde WhatsApp sin respuesta)
-    'seguimiento_entrega': 'Seguimiento post-entrega. El cliente recibió su casa hace pocos días. Pregunta si todo está bien: llaves, escrituras, servicios (agua, luz, gas). Si reporta algún problema, dile que lo registras y que su asesor le da seguimiento.',
-    'satisfaccion': 'Encuesta de satisfacción de casa. Pregunta: "Del 1 al 4, ¿cómo calificarías tu experiencia con tu nueva casa? 1 excelente, 2 buena, 3 regular, 4 mala." Si dice 3 o 4, pregunta qué se puede mejorar.',
-    'encuesta_nps': 'Encuesta NPS. Pregunta: "Del 0 al 10, ¿qué tan probable es que nos recomiendes con un familiar o amigo?" Agradece su respuesta. Si dice 9 o 10, pregunta si conoce a alguien que busque casa.',
-    'referidos': 'Solicitud de referidos. El cliente compró hace 1-3 meses. Tono: "Esperamos que estés disfrutando tu nueva casa. ¿Conoces a algún familiar o amigo que busque casa? Con gusto lo atendemos."',
-    'checkin_postventa': 'Check-in 2 meses post-compra. Tono cálido: "Solo llamo para saber cómo va todo con tu casa. ¿Todo en orden? ¿Necesitas algo?" Breve y amigable.',
-    'mantenimiento': 'Recordatorio de mantenimiento preventivo. Ya pasó ~1 año desde la entrega. "Te llamo para recordarte que es buen momento para revisar impermeabilización, pintura exterior y servicios. ¿Necesitas apoyo con algo?"',
+    'seguimiento_entrega': 'Seguimiento post-entrega. El cliente recibió su casa hace pocos días. Pregunta si todo está bien: llaves, escrituras, servicios (agua, luz, gas). Si reporta problema, dile que lo registras y su asesor le da seguimiento. Cierra con: "¿Hay algo más en lo que pueda ayudarle?"',
+    'satisfaccion': 'Encuesta de satisfacción de casa. Pregunta: "Del 1 al 4, ¿cómo calificarías tu experiencia con tu nueva casa? 1 excelente, 2 buena, 3 regular, 4 mala." Si dice 3 o 4, pregunta qué se puede mejorar y asegúrale que le darán seguimiento.',
+    'encuesta_nps': 'Encuesta NPS. Pregunta: "Del 0 al 10, ¿qué tan probable es que nos recomiendes con un familiar o amigo?" Agradece su respuesta. Si dice 9 o 10, pregunta: "¿Conoces a alguien que busque casa? Con gusto lo atendemos." Si dice 6 o menos, pregunta qué podríamos mejorar.',
+    'referidos': 'Solicitud de referidos. El cliente compró hace 1-3 meses. Empieza preguntando cómo va todo: "Esperamos que estés disfrutando tu nueva casa. ¿Todo bien?" Después pregunta: "¿Conoces a algún familiar o amigo que busque casa? Con gusto lo atendemos y tú recibes un beneficio por recomendarnos." Si no conoce a nadie, despídete con: "No te preocupes, cuando se te ocurra alguien nos avisas."',
+    'checkin_postventa': 'Check-in 2 meses post-compra. Tono cálido: "Solo llamo para saber cómo va todo con tu casa. ¿Todo en orden? ¿Necesitas algo?" Breve y amigable. Si reporta algo, registra y ofrece seguimiento. Cierra con: "Cualquier cosa que necesites, aquí estamos."',
+    'mantenimiento': 'Recordatorio de mantenimiento preventivo. Ya pasó ~1 año desde la entrega. "Te llamo para recordarte que es buen momento para revisar impermeabilización, pintura exterior y servicios. ¿Necesitas apoyo con algo?" Si necesita proveedor, dile que te comunicas con el equipo para conectarlo.',
 
     // Otros
-    'timeout_30min': 'Seguimiento de bridge expirado. El chat directo con el vendedor terminó. Pregunta si quedó alguna duda pendiente.',
+    'timeout_30min': 'Seguimiento de bridge expirado. El chat directo con el vendedor terminó. Pregunta si quedó alguna duda pendiente. Si hay dudas, ofrece resolverlas. Cierra con: "Si necesita algo más, puede escribirnos por WhatsApp."',
   };
   return instrucciones[motivo] || instrucciones['seguimiento'];
 }
