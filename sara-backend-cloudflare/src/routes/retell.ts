@@ -1338,170 +1338,35 @@ CASOS ESPECIALES:
     }
 
     // TOOL: Enviar información por WhatsApp al cliente
+    // NOTA: NO enviamos nada durante la llamada. Todo se envía en call_analyzed
+    // para garantizar: (1) orden correcto, (2) sin duplicados, (3) carousels con fotos
     if (url.pathname === '/webhook/retell/tool/enviar-whatsapp' && request.method === 'POST') {
       try {
         const body = await request.json() as any;
         const args = body.args || body;
-        const callObj = body.call || {};
-        console.log(`🔧 RETELL TOOL enviar-whatsapp FULL BODY:`, JSON.stringify(body).substring(0, 500));
-
-        const tipo = args.tipo || 'info'; // 'brochure', 'ubicacion', 'video', 'info'
+        const tipo = args.tipo || 'info';
         const desarrollo = args.desarrollo || '';
+        console.log(`🔧 RETELL TOOL enviar-whatsapp: tipo=${tipo}, desarrollo=${desarrollo} — DEFERRED to call_analyzed`);
 
-        // Extraer teléfono de múltiples posibles ubicaciones en el body de Retell
-        let callerPhone = callObj.from_number?.replace('+', '')
-          || callObj.to_number?.replace('+', '')
-          || body.from_number?.replace('+', '')
-          || body.to_number?.replace('+', '')
-          || body.metadata?.caller_phone?.replace('+', '')
-          || '';
-
-        // Fallback: buscar en KV por call_id o última llamada
-        if (!callerPhone && env.SARA_CACHE) {
-          const callId = callObj.call_id || body.call_id || '';
-          if (callId) {
-            callerPhone = await env.SARA_CACHE.get(`retell_call_phone:${callId}`) || '';
-            if (callerPhone) console.log(`📞 Phone recuperado de KV por call_id: ${callerPhone}`);
-          }
-          if (!callerPhone) {
-            callerPhone = await env.SARA_CACHE.get('retell_last_caller_phone') || '';
-            if (callerPhone) console.log(`📞 Phone recuperado de KV (última llamada): ${callerPhone}`);
+        // Guardar en KV qué se pidió para que call_analyzed lo envíe
+        const callObj = body.call || {};
+        const callId = callObj.call_id || body.call_id || '';
+        if (callId && env.SARA_CACHE) {
+          const existingRaw = await env.SARA_CACHE.get(`retell_send_queue:${callId}`);
+          const existing: string[] = existingRaw ? JSON.parse(existingRaw) : [];
+          if (desarrollo && !existing.includes(desarrollo)) {
+            existing.push(desarrollo);
+            await env.SARA_CACHE.put(`retell_send_queue:${callId}`, JSON.stringify(existing), { expirationTtl: 3600 });
           }
         }
-        console.log(`🔧 RETELL TOOL enviar-whatsapp callerPhone: ${callerPhone}`);
-        if (!callerPhone) {
-          // Si no tenemos teléfono, enviar la info cuando termine la llamada
-          return new Response(JSON.stringify({ result: 'Listo, le envío la información por WhatsApp cuando termine la llamada.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
 
-        // Normalizar teléfono para WhatsApp (agregar 521 si necesario)
-        let whatsappPhone = callerPhone.replace('+', '');
-        if (whatsappPhone.startsWith('52') && whatsappPhone.length === 12) {
-          whatsappPhone = '521' + whatsappPhone.substring(2);
-        }
-
-        const { MetaWhatsAppService } = await import('../services/meta-whatsapp');
-        const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-
-        if (tipo === 'ubicacion' || tipo === 'gps') {
-          const { data: prop } = await supabase.client
-            .from('properties')
-            .select('gps_link, development')
-            .ilike('development', `%${desarrollo}%`)
-            .limit(1)
-            .maybeSingle();
-
-          if (prop?.gps_link) {
-            await meta.sendCTAButton(whatsappPhone, `📍 *Ubicación de ${desarrollo}*\nToca el botón para abrir en Google Maps`, 'Abrir mapa', prop.gps_link);
-            return new Response(JSON.stringify({ result: `Ubicación de ${desarrollo} enviada por WhatsApp.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-          }
-          return new Response(JSON.stringify({ result: `No encontré la ubicación de ${desarrollo}.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-
-        if (tipo === 'brochure') {
-          const { data: prop } = await supabase.client
-            .from('properties')
-            .select('brochure_urls, development')
-            .ilike('development', `%${desarrollo}%`)
-            .limit(1)
-            .maybeSingle();
-
-          if (prop?.brochure_urls && prop.brochure_urls.length > 0) {
-            const brochureUrl = prop.brochure_urls[0];
-            await meta.sendCTAButton(whatsappPhone, `📋 *Brochure de ${desarrollo}*\nToda la info del desarrollo`, 'Ver brochure', brochureUrl);
-            return new Response(JSON.stringify({ result: `Brochure de ${desarrollo} enviado por WhatsApp.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-          }
-          return new Response(JSON.stringify({ result: `No encontré brochure de ${desarrollo}.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-
-        if (tipo === 'video') {
-          const { data: prop } = await supabase.client
-            .from('properties')
-            .select('youtube_link, development')
-            .ilike('development', `%${desarrollo}%`)
-            .limit(1)
-            .maybeSingle();
-
-          if (prop?.youtube_link) {
-            await meta.sendCTAButton(whatsappPhone, `🎬 *Video de ${desarrollo}*\nConoce el desarrollo en video`, 'Ver video', prop.youtube_link);
-            return new Response(JSON.stringify({ result: `Video de ${desarrollo} enviado por WhatsApp.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-          }
-          return new Response(JSON.stringify({ result: `No encontré video de ${desarrollo}.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-
-        // Info general del desarrollo — enviar CAROUSEL en vez de texto feo
-        if (desarrollo) {
-          // Cargar todas las properties para buildCarouselCards
-          const { data: allProps } = await supabase.client
-            .from('properties')
-            .select('name, development, development_name, price_equipped, price, price_min, price_max, bedrooms, area_m2, land_size, photo_url, gps_link, youtube_link, matterport_link, brochure_urls');
-
-          if (allProps && allProps.length > 0) {
-            // Determinar a qué segmento pertenece este desarrollo
-            const segmentForDev = getCarouselSegmentForDesarrollo(desarrollo);
-
-            if (segmentForDev) {
-              // Enviar carousel del segmento correspondiente
-              try {
-                const cards = AIConversationService.buildCarouselCards(allProps, segmentForDev as any);
-                const templateName = AIConversationService.CAROUSEL_SEGMENTS[segmentForDev]?.template;
-                if (cards.length > 0 && templateName) {
-                  const bodyParams = segmentForDev === 'terrenos'
-                    ? []
-                    : [segmentForDev === 'economico' ? AIConversationService.precioMinGlobal(allProps) : '$3M+'];
-                  await meta.sendCarouselTemplate(whatsappPhone, templateName, bodyParams, cards);
-                  return new Response(JSON.stringify({ result: `Carousel de ${desarrollo} enviado por WhatsApp con tarjetas deslizables.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-                }
-              } catch (carouselErr: any) {
-                console.log(`⚠️ Carousel falló para ${desarrollo}, enviando CTA buttons:`, carouselErr?.message);
-              }
-            }
-
-            // Fallback: enviar recursos individuales con CTA buttons
-            const devProps = allProps.filter((p: any) => {
-              const devName = (p.development || p.development_name || p.name || '').toLowerCase();
-              return devName.includes(desarrollo.toLowerCase()) || desarrollo.toLowerCase().includes(devName);
-            });
-            if (devProps.length > 0) {
-              await enviarRecursosCTARetell(meta, whatsappPhone, desarrollo, devProps);
-              return new Response(JSON.stringify({ result: `Info de ${desarrollo} enviada por WhatsApp con botones interactivos.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-            }
-          }
-          return new Response(JSON.stringify({ result: `No encontré información de ${desarrollo}.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-
-        // Sin desarrollo especificado → enviar AMBOS carousels (económico + premium)
-        {
-          const { data: allProps } = await supabase.client
-            .from('properties')
-            .select('name, development, development_name, price_equipped, price, price_min, price_max, bedrooms, area_m2, land_size, photo_url');
-          if (allProps && allProps.length > 0) {
-            let enviados = 0;
-            for (const seg of ['economico', 'premium'] as const) {
-              try {
-                const cards = AIConversationService.buildCarouselCards(allProps, seg);
-                const templateName = AIConversationService.CAROUSEL_SEGMENTS[seg]?.template;
-                if (cards.length > 0 && templateName) {
-                  const bodyParams = seg === 'economico'
-                    ? [AIConversationService.precioMinGlobal(allProps)]
-                    : ['$3M+'];
-                  if (enviados > 0) await new Promise(r => setTimeout(r, 500));
-                  await meta.sendCarouselTemplate(whatsappPhone, templateName, bodyParams, cards);
-                  enviados++;
-                }
-              } catch (err: any) {
-                console.log(`⚠️ Carousel ${seg} falló:`, err?.message);
-              }
-            }
-            if (enviados > 0) {
-              return new Response(JSON.stringify({ result: `Carousels con todos nuestros desarrollos enviados por WhatsApp.` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-            }
-          }
-          return new Response(JSON.stringify({ result: 'Necesito saber qué desarrollo enviar. Pregúntale al cliente.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
+        const devLabel = desarrollo ? ` de ${desarrollo}` : '';
+        return new Response(JSON.stringify({
+          result: `Perfecto, le envío toda la información${devLabel} por WhatsApp al terminar la llamada.`
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } catch (e: any) {
         console.error('❌ Retell tool enviar-whatsapp error:', e);
-        return new Response(JSON.stringify({ result: 'Error enviando WhatsApp. Le mando la info después de la llamada.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ result: 'Le mando la información por WhatsApp al terminar la llamada.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
     }
 
@@ -2289,8 +2154,25 @@ Reglas:
                   }
                   // Use ALL developments from transcript, not just one
                   const desarrollosMencionados = todosDesarrollosTranscript.length > 0
-                    ? todosDesarrollosTranscript
+                    ? [...todosDesarrollosTranscript]
                     : (desarrolloInteres ? [desarrolloInteres] : []);
+
+                  // Merge in developments from KV queue (saved by enviar_info_whatsapp tool during call)
+                  try {
+                    if (call.call_id && env.SARA_CACHE) {
+                      const kvQueueRaw = await env.SARA_CACHE.get(`retell_send_queue:${call.call_id}`);
+                      if (kvQueueRaw) {
+                        const kvDevs: string[] = JSON.parse(kvQueueRaw);
+                        for (const kvDev of kvDevs) {
+                          if (!desarrollosMencionados.some((d: string) => d.toLowerCase() === kvDev.toLowerCase())) {
+                            desarrollosMencionados.push(kvDev);
+                          }
+                        }
+                        await env.SARA_CACHE.delete(`retell_send_queue:${call.call_id}`);
+                        console.log(`📋 KV queue merged: +${kvDevs.join(', ')} → total: ${desarrollosMencionados.join(', ')}`);
+                      }
+                    }
+                  } catch (kvMergeErr) { /* ignore KV errors */ }
 
                   if (desarrollosMencionados.length > 1) {
                     mensajeFollowUp += `Me da gusto que te interesen *${desarrollosMencionados.join('* y *')}*. `;
@@ -2338,7 +2220,12 @@ Reglas:
                           console.log(`🎠 Carousel "${templateName}" post-call enviado`);
                         }
                       } catch (err: any) {
-                        console.log(`⚠️ Carousel post-call ${seg} falló:`, err?.message);
+                        console.error(`❌ Carousel post-call "${seg}" falló:`, err?.message);
+                        // Log full error details for debugging carousel failures
+                        try {
+                          const errDetails = err?.response ? JSON.stringify(err.response) : (err?.data ? JSON.stringify(err.data) : err?.stack?.substring(0, 300));
+                          if (errDetails) console.error(`❌ Carousel error details:`, errDetails);
+                        } catch (_) { /* ignore */ }
                       }
                     }
 
