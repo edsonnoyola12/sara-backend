@@ -508,6 +508,27 @@ export async function executeCEOHandler(ctx: HandlerContext, handler: any, from:
     if (handlerResult.message) {
       console.log(`📤 CEO Handler ${handlerName}: Enviando respuesta`);
       await ctx.meta.sendWhatsAppMessage(cleanPhone, handlerResult.message);
+
+      // Send list menu if metadata has vendedores (equipo scorecard)
+      if (handlerResult.metadata?.vendedores?.length > 0) {
+        try {
+          const vendedorRows = handlerResult.metadata.vendedores.slice(0, 10).map((v: any) => ({
+            id: `cmd_quien_es_${v.name.toLowerCase().split(' ')[0]}`,
+            title: `📊 ${v.name}`.substring(0, 24),
+            description: `${v.leads} leads activos`.substring(0, 72)
+          }));
+          await new Promise(r => setTimeout(r, 300));
+          await ctx.meta.sendListMenu(
+            cleanPhone,
+            'Selecciona un vendedor para ver detalle.',
+            'Ver vendedores 👥',
+            [{ title: 'Vendedores', rows: vendedorRows }]
+          );
+        } catch (listErr) {
+          console.log('⚠️ No se pudo enviar lista equipo:', listErr);
+        }
+      }
+
       return;
     }
 

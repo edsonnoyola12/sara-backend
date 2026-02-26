@@ -5312,6 +5312,34 @@ export async function vendedorMisOfertas(ctx: HandlerContext, handler: any, from
 
     await ctx.meta.sendWhatsAppMessage(from, msg);
 
+    // Interactive list menu with offers for quick access
+    if (offers.length > 0) {
+      try {
+        const offerRows = offers.slice(0, 10).map((o: any) => {
+          const leadName = o.leads?.name || 'Sin nombre';
+          const precio = Number(o.offered_price).toLocaleString('es-MX', { maximumFractionDigits: 0 });
+          const emoji = statusEmoji[o.status] || '❓';
+          return {
+            id: `cmd_oferta_${(leadName).toLowerCase().replace(/\s+/g, '_').substring(0, 30)}`,
+            title: `${emoji} ${leadName}`.substring(0, 24),
+            description: `$${precio} • ${statusName[o.status] || o.status}`.substring(0, 72)
+          };
+        });
+
+        await new Promise(r => setTimeout(r, 300));
+        await ctx.meta.sendListMenu(
+          from,
+          `Selecciona una oferta para ver más detalles o realizar acciones.`,
+          'Ver ofertas 📋',
+          [{ title: 'Ofertas activas', rows: offerRows }],
+          undefined,
+          'Toca para seleccionar'
+        );
+      } catch (listErr) {
+        console.log('⚠️ No se pudo enviar lista de ofertas:', listErr);
+      }
+    }
+
   } catch (e) {
     console.error('Error en vendedorMisOfertas:', e);
     await ctx.meta.sendWhatsAppMessage(from, '❌ Error al obtener ofertas.');

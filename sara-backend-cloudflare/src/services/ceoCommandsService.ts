@@ -17,6 +17,7 @@ export interface CEOCommandResult {
   response?: string;
   action?: string;
   data?: any;
+  metadata?: any;
 }
 
 export class CEOCommandsService {
@@ -530,19 +531,81 @@ export class CEOCommandsService {
     ceoPhone: string,
     sendMessage: (phone: string, message: string) => Promise<any>
   ): Promise<CEOCommandResult> {
+    // Get team members
     const { data: team } = await this.supabase.client
       .from('team_members')
-      .select('name, role, is_active')
+      .select('id, name, role, is_active')
       .eq('is_active', true)
       .order('name');
 
-    let mensaje = `👥 *Equipo Activo*\n\n`;
-    for (const member of team || []) {
-      mensaje += `• ${member.name} (${member.role || 'vendedor'})\n`;
+    if (!team || team.length === 0) {
+      await sendMessage(ceoPhone, '👥 No hay miembros activos en el equipo.');
+      return { handled: true, action: 'reporte_equipo' };
+    }
+
+    // Get vendedores only for metrics
+    const vendedores = team.filter((m: any) => m.role === 'vendedor');
+    const vendedorIds = vendedores.map((v: any) => v.id);
+
+    // Parallel queries for metrics
+    const hoy = new Date();
+    const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
+    const hoyStr = hoy.toISOString().split('T')[0];
+
+    const [leadsRes, citasRes, cerradosRes] = await Promise.all([
+      this.supabase.client.from('leads').select('id, assigned_to').in('assigned_to', vendedorIds).not('status', 'in', '("lost","inactive","fallen")'),
+      this.supabase.client.from('appointments').select('id, team_member_id, scheduled_date').in('team_member_id', vendedorIds).gte('scheduled_date', primerDiaMes).lte('scheduled_date', hoyStr),
+      this.supabase.client.from('leads').select('id, assigned_to').in('assigned_to', vendedorIds).in('status', ['closed', 'reserved', 'delivered'])
+    ]);
+
+    const leads = leadsRes.data || [];
+    const citas = citasRes.data || [];
+    const cerrados = cerradosRes.data || [];
+
+    // Build scorecard
+    const medalEmojis = ['🥇', '🥈', '🥉'];
+    const scorecards = vendedores.map((v: any) => {
+      const vLeads = leads.filter((l: any) => l.assigned_to === v.id).length;
+      const vCitas = citas.filter((c: any) => c.team_member_id === v.id).length;
+      const vCerrados = cerrados.filter((c: any) => c.assigned_to === v.id).length;
+      return { ...v, leads: vLeads, citas: vCitas, cerrados: vCerrados };
+    }).sort((a: any, b: any) => b.cerrados - a.cerrados || b.leads - a.leads);
+
+    let mensaje = `👥 *EQUIPO ACTIVO* (${team.length})\n\n`;
+
+    // Vendedores with scorecard
+    if (scorecards.length > 0) {
+      mensaje += `🏆 *Vendedores*\n`;
+      scorecards.forEach((v: any, i: number) => {
+        const medal = i < 3 ? medalEmojis[i] : `${i + 1}.`;
+        mensaje += `${medal} *${v.name}*\n`;
+        mensaje += `   📊 ${v.leads} leads • ${v.citas} citas • ${v.cerrados} cierres\n`;
+      });
+    }
+
+    // Non-vendedores
+    const otros = team.filter((m: any) => m.role !== 'vendedor');
+    if (otros.length > 0) {
+      mensaje += `\n👔 *Otros roles*\n`;
+      for (const m of otros) {
+        mensaje += `• ${m.name} (${m.role})\n`;
+      }
     }
 
     await sendMessage(ceoPhone, mensaje);
-    return { handled: true, action: 'reporte_equipo' };
+
+    // Return metadata with vendedores for list menu (calling code will send it)
+    return {
+      handled: true,
+      action: 'reporte_equipo',
+      metadata: {
+        vendedores: scorecards.map((v: any) => ({
+          id: v.id,
+          name: v.name,
+          leads: v.leads
+        }))
+      }
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -552,7 +615,7 @@ export class CEOCommandsService {
     handlerName: string,
     nombreCEO: string,
     params?: any
-  ): Promise<{ message?: string; error?: string; needsExternalHandler?: boolean }> {
+  ): Promise<{ message?: string; error?: string; needsExternalHandler?: boolean; metadata?: any }> {
     try {
       switch (handlerName) {
         case 'generarReporte': {
@@ -578,15 +641,64 @@ export class CEOCommandsService {
         case 'reporteEquipo': {
           const { data: team } = await this.supabase.client
             .from('team_members')
-            .select('name, role, active')
+            .select('id, name, role, active')
             .eq('active', true)
             .order('name');
 
-          let msg = `👥 *Equipo Activo*\n\n`;
-          for (const m of team || []) {
-            msg += `• ${m.name} (${m.role || 'vendedor'})\n`;
+          if (!team || team.length === 0) {
+            return { message: '👥 No hay miembros activos en el equipo.' };
           }
-          return { message: msg };
+
+          const vendedoresEH = team.filter((m: any) => m.role === 'vendedor');
+          const vendedorIdsEH = vendedoresEH.map((v: any) => v.id);
+
+          const hoyEH = new Date();
+          const primerDiaMesEH = new Date(hoyEH.getFullYear(), hoyEH.getMonth(), 1).toISOString().split('T')[0];
+          const hoyStrEH = hoyEH.toISOString().split('T')[0];
+
+          const [leadsEH, citasEH, cerradosEH] = await Promise.all([
+            this.supabase.client.from('leads').select('id, assigned_to').in('assigned_to', vendedorIdsEH).not('status', 'in', '("lost","inactive","fallen")'),
+            this.supabase.client.from('appointments').select('id, team_member_id').in('team_member_id', vendedorIdsEH).gte('scheduled_date', primerDiaMesEH).lte('scheduled_date', hoyStrEH),
+            this.supabase.client.from('leads').select('id, assigned_to').in('assigned_to', vendedorIdsEH).in('status', ['closed', 'reserved', 'delivered'])
+          ]);
+
+          const medalEmojisEH = ['🥇', '🥈', '🥉'];
+          const scorecardsEH = vendedoresEH.map((v: any) => {
+            const vL = (leadsEH.data || []).filter((l: any) => l.assigned_to === v.id).length;
+            const vC = (citasEH.data || []).filter((c: any) => c.team_member_id === v.id).length;
+            const vCr = (cerradosEH.data || []).filter((c: any) => c.assigned_to === v.id).length;
+            return { ...v, leads: vL, citas: vC, cerrados: vCr };
+          }).sort((a: any, b: any) => b.cerrados - a.cerrados || b.leads - a.leads);
+
+          let msg = `👥 *EQUIPO ACTIVO* (${team.length})\n\n`;
+
+          if (scorecardsEH.length > 0) {
+            msg += `🏆 *Vendedores*\n`;
+            scorecardsEH.forEach((v: any, i: number) => {
+              const medal = i < 3 ? medalEmojisEH[i] : `${i + 1}.`;
+              msg += `${medal} *${v.name}*\n`;
+              msg += `   📊 ${v.leads} leads • ${v.citas} citas • ${v.cerrados} cierres\n`;
+            });
+          }
+
+          const otrosEH = team.filter((m: any) => m.role !== 'vendedor');
+          if (otrosEH.length > 0) {
+            msg += `\n👔 *Otros roles*\n`;
+            for (const m of otrosEH) {
+              msg += `• ${m.name} (${m.role})\n`;
+            }
+          }
+
+          return {
+            message: msg,
+            metadata: {
+              vendedores: scorecardsEH.map((v: any) => ({
+                id: v.id,
+                name: v.name,
+                leads: v.leads
+              }))
+            }
+          };
         }
 
         case 'reporteLeads': {

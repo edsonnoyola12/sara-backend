@@ -1612,6 +1612,40 @@ export default {
           }
           // ═══ FIN CAROUSEL QUICK REPLY ═══
 
+          // ═══ LIST MENU QUICK REPLY: Rewrite cmd_* payloads to recognizable commands ═══
+          if (buttonPayloadRaw.startsWith('cmd_')) {
+            const cmdMap: Record<string, string> = {
+              'cmd_mis_leads': 'mis leads',
+              'cmd_citas': 'citas',
+              'cmd_hot': 'hot',
+              'cmd_pendientes': 'pendientes'
+            };
+
+            if (cmdMap[buttonPayloadRaw]) {
+              text = cmdMap[buttonPayloadRaw];
+              console.log(`📱 List menu cmd rewrite: "${buttonPayloadRaw}" → "${text}"`);
+            } else if (buttonPayloadRaw.startsWith('cmd_oferta_')) {
+              const leadSlug = buttonPayloadRaw.replace('cmd_oferta_', '').replace(/_/g, ' ');
+              text = `oferta ${leadSlug}`;
+              console.log(`📱 List menu oferta rewrite: "${buttonPayloadRaw}" → "${text}"`);
+            } else if (buttonPayloadRaw.startsWith('cmd_quien_es_')) {
+              const nameSlug = buttonPayloadRaw.replace('cmd_quien_es_', '').replace(/_/g, ' ');
+              text = `quien es ${nameSlug}`;
+              console.log(`📱 List menu quien_es rewrite: "${buttonPayloadRaw}" → "${text}"`);
+            } else if (buttonPayloadRaw.startsWith('btn_credito_')) {
+              const tipoCredito = buttonPayloadRaw.replace('btn_credito_', '');
+              const creditoMap: Record<string, string> = {
+                'infonavit': 'Quiero información sobre crédito INFONAVIT',
+                'bancario': 'Quiero información sobre crédito bancario',
+                'cofinavit': 'Quiero información sobre crédito Cofinavit',
+                'fovissste': 'Quiero información sobre crédito FOVISSSTE'
+              };
+              text = creditoMap[tipoCredito] || `Quiero crédito ${tipoCredito}`;
+              console.log(`📱 List menu crédito rewrite: "${buttonPayloadRaw}" → "${text}"`);
+            }
+          }
+          // ═══ FIN LIST MENU QUICK REPLY ═══
+
           await handler.handleIncomingMessage(`whatsapp:+${from}`, text, env);
 
           console.log('✅ Mensaje procesado correctamente');

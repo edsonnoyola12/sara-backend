@@ -918,21 +918,25 @@ export async function alertaLeadsHotSinSeguimiento(supabase: SupabaseService, me
       return;
     }
 
-    // Construir mensaje
-    let msg = `🔥 *LEADS HOT SIN SEGUIMIENTO HOY*\n\n`;
-    msg += `Total: ${hotSinSeguimiento.length} leads\n\n`;
+    // Construir mensaje con formato enriquecido
+    let msg = `🔥 *LEADS HOT SIN SEGUIMIENTO HOY*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `📊 Total: *${hotSinSeguimiento.length}* leads\n\n`;
 
-    for (const lead of hotSinSeguimiento.slice(0, 5)) {
+    for (const lead of hotSinSeguimiento.slice(0, 8)) {
       const vendedor = lead.team_members?.name || 'Sin asignar';
-      msg += `• *${lead.name || 'Sin nombre'}*\n`;
-      msg += `  ${lead.status} | Vendedor: ${vendedor}\n`;
+      const diasSinUpdate = Math.floor((Date.now() - new Date(lead.updated_at).getTime()) / (1000 * 60 * 60 * 24));
+      const statusEmoji = lead.status === 'reserved' ? '🏠' : '🤝';
+      msg += `${statusEmoji} *${lead.name || 'Sin nombre'}*\n`;
+      msg += `   👤 ${vendedor} • ⏰ ${diasSinUpdate}d sin actualizar\n`;
+      msg += `   💡 _Escribir: bridge ${(lead.name || '').split(' ')[0]}_\n\n`;
     }
 
-    if (hotSinSeguimiento.length > 5) {
-      msg += `\n...y ${hotSinSeguimiento.length - 5} más`;
+    if (hotSinSeguimiento.length > 8) {
+      msg += `\n_...y ${hotSinSeguimiento.length - 8} leads más_\n`;
     }
 
-    msg += '\n\n⚡ _Estos leads están listos para cerrar. Dar seguimiento urgente._';
+    msg += `\n⚡ *Acción:* Escribir *bridge [nombre]* para contactar directo`;
 
     // Enviar a cada admin (evitar duplicados, respetando ventana 24h)
     const telefonosEnviados = new Set<string>();

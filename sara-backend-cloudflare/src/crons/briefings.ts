@@ -439,6 +439,27 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
       };
       if (resultado.method === 'direct') {
         delete freshNotas.pending_briefing; // Limpiar si se envió directo
+
+        // Send actionable list menu (only when direct — interactive msgs need open window)
+        try {
+          const menuRows: Array<{ id: string; title: string; description?: string }> = [
+            { id: 'cmd_mis_leads', title: '📋 Mis leads', description: 'Ver leads asignados' },
+            { id: 'cmd_citas', title: '📅 Citas de hoy', description: 'Tu agenda del día' },
+            { id: 'cmd_hot', title: '🔥 Leads calientes', description: 'Leads listos para cerrar' },
+            { id: 'cmd_pendientes', title: '⏰ Pendientes', description: 'Leads sin seguimiento' }
+          ];
+
+          await new Promise(r => setTimeout(r, 500));
+          await meta.sendListMenu(
+            vendedor.phone,
+            '¿Qué quieres revisar primero?',
+            'Acciones rápidas 🚀',
+            [{ title: 'Acciones del día', rows: menuRows }]
+          );
+          console.log(`   📱 Lista de acciones enviada a ${vendedor.name}`);
+        } catch (listErr) {
+          console.log(`   ⚠️ No se pudo enviar lista de acciones a ${vendedor.name}:`, listErr);
+        }
       }
 
       await supabase.client.from('team_members').update({

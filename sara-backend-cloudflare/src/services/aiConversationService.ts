@@ -3310,7 +3310,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
     'Andes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg',
     'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-scaled-e1740672689199.jpg',
     'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01-5.jpg',
-    'Paseo Colorines': 'https://gruposantarita.com.mx/wp-content/uploads/2024/11/MONTE-VERDE-FACHADA-DESARROLLO-EDIT-scaled.jpg',
+    'Paseo Colorines': 'https://gruposantarita.com.mx/wp-content/uploads/2026/02/logo-coto-paseo-colorines.png', // Placeholder — update when development photo available
     'Alpes': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/Alpes-Amenidades-1.jpg',
     'Villa Campelo': 'https://gruposantarita.com.mx/wp-content/uploads/2023/10/RF_Casa-Club-1.jpg',
     'Villa Galiano': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/VILLA-GALIANO-ACCESO-2560-X-2560-PX@2x-scaled.jpg',
@@ -3331,14 +3331,6 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
     terrenos: {
       developments: ['Villa Campelo', 'Villa Galiano'],
       template: 'terrenos_nogal'
-    },
-    guadalupe: {
-      developments: ['Andes', 'Distrito Falco', 'Alpes'],
-      template: 'casas_guadalupe'
-    },
-    zacatecas: {
-      developments: ['Monte Verde', 'Los Encinos', 'Miravalle', 'Paseo Colorines'],
-      template: 'casas_zacatecas'
     }
   };
 
@@ -4812,17 +4804,32 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             );
 
             if (!yaTieneOpciones) {
-              const hasAppointment = lead?.status === 'scheduled' || lead?.status === 'visit_scheduled';
-              const opciones = getBotonesContextuales(analysis.intent, lead.status, hasAppointment);
+              let opciones: Array<{ id: string; title: string; description?: string }>;
+              let menuBody: string;
+
+              // Credit-specific options when lead asks about financing
+              if (analysis.intent === 'info_credito') {
+                opciones = [
+                  { id: 'btn_credito_infonavit', title: '🏛️ INFONAVIT', description: 'Crédito con subcuenta INFONAVIT' },
+                  { id: 'btn_credito_bancario', title: '🏦 Crédito bancario', description: 'BBVA, Banorte, Santander, HSBC' },
+                  { id: 'btn_credito_cofinavit', title: '🤝 Cofinavit', description: 'INFONAVIT + banco combinado' },
+                  { id: 'btn_credito_fovissste', title: '🏢 FOVISSSTE', description: 'Para trabajadores del Estado' }
+                ];
+                menuBody = '¿Qué tipo de crédito te interesa?';
+              } else {
+                const hasAppointment = lead?.status === 'scheduled' || lead?.status === 'visit_scheduled';
+                opciones = getBotonesContextuales(analysis.intent, lead.status, hasAppointment);
+                menuBody = '¿Qué te gustaría hacer?';
+              }
 
               if (opciones && opciones.length > 0) {
                 await new Promise(r => setTimeout(r, 500));
                 await this.meta.sendListMenu(
                   from,
-                  '¿Qué te gustaría hacer?',
+                  menuBody,
                   'Ver opciones 👇',
                   [{
-                    title: 'Opciones disponibles',
+                    title: analysis.intent === 'info_credito' ? 'Tipos de crédito' : 'Opciones disponibles',
                     rows: opciones.map(o => ({
                       id: o.id,
                       title: o.title.substring(0, 24),
