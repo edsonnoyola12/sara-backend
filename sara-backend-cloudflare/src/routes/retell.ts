@@ -267,41 +267,64 @@ export async function handleRetellRoutes(
         // Helper: convertir precio numérico a palabras en español (para voz)
         function precioAPalabras(precio: number): string {
           if (precio <= 0) return 'precio por confirmar';
+
+          // Convertir número (0-999) a palabras en español
+          function numATexto(n: number): string {
+            if (n === 0) return '';
+            const unidades = ['', 'un', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve'];
+            const especiales = ['diez', 'once', 'doce', 'trece', 'catorce', 'quince', 'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve'];
+            const decenas = ['', '', 'veinti', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa'];
+            const centenas = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos', 'quinientos', 'seiscientos', 'setecientos', 'ochocientos', 'novecientos'];
+
+            if (n === 100) return 'cien';
+
+            let texto = '';
+            if (n >= 100) {
+              texto += centenas[Math.floor(n / 100)] + ' ';
+              n = n % 100;
+            }
+            if (n >= 20) {
+              const dec = Math.floor(n / 10);
+              const uni = n % 10;
+              if (dec === 2 && uni > 0) {
+                texto += 'veinti' + unidades[uni];
+              } else {
+                texto += decenas[dec] + (uni > 0 ? ' y ' + unidades[uni] : '');
+              }
+            } else if (n >= 10) {
+              texto += especiales[n - 10];
+            } else if (n > 0) {
+              texto += unidades[n];
+            }
+            return texto.trim();
+          }
+
+          // Convertir miles (0-999) a palabras + "mil"
+          function milesATexto(miles: number): string {
+            if (miles === 0) return '';
+            if (miles === 1) return 'mil';
+            return numATexto(miles) + ' mil';
+          }
+
           const millones = Math.floor(precio / 1000000);
           const restoMiles = Math.round((precio % 1000000) / 1000);
 
-          const numPalabras: Record<number, string> = {
-            1: 'un', 2: 'dos', 3: 'tres', 4: 'cuatro', 5: 'cinco',
-            6: 'seis', 7: 'siete', 8: 'ocho', 9: 'nueve', 10: 'diez',
-            11: 'once', 12: 'doce', 13: 'trece', 14: 'catorce', 15: 'quince'
-          };
-
           if (millones >= 1 && restoMiles === 0) {
             if (millones === 1) return 'un millón de pesos';
-            return `${numPalabras[millones] || millones} millones de pesos`;
+            return `${numATexto(millones)} millones de pesos`;
           }
 
           if (millones >= 1) {
-            const milPalabra = restoMiles === 100 ? 'cien mil'
-              : restoMiles === 200 ? 'doscientos mil'
-              : restoMiles === 300 ? 'trescientos mil'
-              : restoMiles === 400 ? 'cuatrocientos mil'
-              : restoMiles === 500 ? 'quinientos mil'
-              : restoMiles === 600 ? 'seiscientos mil'
-              : restoMiles === 700 ? 'setecientos mil'
-              : restoMiles === 800 ? 'ochocientos mil'
-              : restoMiles === 900 ? 'novecientos mil'
-              : `${restoMiles} mil`;
+            const milPalabra = milesATexto(restoMiles);
             if (millones === 1) return `un millón ${milPalabra} pesos`;
-            return `${numPalabras[millones] || millones} millones ${milPalabra} pesos`;
+            return `${numATexto(millones)} millones ${milPalabra} pesos`;
           }
 
           // Solo miles (para terrenos precio/m²)
           if (precio >= 1000) {
-            const miles = Math.round(precio / 1000);
-            return `${numPalabras[miles] || miles} mil pesos`;
+            return `${milesATexto(Math.round(precio / 1000))} pesos`;
           }
-          return `${precio} pesos`;
+          return `${numATexto(precio)} pesos`;
         }
 
         // Helper: rango de precio/m² para terrenos
@@ -647,7 +670,7 @@ CASOS ESPECIALES:
           .select('price_equipped, price')
           .order('price_equipped', { ascending: true })
           .limit(10);
-        let precioDesdeGlobal = '$1.5 millones';
+        let precioDesdeGlobal = `$${(precioMinimoGlobal / 1000000).toFixed(1)} millones`;
         if (minPriceProps && minPriceProps.length > 0) {
           const minP = minPriceProps.reduce((min: number, p: any) => {
             const precio = p.price_equipped || p.price || 0;
@@ -708,7 +731,7 @@ CASOS ESPECIALES:
           }
 
           // Buscar precio del desarrollo de interés
-          let precioDesde = '$1.5 millones';
+          let precioDesde = precioDesdeGlobal;
           if (desarrolloInteres) {
             const { data: propPrecio } = await supabase.client
               .from('properties')
@@ -774,7 +797,7 @@ CASOS ESPECIALES:
             greeting: '¡Hola! Gracias por llamar a Grupo Santa Rita, soy Sara. Estoy aquí para apoyarte en lo que necesites — casas, terrenos, crédito. ¿Con quién tengo el gusto?',
             desarrollo_interes: '',
             vendedor_nombre: 'un asesor',
-            precio_desde: '$1.5 millones'
+            precio_desde: '$1.6 millones'
           }
         }), {
           status: 200,
@@ -823,8 +846,8 @@ CASOS ESPECIALES:
             }
           }
           const devList = Array.from(devMap.entries())
-            .map(([dev, price]) => `${dev} (desde $${(price/1000000).toFixed(1)}M)`)
-            .join(', ');
+            .map(([dev, price]) => `${dev}, desde ${precioAPalabras(price)}`)
+            .join('. ');
           return new Response(JSON.stringify({
             result: `No encontré información de "${desarrollo}". Los desarrollos disponibles son: ${devList || 'Monte Verde, Los Encinos, Miravalle, Distrito Falco, Andes, Paseo Colorines'}, y terrenos en Citadella del Nogal.`
           }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -832,14 +855,13 @@ CASOS ESPECIALES:
 
         const modelos = props.map((p: any) => {
           const precio = p.price_equipped || p.price || 0;
-          return `${p.name}: $${(precio/1000000).toFixed(2)}M, ${p.bedrooms || '?'} rec, ${p.area_m2 || '?'}m² construcción${p.land_size ? `, ${p.land_size}m² terreno` : ''}`;
+          return `${p.name}, ${precioAPalabras(precio)}, ${p.bedrooms || '?'} recámaras, ${p.area_m2 || '?'} metros cuadrados de construcción${p.land_size ? `, terreno de ${p.land_size} metros cuadrados` : ''}`;
         }).join('. ');
 
-        const gps = props[0]?.gps_link || '';
         const tieneAlberca = desarrollo.toLowerCase().includes('andes') ? ' Este desarrollo TIENE alberca.' : '';
 
         return new Response(JSON.stringify({
-          result: `${desarrollo} tiene ${props.length} modelos: ${modelos}.${tieneAlberca} Todos incluyen closets y cocina integral (precio equipada).${gps ? ` Ubicación: ${gps}` : ''}`
+          result: `${desarrollo} tiene ${props.length} modelos: ${modelos}.${tieneAlberca} Todos incluyen closets y cocina integral. La info completa se la mando por WhatsApp.`
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       } catch (e: any) {
         console.error('❌ Retell tool info-desarrollo error:', e);
@@ -891,20 +913,17 @@ CASOS ESPECIALES:
           // Convertir YYYY-MM-DD a DD/MM/YYYY
           const [y, m, d] = fechaISO.split('-');
           fechaISO = `${d}/${m}/${y}`;
-          // Normalizar hora
-          horaISO = hora.replace(/\s*(am|pm)/i, (m: string, p: string) => {
-            return p.toLowerCase() === 'pm' ? '' : '';
-          });
-          if (!/^\d{1,2}:\d{2}$/.test(horaISO)) {
-            const horaMatch = hora.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
-            if (horaMatch) {
-              let h = parseInt(horaMatch[1]);
-              const min = horaMatch[2] || '00';
-              const period = horaMatch[3]?.toLowerCase();
-              if (period === 'pm' && h < 12) h += 12;
-              if (period === 'am' && h === 12) h = 0;
-              horaISO = `${h.toString().padStart(2, '0')}:${min}`;
-            }
+          // Normalizar hora (siempre parsear AM/PM correctamente a 24h)
+          const horaMatch = hora.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+          if (horaMatch) {
+            let h = parseInt(horaMatch[1]);
+            const min = horaMatch[2] || '00';
+            const period = horaMatch[3]?.toLowerCase();
+            if (period === 'pm' && h < 12) h += 12;
+            if (period === 'am' && h === 12) h = 0;
+            // Si no dice am/pm y hora <= 7, asumir PM (nadie agenda citas a las 2am)
+            if (!period && h >= 1 && h <= 7) h += 12;
+            horaISO = `${h.toString().padStart(2, '0')}:${min}`;
           }
         }
 
@@ -1396,17 +1415,18 @@ CASOS ESPECIALES:
 
         let respuesta = '';
 
+        const ingresoTexto = ingreso ? precioAPalabras(ingreso).replace(' pesos', '') + ' pesos mensuales' : '';
+
         if (tipoCredito.toLowerCase().includes('infonavit')) {
-          respuesta = `Con INFONAVIT, el monto depende de tu subcuenta y salario. Con salario de $${ingreso ? (ingreso/1000).toFixed(0) + 'K' : '?'} mensual, podrías acceder a casas desde $1.6 millones usando INFONAVIT + crédito bancario (Cofinavit). Opciones: Monte Verde o Andes desde $1.6M. ¿Quieres que un asesor hipotecario te contacte para hacer la precalificación?`;
+          respuesta = `Con INFONAVIT, el monto depende de tu subcuenta y salario.${ingresoTexto ? ` Con salario de ${ingresoTexto}` : ''} podrías acceder a casas desde un millón seiscientos mil pesos usando INFONAVIT más crédito bancario, que es Cofinavit. Opciones: Monte Verde o Andes. ¿Quieres que un asesor hipotecario te contacte para hacer la precalificación?`;
         } else if (tipoCredito.toLowerCase().includes('fovissste')) {
           respuesta = `FOVISSSTE es para trabajadores del gobierno. El monto depende de tu antigüedad y puntos. También se puede combinar con crédito bancario. Tenemos asesores hipotecarios que te pueden precalificar sin costo. ¿Quieres que te contacte un asesor?`;
         } else {
           if (ingreso && ingreso > 0) {
             const capacidadAprox = ingreso * 0.33 * 240; // 33% de ingreso, 20 años
-            const capacidadM = (capacidadAprox / 1000000).toFixed(1);
-            respuesta = `Con un ingreso de $${(ingreso/1000).toFixed(0)}K mensuales, podrías obtener un crédito bancario de aproximadamente $${capacidadM}M (20 años, ~33% de ingreso). Bancos: BBVA, Banorte, Santander, HSBC. Las tasas van del 9% al 12% anual. ¿Quieres que un asesor hipotecario te contacte gratis?`;
+            respuesta = `Con un ingreso de ${ingresoTexto}, podrías obtener un crédito bancario de aproximadamente ${precioAPalabras(capacidadAprox)}, a veinte años pagando el treinta y tres por ciento de tu ingreso. Bancos: BBVA, Banorte, Santander, HSBC. Las tasas van del nueve al doce por ciento anual. ¿Quieres que un asesor hipotecario te contacte gratis?`;
           } else {
-            respuesta = `Trabajamos con todos los bancos: BBVA, Banorte, Santander, HSBC, Scotiabank. También INFONAVIT, FOVISSSTE y Cofinavit. El enganche mínimo es 10% y con INFONAVIT puede ser 0%. Dime tu ingreso mensual aproximado y te digo para qué casas calificas.`;
+            respuesta = `Trabajamos con todos los bancos: BBVA, Banorte, Santander, HSBC, Scotiabank. También INFONAVIT, FOVISSSTE y Cofinavit. El enganche mínimo es diez por ciento y con INFONAVIT puede ser cero. Dime tu ingreso mensual aproximado y te digo para qué casas calificas.`;
           }
         }
 
@@ -1448,7 +1468,17 @@ CASOS ESPECIALES:
           return new Response(JSON.stringify({ result: `${lead.name || 'El cliente'} no tiene citas próximas. ¿Quiere agendar una visita?` }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
 
-        const citasText = citas.map((c: any) => `${c.scheduled_date} a las ${c.scheduled_time} en ${c.property_name || 'desarrollo'}${c.vendedor_name ? ` con ${c.vendedor_name}` : ''}`).join('. ');
+        const diasSemana = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+        const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+        const citasText = citas.map((c: any) => {
+          const [year, month, day] = (c.scheduled_date || '').split('-').map(Number);
+          const fecha = new Date(year, month - 1, day);
+          const diaSemana = diasSemana[fecha.getDay()] || '';
+          const mesNombre = meses[(month || 1) - 1] || '';
+          const fechaHumana = `el ${diaSemana} ${day} de ${mesNombre}`;
+          const hora = c.scheduled_time ? ` a las ${c.scheduled_time.replace(':00', ' horas').replace(':30', ' y media')}` : '';
+          return `${fechaHumana}${hora} en ${c.property_name || 'desarrollo'}${c.vendedor_name ? ` con ${c.vendedor_name}` : ''}`;
+        }).join('. ');
         return new Response(JSON.stringify({
           result: `${lead.name || 'El cliente'} tiene ${citas.length} cita(s): ${citasText}. ¿Quiere cambiar alguna?`
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -1488,11 +1518,11 @@ CASOS ESPECIALES:
         if (!props || props.length === 0) {
           if (presupuesto < 1500000) {
             return new Response(JSON.stringify({
-              result: `Con ${(presupuesto/1000000).toFixed(1)} millones no tenemos casas disponibles. La más económica es Acacia en Monte Verde a un millón seiscientos mil. También tenemos terrenos en Citadella del Nogal desde seis mil cuatrocientos por metro cuadrado. ¿Le interesa alguna de estas opciones?`
+              result: `Con ${precioAPalabras(presupuesto)} no tenemos casas disponibles. La más económica es Acacia en Monte Verde a un millón seiscientos mil pesos. También tenemos terrenos en Citadella del Nogal desde seis mil cuatrocientos pesos por metro cuadrado. ¿Le interesa alguna de estas opciones?`
             }), { status: 200, headers: { 'Content-Type': 'application/json' } });
           }
           return new Response(JSON.stringify({
-            result: `No encontré opciones exactas para ${(presupuesto/1000000).toFixed(1)} millones. Nuestras casas van desde un millón seiscientos hasta cinco millones y medio. ¿Quiere que le muestre las más cercanas a su presupuesto?`
+            result: `No encontré opciones exactas para ${precioAPalabras(presupuesto)}. Nuestras casas van desde un millón seiscientos mil hasta cinco millones y medio. ¿Quiere que le muestre las más cercanas a su presupuesto?`
           }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
 
@@ -1504,19 +1534,20 @@ CASOS ESPECIALES:
           porDesarrollo[dev].push(p);
         }
 
-        let resultado = `Con presupuesto de ${(presupuesto/1000000).toFixed(1)} millones${recamaras ? ` y ${recamaras}+ recámaras` : ''}, tienes estas opciones:\n`;
+        let resultado = `Con presupuesto de ${precioAPalabras(presupuesto)}${recamaras ? ` y ${recamaras} o más recámaras` : ''}, tienes estas opciones: `;
 
         for (const [dev, modelos] of Object.entries(porDesarrollo)) {
           const zona = ['Monte Verde', 'Los Encinos', 'Miravalle', 'Paseo Colorines'].includes(dev)
             ? 'Colinas del Padre' : 'Guadalupe';
-          resultado += `\n${dev} (${zona}): `;
+          resultado += `En ${dev}, ${zona}: `;
           resultado += modelos.map((m: any) => {
             const precio = m.price_equipped || m.price || 0;
-            return `${m.name} $${(precio/1000000).toFixed(2)}M ${m.bedrooms || '?'}rec ${m.area_m2 || '?'}m²`;
-          }).join(', ');
+            return `modelo ${m.name}, ${precioAPalabras(precio)}, ${m.bedrooms || '?'} recámaras`;
+          }).join('. ');
+          resultado += '. ';
         }
 
-        resultado += `\n\nTotal: ${props.length} opciones en ${Object.keys(porDesarrollo).length} desarrollos.`;
+        resultado += `En total ${props.length} opciones en ${Object.keys(porDesarrollo).length} desarrollos.`;
         if (props.some((p: any) => p.development === 'Andes')) {
           resultado += ' Andes es el único con alberca.';
         }
@@ -2395,7 +2426,6 @@ Reglas de fecha:
                           desarrollosMencionadosFinal.push(kvDev);
                         }
                       }
-                      await env.SARA_CACHE.delete(`retell_send_queue:${call.call_id}`);
                     }
                   }
                 } catch (_kvErr) { /* ignore */ }
@@ -2464,6 +2494,13 @@ Reglas de fecha:
                   }
                 }
 
+                // Cleanup KV queue AFTER all carousels + resources sent
+                try {
+                  if (call.call_id && env.SARA_CACHE) {
+                    await env.SARA_CACHE.delete(`retell_send_queue:${call.call_id}`);
+                  }
+                } catch (_) { /* ignore */ }
+
                 // Actualizar lead
                 if (lead?.id) {
                   await supabase.client
@@ -2516,9 +2553,9 @@ Reglas de fecha:
                     const cbHoraStr = cbFechaParts[1] || callbackConfirmacionPendiente.hora;
                     const cbGpsCode = callbackConfirmacionPendiente.gpsLink
                       ? callbackConfirmacionPendiente.gpsLink.replace(/^https?:\/\/maps\.app\.goo\.gl\//, '')
-                      : 'qR8vK3xYz9M';
+                      : '';
 
-                    await metaCb.sendTemplate(callbackConfirmacionPendiente.phone, 'appointment_confirmation_v2', 'es', [
+                    const templateComponents: any[] = [
                       {
                         type: 'body',
                         parameters: [
@@ -2528,16 +2565,21 @@ Reglas de fecha:
                           { type: 'text', text: cbFechaStr },            // {{4}} Fecha
                           { type: 'text', text: cbHoraStr }              // {{5}} Hora
                         ]
-                      },
-                      {
+                      }
+                    ];
+                    // Solo agregar botón GPS si tenemos link real
+                    if (cbGpsCode) {
+                      templateComponents.push({
                         type: 'button',
                         sub_type: 'url',
                         index: '0',
                         parameters: [
                           { type: 'text', text: cbGpsCode }              // GPS link suffix
                         ]
-                      }
-                    ]);
+                      });
+                    }
+
+                    await metaCb.sendTemplate(callbackConfirmacionPendiente.phone, 'appointment_confirmation_v2', 'es', templateComponents);
                     console.log('📅 Template appointment_confirmation_v2 enviado al lead (ventana cerrada)');
                   } catch (templateCbErr: any) {
                     console.log('⚠️ Template appointment_confirmation_v2 falló:', templateCbErr?.message);
