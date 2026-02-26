@@ -725,7 +725,7 @@ _Generado por SARA_`;
     }));
   } catch (e) {
     console.log('Error en reporte mensual:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteMensualCEO', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarReporteMensualCEO', stack: (e as Error).stack });
   }
 }
 
@@ -958,7 +958,7 @@ _¡Éxito esta semana!_ 🚀`;
     console.log(`✅ Reportes semanales enviados a ${vendedores.length} vendedores`);
   } catch (e) {
     console.log('Error en reporte semanal vendedores:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteSemanalVendedores', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarReporteSemanalVendedores', stack: (e as Error).stack });
   }
 }
 
@@ -1078,7 +1078,7 @@ export async function iniciarFlujosPostVisita(supabase: SupabaseService, meta: M
     }
   } catch (e) {
     console.error('Error en iniciarFlujosPostVisita:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'iniciarFlujosPostVisita', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'iniciarFlujosPostVisita', stack: (e as Error).stack });
   }
 }
 
@@ -1211,7 +1211,7 @@ Tu opinión nos ayuda a mejorar 🙏`;
     }
   } catch (e) {
     console.log('Error en encuestas post-cita:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarEncuestasPostCita', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarEncuestasPostCita', stack: (e as Error).stack });
   }
 }
 
@@ -1284,7 +1284,7 @@ _Responde con un número del 0 al 10_
     }
   } catch (e) {
     console.log('Error en encuestas NPS:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarEncuestasNPS', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarEncuestasNPS', stack: (e as Error).stack });
   }
 }
 
@@ -1376,7 +1376,7 @@ export async function procesarRespuestaEncuesta(supabase: SupabaseService, phone
     return null;
   } catch (e) {
     console.log('Error procesando respuesta encuesta:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'procesarRespuestaEncuesta', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'procesarRespuestaEncuesta', stack: (e as Error).stack });
     return null;
   }
 }
@@ -1663,7 +1663,7 @@ _¡Descansa y mañana con todo!_ 🚀`;
     console.log(`✅ Reportes diarios procesados para ${vendedores.length} vendedores`);
   } catch (e) {
     console.log('Error en reporte diario vendedores:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteDiarioVendedores', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarReporteDiarioVendedores', stack: (e as Error).stack });
   }
 }
 
@@ -1988,7 +1988,7 @@ _¡Éxito en ${meses[mesActual]}!_ 🚀`;
     console.log(`✅ Reportes mensuales enviados a ${vendedores.length} vendedores`);
   } catch (e) {
     console.log('Error en reporte mensual vendedores:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteMensualVendedores', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarReporteMensualVendedores', stack: (e as Error).stack });
   }
 }
 
@@ -2083,7 +2083,7 @@ export async function enviarReporteDiarioAsesores(supabase: SupabaseService, met
     console.log(`✅ Reportes diarios procesados para ${asesores.length} asesores`);
   } catch (e) {
     console.log('Error en reporte diario asesores:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteDiarioAsesores', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarReporteDiarioAsesores', stack: (e as Error).stack });
   }
 }
 
@@ -2168,7 +2168,7 @@ export async function enviarReporteSemanalAsesores(supabase: SupabaseService, me
     console.log(`✅ Reportes semanales procesados para ${asesores.length} asesores`);
   } catch (e) {
     console.log('Error en reporte semanal asesores:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteSemanalAsesores', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarReporteSemanalAsesores', stack: (e as Error).stack });
   }
 }
 
@@ -2252,7 +2252,7 @@ export async function enviarReporteMensualAsesores(supabase: SupabaseService, me
     console.log(`✅ Reportes mensuales enviados a ${asesores.length} asesores`);
   } catch (e) {
     console.log('Error en reporte mensual asesores:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteMensualAsesores', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarReporteMensualAsesores', stack: (e as Error).stack });
   }
 }
 
@@ -2338,7 +2338,7 @@ export async function enviarReporteDiarioMarketing(supabase: SupabaseService, me
     console.log(`✅ Reportes diarios enviados a ${marketing.length} de marketing`);
   } catch (e) {
     console.log('Error en reporte diario marketing:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteDiarioMarketing', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarReporteDiarioMarketing', stack: (e as Error).stack });
   }
 }
 
@@ -2450,7 +2450,7 @@ export async function enviarReporteSemanalMarketing(supabase: SupabaseService, m
     console.log(`✅ Reportes semanales enviados a ${marketing.length} de marketing`);
   } catch (e) {
     console.log('Error en reporte semanal marketing:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteSemanalMarketing', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarReporteSemanalMarketing', stack: (e as Error).stack });
   }
 }
 
@@ -2565,7 +2565,7 @@ export async function enviarReporteMensualMarketing(supabase: SupabaseService, m
     console.log(`✅ Reportes mensuales enviados a ${marketing.length} de marketing`);
   } catch (e) {
     console.log('Error en reporte mensual marketing:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarReporteMensualMarketing', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarReporteMensualMarketing', stack: (e as Error).stack });
   }
 }
 
@@ -2689,7 +2689,7 @@ ${resumen.slice(0, 5).join('\n')}
     console.log(`💰 Aumento aplicado: ${aplicados}/${propiedades.length} propiedades (+${INCREMENTO_MENSUAL * 100}%)`);
   } catch (e) {
     console.log('Error aplicando aumento de precios:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'aplicarPreciosProgramados', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'aplicarPreciosProgramados', stack: (e as Error).stack });
   }
 }
 

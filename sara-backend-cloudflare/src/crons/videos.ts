@@ -389,17 +389,17 @@ Vertical 9:16, 8 seconds.`;
 
   } catch (error) {
     console.error('❌ Error generando video semanal:', error);
-    logErrorToDB(supabase, 'cron_error', 'error', 'generarVideoSemanalLogros', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (error as Error).message || String(error), { severity: 'error', source: 'generarVideoSemanalLogros', stack: (error as Error).stack });
   }
 }
 
 // Fotos de fachadas por desarrollo (compartido entre funciones de video)
 const FOTOS_DESARROLLO: Record<string, string> = {
-  'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg',
-  'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2021/07/M4215335.jpg',
+  'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/11/MONTE-VERDE-FACHADA-DESARROLLO-EDIT-scaled.jpg',
+  'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/Encinos-Amenidades-1.jpg',
   'Andes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg',
-  'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-min-scaled-e1740520053367.jpg',
-  'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
+  'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-scaled-e1740672689199.jpg',
+  'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01-5.jpg',
   'Acacia': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/ACACIA-1-scaled.jpg'
 };
 
@@ -605,7 +605,7 @@ Keep focus on this specific house facade throughout. Golden hour lighting, 4k. N
 
   } catch (e) {
     console.error('Error en videoFelicitacionPostVenta:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'videoFelicitacionPostVenta', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'videoFelicitacionPostVenta', stack: (e as Error).stack });
   }
 }
 
@@ -779,6 +779,6 @@ Keep focus on this specific house facade. Warm daylight, 4k. No text, no subtitl
 
   } catch (e) {
     console.error('Error en videoBienvenidaLeadNuevo:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'videoBienvenidaLeadNuevo', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'videoBienvenidaLeadNuevo', stack: (e as Error).stack });
   }
 }

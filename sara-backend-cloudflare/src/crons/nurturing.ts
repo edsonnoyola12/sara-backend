@@ -186,7 +186,7 @@ Etapa abandonada: ${etapa}
 
   } catch (e) {
     console.error('Error en recuperarAbandonosCredito:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'recuperarAbandonosCredito', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'recuperarAbandonosCredito', stack: (e as Error).stack });
   }
 }
 
@@ -345,7 +345,7 @@ Hace: ${diasDesdeVisita} días
 
   } catch (e) {
     console.error('Error en followUpPostVisita:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'followUpPostVisita', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'followUpPostVisita', stack: (e as Error).stack });
   }
 }
 
@@ -630,7 +630,7 @@ export async function nurturingEducativo(supabase: SupabaseService, meta: MetaWh
 
   } catch (e) {
     console.error('Error en nurturingEducativo:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'nurturingEducativo', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'nurturingEducativo', stack: (e as Error).stack });
   }
 }
 
@@ -771,7 +771,7 @@ Hace: ${diasDesdeCompra} días
 
   } catch (e) {
     console.error('Error en solicitarReferidos:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'solicitarReferidos', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'solicitarReferidos', stack: (e as Error).stack });
   }
 }
 
@@ -911,7 +911,7 @@ Tu respuesta nos ayuda a mejorar 🙏`;
 
   } catch (e) {
     console.error('Error en enviarEncuestaNPS:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarEncuestaNPS', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarEncuestaNPS', stack: (e as Error).stack });
     resultado.detalles.push(`❌ Error general: ${e}`);
     return resultado;
   }
@@ -1154,7 +1154,7 @@ Si hay algo pendiente o algún detalle por resolver, responde y te ayudamos de i
 
   } catch (e) {
     console.error('Error en seguimientoPostEntrega:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'seguimientoPostEntrega', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'seguimientoPostEntrega', stack: (e as Error).stack });
   }
 }
 
@@ -1373,7 +1373,7 @@ Tu opinión nos ayuda a mejorar 🙏`;
 
   } catch (e) {
     console.error('Error en encuestaSatisfaccionCasa:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'encuestaSatisfaccionCasa', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'encuestaSatisfaccionCasa', stack: (e as Error).stack });
   }
 }
 
@@ -1643,7 +1643,7 @@ Responde *SÍ* si todo está bien o *AYUDA* si necesitas contactos de proveedore
 
   } catch (e) {
     console.error('Error en checkInMantenimiento:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'checkInMantenimiento', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'checkInMantenimiento', stack: (e as Error).stack });
   }
 }
 
@@ -1836,7 +1836,7 @@ Estamos aquí para lo que necesites 😊`;
     console.log(`📅 Check-in 60 días completado: ${enviados} enviados`);
   } catch (e) {
     console.error('Error en checkIn60Dias:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'checkIn60Dias', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'checkIn60Dias', stack: (e as Error).stack });
   }
 }
 
@@ -2022,7 +2022,7 @@ export async function llamadasEscalamientoPostVenta(
     console.log(`📞 Escalamiento post-venta completado: ${llamadasRealizadas} llamadas`);
   } catch (e) {
     console.error('Error en llamadasEscalamientoPostVenta:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'llamadasEscalamientoPostVenta', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'llamadasEscalamientoPostVenta', stack: (e as Error).stack });
   }
 }
 
@@ -2117,7 +2117,7 @@ export async function limpiarFlagsEncuestasExpirados(
     return { limpiados: totalLimpiados, leadsAfectados };
   } catch (e) {
     console.error('Error en limpiarFlagsEncuestasExpirados:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'limpiarFlagsEncuestasExpirados', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'limpiarFlagsEncuestasExpirados', stack: (e as Error).stack });
     return { limpiados: 0, leadsAfectados: 0 };
   }
 }

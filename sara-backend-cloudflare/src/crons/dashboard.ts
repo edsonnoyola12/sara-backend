@@ -410,7 +410,7 @@ export async function getAnalyticsDashboard(
 
   } catch (e) {
     console.error('Error generating analytics:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'getAnalyticsDashboard', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'getAnalyticsDashboard', stack: (e as Error).stack });
   }
 
   return dashboard;

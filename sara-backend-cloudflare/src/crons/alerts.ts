@@ -254,7 +254,7 @@ export async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: M
 
   } catch (error) {
     console.error('❌ Error en alertas de leads fríos:', error);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarAlertasLeadsFrios', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (error as Error).message || String(error), { severity: 'error', source: 'enviarAlertasLeadsFrios', stack: (error as Error).stack });
   }
 }
 
@@ -332,7 +332,7 @@ export async function verificarConsistenciaCalendario(
 
   } catch (error) {
     console.error('Error verificando consistencia calendario:', error);
-    logErrorToDB(supabase, 'cron_error', 'error', 'verificarConsistenciaCalendario', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (error as Error).message || String(error), { severity: 'error', source: 'verificarConsistenciaCalendario', stack: (error as Error).stack });
   }
 
   return resultado;
@@ -557,7 +557,7 @@ Responde para *${leadName}*:
 
   } catch (error) {
     console.error('❌ Error verificando asistencia:', error);
-    logErrorToDB(supabase, 'cron_error', 'error', 'detectarNoShows', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (error as Error).message || String(error), { severity: 'error', source: 'detectarNoShows', stack: (error as Error).stack });
   }
 }
 
@@ -648,7 +648,7 @@ export async function verificarTimeoutConfirmaciones(supabase: SupabaseService, 
 
   } catch (error) {
     console.error('❌ Error verificando timeouts:', error);
-    logErrorToDB(supabase, 'cron_error', 'error', 'verificarTimeoutConfirmaciones', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (error as Error).message || String(error), { severity: 'error', source: 'verificarTimeoutConfirmaciones', stack: (error as Error).stack });
   }
 }
 
@@ -750,7 +750,7 @@ export async function enviarAlertasProactivasCEO(supabase: SupabaseService, meta
     }
   } catch (e) {
     console.log('Error en alertas proactivas:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarAlertasProactivasCEO', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarAlertasProactivasCEO', stack: (e as Error).stack });
   }
 }
 
@@ -885,7 +885,7 @@ export async function alertaInactividadVendedor(supabase: SupabaseService, meta:
     console.log(`👔 ALERTA INACTIVIDAD: ${vendedoresInactivos.length} vendedores reportados`);
   } catch (e) {
     console.error('Error en alertaInactividadVendedor:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'alertaInactividadVendedor', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'alertaInactividadVendedor', stack: (e as Error).stack });
   }
 }
 
@@ -954,7 +954,7 @@ export async function alertaLeadsHotSinSeguimiento(supabase: SupabaseService, me
     }
   } catch (e) {
     console.log('Error en alerta leads HOT:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'alertaLeadsHotSinSeguimiento', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'alertaLeadsHotSinSeguimiento', stack: (e as Error).stack });
   }
 }
 
@@ -1030,7 +1030,7 @@ export async function alertaLeadsHotUrgentes(supabase: SupabaseService, meta: Me
     }
   } catch (e) {
     console.log('Error en alertaLeadsHotUrgentes:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'alertaLeadsHotUrgentes', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'alertaLeadsHotUrgentes', stack: (e as Error).stack });
   }
 }
 
@@ -1153,7 +1153,7 @@ export async function recordatorioFinalDia(supabase: SupabaseService, meta: Meta
     }
   } catch (e) {
     console.log('Error en recordatorioFinalDia:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'recordatorioFinalDia', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'recordatorioFinalDia', stack: (e as Error).stack });
   }
 }
 
@@ -1218,7 +1218,7 @@ export async function enviarCoachingProactivo(supabase: SupabaseService, meta: M
     }
   } catch (e) {
     console.log('Error en coaching proactivo:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarCoachingProactivo', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarCoachingProactivo', stack: (e as Error).stack });
   }
 }
 
@@ -1255,7 +1255,7 @@ export async function getABVariant(supabase: SupabaseService, testName: string, 
 
     return variant;
   } catch (e) {
-    logErrorToDB(supabase, 'cron_error', 'error', 'getABVariant', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'getABVariant', stack: (e as Error).stack });
     return 'A'; // Default a variante A si hay error
   }
 }
@@ -1269,7 +1269,7 @@ export async function trackABConversion(supabase: SupabaseService, testName: str
       .eq('lead_id', leadId);
   } catch (e) {
     console.log('Error tracking AB conversion:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'trackABConversion', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'trackABConversion', stack: (e as Error).stack });
   }
 }
 
@@ -1303,7 +1303,7 @@ export async function getABTestResults(supabase: SupabaseService, testName: stri
       winner: conversionsA / (variantA.length || 1) > conversionsB / (variantB.length || 1) ? 'A' : 'B'
     };
   } catch (e) {
-    logErrorToDB(supabase, 'cron_error', 'error', 'getABTestResults', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'getABTestResults', stack: (e as Error).stack });
     return null;
   }
 }
@@ -1378,7 +1378,7 @@ export async function remarketingLeadsFrios(supabase: SupabaseService, meta: Met
     }
   } catch (e) {
     console.log('Error en remarketing:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'remarketingLeadsFrios', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'remarketingLeadsFrios', stack: (e as Error).stack });
   }
 }
 
@@ -1519,7 +1519,7 @@ export async function followUpLeadsInactivos(supabase: SupabaseService, meta: Me
 
   } catch (error) {
     console.error('❌ Error en followUpLeadsInactivos:', error);
-    logErrorToDB(supabase, 'cron_error', 'error', 'followUpLeadsInactivos', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (error as Error).message || String(error), { severity: 'error', source: 'followUpLeadsInactivos', stack: (error as Error).stack });
   }
 }
 
@@ -1708,7 +1708,7 @@ export async function recordatoriosPagoApartado(supabase: SupabaseService, meta:
 
   } catch (error) {
     console.error('❌ Error en recordatoriosPagoApartado:', error);
-    logErrorToDB(supabase, 'cron_error', 'error', 'recordatoriosPagoApartado', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (error as Error).message || String(error), { severity: 'error', source: 'recordatoriosPagoApartado', stack: (error as Error).stack });
   }
 }
 
@@ -1834,7 +1834,7 @@ export async function reactivarLeadsPerdidos(supabase: SupabaseService, meta: Me
     console.log(`✅ Reactivación completada: ${reactivados} leads contactados`);
   } catch (error) {
     console.error('❌ Error en reactivación:', error);
-    logErrorToDB(supabase, 'cron_error', 'error', 'reactivarLeadsPerdidos', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (error as Error).message || String(error), { severity: 'error', source: 'reactivarLeadsPerdidos', stack: (error as Error).stack });
   }
 }
 
@@ -1895,7 +1895,7 @@ export async function felicitarCumpleañosLeads(supabase: SupabaseService, meta:
 
   } catch (error) {
     console.error('❌ Error en felicitaciones de cumpleaños:', error);
-    logErrorToDB(supabase, 'cron_error', 'error', 'felicitarCumpleañosLeads', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (error as Error).message || String(error), { severity: 'error', source: 'felicitarCumpleañosLeads', stack: (error as Error).stack });
   }
 }
 
@@ -2078,7 +2078,7 @@ export async function felicitarCumpleañosEquipo(supabase: SupabaseService, meta
 
   } catch (error) {
     console.error('❌ Error en felicitaciones de cumpleaños equipo:', error);
-    logErrorToDB(supabase, 'cron_error', 'error', 'felicitarCumpleañosEquipo', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (error as Error).message || String(error), { severity: 'error', source: 'felicitarCumpleañosEquipo', stack: (error as Error).stack });
   }
 }
 
@@ -2196,7 +2196,7 @@ export async function alertaCalidadRespuestas(
 
   } catch (error) {
     console.error('❌ Error en alerta de calidad:', error);
-    logErrorToDB(supabase, 'cron_error', 'error', 'alertaCalidadRespuestas', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (error as Error).message || String(error), { severity: 'error', source: 'alertaCalidadRespuestas', stack: (error as Error).stack });
   }
 }
 
@@ -2290,7 +2290,7 @@ export async function alertaCitaNoConfirmada(supabase: SupabaseService, meta: Me
     }
   } catch (e) {
     console.error('Error en alertaCitaNoConfirmada:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'alertaCitaNoConfirmada', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'alertaCitaNoConfirmada', stack: (e as Error).stack });
   }
 }
 
@@ -2365,6 +2365,6 @@ export async function alertarLeadsEstancados(supabase: SupabaseService, meta: Me
     console.log(`⏰ Alertas de leads estancados enviadas: ${totalAlertas} leads a ${porVendedor.size} vendedores`);
   } catch (e) {
     console.error('Error en alertarLeadsEstancados:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'alertarLeadsEstancados', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'alertarLeadsEstancados', stack: (e as Error).stack });
   }
 }

@@ -68,7 +68,7 @@ export async function logEvento(
     });
   } catch (e) {
     console.error('Error logging evento:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'logEvento', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'logEvento', stack: (e as Error).stack });
   }
 }
 
@@ -453,7 +453,7 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
   } catch (error) {
     console.error(`\n   ❌ ERROR EN BRIEFING para ${vendedor.name}:`, error);
     console.error(`   ❌ Stack:`, error instanceof Error ? error.stack : 'No stack');
-    logErrorToDB(supabase, 'cron_error', 'error', 'enviarBriefingMatutino', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (error as Error).message || String(error), { severity: 'error', source: 'enviarBriefingMatutino', stack: (error as Error).stack });
   }
 
   console.log(`\n═══════════════════════════════════════════════════════════`);

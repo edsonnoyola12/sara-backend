@@ -309,6 +309,26 @@ export class MetaWhatsAppService {
     }
   }
 
+  /**
+   * fetch() with AbortController timeout — for methods that don't go through fetchWithRetry.
+   * Prevents Worker from hanging if Meta API is unresponsive.
+   */
+  private async fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 15000): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        throw new Error(`Meta API timeout after ${timeoutMs}ms: ${url.split('?')[0]}`);
+      }
+      throw err;
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // 📤 ENVIAR MENSAJE DE WHATSAPP
   // ═══════════════════════════════════════════════════════════════════════════

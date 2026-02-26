@@ -72,7 +72,7 @@ export async function verificarBridgesPorExpirar(supabase: SupabaseService, meta
     console.log(advertidos > 0 ? '🔗 Bridges advertidos: ' + advertidos : '🔗 No hay bridges por expirar');
   } catch (e) {
     console.error('❌ Error verificando bridges:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'verificarBridgesPorExpirar', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'verificarBridgesPorExpirar', stack: (e as Error).stack });
   }
 }
 
@@ -166,7 +166,7 @@ export async function procesarFollowupsPendientes(supabase: SupabaseService, met
 
   } catch (e) {
     console.error('Error procesando follow-ups pendientes:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'procesarFollowupsPendientes', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'procesarFollowupsPendientes', stack: (e as Error).stack });
   }
 }
 
@@ -233,7 +233,7 @@ export async function archivarConversationHistory(supabase: SupabaseService): Pr
     console.log(`🗄️ Archival completado: ${archivados} leads, ${entriesTrimmed} entries removidos`);
   } catch (e) {
     console.error('❌ Error en archival de conversation_history:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'archivarConversationHistory', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'archivarConversationHistory', stack: (e as Error).stack });
   }
 }
 
@@ -472,6 +472,6 @@ Esperamos que sigas disfrutando tu casa y creando recuerdos increíbles. ¡Graci
     console.log(`✅ Felicitaciones de aniversario completadas: ${felicitados} clientes`);
   } catch (error) {
     console.error('❌ Error en felicitaciones de aniversario:', error);
-    logErrorToDB(supabase, 'cron_error', 'error', 'felicitarAniversarioCompra', (error as Error).message || String(error), (error as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (error as Error).message || String(error), { severity: 'error', source: 'felicitarAniversarioCompra', stack: (error as Error).stack });
   }
 }

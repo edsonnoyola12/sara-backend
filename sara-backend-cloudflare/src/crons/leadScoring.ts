@@ -362,7 +362,7 @@ ${señales.some(s => s.tipo === 'visita') ? '→ Agendar visita HOY si es posibl
 
   } catch (e) {
     console.error('Error en alertarLeadCaliente:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'alertarLeadCaliente', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'alertarLeadCaliente', stack: (e as Error).stack });
   }
 }
 
@@ -411,7 +411,7 @@ export async function actualizarLeadScores(supabase: SupabaseService): Promise<v
 
   } catch (e) {
     console.error('Error en actualizarLeadScores:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'actualizarLeadScores', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'actualizarLeadScores', stack: (e as Error).stack });
   }
 }
 
@@ -670,6 +670,6 @@ Si quieres, te puedo enviar información detallada para que la revisen juntos. T
 
   } catch (e) {
     console.error('Error en alertarObjecion:', e);
-    logErrorToDB(supabase, 'cron_error', 'error', 'alertarObjecion', (e as Error).message || String(e), (e as Error).stack).catch(() => {});
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'alertarObjecion', stack: (e as Error).stack });
   }
 }

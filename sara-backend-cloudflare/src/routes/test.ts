@@ -10383,23 +10383,55 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
     // Create Carousel Templates in Meta Business Manager
     // Usage: /create-carousel-templates?api_key=XXX&template=all
     // Options: template=casas_economicas|casas_premium|terrenos_nogal|all
+    //          action=delete (delete templates first, then recreate)
     // TEMPORARY - Remove after templates are approved
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/create-carousel-templates' && request.method === 'GET') {
       const templateParam = url.searchParams.get('template') || 'all';
+      const actionParam = url.searchParams.get('action') || 'create';
       const WABA_ID = '1227849769248437';
+
+      // If action=delete, delete templates first
+      if (actionParam === 'delete' || actionParam === 'recreate') {
+        const templatesToDelete = templateParam === 'all'
+          ? ['casas_economicas', 'casas_premium', 'casas_economicas_v2', 'casas_premium_v2', 'terrenos_nogal']
+          : [templateParam];
+        const deleteResults: any[] = [];
+        for (const tplName of templatesToDelete) {
+          try {
+            const delResp = await fetch(
+              `https://graph.facebook.com/v22.0/${WABA_ID}/message_templates?name=${tplName}`,
+              {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${env.META_ACCESS_TOKEN}` }
+              }
+            );
+            const delData: any = await delResp.json();
+            deleteResults.push({ template: tplName, status: delResp.status, success: delData.success, data: delData });
+            console.log(`🗑️ Delete ${tplName}: ${delResp.status} - ${JSON.stringify(delData)}`);
+          } catch (err: any) {
+            deleteResults.push({ template: tplName, error: err.message });
+          }
+        }
+        if (actionParam === 'delete') {
+          return corsResponse(JSON.stringify({ action: 'delete', results: deleteResults }, null, 2));
+        }
+        // If recreate, continue to creation below after a short delay
+        await new Promise(r => setTimeout(r, 2000));
+        console.log('⏳ Waiting 2s after delete before recreating...');
+      }
 
       // Image URLs per development
       const FOTOS: Record<string, string> = {
-        'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg',
-        'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2021/07/M4215335.jpg',
+        'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/11/MONTE-VERDE-FACHADA-DESARROLLO-EDIT-scaled.jpg',
+        'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/Encinos-Amenidades-1.jpg',
         'Andes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg',
-        'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-min-scaled-e1740520053367.jpg',
-        'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
-        'Paseo Colorines': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/ACACIA-1-scaled.jpg',
-        'Alpes': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg',
-        'Villa Campelo': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
-        'Villa Galiano': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
+        'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-scaled-e1740672689199.jpg',
+        'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01-5.jpg',
+        'Paseo Colorines': 'https://gruposantarita.com.mx/wp-content/uploads/2024/11/MONTE-VERDE-FACHADA-DESARROLLO-EDIT-scaled.jpg',
+        'Alpes': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/Alpes-Amenidades-1.jpg',
+        'Villa Campelo': 'https://gruposantarita.com.mx/wp-content/uploads/2023/10/RF_Casa-Club-1.jpg',
+        'Villa Galiano': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/VILLA-GALIANO-ACCESO-2560-X-2560-PX@2x-scaled.jpg',
       };
 
       // Step 1: Get app_id from debug_token
@@ -10468,9 +10500,9 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         cardBody: string;
         cardExamples: string[][];
       }> = {
-        casas_economicas: {
+        casas_economicas_v2: {
           developments: ['Monte Verde', 'Andes', 'Alpes'],
-          bodyText: 'Conoce nuestras casas en Zacatecas desde {{1}} 🏠',
+          bodyText: 'Conoce nuestras casas desde {{1}} en Zacatecas y Guadalupe 🏠',
           bodyExample: [['$1.6M']],
           cardBody: '🏠 {{1}}\n💰 Casas desde {{2}} equipadas con cocina y closets',
           cardExamples: [
@@ -10479,9 +10511,9 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
             ['Alpes - 2 a 3 recámaras en Colinas del Padre', '$1.6M'],
           ]
         },
-        casas_premium: {
+        casas_premium_v2: {
           developments: ['Los Encinos', 'Miravalle', 'Paseo Colorines', 'Distrito Falco'],
-          bodyText: 'Conoce nuestras casas premium en Zacatecas desde {{1}} 🏠',
+          bodyText: 'Conoce nuestras casas premium desde {{1}} en Zacatecas y Guadalupe 🏠',
           bodyExample: [['$3.0M']],
           cardBody: '🏠 {{1}}\n💰 Casas desde {{2}} equipadas con cocina y closets',
           cardExamples: [
@@ -10656,7 +10688,9 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
 
       const segmentMap: Record<string, 'economico' | 'premium' | 'terrenos'> = {
         casas_economicas: 'economico',
+        casas_economicas_v2: 'economico',
         casas_premium: 'premium',
+        casas_premium_v2: 'premium',
         terrenos_nogal: 'terrenos'
       };
       const segment = segmentMap[templateName];

@@ -3255,15 +3255,15 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
    * Fotos por desarrollo para carousels (fallback si photo_url no existe en DB).
    */
   static readonly FOTOS_DESARROLLO: Record<string, string> = {
-    'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg',
-    'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2021/07/M4215335.jpg',
+    'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/11/MONTE-VERDE-FACHADA-DESARROLLO-EDIT-scaled.jpg',
+    'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/Encinos-Amenidades-1.jpg',
     'Andes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg',
-    'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-min-scaled-e1740520053367.jpg',
-    'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
-    'Paseo Colorines': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/ACACIA-1-scaled.jpg',
-    'Alpes': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg',
-    'Villa Campelo': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
-    'Villa Galiano': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img03-7.jpg',
+    'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-scaled-e1740672689199.jpg',
+    'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01-5.jpg',
+    'Paseo Colorines': 'https://gruposantarita.com.mx/wp-content/uploads/2024/11/MONTE-VERDE-FACHADA-DESARROLLO-EDIT-scaled.jpg',
+    'Alpes': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/Alpes-Amenidades-1.jpg',
+    'Villa Campelo': 'https://gruposantarita.com.mx/wp-content/uploads/2023/10/RF_Casa-Club-1.jpg',
+    'Villa Galiano': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/VILLA-GALIANO-ACCESO-2560-X-2560-PX@2x-scaled.jpg',
   };
 
   /**
@@ -3272,11 +3272,11 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
   static readonly CAROUSEL_SEGMENTS: Record<string, { developments: string[]; template: string }> = {
     economico: {
       developments: ['Monte Verde', 'Andes', 'Alpes'],
-      template: 'casas_economicas'
+      template: 'casas_economicas_v2'
     },
     premium: {
       developments: ['Los Encinos', 'Miravalle', 'Paseo Colorines', 'Distrito Falco'],
-      template: 'casas_premium'
+      template: 'casas_premium_v2'
     },
     terrenos: {
       developments: ['Villa Campelo', 'Villa Galiano'],
@@ -3342,10 +3342,11 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
       const zona = ['Monte Verde', 'Los Encinos', 'Miravalle', 'Paseo Colorines', 'Alpes', 'Monte Real']
         .includes(devName) ? 'Colinas del Padre' : 'Guadalupe';
 
-      // Photo URL: prefer DB, fallback to hardcoded
-      const imageUrl = devProps[0]?.photo_url ||
+      // Photo URL: prefer development-level photo, fallback to first property photo
+      const imageUrl =
         AIConversationService.FOTOS_DESARROLLO[devName] ||
-        'https://gruposantarita.com.mx/wp-content/uploads/2024/10/EUCALIPTO-0-scaled.jpg';
+        devProps[0]?.photo_url ||
+        'https://gruposantarita.com.mx/wp-content/uploads/2024/11/MONTE-VERDE-FACHADA-DESARROLLO-EDIT-scaled.jpg';
 
       // Slug for quick reply payload
       const slug = devName.toLowerCase().replace(/\s+/g, '_').replace(/[áéíóú]/g, (m: string) =>
