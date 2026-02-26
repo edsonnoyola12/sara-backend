@@ -10394,7 +10394,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       // If action=status, just query template status from Meta
       if (actionParam === 'status') {
         const namesToCheck = templateParam === 'all'
-          ? ['casas_economicas_v2', 'casas_premium_v2', 'terrenos_nogal']
+          ? ['casas_economicas_v2', 'casas_premium_v2', 'terrenos_nogal', 'casas_guadalupe', 'casas_zacatecas']
           : [templateParam];
         const statusResults: any[] = [];
         for (const tplName of namesToCheck) {
@@ -10421,7 +10421,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       // If action=delete, delete templates first
       if (actionParam === 'delete' || actionParam === 'recreate') {
         const templatesToDelete = templateParam === 'all'
-          ? ['casas_economicas', 'casas_premium', 'casas_economicas_v2', 'casas_premium_v2', 'terrenos_nogal']
+          ? ['casas_economicas', 'casas_premium', 'casas_economicas_v2', 'casas_premium_v2', 'terrenos_nogal', 'casas_guadalupe', 'casas_zacatecas']
           : [templateParam];
         const deleteResults: any[] = [];
         for (const tplName of templatesToDelete) {
@@ -10559,6 +10559,29 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
             ['Villa Campelo - Citadella del Nogal', '$8,500'],
             ['Villa Galiano - Citadella del Nogal', '$6,400'],
           ]
+        },
+        casas_guadalupe: {
+          developments: ['Andes', 'Distrito Falco', 'Alpes'],
+          bodyText: 'Conoce nuestras casas en Guadalupe desde {{1}} 🏠',
+          bodyExample: [['$1.6M']],
+          cardBody: '🏠 {{1}}\n💰 Casas desde {{2}} equipadas con cocina y closets',
+          cardExamples: [
+            ['Priv. Andes - 2 a 3 recámaras en Guadalupe', '$1.6M'],
+            ['Distrito Falco - 3 recámaras en Guadalupe', '$3.7M'],
+            ['Alpes - 2 recámaras en Guadalupe', '$2.0M'],
+          ]
+        },
+        casas_zacatecas: {
+          developments: ['Monte Verde', 'Los Encinos', 'Miravalle', 'Paseo Colorines'],
+          bodyText: 'Conoce nuestras casas en Zacatecas desde {{1}} 🏠',
+          bodyExample: [['$1.6M']],
+          cardBody: '🏠 {{1}}\n💰 Casas desde {{2}} equipadas con cocina y closets',
+          cardExamples: [
+            ['Monte Verde - 2 a 3 recámaras en Colinas del Padre', '$1.6M'],
+            ['Los Encinos - 3 recámaras en Colinas del Padre', '$3.0M'],
+            ['Miravalle - 3 recámaras en Colinas del Padre', '$3.0M'],
+            ['Paseo Colorines - 3 recámaras en Colinas del Padre', '$3.0M'],
+          ]
         }
       };
 
@@ -10678,6 +10701,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       const segToTemplate: Record<string, string> = {
         economico: 'casas_economicas_v2', premium: 'casas_premium_v2', terrenos: 'terrenos_nogal',
         casas_economicas: 'casas_economicas_v2', casas_premium: 'casas_premium_v2',
+        guadalupe: 'casas_guadalupe', zacatecas: 'casas_zacatecas',
       };
       const templateName = segToTemplate[segParam] || segParam;
       const phone = url.searchParams.get('phone') || '5610016226';
@@ -10719,12 +10743,14 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         .from('properties')
         .select('*');
 
-      const segmentMap: Record<string, 'economico' | 'premium' | 'terrenos'> = {
+      const segmentMap: Record<string, string> = {
         casas_economicas: 'economico',
         casas_economicas_v2: 'economico',
         casas_premium: 'premium',
         casas_premium_v2: 'premium',
-        terrenos_nogal: 'terrenos'
+        terrenos_nogal: 'terrenos',
+        casas_guadalupe: 'guadalupe',
+        casas_zacatecas: 'zacatecas',
       };
       const segment = segmentMap[templateName];
       if (!segment) {
@@ -10738,11 +10764,15 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         return corsResponse(JSON.stringify({ error: 'No cards built (no matching properties in DB)' }));
       }
 
-      // Step 3: Build body params (terrenos_nogal has no body params)
-      const bodyParams = segment === 'terrenos'
-        ? []
-        : [AIConversationService.precioMinDesarrollo(properties || [],
-            segment === 'economico' ? 'Monte Verde' : 'Los Encinos')];
+      // Step 3: Build body params (terrenos_nogal has no body params; others get dynamic min price)
+      let bodyParams: string[];
+      if (segment === 'terrenos') {
+        bodyParams = [];
+      } else {
+        const segDevs = AIConversationService.CAROUSEL_SEGMENTS[segment]?.developments || [];
+        const firstDev = segDevs[0] || 'Monte Verde';
+        bodyParams = [AIConversationService.precioMinDesarrollo(properties || [], firstDev) || AIConversationService.precioMinGlobal(properties || [])];
+      }
 
       // Step 4: Send carousel
       try {

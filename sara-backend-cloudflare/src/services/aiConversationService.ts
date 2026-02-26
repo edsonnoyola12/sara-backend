@@ -46,7 +46,7 @@ interface AIAnalysis {
   phase?: string;
   phaseNumber?: number;
   secondary_intents?: string[];
-  send_carousel?: 'economico' | 'premium' | 'all' | 'terrenos';
+  send_carousel?: 'economico' | 'premium' | 'all' | 'terrenos' | 'guadalupe' | 'zacatecas';
   send_location_request?: boolean;
 }
 
@@ -1466,8 +1466,8 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
 - Sin presupuesto claro, pregunta general → send_carousel: "all"
 - Pregunta por terrenos/lotes → send_carousel: "terrenos"
 - Pregunta por ZONA sin desarrollo específico:
-  - "casas de guadalupe" / "casas en guadalupe" → send_carousel: "all"
-  - "casas de zacatecas" / "casas en zacatecas" / "casas en colinas" → send_carousel: "all"
+  - "casas de guadalupe" / "casas en guadalupe" → send_carousel: "guadalupe"
+  - "casas de zacatecas" / "casas en zacatecas" / "casas en colinas" → send_carousel: "zacatecas"
   - "todas las casas" / "qué tienen" / "qué opciones hay" → send_carousel: "all"
 - NO usar si ya preguntó por UN desarrollo específico (ej: "Monte Verde")
 - NO usar si ya se envió carousel en esta conversación
@@ -2534,12 +2534,19 @@ Por WhatsApp te atiendo 24/7 🙌
       // Safety net: si Claude no activó carousel pero el mensaje pide casas por zona
       if (!result.send_carousel && !desarrolloInteres) {
         const msgLowerCarousel = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        const pideCasasPorZona = /casas?\s+(de|en)\s+(guadalupe|zacatecas|colinas)/i.test(msgLowerCarousel)
-          || /todas?\s+las?\s+casas/i.test(msgLowerCarousel)
+        const pideGuadalupe = /casas?\s+(de|en)\s+guadalupe/i.test(msgLowerCarousel);
+        const pideZacatecas = /casas?\s+(de|en)\s+(zacatecas|colinas)/i.test(msgLowerCarousel);
+        const pideTodas = /todas?\s+las?\s+casas/i.test(msgLowerCarousel)
           || /que\s+(tienen|opciones|hay)/i.test(msgLowerCarousel);
-        if (pideCasasPorZona) {
+        if (pideGuadalupe) {
+          result.send_carousel = 'guadalupe';
+          console.log('🎠 Safety net: carousel forzado a "guadalupe" por zona detectada');
+        } else if (pideZacatecas) {
+          result.send_carousel = 'zacatecas';
+          console.log('🎠 Safety net: carousel forzado a "zacatecas" por zona detectada');
+        } else if (pideTodas) {
           result.send_carousel = 'all';
-          console.log('🎠 Safety net: carousel forzado a "all" por zona/general detectada en mensaje');
+          console.log('🎠 Safety net: carousel forzado a "all" por pregunta general');
         }
       }
 
@@ -3299,6 +3306,14 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
     terrenos: {
       developments: ['Villa Campelo', 'Villa Galiano'],
       template: 'terrenos_nogal'
+    },
+    guadalupe: {
+      developments: ['Andes', 'Distrito Falco', 'Alpes'],
+      template: 'casas_guadalupe'
+    },
+    zacatecas: {
+      developments: ['Monte Verde', 'Los Encinos', 'Miravalle', 'Paseo Colorines'],
+      template: 'casas_zacatecas'
     }
   };
 
@@ -3357,7 +3372,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
       const recText = isTerreno ? 'Terrenos' : (minBed === maxBed ? `${minBed} rec` : `${minBed}-${maxBed} rec`);
 
       // Zone
-      const zona = ['Monte Verde', 'Los Encinos', 'Miravalle', 'Paseo Colorines', 'Alpes', 'Monte Real']
+      const zona = ['Monte Verde', 'Los Encinos', 'Miravalle', 'Paseo Colorines', 'Monte Real']
         .includes(devName) ? 'Colinas del Padre' : 'Guadalupe';
 
       // Photo URL: prefer development-level photo, fallback to first property photo
@@ -5244,10 +5259,15 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               const templateName = AIConversationService.CAROUSEL_SEGMENTS[segment]?.template;
 
               if (cards.length > 0 && templateName) {
-                // terrenos_nogal template has no body params; casas templates have 1
-                const bodyParams = segment === 'terrenos'
-                  ? []
-                  : [segment === 'economico' ? AIConversationService.precioMinGlobal(properties) : '$3M+'];
+                // Body params: terrenos has none; others get dynamic min price from segment's first development
+                let bodyParams: string[];
+                if (segment === 'terrenos') {
+                  bodyParams = [];
+                } else {
+                  const segDevs = AIConversationService.CAROUSEL_SEGMENTS[segment]?.developments || [];
+                  const firstDev = segDevs[0] || '';
+                  bodyParams = [AIConversationService.precioMinDesarrollo(properties, firstDev) || AIConversationService.precioMinGlobal(properties)];
+                }
 
                 await new Promise(r => setTimeout(r, 500));
                 try {
