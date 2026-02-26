@@ -781,7 +781,7 @@ export default {
                     `Status webhook failed: ${errorCode}`,
                     `Meta delivery failed: ${errorCode} - ${errorTitle}`
                   );
-                } catch (_) { /* silent */ }
+                } catch (retryErr) { console.error('⚠️ Error encolando retry:', retryErr); }
               }
             } catch (dbError) {
               // Si la tabla no existe, solo loguear
@@ -801,7 +801,7 @@ export default {
                   console.log(`🔊 TTS Status actualizado: ${messageId.substring(0, 20)}... → ${statusType}`);
                 }
               } catch (ttsError) {
-                // Silencioso si falla - no es crítico
+                console.error('⚠️ Error actualizando TTS status:', ttsError);
               }
 
               // 📬 Message Tracking - Actualizar estado de TODOS los mensajes
@@ -813,7 +813,7 @@ export default {
                   statusType === 'failed' ? errorTitle : undefined
                 );
               } catch (msgError) {
-                // Silencioso si falla
+                console.error('⚠️ Error actualizando message tracking:', msgError);
               }
             }
           }
@@ -958,9 +958,9 @@ export default {
           if (messageId && !teamMember && meta) {
             try {
               ctx.waitUntil(
-                meta.sendReaction(from, messageId, '✅').catch(() => {})
+                meta.sendReaction(from, messageId, '✅').catch((e) => console.error('⚠️ Reaction failed:', e))
               );
-            } catch (_) { /* never fail main flow */ }
+            } catch (reactErr) { console.error('⚠️ Reaction setup error:', reactErr); }
           }
 
           // ═══ AVISO FUERA DE HORARIO — DESACTIVADO ═══
@@ -2340,7 +2340,7 @@ export default {
           stack: error instanceof Error ? error.stack : undefined,
           context: { request_id: requestId, path: url.pathname, method: request.method }
         }));
-      } catch (_) { /* ignore - best effort error logging */ }
+      } catch (logErr) { console.error('⚠️ Error logging to DB failed:', logErr); }
 
       return corsResponse(JSON.stringify({
         error: 'Internal Server Error',
@@ -2521,6 +2521,20 @@ export default {
           .limit(10);
 
         if (leadsNuevosSinContactar && leadsNuevosSinContactar.length > 0) {
+          // Batch: cargar actividades de TODOS los leads de una vez (evita N+1 queries)
+          const leadIds = leadsNuevosSinContactar.map((l: any) => l.id);
+          const { data: allActivities } = await supabase.client
+            .from('lead_activities')
+            .select('lead_id, team_member_id')
+            .in('lead_id', leadIds);
+
+          const activitySet = new Set(
+            (allActivities || []).map((a: any) => `${a.lead_id}:${a.team_member_id}`)
+          );
+
+          // Reuse vendedores already fetched at CRON start (line 2408)
+          const vendedoresMap = new Map((vendedores || []).map((v: any) => [v.id, v]));
+
           // Filtrar los que realmente no han sido contactados
           for (const lead of leadsNuevosSinContactar) {
             const notas = typeof lead.notes === 'object' ? lead.notes : {};
@@ -2538,23 +2552,12 @@ export default {
               continue;
             }
 
-            // Verificar si hay actividad del vendedor en lead_activities
-            const { data: actividades } = await supabase.client
-              .from('lead_activities')
-              .select('id')
-              .eq('lead_id', lead.id)
-              .eq('team_member_id', lead.assigned_to)
-              .limit(1);
-
-            const tieneActividad = actividades && actividades.length > 0;
+            // Verificar si hay actividad del vendedor (batch lookup)
+            const tieneActividad = activitySet.has(`${lead.id}:${lead.assigned_to}`);
             if (tieneActividad) continue;
 
-            // Este lead NO ha sido contactado - alertar al vendedor
-            const { data: vendedor } = await supabase.client
-              .from('team_members')
-              .select('id, name, phone')
-              .eq('id', lead.assigned_to)
-              .single();
+            // Lookup vendedor del cache (no query individual)
+            const vendedor = vendedoresMap.get(lead.assigned_to) as any;
 
             if (vendedor?.phone) {
               const minutosSinContactar = Math.round((Date.now() - new Date(lead.created_at).getTime()) / 60000);
@@ -2604,7 +2607,10 @@ export default {
               alertaMsg += `→ *bridge ${primerNombre}* - Chat directo\n`;
               alertaMsg += `→ Escribe tu mensaje para enviarlo`;
 
-              await meta.sendWhatsAppMessage(vendedor.phone, alertaMsg);
+              await enviarMensajeTeamMember(supabase, meta, vendedor, alertaMsg, {
+                tipoMensaje: 'alerta_lead',
+                pendingKey: 'pending_alerta_lead'
+              });
               console.log(`⏰ ALERTA INTELIGENTE enviada a ${vendedor.name}: ${identificadorLead} sin contactar (${minutosSinContactar} min)`);
 
               // Marcar como alertado y guardar sugerencia para cuando responda "ok"
@@ -3581,7 +3587,7 @@ export default {
           stack: error instanceof Error ? error.stack : undefined,
           context: { cron: event.cron, scheduled_time: new Date(event.scheduledTime).toISOString() }
         });
-      } catch (_) { /* fail silently */ }
+      } catch (logErr) { console.error('⚠️ CRON error logging to DB failed:', logErr); }
 
       throw error; // Re-throw para que Cloudflare lo registre
     }

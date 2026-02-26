@@ -710,15 +710,25 @@ export async function recordatorioAsesores(supabase: SupabaseService, meta: Meta
     .eq('role', 'vendedor')
     .eq('active', true);
 
+  // Batch: cargar TODOS los leads nuevos de una vez (evita N+1 queries)
+  const { data: allNewLeads } = await supabase.client
+    .from('leads')
+    .select('id, name, phone, assigned_to')
+    .eq('status', 'new')
+    .not('assigned_to', 'is', null);
+
+  const newLeadsByVendor = new Map<string, any[]>();
+  for (const lead of allNewLeads || []) {
+    const arr = newLeadsByVendor.get(lead.assigned_to) || [];
+    arr.push(lead);
+    newLeadsByVendor.set(lead.assigned_to, arr);
+  }
+
   for (const v of vendedores || []) {
     try {
       if (!v.phone || !v.recibe_briefing) continue;
 
-      const { data: leadsSinContactar } = await supabase.client
-        .from('leads')
-        .select('*')
-        .eq('assigned_to', v.id)
-        .eq('status', 'new');
+      const leadsSinContactar = newLeadsByVendor.get(v.id) || [];
 
       if (leadsSinContactar && leadsSinContactar.length > 0) {
         const mensaje = `💬 *Recordatorio de seguimiento*
@@ -750,18 +760,27 @@ Revísalos en el CRM y márcalos como contactados.`;
   const fechaLimite = new Date();
   fechaLimite.setDate(fechaLimite.getDate() - diasSinMovimiento);
 
+  // Batch: cargar TODAS las hipotecas estancadas de una vez (evita N+1 queries)
+  const { data: allStaleHipotecas } = await supabase.client
+    .from('mortgage_applications')
+    .select('id, lead_name, bank, assigned_advisor_id')
+    .in('status', ['pending', 'in_review', 'documents'])
+    .lt('updated_at', fechaLimite.toISOString());
+
+  const hipotecasByAsesor = new Map<string, any[]>();
+  for (const h of allStaleHipotecas || []) {
+    const arr = hipotecasByAsesor.get(h.assigned_advisor_id) || [];
+    arr.push(h);
+    hipotecasByAsesor.set(h.assigned_advisor_id, arr);
+  }
+
   for (const asesor of asesores || []) {
     try {
       if (!asesor.phone || asesor.is_active === false) continue;
 
-      const { data: hipotecasSinMover } = await supabase.client
-        .from('mortgage_applications')
-        .select('*')
-        .eq('assigned_advisor_id', asesor.id)
-        .in('status', ['pending', 'in_review', 'documents'])
-        .lt('updated_at', fechaLimite.toISOString());
+      const hipotecasSinMover = hipotecasByAsesor.get(asesor.id) || [];
 
-      if (hipotecasSinMover && hipotecasSinMover.length > 0) {
+      if (hipotecasSinMover.length > 0) {
         let mensaje = `🏦 *Recordatorio de Créditos*
 
 ${asesor.name}, tienes ${hipotecasSinMover.length} solicitud(es) sin actualizar en ${diasSinMovimiento}+ días:

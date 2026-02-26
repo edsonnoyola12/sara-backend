@@ -674,7 +674,7 @@ Atendemos de Lunes a Viernes 9am-6pm y Sábados 9am-2pm 😊`,
                   severity: 'critical', source: 'creditFlowService',
                   context: { leadId, leadPhone: context.lead_phone, asesorId: asesor.id, banco: context.banco_preferido }
                 });
-              } catch (_) { /* best effort */ }
+              } catch (logErr) { console.error('⚠️ logErrorToDB failed (mortgage_insert_failed):', logErr); }
             } else {
               console.log(`📊 Mortgage application creada para lead ${leadId}`);
             }

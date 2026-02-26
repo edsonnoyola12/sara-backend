@@ -237,7 +237,7 @@ export async function enviarMensajeTeamMember(
               severity: 'critical', source: 'enviarMensajeTeamMember:templateOverride+fallback',
               context: { teamMemberId: teamMember.id, teamMemberName: teamMember.name, tipoMensaje, pendingKey, mensajePreview: mensaje.substring(0, 100) }
             });
-          } catch (_) { /* best effort */ }
+          } catch (logErr) { console.error('⚠️ logErrorToDB failed (templateOverride+fallback):', logErr); }
           return { success: false, method: 'failed', ventanaAbierta: false };
         }
       } else {
@@ -253,7 +253,7 @@ export async function enviarMensajeTeamMember(
             severity: 'critical', source: 'enviarMensajeTeamMember:genericTemplateFailed',
             context: { teamMemberId: teamMember.id, teamMemberName: teamMember.name, tipoMensaje, pendingKey, mensajePreview: mensaje.substring(0, 100) }
           });
-        } catch (_) { /* best effort */ }
+        } catch (logErr) { console.error('⚠️ logErrorToDB failed (genericTemplateFailed):', logErr); }
         return { success: false, method: 'failed', ventanaAbierta: false };
       }
     }
@@ -275,7 +275,7 @@ export async function enviarMensajeTeamMember(
         stack: error instanceof Error ? error.stack : undefined,
         context: { teamMemberId: teamMember.id, teamMemberName: teamMember.name, tipoMensaje, pendingKey }
       });
-    } catch (_) { /* best effort */ }
+    } catch (logErr) { console.error('⚠️ logErrorToDB failed (outerCatch):', logErr); }
     return { success: false, method: 'failed', ventanaAbierta: false };
   }
 }
@@ -328,7 +328,7 @@ async function guardarMensajePending(
         source: 'teamMessaging.guardarMensajePending',
         context: { teamMemberId, pendingKey, tipoMensaje, dbError: pendingError.code || pendingError.message }
       });
-    } catch (_) { /* best effort */ }
+    } catch (logErr) { console.error('⚠️ logErrorToDB failed (guardarMensajePending):', logErr); }
   } else {
     console.log(`   💾 Mensaje guardado como ${pendingKey} (expira en ${expirationHours}h)${wamid ? `, wamid: ${wamid.substring(0, 15)}...` : ''}`);
   }

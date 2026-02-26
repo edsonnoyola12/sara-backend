@@ -1035,7 +1035,7 @@ CASOS ESPECIALES:
             try {
               await env.SARA_CACHE.put(`retell_cita_created:${callIdForFlag}`, '1', { expirationTtl: 3600 });
               console.log(`🔒 KV flag retell_cita_created:${callIdForFlag} saved — will skip Claude callback`);
-            } catch (_) { /* ignore KV errors */ }
+            } catch (kvErr) { console.error('⚠️ KV error saving retell_cita_created flag:', kvErr); }
           }
 
           // 1. Actualizar nombre del lead si dio uno real
@@ -1087,7 +1087,7 @@ CASOS ESPECIALES:
                 const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
                 fechaDisplay = `${parseInt(dateMatch[1])} de ${meses[parseInt(dateMatch[2])-1]}`;
               }
-            } catch (e) { /* usar fecha original */ }
+            } catch (e) { console.error('⚠️ Error parseando fecha para display:', e); }
 
             await meta.sendWhatsAppMessage(wpPhone,
               `✅ ¡Cita confirmada!\n\n📅 ${fechaDisplay} a las ${horaISO || hora}\n🏠 ${desarrollo}${vendedorInfo}${gpsLink}\n\n¡Te esperamos, ${displayNombre}!`
@@ -1892,7 +1892,7 @@ CASOS ESPECIALES:
                   console.log(`🔒 Skip Claude callback: agendar-cita ya creó cita durante la llamada ${call.call_id}`);
                   debugLog.push({ t: Date.now(), step: 'skip_callback_analysis', reason: 'cita_already_created_by_tool' });
                 }
-              } catch (_) { /* ignore KV errors */ }
+              } catch (kvErr) { console.error('⚠️ KV error reading retell_cita_created flag:', kvErr); }
             }
 
             if (event === 'call_analyzed' && lead && call.transcript && durationSeconds > 30 && !citaYaCreada) {
@@ -2464,7 +2464,7 @@ Reglas de fecha:
                       }
                     }
                   }
-                } catch (_kvErr) { /* ignore */ }
+                } catch (_kvErr) { console.error('⚠️ KV error reading retell_send_queue:', _kvErr); }
 
                 // Send carousels + resources even if no specific development detected
                 // (e.g., user asked "casas en Zacatecas" — send both carousels)
@@ -2509,7 +2509,7 @@ Reglas de fecha:
                         try {
                           const errDetails = err?.response ? JSON.stringify(err.response) : (err?.data ? JSON.stringify(err.data) : err?.stack?.substring(0, 500));
                           if (errDetails) console.error(`❌ Carousel error details:`, errDetails);
-                        } catch (_) { /* ignore */ }
+                        } catch (parseErr) { console.error('⚠️ Error parsing carousel error details:', parseErr); }
                         debugLog.push({ t: Date.now(), step: 'carousel_error', segment: seg, error: err?.message });
                       }
                     }
@@ -2542,7 +2542,7 @@ Reglas de fecha:
                   if (call.call_id && env.SARA_CACHE) {
                     await env.SARA_CACHE.delete(`retell_send_queue:${call.call_id}`);
                   }
-                } catch (_) { /* ignore */ }
+                } catch (kvErr) { console.error('⚠️ KV error deleting retell_send_queue:', kvErr); }
 
                 // Actualizar lead
                 if (lead?.id) {

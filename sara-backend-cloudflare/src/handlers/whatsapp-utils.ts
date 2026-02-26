@@ -787,7 +787,7 @@ export async function crearCitaCompleta(
         try {
           await ctx.twilio.sendWhatsAppMessage(from,
             '⚠️ Tuve un problema técnico al agendar tu cita. Un asesor te contactará en breve para confirmarla. ¡Disculpa la molestia!');
-        } catch (_) { /* best effort */ }
+        } catch (sendErr) { console.error('⚠️ Error enviando mensaje de error al lead:', sendErr); }
         // Alertar al dev
         try {
           const { logErrorToDB } = await import('../crons/healthCheck');
@@ -795,7 +795,7 @@ export async function crearCitaCompleta(
             severity: 'critical', source: 'crearCitaCompleta',
             context: { leadPhone: from, desarrollo, fecha, hora, leadId: lead?.id }
           });
-        } catch (_) { /* best effort */ }
+        } catch (logErr) { console.error('⚠️ logErrorToDB failed (cita_creation_failed):', logErr); }
         return;
       }
       return;
@@ -845,7 +845,7 @@ export async function crearCitaCompleta(
             severity: 'error', source: 'crearCitaCompleta:vendorNotif',
             context: { vendedorId: vendedor.id, leadPhone: from, desarrollo, fecha, hora }
           });
-        } catch (_) { /* best effort */ }
+        } catch (logErr) { console.error('⚠️ logErrorToDB failed (vendor_notification_failed):', logErr); }
       }
     }
 
@@ -883,7 +883,7 @@ export async function crearCitaCompleta(
     try {
       await ctx.twilio.sendWhatsAppMessage(from,
         '⚠️ Tuve un problema técnico al agendar tu cita. Un asesor te contactará en breve para confirmarla. ¡Disculpa la molestia!');
-    } catch (_) { /* best effort */ }
+    } catch (sendErr) { console.error('⚠️ Error enviando mensaje de error al lead:', sendErr); }
     try {
       const { logErrorToDB } = await import('../crons/healthCheck');
       await logErrorToDB(ctx.supabase, 'cita_creation_crashed', error instanceof Error ? error.message : String(error), {
@@ -891,7 +891,7 @@ export async function crearCitaCompleta(
         stack: error instanceof Error ? error.stack : undefined,
         context: { leadPhone: from, desarrollo, fecha, hora, leadId: lead?.id }
       });
-    } catch (_) { /* best effort */ }
+    } catch (logErr) { console.error('⚠️ logErrorToDB failed (cita_creation_crashed):', logErr); }
   }
 }
 
