@@ -1465,6 +1465,10 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
 - Presupuesto $3M+ o pide "premium/grande" → send_carousel: "premium"
 - Sin presupuesto claro, pregunta general → send_carousel: "all"
 - Pregunta por terrenos/lotes → send_carousel: "terrenos"
+- Pregunta por ZONA sin desarrollo específico:
+  - "casas de guadalupe" / "casas en guadalupe" → send_carousel: "all"
+  - "casas de zacatecas" / "casas en zacatecas" / "casas en colinas" → send_carousel: "all"
+  - "todas las casas" / "qué tienen" / "qué opciones hay" → send_carousel: "all"
 - NO usar si ya preguntó por UN desarrollo específico (ej: "Monte Verde")
 - NO usar si ya se envió carousel en esta conversación
 
@@ -2526,7 +2530,21 @@ Por WhatsApp te atiendo 24/7 🙌
         send_carousel: parsed.send_carousel || null,
         send_location_request: parsed.send_location_request || false
       };
-      
+
+      // Safety net: si Claude no activó carousel pero el mensaje pide casas por zona
+      if (!result.send_carousel && !desarrolloInteres) {
+        const msgLowerCarousel = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const pideCasasPorZona = /casas?\s+(de|en)\s+(guadalupe|zacatecas|colinas)/i.test(msgLowerCarousel)
+          || /todas?\s+las?\s+casas/i.test(msgLowerCarousel)
+          || /que\s+(tienen|opciones|hay)/i.test(msgLowerCarousel);
+        if (pideCasasPorZona) {
+          result.send_carousel = 'all';
+          console.log('🎠 Safety net: carousel forzado a "all" por zona/general detectada en mensaje');
+        }
+      }
+
+      return result;
+
     } catch (e) {
       console.error('❌ Error OpenAI:', e);
 
