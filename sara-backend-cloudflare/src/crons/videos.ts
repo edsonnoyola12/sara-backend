@@ -417,7 +417,10 @@ function obtenerFotoDesarrollo(desarrollo: string): string {
 }
 
 async function descargarImagenBase64(url: string): Promise<string> {
-  const imgResponse = await fetch(url);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  const imgResponse = await fetch(url, { signal: ctrl.signal });
+  clearTimeout(timer);
   if (!imgResponse.ok) {
     throw new Error(`Error descargando imagen: ${imgResponse.status}`);
   }

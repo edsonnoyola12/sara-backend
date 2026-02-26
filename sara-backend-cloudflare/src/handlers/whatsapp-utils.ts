@@ -672,7 +672,10 @@ export async function generarVideoBienvenida(
 
     console.log('📸 Foto a usar:', photoUrl);
 
-    const imgResponse = await fetch(photoUrl);
+    const imgCtrl = new AbortController();
+    const imgTimer = setTimeout(() => imgCtrl.abort(), 10_000);
+    const imgResponse = await fetch(photoUrl, { signal: imgCtrl.signal });
+    clearTimeout(imgTimer);
     if (!imgResponse.ok) {
       console.error('⚠️ Error descargando imagen');
       return null;
@@ -684,6 +687,8 @@ export async function generarVideoBienvenida(
 
     console.log('🎬 Prompt:', prompt);
 
+    const veoCtrl = new AbortController();
+    const veoTimer = setTimeout(() => veoCtrl.abort(), 25_000);
     const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/veo-3.0-fast-generate-001:predictLongRunning', {
       method: 'POST',
       headers: {
@@ -702,8 +707,10 @@ export async function generarVideoBienvenida(
           aspectRatio: "9:16",
           durationSeconds: 6
         }
-      })
+      }),
+      signal: veoCtrl.signal
     });
+    clearTimeout(veoTimer);
 
     if (!response.ok) {
       const errorText = await response.text();

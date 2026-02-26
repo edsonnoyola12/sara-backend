@@ -1781,12 +1781,16 @@ export async function reactivarLeadsPerdidos(supabase: SupabaseService, meta: Me
       try {
         await meta.sendWhatsAppMessage(lead.phone, mensaje);
 
+        const notasObj = safeJsonParse(lead.notes);
+        notasObj.ultima_reactivacion = ahora.toISOString().split('T')[0];
+        notasObj.reactivaciones_count = (notasObj.reactivaciones_count || 0) + 1;
+
         await supabase.client
           .from('leads')
           .update({
             status: 'contacted',
             updated_at: ahora.toISOString(),
-            notes: (lead.notes || '') + `\n[${ahora.toISOString().split('T')[0]}] Reactivación automática enviada`
+            notes: notasObj
           })
           .eq('id', lead.id);
 

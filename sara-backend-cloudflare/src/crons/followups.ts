@@ -93,16 +93,29 @@ export async function seguimientoHipotecas(supabase: SupabaseService, meta: Meta
     const hace7dias = new Date();
     hace7dias.setDate(hace7dias.getDate() - 7);
 
-    // Hipotecas en banco sin actualización en 7+ días
+    // Hipotecas en banco sin actualización en 7+ días (include lead notes to avoid N+1)
     const { data: hipotecasEstancadas } = await supabase.client
       .from('mortgage_applications')
-      .select('*, leads(name, phone), team_members!mortgage_applications_assigned_advisor_id_fkey(name, phone)')
+      .select('*, leads(name, phone, notes), team_members!mortgage_applications_assigned_advisor_id_fkey(id, name, phone)')
       .eq('status', 'sent_to_bank')
       .lt('updated_at', hace7dias.toISOString());
 
     if (!hipotecasEstancadas || hipotecasEstancadas.length === 0) {
       console.log('✅ No hay hipotecas estancadas');
       return;
+    }
+
+    // Batch-fetch all vendedor_original_ids to avoid N+1 queries in loop
+    const vendorOrigIds = new Set<string>();
+    for (const hip of hipotecasEstancadas) {
+      const notas = safeJsonParse((hip as any).leads?.notes);
+      if (notas.vendedor_original_id) vendorOrigIds.add(notas.vendedor_original_id);
+    }
+    let vendorOrigMap = new Map<string, any>();
+    if (vendorOrigIds.size > 0) {
+      const { data: vendorsOrig } = await supabase.client
+        .from('team_members').select('*').in('id', Array.from(vendorOrigIds));
+      vendorOrigMap = new Map((vendorsOrig || []).map((v: any) => [v.id, v]));
     }
 
     // Notificar a asesores Y vendedores originales
@@ -130,15 +143,12 @@ export async function seguimientoHipotecas(supabase: SupabaseService, meta: Meta
         console.log(`Error notificando asesor:`, e);
       }
 
-      // Notificar al vendedor original (si existe en notes del lead)
+      // Notificar al vendedor original (using pre-fetched map, no N+1)
       try {
-        const { data: leadFull } = await supabase.client
-          .from('leads').select('notes').eq('id', hip.lead_id).single();
-        const notas = safeJsonParse(leadFull?.notes);
+        const notas = safeJsonParse(lead?.notes);
         const vendedorOrigId = notas.vendedor_original_id;
         if (vendedorOrigId && vendedorOrigId !== asesor.id) {
-          const { data: vendedorOrig } = await supabase.client
-            .from('team_members').select('*').eq('id', vendedorOrigId).single();
+          const vendedorOrig = vendorOrigMap.get(vendedorOrigId);
           if (vendedorOrig?.phone) {
             const msgVendedor = `🏦 *ACTUALIZACIÓN CRÉDITO*\n\n` +
               `Tu lead *${lead?.name || 'Sin nombre'}* tiene una hipoteca estancada en *${hip.bank || 'banco'}* (${diasEnBanco} días).\n\n` +

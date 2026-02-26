@@ -164,17 +164,11 @@ export class PipelineService {
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
 
-    // Fetch leads
-    const { data: leads } = await this.supabase.client
-      .from('leads')
-      .select('*')
-      .gte('created_at', startDate.toISOString());
-
-    // Fetch team members for names
-    const { data: teamMembers } = await this.supabase.client
-      .from('team_members')
-      .select('id, name')
-      .eq('active', true);
+    // Fetch leads + team members in parallel
+    const [{ data: leads }, { data: teamMembers }] = await Promise.all([
+      this.supabase.client.from('leads').select('*').gte('created_at', startDate.toISOString()),
+      this.supabase.client.from('team_members').select('id, name').eq('active', true)
+    ]);
 
     const teamMap = new Map<string, string>(teamMembers?.map((t: any) => [t.id, t.name]) || []);
 
