@@ -1969,18 +1969,18 @@ Reglas de fecha:
 
                   const citaFecha = callbackData.date;
                   const citaHora = callbackData.time || '10:00';
-                  // Si Claude dice "visita" o "seguimiento", respetar.
-                  // Si dice "llamada" PERO hay un desarrollo mencionado, corregir a "visita" (el lead quiere ir a ver, no que le llamen).
-                  // Default: si hay desarrollo → "visita", si no → "llamada"
+                  // Respetar SIEMPRE el tipo que Claude detectó de la conversación.
+                  // Si Claude dice "llamada" (ej: "márcame mañana"), es LLAMADA aunque haya desarrollo mencionado.
+                  // Solo usar default si Claude no especificó tipo.
                   let citaTipo: string;
-                  if (callbackData.type === 'visita') {
+                  if (callbackData.type === 'llamada') {
+                    citaTipo = 'llamada';
+                  } else if (callbackData.type === 'visita') {
                     citaTipo = 'visita';
                   } else if (callbackData.type === 'seguimiento') {
                     citaTipo = 'seguimiento';
-                  } else if (callbackData.type === 'llamada' && !desarrolloFinal) {
-                    citaTipo = 'llamada';
                   } else {
-                    // Default: si hay desarrollo mencionado → visita (quiere ir a ver), sino → llamada
+                    // Default solo si Claude no especificó tipo: si hay desarrollo → visita, sino → llamada
                     citaTipo = desarrolloFinal ? 'visita' : 'llamada';
                   }
 
@@ -2036,6 +2036,21 @@ Reglas de fecha:
 
                   } else {
                     // CALLBACK FORMAL (>= 2 horas): crear appointment + notificar + confirmar
+
+                    // Cross-call dedup: verificar si ya existe cita para este lead en la misma fecha
+                    const { data: citaExistente } = await supabase.client
+                      .from('appointments')
+                      .select('id, scheduled_time, appointment_type')
+                      .eq('lead_id', lead.id)
+                      .eq('scheduled_date', citaFecha)
+                      .in('status', ['scheduled', 'confirmed'])
+                      .limit(1);
+
+                    if (citaExistente && citaExistente.length > 0) {
+                      console.log(`⏭️ Cita duplicada detectada: lead ${lead.name} ya tiene cita el ${citaFecha} a las ${citaExistente[0].scheduled_time} (${citaExistente[0].appointment_type}). Saltando.`);
+                      debugLog.push({ t: Date.now(), step: 'callback_dedup_skipped', existingTime: citaExistente[0].scheduled_time });
+                    } else {
+
                     const { error: citaError } = await supabase.client
                       .from('appointments')
                       .insert([{
@@ -2186,6 +2201,7 @@ Reglas de fecha:
 
                       debugLog.push({ t: Date.now(), step: 'callback_appointment_created', fecha: citaFecha, hora: citaHora, tipo: citaTipo });
                     }
+                  } // close dedup else
                   }
                 }
               } catch (callbackError: any) {
@@ -2450,7 +2466,13 @@ Reglas de fecha:
                   }
                 } catch (_kvErr) { /* ignore */ }
 
-                if (desarrollosMencionadosFinal.length > 0) {
+                // Send carousels + resources even if no specific development detected
+                // (e.g., user asked "casas en Zacatecas" — send both carousels)
+                const enviarCarousels = desarrollosMencionadosFinal.length > 0 || (durationSeconds > 30);
+                console.log(`🎠 Carousel decision: enviar=${enviarCarousels}, devsMencionados=${desarrollosMencionadosFinal.length} [${desarrollosMencionadosFinal.join(', ')}], duration=${durationSeconds}s`);
+                debugLog.push({ t: Date.now(), step: 'carousel_decision', enviar: enviarCarousels, devs: desarrollosMencionadosFinal, duration: durationSeconds });
+
+                if (enviarCarousels) {
                   await new Promise(resolve => setTimeout(resolve, 1500));
                   const { data: allProps } = await supabase.client
                     .from('properties')
@@ -2463,7 +2485,7 @@ Reglas de fecha:
                       const seg = getCarouselSegmentForDesarrollo(dev);
                       if (seg && !segmentosEnviados.has(seg)) segmentosEnviados.add(seg);
                     }
-                    // If no specific segments found, send both
+                    // If no specific segments found (general request like "casas en Zacatecas"), send both
                     if (segmentosEnviados.size === 0) {
                       segmentosEnviados.add('economico');
                       segmentosEnviados.add('premium');
@@ -2483,11 +2505,12 @@ Reglas de fecha:
                           console.log(`🎠 Carousel "${templateName}" post-call enviado (ventana: ${ventanaAbierta ? 'abierta' : 'cerrada'})`);
                         }
                       } catch (err: any) {
-                        console.error(`❌ Carousel post-call "${seg}" falló:`, err?.message);
+                        console.error(`❌ Carousel post-call "${seg}" falló para ${leadPhone}:`, err?.message);
                         try {
-                          const errDetails = err?.response ? JSON.stringify(err.response) : (err?.data ? JSON.stringify(err.data) : err?.stack?.substring(0, 300));
+                          const errDetails = err?.response ? JSON.stringify(err.response) : (err?.data ? JSON.stringify(err.data) : err?.stack?.substring(0, 500));
                           if (errDetails) console.error(`❌ Carousel error details:`, errDetails);
                         } catch (_) { /* ignore */ }
+                        debugLog.push({ t: Date.now(), step: 'carousel_error', segment: seg, error: err?.message });
                       }
                     }
 
@@ -2670,6 +2693,17 @@ async function enviarRecursosCTARetell(
   const prop = props[0];
   const devName = prop.development || prop.development_name || prop.name || desarrollo;
 
+  // Buscar recursos en TODAS las propiedades del desarrollo (no solo props[0])
+  const youtubeLink = props.find((p: any) => p.youtube_link)?.youtube_link;
+  const matterportLink = props.find((p: any) => p.matterport_link)?.matterport_link;
+  const gpsLink = props.find((p: any) => p.gps_link)?.gps_link;
+  const brochureProp = props.find((p: any) => {
+    const raw = p.brochure_urls;
+    if (!raw) return false;
+    const urls = Array.isArray(raw) ? raw : [raw];
+    return urls.some((u: string) => u.includes('.html') || u.includes('pages.dev'));
+  });
+
   // Precio mínimo
   const precioDesde = props.reduce((min: number, p: any) => {
     const precio = Number(p.price_equipped || p.price || 0);
@@ -2684,23 +2718,23 @@ async function enviarRecursosCTARetell(
   // CTA buttons para cada recurso disponible
   const delay = () => new Promise(r => setTimeout(r, 400));
 
-  if (prop.youtube_link) {
+  if (youtubeLink) {
     await delay();
-    await meta.sendCTAButton(phone, `🎬 *Video de ${devName}*\nConoce el desarrollo`, 'Ver video', prop.youtube_link);
+    await meta.sendCTAButton(phone, `🎬 *Video de ${devName}*\nConoce el desarrollo`, 'Ver video', youtubeLink);
   }
 
-  if (prop.matterport_link) {
+  if (matterportLink) {
     await delay();
-    await meta.sendCTAButton(phone, `🏠 *Recorrido 3D de ${devName}*\nExplora las casas por dentro`, 'Recorrido 3D', prop.matterport_link);
+    await meta.sendCTAButton(phone, `🏠 *Recorrido 3D de ${devName}*\nExplora las casas por dentro`, 'Recorrido 3D', matterportLink);
   }
 
-  if (prop.gps_link) {
+  if (gpsLink) {
     await delay();
-    await meta.sendCTAButton(phone, `📍 *Ubicación de ${devName}*`, 'Abrir mapa', prop.gps_link);
+    await meta.sendCTAButton(phone, `📍 *Ubicación de ${devName}*`, 'Abrir mapa', gpsLink);
   }
 
-  const brochureRaw = prop.brochure_urls;
-  if (brochureRaw) {
+  if (brochureProp) {
+    const brochureRaw = brochureProp.brochure_urls;
     const urls = Array.isArray(brochureRaw) ? brochureRaw : [brochureRaw];
     const htmlUrl = urls.find((u: string) => u.includes('.html') || u.includes('pages.dev'));
     if (htmlUrl) {
@@ -2723,6 +2757,17 @@ async function enviarRecursosTextoRetell(
   const prop = props[0];
   const devName = prop.development || prop.development_name || prop.name || desarrollo;
 
+  // Buscar recursos en TODAS las propiedades del desarrollo
+  const youtubeLink = props.find((p: any) => p.youtube_link)?.youtube_link;
+  const matterportLink = props.find((p: any) => p.matterport_link)?.matterport_link;
+  const gpsLink = props.find((p: any) => p.gps_link)?.gps_link;
+  const brochureProp = props.find((p: any) => {
+    const raw = p.brochure_urls;
+    if (!raw) return false;
+    const urls = Array.isArray(raw) ? raw : [raw];
+    return urls.some((u: string) => u.includes('.html') || u.includes('pages.dev'));
+  });
+
   // Precio mínimo
   const precioDesde = props.reduce((min: number, p: any) => {
     const precio = Number(p.price_equipped || p.price || 0);
@@ -2733,18 +2778,18 @@ async function enviarRecursosTextoRetell(
   // Build a single text message with all available resources
   let msg = `🏡 *${devName}*${precioStr ? ` — Desde ${precioStr} equipada` : ''}\n`;
 
-  if (prop.youtube_link) {
-    msg += `\n🎬 Video: ${prop.youtube_link}`;
+  if (youtubeLink) {
+    msg += `\n🎬 Video: ${youtubeLink}`;
   }
-  if (prop.matterport_link) {
-    msg += `\n🏠 Recorrido 3D: ${prop.matterport_link}`;
+  if (matterportLink) {
+    msg += `\n🏠 Recorrido 3D: ${matterportLink}`;
   }
-  if (prop.gps_link) {
-    msg += `\n📍 Ubicación: ${prop.gps_link}`;
+  if (gpsLink) {
+    msg += `\n📍 Ubicación: ${gpsLink}`;
   }
 
-  const brochureRaw = prop.brochure_urls;
-  if (brochureRaw) {
+  if (brochureProp) {
+    const brochureRaw = brochureProp.brochure_urls;
     const urls = Array.isArray(brochureRaw) ? brochureRaw : [brochureRaw];
     const htmlUrl = urls.find((u: string) => u.includes('.html') || u.includes('pages.dev'));
     if (htmlUrl) {
