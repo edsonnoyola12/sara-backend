@@ -3664,11 +3664,31 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             await this.meta.sendWhatsAppMessage(from, respuestaCancelacion);
             console.log('✅ Confirmación de cancelación enviada al lead');
 
-            // Guardar en historial (atomic)
-            await this.appendToHistory(lead.id, [
-              { role: 'user', content: originalMessage },
-              { role: 'assistant', content: respuestaCancelacion }
-            ]);
+            // Actualizar lead: status→contacted + guardar historial (1 sola operación)
+            try {
+              const { data: leadActual } = await this.supabase.client
+                .from('leads')
+                .select('conversation_history')
+                .eq('id', lead.id)
+                .single();
+              const historial = leadActual?.conversation_history || [];
+              historial.push(
+                { role: 'user', content: originalMessage, timestamp: new Date().toISOString() },
+                { role: 'assistant', content: respuestaCancelacion, timestamp: new Date().toISOString() }
+              );
+              const { error: updateErr } = await this.supabase.client
+                .from('leads')
+                .update({
+                  status: 'contacted',
+                  status_changed_at: new Date().toISOString(),
+                  conversation_history: historial.slice(-30)
+                })
+                .eq('id', lead.id);
+              if (updateErr) console.error('⚠️ Error actualizando lead post-cancelación:', updateErr);
+              else console.log('✅ Lead actualizado: status→contacted + historial guardado');
+            } catch (e) {
+              console.error('⚠️ Error en update post-cancelación:', e);
+            }
 
             return; // Terminar aquí
           } else {
