@@ -655,12 +655,39 @@ export class LeadMessageService {
 
     const esLlamada = (cita as any).appointment_type === 'llamada';
     const tipoTexto = esLlamada ? 'llamada' : 'cita';
+    const respuestaCancelacion = `Entendido ${lead.name?.split(' ')[0] || ''}, tu ${tipoTexto} ha sido cancelada. 😊\n\n` +
+                `Si cambias de opinión o quieres reagendar, solo escríbeme.\n\n¡Que tengas buen día!`;
     const result: LeadMessageResult = {
       action: 'handled',
-      response: `Entendido ${lead.name?.split(' ')[0] || ''}, tu ${tipoTexto} ha sido cancelada. 😊\n\n` +
-                `Si cambias de opinión o quieres reagendar, solo escríbeme.\n\n¡Que tengas buen día!`,
+      response: respuestaCancelacion,
       sendVia: 'meta'
     };
+
+    // Revertir lead.status a 'contacted' + guardar en conversation_history (atómico)
+    try {
+      const { data: leadActual } = await this.supabase.client
+        .from('leads')
+        .select('conversation_history, status')
+        .eq('id', lead.id)
+        .single();
+      const historial = leadActual?.conversation_history || [];
+      historial.push(
+        { role: 'user', content: `quiero cancelar mi ${tipoTexto}`, timestamp: new Date().toISOString() },
+        { role: 'assistant', content: respuestaCancelacion, timestamp: new Date().toISOString() }
+      );
+      const { error: updateErr } = await this.supabase.client
+        .from('leads')
+        .update({
+          status: 'contacted',
+          status_changed_at: new Date().toISOString(),
+          conversation_history: historial.slice(-30)
+        })
+        .eq('id', lead.id);
+      if (updateErr) console.error('⚠️ Error actualizando lead post-cancelación:', updateErr);
+      else console.log('✅ Lead actualizado: status→contacted + historial guardado');
+    } catch (e) {
+      console.error('⚠️ Error en update post-cancelación:', e);
+    }
 
     // Notificar al vendedor
     const vendedorCita = cita.team_members;
