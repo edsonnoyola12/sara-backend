@@ -1622,16 +1622,14 @@ export default {
               console.log(`🖼️ Recurso button tap: tipo="${recursoType}", slug="${slug}", desarrollo="${devName}"`);
 
               try {
-                // Look up property in DB
+                // Look up property in DB by development name
+                const slugNorm = slug.replace(/_/g, ' ');
                 const { data: recursoProps } = await supabase.client
                   .from('properties')
-                  .select('development_name, name, gps_link, youtube_link, matterport_link, brochure_urls')
-                  .limit(50);
-                const allRecursoProps = recursoProps || [];
-                const propMatch = allRecursoProps.find((p: any) => {
-                  const d = (p.development_name || p.name || '').toLowerCase();
-                  return d.includes(slug.replace(/_/g, ' ')) || slug.replace(/_/g, ' ').includes(d);
-                });
+                  .select('development, name, gps_link, youtube_link, matterport_link, brochure_urls')
+                  .ilike('development', `%${slugNorm}%`)
+                  .limit(5);
+                const propMatch = (recursoProps || [])[0];
 
                 if (propMatch) {
                   let recursoEnviado = false;
