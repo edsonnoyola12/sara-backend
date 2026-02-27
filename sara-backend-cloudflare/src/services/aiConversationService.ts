@@ -3331,6 +3331,14 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
     terrenos: {
       developments: ['Villa Campelo', 'Villa Galiano'],
       template: 'terrenos_nogal'
+    },
+    zacatecas: {
+      developments: ['Monte Verde', 'Los Encinos', 'Miravalle', 'Paseo Colorines'],
+      template: 'casas_zacatecas'
+    },
+    guadalupe: {
+      developments: ['Andes', 'Distrito Falco', 'Alpes'],
+      template: 'casas_guadalupe'
     }
   };
 
@@ -3340,7 +3348,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
    */
   static buildCarouselCards(
     properties: any[],
-    segment: 'economico' | 'premium' | 'terrenos'
+    segment: 'economico' | 'premium' | 'terrenos' | 'zacatecas' | 'guadalupe'
   ): Array<{ imageUrl: string; bodyParams: string[]; quickReplyPayload: string; quickReplyPayload2: string }> {
     const config = AIConversationService.CAROUSEL_SEGMENTS[segment];
     if (!config) return [];
@@ -5261,9 +5269,11 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             .length;
 
           if (!carouselSentAt || msgCountSinceCarousel >= 5) {
-            // Send premium FIRST, then economico — Meta sometimes drops the first of two rapid carousel sends
+            // For "all": send both zone carousels (zacatecas + guadalupe) — phone flow asks zone first
+            // For price-based (economico/premium): send that single segment
+            // For zone-based (zacatecas/guadalupe): send that single zone
           const segments = analysis.send_carousel === 'all'
-              ? ['premium', 'economico'] as const
+              ? ['zacatecas', 'guadalupe'] as const
               : [analysis.send_carousel] as const;
 
             for (let si = 0; si < segments.length; si++) {
