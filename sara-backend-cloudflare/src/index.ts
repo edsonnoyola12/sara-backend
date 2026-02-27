@@ -1612,6 +1612,115 @@ export default {
           }
           // ═══ FIN CAROUSEL QUICK REPLY ═══
 
+          // ═══ RECURSO QUICK REPLY: Handle recurso_gps_*, recurso_brochure_*, recurso_video_*, recurso_3d_* ═══
+          if (buttonPayloadRaw.startsWith('recurso_')) {
+            const recursoMatch = buttonPayloadRaw.match(/^recurso_(gps|brochure|video|3d)_(.+)$/);
+            if (recursoMatch) {
+              const recursoType = recursoMatch[1]; // gps, brochure, video, 3d
+              const slug = recursoMatch[2]; // monte_verde, andes, etc.
+              const devName = slug.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+              console.log(`🖼️ Recurso button tap: tipo="${recursoType}", slug="${slug}", desarrollo="${devName}"`);
+
+              try {
+                // Look up property in DB
+                const { data: recursoProps } = await supabase.client
+                  .from('properties')
+                  .select('development_name, name, gps_link, youtube_link, matterport_link, brochure_urls')
+                  .limit(50);
+                const allRecursoProps = recursoProps || [];
+                const propMatch = allRecursoProps.find((p: any) => {
+                  const d = (p.development_name || p.name || '').toLowerCase();
+                  return d.includes(slug.replace(/_/g, ' ')) || slug.replace(/_/g, ' ').includes(d);
+                });
+
+                if (propMatch) {
+                  let recursoEnviado = false;
+                  if (recursoType === 'gps' && propMatch.gps_link) {
+                    await meta.sendCTAButton(from,
+                      `📍 Ubicación de *${devName}*`,
+                      'Abrir en Maps 📍',
+                      propMatch.gps_link
+                    );
+                    recursoEnviado = true;
+                    console.log(`✅ GPS CTA enviado para ${devName}`);
+                  } else if (recursoType === 'brochure') {
+                    const brochureUrl = Array.isArray(propMatch.brochure_urls)
+                      ? propMatch.brochure_urls[0]
+                      : (typeof propMatch.brochure_urls === 'string' ? propMatch.brochure_urls : null);
+                    if (brochureUrl) {
+                      if (brochureUrl.includes('.html') || brochureUrl.includes('pages.dev')) {
+                        await meta.sendCTAButton(from,
+                          `📋 Brochure de *${devName}*`,
+                          'Ver brochure 📋',
+                          brochureUrl
+                        );
+                      } else {
+                        // PDF brochure → send as document
+                        const filename = `Brochure_${devName.replace(/\s+/g, '_')}.pdf`;
+                        await meta.sendWhatsAppDocument(from, brochureUrl, filename, `📋 Brochure ${devName}`);
+                      }
+                      recursoEnviado = true;
+                      console.log(`✅ Brochure enviado para ${devName}`);
+                    } else {
+                      // Fallback brochure URL
+                      const fallbackUrl = `https://brochures-santarita.pages.dev/${slug}`;
+                      await meta.sendCTAButton(from,
+                        `📋 Brochure de *${devName}*`,
+                        'Ver brochure 📋',
+                        fallbackUrl
+                      );
+                      recursoEnviado = true;
+                      console.log(`✅ Brochure fallback enviado para ${devName}`);
+                    }
+                  } else if (recursoType === 'video' && propMatch.youtube_link) {
+                    await meta.sendCTAButton(from,
+                      `🎬 Video de *${devName}*`,
+                      'Ver video 🎬',
+                      propMatch.youtube_link
+                    );
+                    recursoEnviado = true;
+                    console.log(`✅ Video CTA enviado para ${devName}`);
+                  } else if (recursoType === '3d' && propMatch.matterport_link) {
+                    await meta.sendCTAButton(from,
+                      `🏠 Recorrido 3D de *${devName}*`,
+                      'Ver recorrido 🏠',
+                      propMatch.matterport_link
+                    );
+                    recursoEnviado = true;
+                    console.log(`✅ Matterport CTA enviado para ${devName}`);
+                  } else {
+                    // Resource not available for this development
+                    await meta.sendWhatsAppMessage(from,
+                      `Lo siento, ese recurso no está disponible para *${devName}*. ¿Te puedo ayudar con algo más?`);
+                    console.log(`⚠️ Recurso "${recursoType}" no disponible para ${devName}`);
+                  }
+
+                  // Follow-up de venta después de enviar recurso
+                  if (recursoEnviado) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    const followUps: Record<string, string> = {
+                      'gps': `¿Te gustaría visitar *${devName}*? Puedo agendarte una visita este fin de semana 🏡`,
+                      'video': `¿Qué te pareció? Si quieres conocerlo en persona, te agendo una visita. ¿Sábado o domingo? 📅`,
+                      '3d': `¿Te gustó el recorrido? Nada como verlo en persona. ¿Qué día te funciona para visitarlo? 🏠`,
+                      'brochure': `Ahí tienes todos los detalles. ¿Te gustaría agendar una visita para conocer *${devName}*? 📅`,
+                    };
+                    await meta.sendWhatsAppMessage(from, followUps[recursoType] || `¿Te gustaría visitar *${devName}*? 🏡`);
+                    console.log(`✅ Follow-up de venta enviado después de recurso ${recursoType}`);
+                  }
+                } else {
+                  console.error(`⚠️ No se encontró propiedad para slug: ${slug}`);
+                  await meta.sendWhatsAppMessage(from,
+                    `No encontré información de ese desarrollo. ¿Cuál te interesa conocer?`);
+                }
+              } catch (recursoErr) {
+                console.error('❌ Error procesando recurso button:', recursoErr);
+                // Fall through to normal AI processing
+              }
+              return new Response('OK', { status: 200 });
+            }
+          }
+          // ═══ FIN RECURSO QUICK REPLY ═══
+
           // ═══ LIST MENU QUICK REPLY: Rewrite cmd_* payloads to recognizable commands ═══
           if (buttonPayloadRaw.startsWith('cmd_')) {
             const cmdMap: Record<string, string> = {

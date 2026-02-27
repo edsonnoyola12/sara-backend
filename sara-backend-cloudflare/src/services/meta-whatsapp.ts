@@ -1021,6 +1021,73 @@ export class MetaWhatsAppService {
   }
 
   /**
+   * Envía imagen con botones de quick reply (máx 3 botones, títulos máx 20 chars)
+   * Ideal para: tarjeta de desarrollo con opciones (GPS, Brochure, Video)
+   */
+  async sendImageWithButtons(
+    to: string,
+    imageUrl: string,
+    bodyText: string,
+    buttons: Array<{ id: string; title: string }>,
+    footerText?: string
+  ): Promise<any> {
+    const phone = this.normalizePhone(to);
+    const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
+
+    const validButtons = buttons.slice(0, 3).map(btn => ({
+      type: 'reply',
+      reply: {
+        id: btn.id.substring(0, 256),
+        title: btn.title.substring(0, 20)
+      }
+    }));
+
+    const payload: any = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        header: { type: 'image', image: { link: imageUrl } },
+        body: { text: bodyText.substring(0, 1024) },
+        action: { buttons: validButtons }
+      }
+    };
+
+    if (footerText) {
+      payload.interactive.footer = { text: footerText.substring(0, 60) };
+    }
+
+    console.log(`🖼️ Enviando imagen+botones a ${phone}: ${buttons.map(b => b.title).join(', ')}`);
+
+    const response = await this._fetchWithCallback(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    }, `sendImageButtons:${phone}`, {
+      recipientPhone: phone, messageType: 'image_buttons', payload: { imageUrl, bodyText: bodyText.substring(0, 100), buttons: buttons.map(b => b.title) }
+    });
+    const data = await response.json() as any;
+
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId,
+        recipientPhone: phone,
+        messageType: 'image_buttons',
+        categoria: 'imagen_con_botones',
+        contenido: bodyText.substring(0, 200)
+      });
+    }
+
+    return data;
+  }
+
+  /**
    * Envía lista desplegable con opciones (máximo 10 items)
    * Ideal para: elegir desarrollo, seleccionar horario, menú de opciones
    */

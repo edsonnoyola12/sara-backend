@@ -3306,13 +3306,13 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
    */
   static readonly FOTOS_DESARROLLO: Record<string, string> = {
     'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/11/MONTE-VERDE-FACHADA-DESARROLLO-EDIT-scaled.jpg',
-    'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/Encinos-Amenidades-1.jpg',
-    'Andes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg',
+    'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01-1.jpg', // Encino Verde — fachada casa 2 pisos con balcones
+    'Andes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Gardenia_act.jpg', // Gardenia — fachada casa
     'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-scaled-e1740672689199.jpg',
-    'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01-5.jpg',
-    'Paseo Colorines': 'https://gruposantarita.com.mx/wp-content/uploads/2026/02/logo-coto-paseo-colorines.png', // Placeholder — update when development photo available
-    'Alpes': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/Alpes-Amenidades-1.jpg',
-    'Villa Campelo': 'https://gruposantarita.com.mx/wp-content/uploads/2023/10/RF_Casa-Club-1.jpg',
+    'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01-8.jpg', // Chipre — fachada con cochera y balcón
+    'Paseo Colorines': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-min-scaled-e1740520053367.jpg', // Temporal — zona Colinas del Padre
+    'Alpes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg', // Dalia (Andes zone) — fachada casa económica
+    'Villa Campelo': 'https://gruposantarita.com.mx/wp-content/uploads/2023/10/RF_Caseta-1-scaled.jpg', // Caseta acceso Citadella del Nogal
     'Villa Galiano': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/VILLA-GALIANO-ACCESO-2560-X-2560-PX@2x-scaled.jpg',
   };
 
@@ -4794,8 +4794,19 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
           // Solo skip si SARA está activamente agendando (pidiendo día/hora exacta)
           const estaAgendando = /¿.*(sábado|sabado|domingo|día|dia|hora|10|11|12).*(te funciona|te queda|va bien|prefieres)/i.test(respuestaLimpia);
 
+          // Skip list menu if image+buttons card will be sent (the buttons already serve as CTA)
+          const enviaraImagenConBotones = desarrolloInteres && (
+            analysis.send_video_desarrollo === true ||
+            analysis.send_gps === true ||
+            analysis.send_brochure === true ||
+            analysis.send_video === true ||
+            analysis.send_matterport === true
+          );
+
           if (estaAgendando) {
             console.log('⏭️ Opciones omitidas (SARA está agendando cita activamente)');
+          } else if (enviaraImagenConBotones) {
+            console.log('⏭️ Opciones omitidas (imagen+botones de recursos se enviará)');
           } else {
             const historial = lead.conversation_history || [];
             const yaTieneOpciones = historial.slice(-3).some((m: any) =>
@@ -5250,11 +5261,13 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             .length;
 
           if (!carouselSentAt || msgCountSinceCarousel >= 5) {
-            const segments = analysis.send_carousel === 'all'
-              ? ['economico', 'premium'] as const
+            // Send premium FIRST, then economico — Meta sometimes drops the first of two rapid carousel sends
+          const segments = analysis.send_carousel === 'all'
+              ? ['premium', 'economico'] as const
               : [analysis.send_carousel] as const;
 
-            for (const segment of segments) {
+            for (let si = 0; si < segments.length; si++) {
+              const segment = segments[si];
               const cards = AIConversationService.buildCarouselCards(properties, segment as any);
               const templateName = AIConversationService.CAROUSEL_SEGMENTS[segment]?.template;
 
@@ -5269,13 +5282,18 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   bodyParams = [AIConversationService.precioMinDesarrollo(properties, firstDev) || AIConversationService.precioMinGlobal(properties)];
                 }
 
-                await new Promise(r => setTimeout(r, 500));
+                // Delay: 1s before first, 3s between subsequent (Meta needs time between carousel templates)
+                await new Promise(r => setTimeout(r, si === 0 ? 1000 : 3000));
                 try {
-                  await this.meta.sendCarouselTemplate(from, templateName, bodyParams, cards);
-                  console.log(`🎠 Carousel "${templateName}" enviado (${cards.length} cards)`);
+                  console.log(`🎠 Enviando carousel "${templateName}" (${cards.length} cards, bodyParams: ${JSON.stringify(bodyParams)})...`);
+                  const carouselResult = await this.meta.sendCarouselTemplate(from, templateName, bodyParams, cards);
+                  if (carouselResult?.rate_limited) {
+                    console.error(`🚦 Carousel "${templateName}" rate limited — NO enviado`);
+                  } else {
+                    console.log(`🎠 Carousel "${templateName}" enviado OK: wamid=${carouselResult?.messages?.[0]?.id || 'unknown'}`);
+                  }
                 } catch (carouselErr: any) {
-                  // Template might not be approved yet — fallback silently
-                  console.log(`⚠️ Carousel "${templateName}" falló (template pendiente?):`, carouselErr?.message);
+                  console.error(`❌ Carousel "${templateName}" falló:`, carouselErr?.message, carouselErr?.stack?.substring(0, 200));
                 }
               }
             }
@@ -5457,9 +5475,10 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             // Collect actions for batch historial update (saves subrequests)
             const accionesHistorial: Array<{accion: string, detalles?: string}> = [];
 
-            // ═══ OPTIMIZACIÓN: 1 mensaje combinado por desarrollo (video+GPS+brochure) ═══
-            // Antes: 3 mensajes separados × N desarrollos = 3N fetch calls
-            // Ahora: 1 mensaje combinado × N desarrollos = N fetch calls (PDFs aparte)
+            // ═══ IMAGEN + BOTONES: 1 tarjeta por desarrollo con quick reply buttons ═══
+            // Antes: 4+ CTA buttons separados × N desarrollos = 4N+ mensajes
+            // Ahora: 1 imagen+botones × N desarrollos = N mensajes (lead elige qué recurso)
+            let imagenRecursoEnviada = false;
             const brochuresEnviados: string[] = [];
             for (const dev of desarrollosLista) {
               const devNorm = dev.toLowerCase().trim();
@@ -5469,90 +5488,132 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               });
 
               if (propiedadMatch) {
-                // ═══ CTA BUTTONS: Enviar recursos como botones interactivos ═══
-                const recursosDesc: string[] = [];
-                const msgLowerRes = (originalMessage || '').toLowerCase();
-                const pidioPlanos = msgLowerRes.includes('plano') || msgLowerRes.includes('planos');
+                const slug = dev.toLowerCase().replace(/\s+/g, '_');
 
-                // GPS → CTA button (prioridad 1)
-                if (analysis.send_gps === true) {
-                  const gpsLink = propiedadMatch.gps_link || 'https://maps.app.goo.gl/hUk6aH8chKef6NRY7';
-                  const gpsLabel = propiedadMatch.gps_link ? dev : 'Oficinas Grupo Santa Rita';
-                  if (!propiedadMatch.gps_link) console.warn(`⚠️ GPS NULL para ${dev} — enviado GPS de oficinas como fallback`);
-                  await new Promise(r => setTimeout(r, 300));
-                  const gpsOk = await this.safeSendCTA(from,
-                    `📍 Ubicación de *${gpsLabel}*`,
-                    'Ver ubicación 📍',
-                    gpsLink
-                  );
-                  if (gpsOk) recursosDesc.push('GPS');
+                // Build dynamic body text from DB
+                const esTerreno = devNorm.includes('campelo') || devNorm.includes('galiano');
+                const devProps = properties.filter((p: any) => {
+                  const d = (p.development || p.development_name || '').toLowerCase();
+                  return d.includes(devNorm) || devNorm.includes(d);
+                });
+                const precios = devProps
+                  .map((p: any) => Number(p.price_equipped || p.price || 0))
+                  .filter((n: number) => n > 100000);
+                const minPrecio = precios.length > 0 ? Math.min(...precios) : 0;
+                const bedrooms = devProps.map((p: any) => Number(p.bedrooms || 0)).filter((n: number) => n > 0);
+                const minBed = bedrooms.length > 0 ? Math.min(...bedrooms) : 0;
+                const maxBed = bedrooms.length > 0 ? Math.max(...bedrooms) : 0;
+                const sizes = devProps.map((p: any) => Number(p.construction_size || 0)).filter((n: number) => n > 0);
+                const minSize = sizes.length > 0 ? Math.min(...sizes) : 0;
+                const maxSize = sizes.length > 0 ? Math.max(...sizes) : 0;
+
+                // Zone lookup
+                const colinas = ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'monte real'];
+                const zona = colinas.some(c => devNorm.includes(c)) ? 'Colinas del Padre' : 'Guadalupe';
+
+                let bodyText: string;
+                if (esTerreno) {
+                  const landSizes = devProps.map((p: any) => Number(p.land_size || 0)).filter((n: number) => n > 0);
+                  const precioM2 = landSizes.length > 0 && minPrecio > 0
+                    ? `$${Math.round(minPrecio / Math.max(...landSizes)).toLocaleString('es-MX')}/m²`
+                    : '';
+                  bodyText = `*${dev}* — Citadella del Nogal\nTerrenos${precioM2 ? ` desde ${precioM2}` : ''}\nFinanciamiento disponible`;
+                } else {
+                  const precioFmt = minPrecio > 0 ? `$${(minPrecio / 1000000).toFixed(1)}M equipadas` : '';
+                  const recFmt = minBed > 0 ? (minBed === maxBed ? `${minBed} rec` : `${minBed} a ${maxBed} rec`) : '';
+                  const sizeFmt = minSize > 0 ? (minSize === maxSize ? `${minSize}m²` : `${minSize} a ${maxSize}m²`) : '';
+                  const details = [recFmt, sizeFmt].filter(Boolean).join(' | ');
+                  bodyText = `*${dev}* — ${zona}\nCasas${precioFmt ? ` desde ${precioFmt}` : ''}\n${details}`;
                 }
 
-                // Brochure HTML → CTA button (prioridad 2)
+                // Build buttons dynamically (max 3) — priority: Video > Recorrido 3D > Ubicación > Brochure
+                const buttons: Array<{ id: string; title: string }> = [];
+
+                // 1. Video (highest impact)
+                if (propiedadMatch.youtube_link) {
+                  buttons.push({ id: `recurso_video_${slug}`, title: '🎬 Video' });
+                }
+
+                // 2. Matterport / Recorrido 3D
+                if (propiedadMatch.matterport_link && buttons.length < 3) {
+                  buttons.push({ id: `recurso_3d_${slug}`, title: '🏠 Recorrido 3D' });
+                }
+
+                // 3. GPS / Ubicación
+                if (propiedadMatch.gps_link && buttons.length < 3) {
+                  buttons.push({ id: `recurso_gps_${slug}`, title: '📍 Ubicación' });
+                }
+
+                // 4. Brochure (only if room left in 3-button limit)
                 const brochureRaw = propiedadMatch.brochure_urls;
                 const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
-                let brochurePDF = false;
-                if (brochureUrl && !brochuresEnviados.includes(brochureUrl)) {
-                  const esHTML = brochureUrl.includes('.html') || brochureUrl.includes('pages.dev');
-                  if (esHTML) {
-                    const cleanUrl = brochureUrl.replace(/\.html$/, '');
-                    await new Promise(r => setTimeout(r, 300));
-                    const brochureOk = await this.safeSendCTA(from,
-                      `📋 Brochure de *${dev}* — fotos, planos, precios y características`,
-                      'Ver brochure 📋',
-                      cleanUrl
-                    );
-                    if (brochureOk) {
-                      brochuresEnviados.push(brochureUrl);
-                      recursosDesc.push('brochure');
-                    }
-                  } else {
-                    brochurePDF = true;
-                  }
+                let brochureInButtons = false;
+                if (brochureUrl && buttons.length < 3) {
+                  buttons.push({ id: `recurso_brochure_${slug}`, title: '📋 Brochure' });
+                  brochureInButtons = true;
                 }
 
-                // Video YouTube → CTA button (prioridad 3)
-                if (propiedadMatch.youtube_link) {
-                  await new Promise(r => setTimeout(r, 300));
-                  const videoOk = await this.safeSendCTA(from,
-                    `🎬 Video de *${dev}*`,
-                    'Ver video 🎬',
-                    propiedadMatch.youtube_link
-                  );
-                  if (videoOk) recursosDesc.push('video');
-                } else if (analysis.send_video_desarrollo === true) {
-                  console.warn(`⚠️ Video prometido pero youtube_link NULL para ${dev}`);
-                }
-
-                // Matterport → CTA button (prioridad 4)
-                if (propiedadMatch.matterport_link && !pidioPlanos) {
-                  await new Promise(r => setTimeout(r, 300));
-                  const matterOk = await this.safeSendCTA(from,
-                    `🏠 Recorrido virtual 3D de *${dev}*`,
-                    'Ver recorrido 3D 🏠',
-                    propiedadMatch.matterport_link
-                  );
-                  if (matterOk) recursosDesc.push('recorrido 3D');
-                }
-
-                if (recursosDesc.length > 0) {
-                  console.log(`✅ CTA buttons enviados para ${dev}: ${recursosDesc.join(', ')}`);
-                  accionesHistorial.push({ accion: `Envié ${recursosDesc.join(', ')} (CTA)`, detalles: dev });
-                } else if (!brochurePDF) {
-                  // Fallback: desarrollo en DB pero SIN recursos — enviar brochure HTML como CTA
-                  const brochureFallback = brochureUrl || `https://brochures-santarita.pages.dev/${dev.toLowerCase().replace(/\s+/g, '_')}`;
+                // Fallback: if no resources at all, add brochure URL as CTA
+                if (buttons.length === 0) {
+                  const brochureFallback = `https://brochures-santarita.pages.dev/${slug}`;
                   await new Promise(r => setTimeout(r, 300));
                   await this.safeSendCTA(from,
                     `📋 Información de *${dev}* — fotos, planos y precios`,
                     'Ver brochure 📋',
                     brochureFallback
                   );
-                  console.log(`⚠️ ${dev} sin video/GPS — enviado brochure CTA como fallback`);
-                  accionesHistorial.push({ accion: 'Envié brochure CTA (sin video disponible)', detalles: dev });
+                  console.log(`⚠️ ${dev} sin recursos en DB — enviado brochure CTA como fallback`);
+                  accionesHistorial.push({ accion: 'Envié brochure CTA fallback', detalles: dev });
+                  continue;
                 }
 
-                // PDF brochure must be sent as separate document (no CTA, es descargable)
-                if (brochurePDF && brochureUrl) {
+                // Send image card with buttons
+                const fotoUrl = AIConversationService.FOTOS_DESARROLLO[dev] ||
+                  propiedadMatch.photo_url ||
+                  'https://gruposantarita.com.mx/wp-content/uploads/2024/11/MONTE-VERDE-FACHADA-DESARROLLO-EDIT-scaled.jpg';
+
+                await new Promise(r => setTimeout(r, 300));
+                try {
+                  await this.meta.sendImageWithButtons(
+                    from,
+                    fotoUrl,
+                    bodyText,
+                    buttons,
+                    'Toca para solicitar'
+                  );
+                  imagenRecursoEnviada = true;
+                  console.log(`✅ Imagen+botones enviados para ${dev}: ${buttons.map(b => b.title).join(', ')}`);
+                  accionesHistorial.push({ accion: `Envié tarjeta con ${buttons.length} opciones`, detalles: dev });
+
+                  // Send brochure as separate CTA if it didn't fit in the 3-button limit
+                  if (brochureUrl && !brochureInButtons) {
+                    await new Promise(r => setTimeout(r, 300));
+                    const esHTML = brochureUrl.includes('.html') || brochureUrl.includes('pages.dev');
+                    const cleanUrl = esHTML ? brochureUrl.replace(/\.html$/, '') : brochureUrl;
+                    await this.safeSendCTA(from, `📋 Brochure de *${dev}* — modelos, precios y planos`, 'Ver brochure 📋', cleanUrl);
+                    console.log(`✅ Brochure CTA enviado por separado para ${dev}`);
+                    accionesHistorial.push({ accion: 'Envié brochure CTA separado', detalles: dev });
+                  }
+                } catch (imgErr: any) {
+                  // Fallback: send individual CTA buttons if image+buttons fails
+                  console.error(`⚠️ Imagen+botones falló para ${dev}: ${imgErr.message?.slice(0, 200)} — enviando CTAs individuales`);
+                  if (propiedadMatch.gps_link) {
+                    await this.safeSendCTA(from, `📍 Ubicación de *${dev}*`, 'Ver ubicación 📍', propiedadMatch.gps_link);
+                  }
+                  if (brochureUrl) {
+                    const esHTML = brochureUrl.includes('.html') || brochureUrl.includes('pages.dev');
+                    const cleanUrl = esHTML ? brochureUrl.replace(/\.html$/, '') : brochureUrl;
+                    await this.safeSendCTA(from, `📋 Brochure de *${dev}*`, 'Ver brochure 📋', cleanUrl);
+                  }
+                  if (propiedadMatch.youtube_link) {
+                    await this.safeSendCTA(from, `🎬 Video de *${dev}*`, 'Ver video 🎬', propiedadMatch.youtube_link);
+                  }
+                  accionesHistorial.push({ accion: 'Envié CTAs individuales (fallback)', detalles: dev });
+                }
+
+                // PDF brochure still sent as separate document (it's a download)
+                const brochurePDF = brochureUrl && !brochureUrl.includes('.html') && !brochureUrl.includes('pages.dev');
+                if (brochurePDF) {
                   brochuresEnviados.push(brochureUrl);
                   await new Promise(r => setTimeout(r, 300));
                   try {
@@ -5560,15 +5621,12 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                     await this.meta.sendWhatsAppDocument(from, brochureUrl, filename, `📋 Brochure ${dev} - Modelos, precios y características`);
                     console.log(`✅ Brochure PDF enviado para ${dev}:`, brochureUrl);
                   } catch (docError) {
-                    console.error(`⚠️ Error enviando brochure como documento, enviando como link:`, docError);
+                    console.error(`⚠️ Error enviando brochure PDF:`, docError);
                     await this.meta.sendWhatsAppMessage(from, `📋 *Brochure ${dev}:*\n${brochureUrl}\n\n_Modelos, precios y características_`);
                   }
                   accionesHistorial.push({ accion: 'Envié brochure PDF', detalles: dev });
                 }
 
-                if (!analysis.send_gps) {
-                  console.log(`ℹ️ GPS de ${dev} disponible pero no solicitado`);
-                }
               } else {
                 // Fallback: no encontró propiedad en DB — buscar brochure HTML como mínimo
                 console.error(`⚠️ No se encontró propiedad para: ${dev} — intentando fallback`);
@@ -5613,17 +5671,6 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               console.error('⚠️ Error guardando recursos en notes:', e);
             }
 
-            // ═══ FIX: EMPUJAR A CITA DESPUÉS DE RECURSOS ═══
-            // Verificar si NO tiene cita programada
-            const { data: citaExiste } = await this.supabase.client
-              .from('appointments')
-              .select('id')
-              .eq('lead_id', lead.id)
-              .in('status', ['scheduled', 'confirmed', 'pending'])
-              .limit(1);
-
-            const tieneCita = citaExiste && citaExiste.length > 0;
-
             // Batch save all resource actions (1 READ + 1 WRITE instead of 2 per action)
             if (accionesHistorial.length > 0) {
               await this.guardarAccionesEnHistorialBatch(lead.id, accionesHistorial);
@@ -5633,45 +5680,9 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               console.error('⚠️ No se encontraron brochures en DB para los desarrollos');
             }
 
-            if (!tieneCita) {
-              // ═══ PUSH A CITA - PHASE-AWARE ═══
-              const yaQuiereCita = analysis.intent === 'confirmar_cita';
-              const phaseInfoPush = this.detectConversationPhase(lead, ''); // No cita in this block
-              console.log(`📍 PUSH PHASE: ${phaseInfoPush.phase} | pushStyle: ${phaseInfoPush.pushStyle} | allowPush: ${phaseInfoPush.allowPushToCita}`);
-
-              if (!yaQuiereCita && phaseInfoPush.allowPushToCita) {
-                await new Promise(r => setTimeout(r, 400));
-                const desarrollosMencionados = desarrollosLista.join(' y ');
-                let msgPush = '';
-
-                if (phaseInfoPush.pushStyle === 'full') {
-                  // Phase 4 closing: urgency + binary close
-                  msgPush = tieneNombre
-                    ? `${primerNombre}, estos modelos se están vendiendo rápido 🔥 ¿Qué día te gustaría venir a conocer *${desarrollosMencionados}*? 🏠`
-                    : `Estos modelos se están vendiendo rápido 🔥 ¿Qué día puedes visitarnos para conocer *${desarrollosMencionados}*? 🏠`;
-                } else if (phaseInfoPush.pushStyle === 'soft') {
-                  // Phase 3 presentation: natural suggestion, no urgency
-                  msgPush = tieneNombre
-                    ? `${primerNombre}, ¿te gustaría conocer *${desarrollosMencionados}* en persona? 🏠`
-                    : `¿Te gustaría conocer *${desarrollosMencionados}* en persona? 🏠`;
-                } else if (phaseInfoPush.pushStyle === 'gentle') {
-                  // Phase 5 nurturing: gentle reminder
-                  msgPush = `Si quieres volver a visitar *${desarrollosMencionados}*, con gusto te agendo 😊`;
-                }
-
-                if (msgPush) {
-                  await this.meta.sendWhatsAppMessage(from, msgPush);
-                  console.log(`✅ Push a cita enviado (${phaseInfoPush.pushStyle}) después de recursos`);
-                  // Push se guardará en conversation_history en el siguiente turno (ahorra 2 subrequests)
-                }
-              } else if (yaQuiereCita) {
-                console.log('ℹ️ Push a cita OMITIDO - usuario ya expresó intent: confirmar_cita');
-              } else {
-                console.log(`ℹ️ Push a cita OMITIDO - fase ${phaseInfoPush.phase} no permite push`);
-              }
-            } else {
-              console.log('ℹ️ Lead ya tiene cita - recursos enviados, push crédito se verificará abajo');
-            }
+            // Push-to-cita removed — image card with buttons already serves as CTA,
+            // and Claude's AI response naturally includes the sales push ("¿sábado o domingo?")
+            console.log('ℹ️ Imagen+botones enviada — push a cita integrado en tarjeta');
           } else {
             console.log('ℹ️ Recursos ya enviados anteriormente');
 

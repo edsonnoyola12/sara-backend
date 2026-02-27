@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-25 (Sesión 66)
+> Última actualización: 2026-02-26 (Sesión 71)
 
 ---
 
@@ -51,16 +51,18 @@ npm test
 
 | Archivo | Líneas | Función | Riesgo |
 |---------|--------|---------|--------|
-| `src/index.ts` | ~3,000 | Router principal (modularizado) | MEDIO |
-| `src/handlers/whatsapp.ts` | ~2,167 | Dispatcher + lead flow (modularizado) | MEDIO |
-| `src/handlers/whatsapp-vendor.ts` | ~6,048 | Handlers vendedor (93 funciones) | ALTO |
-| `src/handlers/whatsapp-ceo.ts` | ~1,887 | Handlers CEO (14 funciones) | ALTO |
-| `src/handlers/whatsapp-utils.ts` | ~1,581 | Utilidades compartidas | MEDIO |
+| `src/index.ts` | ~3,650 | Router principal (modularizado) | MEDIO |
+| `src/handlers/whatsapp.ts` | ~2,390 | Dispatcher + lead flow (modularizado) | MEDIO |
+| `src/handlers/whatsapp-vendor.ts` | ~6,350 | Handlers vendedor (93 funciones) | ALTO |
+| `src/handlers/whatsapp-ceo.ts` | ~1,860 | Handlers CEO (14 funciones) | ALTO |
+| `src/handlers/whatsapp-utils.ts` | ~1,960 | Utilidades compartidas + findLeadByName | MEDIO |
 | `src/handlers/whatsapp-agencia.ts` | ~652 | Handlers agencia/marketing | MEDIO |
 | `src/handlers/whatsapp-asesor.ts` | ~554 | Handlers asesor | MEDIO |
 | `src/handlers/whatsapp-types.ts` | ~13 | HandlerContext interface | BAJO |
-| `src/services/aiConversationService.ts` | ~7,850 | IA + prompts + phase-aware | ALTO |
+| `src/services/aiConversationService.ts` | ~8,740 | IA + prompts + phase-aware + carousels | ALTO |
 | `src/services/creditFlowService.ts` | ~1,400 | Flujo hipotecario | MEDIO |
+| `src/routes/retell.ts` | ~2,840 | Retell.ai webhooks + tools + post-call | ALTO |
+| `src/services/meta-whatsapp.ts` | ~1,660 | Meta API (CTA, carousel, reactions, vCard) | MEDIO |
 
 ### Módulos CRON Extraídos (2026-01-29)
 
@@ -92,7 +94,7 @@ npm test
 | `src/services/pdfReportService.ts` | ~700 | Generador de reportes PDF/HTML |
 | `src/services/webhookService.ts` | ~500 | Webhooks salientes para integraciones |
 | `src/services/cacheService.ts` | ~270 | Cache inteligente con KV |
-| `src/services/retellService.ts` | ~350 | Llamadas telefónicas con Retell.ai |
+| `src/services/retellService.ts` | ~350 | Llamadas telefónicas con Retell.ai (14+ motivos) |
 | `src/services/ttsService.ts` | ~200 | Text-to-Speech con OpenAI |
 | `src/services/ttsTrackingService.ts` | ~150 | Tracking de métricas TTS |
 | `src/services/surveyService.ts` | ~300 | Servicio de encuestas |
@@ -558,7 +560,7 @@ sara-backend-cloudflare/
 │   ├── utils/
 │   │   └── conversationLogic.ts
 │   └── tests/
-│       └── ...17 archivos de test
+│       └── ...20 archivos de test
 ├── wrangler.toml             # Config Cloudflare
 ├── SARA_COMANDOS.md          # Documentación detallada
 └── CLAUDE.md                 # Este archivo
@@ -6531,6 +6533,157 @@ async sendContactCard(to: string, contact: { name: string; phone: string; compan
 
 ---
 
+### 2026-02-25 (Sesiones 67-68) - Robustness Hardening Masivo (4 Rounds)
+
+**Auditoría de robustez completa del sistema con 4 rondas de mejoras:**
+
+#### Round 1: DST-Aware Time, Retry Queue, 24h-Safe Notifs (commit `b0f7adf3`)
+
+| Fix | Descripción |
+|-----|-------------|
+| DST-aware time | Manejo correcto de horario de verano México |
+| Retry queue mejorado | `processRetryQueue()` más robusto |
+| 24h-safe notificaciones | Más team notifications convertidas a `enviarMensajeTeamMember()` |
+| Restrictive auth | Endpoints sensibles con auth más estricta |
+
+#### Round 2: Fetch Timeouts, Silent Catches, Atomic History (commits `df7d04f9`, `5721b326`, `04e4fd3e`)
+
+| Fix | Descripción |
+|-----|-------------|
+| **Fetch timeouts** | 10s Meta API, 8s Supabase, 5s external APIs |
+| **Silent catches eliminados** | Todos los catch blocks ahora logean + `logErrorToDB()` |
+| **Atomic conversation_history** | Read-merge-write pattern para prevenir overwrites |
+| **CORS dedup** | Headers de CORS mejorados |
+| **N+1 query batching** | Queries paralelas donde son independientes |
+| **24h-safe sends** | 7 raw `sendWhatsAppMessage` a equipo → `enviarMensajeTeamMember()` |
+
+#### Round 3: N+1 Batch, Atomic Notes, Parallel Queries (commit `14de4f9c`)
+
+| Fix | Descripción |
+|-----|-------------|
+| **N+1 batch** | Queries agrupadas para reducir subrequests |
+| **Atomic notes** | Patrón read→merge→write para `lead.notes` |
+| **Parallel queries** | `Promise.all()` para queries independientes |
+
+#### Round 4: Error Logging, Parallel Queries (commit `fb9b9245`)
+
+| Fix | Descripción |
+|-----|-------------|
+| **Error logging** | `logErrorToDB()` en ~40+ catch blocks de CRONs y servicios |
+| **Parallel queries** | Más optimizaciones de queries paralelas |
+
+**Total de archivos afectados:** 15+
+**Patrón principal:** Fetch timeouts + atomic writes + error persistence + 24h-safe messaging
+
+---
+
+### 2026-02-25 (Sesiones 68-69) - Retell Post-Call: Carousels + CTA Buttons
+
+**Mejora completa del flujo post-llamada Retell — reemplazar mensajes de texto feos por carousels y CTA buttons.**
+
+#### Commits principales:
+- `a44baf7c` — Reemplazar ugly Retell WhatsApp messages con carousel templates + CTA buttons
+- `739d0581` — Mejorar flujo de venta Retell: preguntar tipo de casa + presupuesto (no zona)
+- `3ed40263` — Enviar carousels + recursos de TODOS los desarrollos mencionados en llamada
+- `6b883318` — Defer resource sending to post-call + merge KV queue + carousel error logging
+- `87a49144` — Prevenir citas duplicadas Retell + filtrar nombres de desarrollo inválidos
+- `1708c2e5`, `f617506f` — Fix 5+ Retell post-call bugs (citaTipo, dedup, carousels, resources)
+- `ea077010` — Todas las respuestas de tools Retell hablan español natural
+- `1a1409f8` — Eliminar sentinel values y desarrollos duplicados en mensajes post-call
+
+#### Cambios clave:
+
+| Antes | Después |
+|-------|---------|
+| Texto plano con info del lead después de llamada | Carousel template por segmento + CTA buttons para recursos |
+| Recursos enviados DURANTE la llamada | Recursos diferidos a POST-CALL via KV queue |
+| Tool responses devolvían JSON crudo | Respuestas en español natural |
+| Sin dedup de citas | KV dedup para prevenir citas duplicadas |
+| Nombres de desarrollo inválidos pasaban | Filtro contra lista conocida |
+
+#### KV Queue para Post-Call Resources:
+
+```
+Llamada Retell termina → call_analyzed webhook
+├── Obtener desarrollos mencionados de metadata
+├── Para cada desarrollo:
+│   ├── Enviar carousel template (por segmento)
+│   ├── Enviar CTA button: video YouTube
+│   ├── Enviar CTA button: recorrido 3D (Matterport)
+│   └── Enviar CTA button: ubicación GPS
+└── Notificar vendedor (24h-safe) con resumen
+```
+
+---
+
+### 2026-02-25 (Sesiones 69-70) - Carousel Templates v2 + Visual Enhancements
+
+#### Carousel Templates v2 (commits `cda59292`, `22fbd9c1`, `5728c6c3`, `0d8926b7`)
+
+Templates actualizados con fotos JPG y estructura mejorada:
+
+| Template | Segmento | Desarrollos |
+|----------|----------|-------------|
+| `casas_economicas_v2` | Económico (<$3M) | Monte Verde, Andes, Alpes |
+| `casas_premium_v2` | Premium ($3M+) | Los Encinos, Miravalle, Paseo Colorines, Distrito Falco |
+| `terrenos_nogal` | Terrenos | Villa Campelo, Villa Galiano |
+
+**Mejoras:**
+- Fotos actualizadas a renders más recientes
+- Card body: 2 parámetros (nombre+rec+zona, precio)
+- Carousel se activa también para preguntas por zona (guadalupe/zacatecas)
+
+#### 5 Visual Enhancements (commit `7c6d5148`)
+
+| Feature | Descripción |
+|---------|-------------|
+| **Ofertas interactivas** | Lista menu con ofertas activas del vendedor |
+| **Equipo interactivo** | Lista menu con métricas por vendedor |
+| **Briefing interactivo** | Lista menu con acciones rápidas |
+| **Hot alerts interactivas** | Lista menu con leads calientes |
+| **Crédito interactivo** | Lista menu con opciones de financiamiento |
+
+Todos usan `sendListMenu()` en vez de texto plano.
+
+#### Property Photos (commit `fcfb86f8`)
+
+`FOTOS_DESARROLLO` actualizado con renders más recientes para todos los desarrollos.
+
+---
+
+### 2026-02-26 (Sesión 71) - Retell Audit + Final Robustness Fixes
+
+#### Retell Audit (commit `d21c3f63`)
+
+| Fix | Descripción |
+|-----|-------------|
+| **Dynamic dev lists** | Listas de desarrollos en prompts Retell leídas de DB |
+| **Expanded motivos** | 14+ motivos con instrucciones específicas |
+| **Error logging** | `logErrorToDB()` en rutas Retell |
+
+#### Robustness Final (commit `32d05f08`)
+
+| Fix | Archivo | Descripción |
+|-----|---------|-------------|
+| **Raw send → 24h-safe** | `appointmentService.ts` | `crearCitaLlamada` notification usa `enviarMensajeTeamMember()` con fallback |
+| **Async bug fix** | `aiConversationService.ts` | `setTimeout(async () => {...})` → `await new Promise(r => setTimeout(r, delay)); await ...` |
+| **Error logging** | `appointmentService.ts` | `logErrorToDB()` en `cancelAppointment` y `crearCitaLlamada` catch blocks |
+
+**Patrón unsafe de Cloudflare Workers corregido:**
+```typescript
+// ANTES (fire-and-forget, unsafe):
+setTimeout(async () => { await sendWhatsAppMessage(...) }, 1500);
+
+// DESPUÉS (properly awaited):
+await new Promise(r => setTimeout(r, 1500));
+await sendWhatsAppMessage(...);
+```
+
+**Tests:** 692/692 pasando
+**Deploy:** Completado y verificado en producción
+
+---
+
 **Estado final del sistema:**
 
 | Métrica | Valor |
@@ -6540,17 +6693,18 @@ async sendContactCard(to: string, contact: { name: string; phone: string; compan
 | Servicios | 85+ |
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 27+ |
-| Capas de resilience | 9 |
-| Templates WA aprobados | 6 (3 equipo + 3 carousel) |
+| Capas de resilience | 9+ |
+| Templates WA aprobados | 6 (3 equipo + 3 carousel v2) |
 | Propiedades en catálogo | 32 |
 | Desarrollos | 9 (Monte Verde, Monte Real, Andes, Falco, Encinos, Miravalle, Colorines, Alpes, Citadella) |
 | **pending_auto_response types** | **16** |
 | **CRM UX/UI Rounds** | **8 completados** |
 | **Precios dinámicos** | **100% — 0 hardcoded (WhatsApp + Retell)** |
 | **Voz Retell** | **ElevenLabs LatAm Spanish** |
-| **Motivos Retell** | **12 context-aware prompts** |
-| **Carousel Templates** | **3 segmentos (economico, premium, terrenos)** |
+| **Motivos Retell** | **14+ context-aware prompts** |
+| **Carousel Templates** | **3 segmentos v2 (economico, premium, terrenos)** |
 | **WhatsApp UX Features** | **3 activas: CTA buttons, reactions, contact cards** |
+| **Robustness** | **Fetch timeouts, atomic writes, error persistence, 24h-safe sends** |
 
 **URLs de producción:**
 
@@ -6559,5 +6713,7 @@ async sendContactCard(to: string, contact: { name: string; phone: string; compan
 | Backend | https://sara-backend.edson-633.workers.dev |
 | CRM | https://sara-crm-new.vercel.app |
 | Videos | https://sara-videos.onrender.com |
+
+**Sistema 100% completo y operativo — Última verificación: 2026-02-26 (Sesión 71)**
 
 **Sistema 100% completo y operativo — Última verificación: 2026-02-25 (Sesión 66)**
