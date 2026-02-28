@@ -890,10 +890,10 @@ agendar ${nombreLead} mañana 4pm`;
         }
       }
 
-      // Actualizar stage del lead
+      // Actualizar status del lead a 'scheduled'
       await this.supabase.client
         .from('leads')
-        .update({ stage: 'visit_scheduled', updated_at: new Date().toISOString() })
+        .update({ status: 'scheduled', updated_at: new Date().toISOString() })
         .eq('id', lead.id);
 
       return {
@@ -1073,10 +1073,10 @@ agendar ${nombreLead} mañana 4pm`;
         }
       }
 
-      // Actualizar stage del lead
+      // Actualizar status del lead a 'scheduled'
       await this.supabase.client
         .from('leads')
-        .update({ stage: 'visit_scheduled', updated_at: new Date().toISOString() })
+        .update({ status: 'scheduled', updated_at: new Date().toISOString() })
         .eq('id', lead.id);
 
       return {
