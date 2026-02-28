@@ -3633,12 +3633,12 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         if (intentCita === 'cancelar_cita') {
           if (citaActiva) {
             // Cancelar en BD
-            await this.supabase.client.from('appointments').update({
+            const { error: cancelErr } = await this.supabase.client.from('appointments').update({
               status: 'cancelled',
-              cancelled_at: new Date().toISOString(),
               cancellation_reason: 'Cancelado por cliente via WhatsApp (IA)'
             }).eq('id', citaActiva.id);
-            console.log('✅ Cita cancelada en BD');
+            if (cancelErr) console.error('⚠️ Error cancelando cita en BD:', cancelErr);
+            else console.log('✅ Cita cancelada en BD');
 
             // Notificar al vendedor (24h-safe)
             if (vendedorCita?.phone) {

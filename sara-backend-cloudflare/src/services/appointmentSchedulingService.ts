@@ -113,7 +113,6 @@ export class AppointmentSchedulingService {
         .from('appointments')
         .update({
           status: 'cancelled',
-          cancelled_at: new Date().toISOString(),
           cancelled_by: vendedor.name
         })
         .eq('id', appointment.id);
@@ -195,7 +194,6 @@ Puedes reagendar cuando quieras.`;
         .from('appointments')
         .update({
           status: 'cancelled',
-          cancelled_at: new Date().toISOString(),
           cancelled_by: vendedor.name
         })
         .eq('id', appointment.id);

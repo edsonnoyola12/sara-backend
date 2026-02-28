@@ -647,11 +647,12 @@ export class LeadMessageService {
     }
 
     // Cancelar en BD
-    await this.supabase.client.from('appointments').update({
+    const { error: cancelErr } = await this.supabase.client.from('appointments').update({
       status: 'cancelled',
-      cancelled_at: new Date().toISOString(),
       cancellation_reason: 'Cancelado por cliente via WhatsApp'
     }).eq('id', cita.id);
+    if (cancelErr) console.error('⚠️ Error cancelando cita:', cancelErr);
+    else console.log('✅ Cita cancelada en BD');
 
     const esLlamada = (cita as any).appointment_type === 'llamada';
     const tipoTexto = esLlamada ? 'llamada' : 'cita';
