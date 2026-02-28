@@ -99,6 +99,8 @@ export class LeadMessageService {
     // 0.1. RESPUESTA A MENSAJE AUTOMÁTICO (lead frío, aniversario, cumpleaños, etc.)
     const autoResponseResult = await this.checkAutoMessageResponse(lead, body, mensajeLower, notasLead);
     if (autoResponseResult.action === 'handled') return autoResponseResult;
+    // Propagar continue_to_ai con updateLead/notifyVendor (ej: esSolicitudEspecifica limpia pending_auto_response)
+    if (autoResponseResult.action === 'continue_to_ai' && autoResponseResult.updateLead) return autoResponseResult;
 
     // 0.5. ENCUESTA DE SATISFACCIÓN POST-VISITA (respuestas 1-4)
     const satisfactionResult = await this.checkSatisfactionSurvey(lead, body, mensajeLower, notasLead);
@@ -1034,9 +1036,16 @@ export class LeadMessageService {
       'qué', 'que', 'cómo', 'como', 'cuál', 'cual' // Preguntas
     ];
 
-    const esSolicitudEspecifica = palabrasSolicitud.some(palabra => mensajeLower.includes(palabra)) ||
-                                   mensajeLower.includes('?') ||
-                                   mensajeLower.length > 60; // Mensajes largos probablemente son solicitudes específicas
+    // Usar word boundaries para evitar falsos positivos (ej: 'ver' en 'verdad', 'que' en 'aunque')
+    const esSolicitudEspecifica = palabrasSolicitud.some(palabra => {
+      // Palabras cortas (<=3 chars) necesitan word boundary estricto
+      if (palabra.length <= 3) {
+        const regex = new RegExp(`(?:^|\\s|[¿¡])${palabra.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$|[?!.,;:])`, 'i');
+        return regex.test(mensajeLower);
+      }
+      return mensajeLower.includes(palabra);
+    }) || mensajeLower.includes('?') ||
+         mensajeLower.length > 100; // Solo mensajes MUY largos (>100 chars) — antes era 60 que capturaba respuestas normales
 
     const esPositiva = respuestasPositivas.some(r => mensajeLower === r || mensajeLower.startsWith(r + ' '));
     const esNegativa = respuestasNegativas.some(r => mensajeLower === r || mensajeLower.startsWith(r + ' '));
@@ -1126,20 +1135,30 @@ export class LeadMessageService {
 
     switch (tipoMensaje) {
       case 'lead_frio':
-      case 'reengagement':
-        if (esPositiva) {
+      case 'reengagement': {
+        const palabrasPosFrio = ['sí', 'si', 'claro', 'dale', 'va', 'sale', 'ok', 'okey', 'bueno', 'bien',
+          'interesa', 'interesado', 'interesada', 'quiero', 'me gustaría', 'me gustaria', 'ándale', 'andale',
+          'por supuesto', 'encantado', 'encantada', 'perfecto', 'genial', 'excelente', 'adelante', 'venga'];
+        const palabrasNegFrio = ['no', 'nel', 'nop', 'nope', 'paso', 'ya no', 'no gracias', 'no me interesa',
+          'dejame', 'déjame', 'no quiero', 'ya compré', 'ya compre', 'ya tengo', 'otro lado'];
+
+        const esFrioPositivo = esPositiva || palabrasPosFrio.some(p => mensajeLower.includes(p));
+        const esFrioNegativo = esNegativa || palabrasNegFrio.some(p => mensajeLower.includes(p));
+
+        if (esFrioNegativo && !esFrioPositivo) {
+          respuesta = `¡Claro ${nombreLead}! Solo una pregunta rápida: ¿rentas actualmente o ya tienes casa propia? 🏠\n\n` +
+                      `A veces hay opciones de financiamiento que podrían sorprenderte.`;
+        } else if (esFrioPositivo) {
           respuesta = `¡Qué gusto ${nombreLead}! 😊\n\n` +
                       `Me encanta que sigas interesado en ${propiedad}.\n\n` +
                       `Para que conozcas todos los detalles, *¿qué día te funciona para una visita?* 🏠`;
           updateLead = { status: 'contacted', notes: { ...notasLead, reactivado: new Date().toISOString() } };
-        } else if (esNegativa) {
-          respuesta = `¡Claro ${nombreLead}! Solo una pregunta rápida: ¿rentas actualmente o ya tienes casa propia? 🏠\n\n` +
-                      `A veces hay opciones de financiamiento que podrían sorprenderte.`;
         } else {
           respuesta = `¡Gracias por responder ${nombreLead}! 😊\n\n` +
                       `¿Te gustaría que tu asesor te contacte para platicar sobre ${propiedad}?`;
         }
         break;
+      }
 
       case 'aniversario':
         if (esNeutra || body.length < 50) {
@@ -1156,141 +1175,321 @@ export class LeadMessageService {
                     `Esperamos que la pases increíble en tu día especial. ¡Un abrazo grande!`;
         break;
 
-      case 'postventa':
-        if (esPositiva || esNeutra) {
+      case 'postventa': {
+        const palabrasPosPostventa = ['excelente', 'perfecto', 'genial', 'increíble', 'increible', 'maravilloso',
+          'muy bien', 'todo bien', 'contento', 'contenta', 'satisfecho', 'satisfecha', 'feliz', 'encantado', 'encantada',
+          'super', 'mejor', 'bien', 'bueno', 'buena', 'a gusto', 'agusto', 'sin problema', 'sin novedad', 'gracias'];
+        const palabrasNegPostventa = ['mal', 'peor', 'horrible', 'terrible', 'pésimo', 'pesimo', 'molesto', 'molesta',
+          'problema', 'problemas', 'queja', 'mala', 'malo', 'pésima', 'pesima', 'no funciona', 'defecto', 'desperfecto'];
+
+        const esPostvPositivo = esPositiva || esNeutra || palabrasPosPostventa.some(p => mensajeLower.includes(p));
+        const esPostvNegativo = esNegativa || palabrasNegPostventa.some(p => mensajeLower.includes(p));
+
+        if (esPostvNegativo && !esPostvPositivo) {
+          respuesta = `Gracias por tu respuesta ${nombreLead}.\n\n` +
+                      `Tu asesor te contactará para ver cómo podemos ayudarte.`;
+          notifyVendor = true;
+        } else if (esPostvPositivo) {
           respuesta = `¡Qué bueno saber que todo va bien ${nombreLead}! 🏠\n\n` +
                       `Gracias por ser parte de nuestra comunidad. Si necesitas algo, aquí estamos.`;
         } else {
-          respuesta = `Gracias por tu respuesta ${nombreLead}.\n\n` +
-                      `Tu asesor te contactará para ver cómo podemos ayudarte.`;
+          respuesta = `¡Gracias por tu opinión ${nombreLead}! 🏠\n\n` +
+                      `Tu asesor revisará tu mensaje. Si necesitas algo, aquí estamos.`;
         }
         break;
+      }
 
-      case 'recordatorio_pago':
-        if (esPositiva) {
+      case 'recordatorio_pago': {
+        const palabrasPosPago = ['sí', 'si', 'claro', 'listo', 'ya pagué', 'ya pague', 'ya lo hice', 'hecho',
+          'pagado', 'transferí', 'transferi', 'deposité', 'deposite', 'ok', 'bien', 'perfecto', 'gracias',
+          'ya quedó', 'ya quedo', 'confirmado', 'realizado'];
+        const palabrasNegPago = ['no', 'no puedo', 'problema', 'dificultad', 'ayuda', 'aplazar', 'atrasar',
+          'no tengo', 'sin dinero', 'difícil', 'dificil', 'complicado'];
+
+        const esPagoPositivo = esPositiva || palabrasPosPago.some(p => mensajeLower.includes(p));
+        const esPagoNegativo = esNegativa || palabrasNegPago.some(p => mensajeLower.includes(p));
+
+        if (esPagoNegativo && !esPagoPositivo) {
+          respuesta = `Entendido ${nombreLead}. Tu asesor te contactará para ver las opciones disponibles.`;
+          notifyVendor = true;
+        } else if (esPagoPositivo) {
           respuesta = `Perfecto ${nombreLead}, ¡gracias por confirmar! 💪\n\n` +
                       `Si tienes alguna duda sobre tu pago, tu asesor está disponible para ayudarte.`;
         } else {
           respuesta = `Entendido ${nombreLead}. Tu asesor te contactará para ver las opciones disponibles.`;
         }
         break;
+      }
 
-      case 'seguimiento_credito':
-        if (esPositiva) {
+      case 'seguimiento_credito': {
+        const palabrasPosCredito = ['sí', 'si', 'claro', 'perfecto', 'genial', 'bien', 'bueno', 'ok',
+          'quiero', 'interesa', 'adelante', 'me gustaría', 'me gustaria', 'avanzar', 'continuar',
+          'seguir', 'actualización', 'actualizacion', 'cómo va', 'como va', 'qué pasó', 'que paso'];
+        const palabrasNegCredito = ['no', 'ya no', 'cancelar', 'no me interesa', 'no quiero', 'desisto',
+          'paso', 'dejarlo', 'olvidalo', 'olvídalo', 'no gracias', 'otro banco', 'otra opción'];
+
+        const esCreditoPositivo = esPositiva || palabrasPosCredito.some(p => mensajeLower.includes(p));
+        const esCreditoNegativo = esNegativa || palabrasNegCredito.some(p => mensajeLower.includes(p));
+
+        if (esCreditoNegativo && !esCreditoPositivo) {
+          respuesta = `Entendido ${nombreLead}. Si cambias de opinión o necesitas información sobre otras opciones de financiamiento, aquí estamos. 🏠`;
+        } else if (esCreditoPositivo) {
           respuesta = `¡Perfecto ${nombreLead}! 🏦\n\n` +
                       `Tu asesor de crédito te contactará para darte una actualización detallada sobre tu solicitud.`;
-        } else if (esNegativa) {
-          respuesta = `Entendido ${nombreLead}. Si cambias de opinión o necesitas información sobre otras opciones de financiamiento, aquí estamos. 🏠`;
         } else {
           respuesta = `¡Gracias por responder ${nombreLead}! 🏦\n\n` +
                       `Le paso tu mensaje a tu asesor de crédito para que te contacte con los detalles.`;
         }
         break;
+      }
 
       case 'followup_inactivo':
-      case 'remarketing':
-        if (esPositiva) {
+      case 'remarketing': {
+        const palabrasPosInactivo = ['sí', 'si', 'claro', 'dale', 'va', 'sale', 'ok', 'okey', 'bueno', 'bien',
+          'interesa', 'interesado', 'interesada', 'quiero', 'me gustaría', 'me gustaria', 'ándale', 'andale',
+          'por supuesto', 'encantado', 'encantada', 'perfecto', 'genial', 'excelente', 'adelante', 'venga',
+          'sigo buscando', 'sigo interesado', 'sigo interesada', 'todavía busco', 'aún busco'];
+        const palabrasNegInactivo = ['no', 'nel', 'nop', 'nope', 'paso', 'ya no', 'no gracias', 'no me interesa',
+          'dejame', 'déjame', 'no quiero', 'ya compré', 'ya compre', 'ya tengo', 'otro lado', 'ya encontré',
+          'ya encontre', 'no busco'];
+
+        const esInactivoPositivo = esPositiva || palabrasPosInactivo.some(p => mensajeLower.includes(p));
+        const esInactivoNegativo = esNegativa || palabrasNegInactivo.some(p => mensajeLower.includes(p));
+
+        if (esInactivoNegativo && !esInactivoPositivo) {
+          respuesta = `¡Claro ${nombreLead}! Sin presión. Solo una pregunta: ¿ya encontraste casa o sigues buscando? 🏠`;
+        } else if (esInactivoPositivo) {
           respuesta = `¡Qué gusto ${nombreLead}! 😊\n\n` +
                       `Me alegra que sigas interesado. Tenemos casas desde $1.6M con excelentes opciones de financiamiento.\n\n` +
                       `*¿Qué día te funciona para una visita?* 🏠`;
           updateLead = { status: 'contacted', notes: { ...notasLead, reactivado: new Date().toISOString() } };
-        } else if (esNegativa) {
-          respuesta = `¡Claro ${nombreLead}! Sin presión. Solo una pregunta: ¿ya encontraste casa o sigues buscando? 🏠`;
         } else {
           respuesta = `¡Gracias por responder ${nombreLead}! 😊\n\n` +
                       `¿Te gustaría conocer las opciones disponibles? Puedo agendar una visita sin compromiso.`;
         }
         break;
+      }
 
-      case 'recordatorio_cita':
-        if (esPositiva) {
-          const citaDesarrollo = (notasLead.pending_auto_response as any)?.desarrollo || 'nuestro desarrollo';
+      case 'recordatorio_cita': {
+        const citaDesarrollo = (notasLead.pending_auto_response as any)?.desarrollo || 'nuestro desarrollo';
+        const palabrasPosCita = ['sí', 'si', 'claro', 'confirmo', 'confirmado', 'ahí estaré', 'ahi estare',
+          'ahí estamos', 'perfecto', 'listo', 'va', 'sale', 'ok', 'voy', 'llego', 'nos vemos', 'dale',
+          'por supuesto', 'cuenten conmigo', 'de acuerdo', 'bien', 'excelente', 'genial'];
+        const palabrasNegCita = ['no', 'no puedo', 'cancelo', 'cancela', 'cancelar', 'reagendar', 'cambiar',
+          'otro día', 'otro dia', 'no voy', 'no llego', 'surgió algo', 'surgio algo', 'imposible',
+          'no me es posible', 'mover la cita', 'posponer'];
+
+        const esCitaPositivo = esPositiva || palabrasPosCita.some(p => mensajeLower.includes(p));
+        const esCitaNegativo = esNegativa || palabrasNegCita.some(p => mensajeLower.includes(p));
+
+        if (esCitaNegativo && !esCitaPositivo) {
+          respuesta = `Entendido ${nombreLead}. ¿Te gustaría reagendar para otro día? Puedo buscarte un horario que te funcione mejor. 📅`;
+        } else if (esCitaPositivo) {
           respuesta = `¡Perfecto ${nombreLead}! 🏠\n\n` +
                       `Te esperamos en ${citaDesarrollo}. Si necesitas la ubicación, con gusto te la envío. 📍`;
-        } else if (esNegativa) {
-          respuesta = `Entendido ${nombreLead}. ¿Te gustaría reagendar para otro día? Puedo buscarte un horario que te funcione mejor. 📅`;
         } else {
           respuesta = `¡Gracias por confirmar ${nombreLead}! 😊\n\n` +
                       `Si tienes alguna pregunta antes de tu visita, aquí estoy para ayudarte.`;
         }
         break;
+      }
 
-      case 'referidos':
-        if (esPositiva) {
+      case 'referidos': {
+        const palabrasPosReferidos = ['sí', 'si', 'claro', 'tengo', 'conozco', 'un amigo', 'una amiga',
+          'mi hermano', 'mi hermana', 'mi primo', 'mi prima', 'mi vecino', 'mi vecina', 'mi compadre',
+          'mi comadre', 'un familiar', 'un conocido', 'alguien', 'un compañero', 'un compañera',
+          'de hecho', 'justo', 'dale', 'va', 'ok', 'perfecto', 'me interesa'];
+        const palabrasNegReferidos = ['no', 'no conozco', 'nadie', 'no tengo', 'no se me ocurre',
+          'ahorita no', 'por ahora no', 'no gracias', 'paso', 'no sé', 'no se', 'ninguno'];
+
+        const esRefPositivo = esPositiva || palabrasPosReferidos.some(p => mensajeLower.includes(p));
+        const esRefNegativo = esNegativa || palabrasNegReferidos.some(p => mensajeLower.includes(p));
+
+        if (esRefNegativo && !esRefPositivo) {
+          respuesta = `¡Sin problema ${nombreLead}! Si en el futuro alguien te pregunta por casas, aquí estamos. 😊`;
+        } else if (esRefPositivo) {
           respuesta = `¡Excelente ${nombreLead}! 🎁\n\n` +
                       `Comparte el nombre y teléfono de tu referido y yo me encargo de contactarlo.\n\n` +
                       `Recuerda: *ambos reciben un regalo especial* si tu referido compra. 🏠`;
-        } else if (esNegativa) {
-          respuesta = `¡Sin problema ${nombreLead}! Si en el futuro alguien te pregunta por casas, aquí estamos. 😊`;
         } else {
           respuesta = `¡Gracias por responder ${nombreLead}! 🏠\n\n` +
                       `Si tienes algún familiar o amigo buscando casa, solo pásame su nombre y número. ¡Sin compromiso!`;
         }
         break;
+      }
 
-      case 'nps':
-        if (esPositiva || esNeutra) {
-          respuesta = `¡Muchas gracias por tu calificación ${nombreLead}! 🙏\n\n` +
-                      `Tu opinión nos ayuda a seguir mejorando. Si hay algo específico que podamos mejorar, no dudes en escribirnos.`;
+      case 'nps': {
+        // Intentar extraer score numérico del mensaje verbose (ej: "9 de 10 todo excelente")
+        const npsMatch = body.match(/\b(\d{1,2})\b/);
+        const npsScore = npsMatch ? parseInt(npsMatch[1]) : null;
+        const npsValido = npsScore !== null && npsScore >= 0 && npsScore <= 10;
+
+        if (npsValido) {
+          // Score extraído — clasificar y guardar
+          const categoria = npsScore >= 9 ? 'promotor' : npsScore >= 7 ? 'pasivo' : 'detractor';
+          notasLead.nps_score = npsScore;
+          notasLead.nps_categoria = categoria;
+          notasLead.nps_respondido = new Date().toISOString();
+          notasLead.esperando_feedback_nps = true;
+          notasLead.esperando_feedback_nps_at = new Date().toISOString();
+          updateLead = { ...updateLead, survey_rating: npsScore, survey_completed: true };
+
+          if (npsScore >= 9) {
+            respuesta = `¡Muchas gracias por tu calificación ${nombreLead}! 🎉\n\n` +
+                        `Nos alegra saber que tuviste una gran experiencia. Si conoces a alguien que busque casa, ¡con gusto lo atendemos!`;
+          } else if (npsScore >= 7) {
+            respuesta = `¡Gracias por tu respuesta ${nombreLead}! 😊\n\n` +
+                        `Tu opinión nos ayuda a seguir mejorando. ¿Hay algo que podamos mejorar?`;
+          } else {
+            respuesta = `Gracias por tu honestidad ${nombreLead}. 🙏\n\n` +
+                        `Lamentamos que tu experiencia no haya sido la mejor. Tu asesor te contactará para ver cómo podemos mejorar.`;
+            notifyVendor = true;
+          }
         } else {
-          respuesta = `Gracias por tu honestidad ${nombreLead}. 🙏\n\n` +
-                      `Lamentamos que tu experiencia no haya sido la mejor. Tu asesor te contactará para ver cómo podemos mejorar.`;
-          notifyVendor = true;
-        }
-        break;
+          // Sin número — clasificar sentimiento con palabras clave (más flexible que esPositiva/esNeutra)
+          const palabrasPositivasNPS = ['excelente', 'perfecto', 'genial', 'increíble', 'increible', 'maravilloso',
+            'muy bien', 'todo bien', 'contento', 'satisfecho', 'feliz', 'encantado', 'super', 'buenísimo',
+            'buenisimo', 'mejor', 'bien', 'bueno', 'buena', 'recomiendo', 'padre', 'chido', 'chingon'];
+          const palabrasNegativasNPS = ['mal', 'peor', 'horrible', 'terrible', 'pésimo', 'pesimo', 'molesto',
+            'enojado', 'decepcion', 'decepción', 'queja', 'problema', 'mala', 'malo', 'pésima', 'pesima'];
 
-      case 'post_entrega':
-        if (esPositiva) {
-          respuesta = `¡Qué bueno que todo está en orden ${nombreLead}! 🏠🔑\n\n` +
-                      `¡Bienvenido a la familia Santa Rita! Si necesitas algo en el futuro, aquí estamos.`;
-        } else if (esNegativa) {
+          const esNpsPositivo = palabrasPositivasNPS.some(p => mensajeLower.includes(p));
+          const esNpsNegativo = palabrasNegativasNPS.some(p => mensajeLower.includes(p));
+
+          if (esNpsNegativo && !esNpsPositivo) {
+            const estimatedScore = 3;
+            notasLead.nps_score = estimatedScore;
+            notasLead.nps_categoria = 'detractor';
+            notasLead.nps_respondido = new Date().toISOString();
+            updateLead = { ...updateLead, survey_rating: estimatedScore, survey_completed: true };
+            respuesta = `Gracias por tu honestidad ${nombreLead}. 🙏\n\n` +
+                        `Lamentamos que tu experiencia no haya sido la mejor. Tu asesor te contactará para ver cómo podemos mejorar.`;
+            notifyVendor = true;
+          } else {
+            // Positivo o neutral → tratar como positivo
+            const estimatedScore = esNpsPositivo ? 9 : 8;
+            const categoria = estimatedScore >= 9 ? 'promotor' : 'pasivo';
+            notasLead.nps_score = estimatedScore;
+            notasLead.nps_categoria = categoria;
+            notasLead.nps_respondido = new Date().toISOString();
+            updateLead = { ...updateLead, survey_rating: estimatedScore, survey_completed: true };
+            respuesta = esNpsPositivo
+              ? `¡Muchas gracias por tu calificación ${nombreLead}! 🎉\n\n` +
+                `Nos alegra saber que tuviste una gran experiencia. Si conoces a alguien que busque casa, ¡con gusto lo atendemos!`
+              : `¡Muchas gracias por tu respuesta ${nombreLead}! 🙏\n\n` +
+                `Tu opinión nos ayuda a seguir mejorando. Si hay algo específico que podamos mejorar, no dudes en escribirnos.`;
+          }
+        }
+        // Siempre limpiar flag de espera NPS
+        notasLead.esperando_respuesta_nps = false;
+        break;
+      }
+
+      case 'post_entrega': {
+        const palabrasPosEntrega = ['excelente', 'perfecto', 'genial', 'increíble', 'increible', 'maravilloso',
+          'muy bien', 'todo bien', 'contento', 'contenta', 'satisfecho', 'satisfecha', 'feliz', 'encantado', 'encantada',
+          'super', 'mejor', 'bien', 'bueno', 'buena', 'en orden', 'correcto', 'completo', 'listo', 'lista',
+          'sin problema', 'sin novedad', 'todo listo', 'ya tengo', 'ya llegaron', 'ya está'];
+        const palabrasNegEntrega = ['mal', 'peor', 'horrible', 'terrible', 'pésimo', 'pesimo', 'molesto', 'molesta',
+          'problema', 'problemas', 'falta', 'faltan', 'no llega', 'no llegó', 'no han', 'no me han',
+          'pendiente', 'pendientes', 'retraso', 'demora', 'escritura', 'llave', 'llaves', 'servicio', 'servicios',
+          'mala', 'malo', 'pésima', 'pesima', 'queja', 'no funciona', 'roto', 'rota'];
+
+        const esEntregaPositivo = esPositiva || esNeutra || palabrasPosEntrega.some(p => mensajeLower.includes(p));
+        const esEntregaNegativo = esNegativa || palabrasNegEntrega.some(p => mensajeLower.includes(p));
+
+        if (esEntregaNegativo && !esEntregaPositivo) {
           respuesta = `Gracias por avisarnos ${nombreLead}. 🔧\n\n` +
                       `Tu asesor te contactará lo antes posible para resolver cualquier pendiente.`;
           notifyVendor = true;
+        } else if (esEntregaPositivo) {
+          respuesta = `¡Qué bueno que todo está en orden ${nombreLead}! 🏠🔑\n\n` +
+                      `¡Bienvenido a la familia Santa Rita! Si necesitas algo en el futuro, aquí estamos.`;
         } else {
           respuesta = `¡Gracias por tu respuesta ${nombreLead}! 🏠\n\n` +
                       `Si necesitas ayuda con algo de tu nueva casa, no dudes en escribirme.`;
         }
         break;
+      }
 
-      case 'satisfaccion_casa':
-        if (esPositiva) {
-          respuesta = `¡Nos da mucho gusto que estés contento con tu casa ${nombreLead}! 🏠💙\n\n` +
-                      `¡Gracias por confiar en Grupo Santa Rita!`;
-        } else if (esNegativa) {
+      case 'satisfaccion_casa': {
+        // Matching flexible para respuestas verbales (mismo patrón que NPS)
+        const palabrasPosSatisf = ['excelente', 'perfecto', 'genial', 'increíble', 'increible', 'maravilloso',
+          'muy bien', 'todo bien', 'contento', 'contenta', 'satisfecho', 'satisfecha', 'feliz', 'encantado', 'encantada',
+          'super', 'mejor', 'bien', 'bueno', 'buena', 'me encanta', 'me gusta', 'padre', 'chido', 'bonita', 'bonito',
+          'comoda', 'cómoda', 'comodo', 'cómodo', 'a gusto', 'agusto', 'tranquilo', 'tranquila'];
+        const palabrasNegSatisf = ['mal', 'peor', 'horrible', 'terrible', 'pésimo', 'pesimo', 'molesto', 'molesta',
+          'problema', 'problemas', 'filtra', 'filtración', 'humedad', 'goteras', 'grieta', 'fisura', 'daño',
+          'mala', 'malo', 'pésima', 'pesima', 'queja', 'defecto', 'desperfecto', 'no funciona', 'roto', 'rota'];
+
+        const esSatisfPositivo = esPositiva || esNeutra || palabrasPosSatisf.some(p => mensajeLower.includes(p));
+        const esSatisfNegativo = esNegativa || palabrasNegSatisf.some(p => mensajeLower.includes(p));
+
+        if (esSatisfNegativo && !esSatisfPositivo) {
           respuesta = `Lamentamos escuchar eso ${nombreLead}. 😔\n\n` +
                       `Tu asesor se pondrá en contacto contigo para atender cualquier situación. Queremos que estés 100% satisfecho.`;
           notifyVendor = true;
+        } else if (esSatisfPositivo) {
+          respuesta = `¡Nos da mucho gusto que estés contento con tu casa ${nombreLead}! 🏠💙\n\n` +
+                      `¡Gracias por confiar en Grupo Santa Rita!`;
         } else {
           respuesta = `¡Gracias por tu opinión ${nombreLead}! 🏠\n\n` +
                       `Tu retroalimentación es muy valiosa para nosotros. Si hay algo por mejorar, cuéntanos.`;
         }
         break;
+      }
 
-      case 'mantenimiento':
-        if (esPositiva) {
-          respuesta = `¡Perfecto ${nombreLead}! 🏠✅\n\n` +
-                      `Qué bueno que todo está en orden. Recuerda que el mantenimiento preventivo alarga la vida de tu hogar. ¡Felicidades!`;
-        } else if (esNegativa) {
+      case 'mantenimiento': {
+        const palabrasPosMant = ['excelente', 'perfecto', 'genial', 'increíble', 'increible', 'maravilloso',
+          'muy bien', 'todo bien', 'contento', 'contenta', 'satisfecho', 'satisfecha', 'feliz', 'encantado', 'encantada',
+          'super', 'mejor', 'bien', 'bueno', 'buena', 'en orden', 'sin problema', 'sin novedad', 'no necesito', 'todo perfecto'];
+        const palabrasNegMant = ['mal', 'peor', 'horrible', 'terrible', 'pésimo', 'pesimo', 'molesto', 'molesta',
+          'problema', 'problemas', 'filtra', 'filtración', 'humedad', 'goteras', 'grieta', 'fisura', 'daño',
+          'mala', 'malo', 'pésima', 'pesima', 'queja', 'defecto', 'desperfecto', 'no funciona', 'roto', 'rota',
+          'necesito', 'ayuda', 'reparar', 'reparación', 'arreglar', 'proveedores', 'proveedor'];
+
+        const esMantPositivo = esPositiva || esNeutra || palabrasPosMant.some(p => mensajeLower.includes(p));
+        const esMantNegativo = esNegativa || palabrasNegMant.some(p => mensajeLower.includes(p));
+
+        if (esMantNegativo && !esMantPositivo) {
           respuesta = `Entendido ${nombreLead}. 🔧\n\n` +
                       `Te paso contacto de proveedores de confianza para lo que necesites. Tu asesor te contactará.`;
           notifyVendor = true;
+        } else if (esMantPositivo) {
+          respuesta = `¡Perfecto ${nombreLead}! 🏠✅\n\n` +
+                      `Qué bueno que todo está en orden. Recuerda que el mantenimiento preventivo alarga la vida de tu hogar. ¡Felicidades!`;
         } else {
           respuesta = `¡Gracias por responder ${nombreLead}! 🏠\n\n` +
                       `Si necesitas recomendación de proveedores para mantenimiento, con gusto te ayudo.`;
         }
         break;
+      }
 
-      case 'checkin_60d':
-        if (esPositiva || esNeutra) {
-          respuesta = `¡Qué gusto saber que todo va bien ${nombreLead}! 🏡😊\n\n` +
-                      `Disfruta tu hogar. Si necesitas algo, aquí estamos para ayudarte.`;
-        } else {
+      case 'checkin_60d': {
+        const palabrasPosCheckin = ['excelente', 'perfecto', 'genial', 'increíble', 'increible', 'maravilloso',
+          'muy bien', 'todo bien', 'contento', 'contenta', 'satisfecho', 'satisfecha', 'feliz', 'encantado', 'encantada',
+          'super', 'mejor', 'bien', 'bueno', 'buena', 'a gusto', 'agusto', 'tranquilo', 'tranquila',
+          'sin problema', 'sin novedad', 'gracias', 'todo perfecto', 'en orden'];
+        const palabrasNegCheckin = ['mal', 'peor', 'horrible', 'terrible', 'pésimo', 'pesimo', 'molesto', 'molesta',
+          'problema', 'problemas', 'queja', 'mala', 'malo', 'pésima', 'pesima', 'no funciona', 'defecto',
+          'desperfecto', 'filtra', 'humedad', 'goteras', 'grieta', 'daño'];
+
+        const esCheckinPositivo = esPositiva || esNeutra || palabrasPosCheckin.some(p => mensajeLower.includes(p));
+        const esCheckinNegativo = esNegativa || palabrasNegCheckin.some(p => mensajeLower.includes(p));
+
+        if (esCheckinNegativo && !esCheckinPositivo) {
           respuesta = `Gracias por compartir ${nombreLead}. 🏡\n\n` +
                       `Tu asesor te contactará para ver cómo podemos ayudarte.`;
           notifyVendor = true;
+        } else if (esCheckinPositivo) {
+          respuesta = `¡Qué gusto saber que todo va bien ${nombreLead}! 🏡😊\n\n` +
+                      `Disfruta tu hogar. Si necesitas algo, aquí estamos para ayudarte.`;
+        } else {
+          respuesta = `¡Gracias por tu respuesta ${nombreLead}! 🏡\n\n` +
+                      `Si hay algo en lo que podamos ayudarte, no dudes en escribirnos.`;
         }
         break;
+      }
 
       default:
         // Respuesta genérica

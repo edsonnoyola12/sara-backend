@@ -1146,7 +1146,38 @@ export class WhatsAppHandler {
           }
         }
 
+        // Guardar en conversation_history (auto-message responses)
+        const finalResponse = responseText || leadMsgResult.response?.trim() || '';
+        if (finalResponse && body) {
+          try {
+            const { data: leadHist } = await this.supabase.client
+              .from('leads')
+              .select('conversation_history')
+              .eq('id', lead.id)
+              .single();
+            const historial = leadHist?.conversation_history || [];
+            const now = new Date().toISOString();
+            historial.push(
+              { role: 'user', content: body, timestamp: now },
+              { role: 'assistant', content: finalResponse, timestamp: now }
+            );
+            await this.supabase.client
+              .from('leads')
+              .update({ conversation_history: historial.slice(-30) })
+              .eq('id', lead.id);
+            console.log('✅ Historial auto-message guardado');
+          } catch (histErr) {
+            console.error('⚠️ Error guardando historial auto-message:', histErr);
+          }
+        }
+
         return;
+      }
+
+      // Aplicar updateLead para continue_to_ai (limpia pending_auto_response, etc.)
+      if (leadMsgResult.updateLead) {
+        await this.supabase.client.from('leads').update(leadMsgResult.updateLead).eq('id', lead.id);
+        console.log('📝 Lead actualizado (continue_to_ai)');
       }
 
       // Si hay notificación de vendedor pendiente (ej: respuesta a broadcast), enviarla (24h-safe)
