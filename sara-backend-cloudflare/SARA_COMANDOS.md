@@ -39,7 +39,7 @@ npx wrangler tail --format=pretty
 - KV Cache separado
 - Mismos secrets que producción
 
-### Tests Automatizados (692 tests)
+### Tests Automatizados (798 tests)
 
 | Archivo | Tests | Qué protege |
 |---------|-------|-------------|
@@ -54,6 +54,9 @@ npx wrangler tail --format=pretty
 | `retryService.test.ts` | 11 | Retry logic, exponential backoff, error detection |
 | `leadScoring.test.ts` | 11 | Scoring de leads |
 | `dateParser.test.ts` | 8 | Parseo de fechas en español |
+| `creditFlowService.test.ts` | 69 | Flujo hipotecario: detección, calificación, asignación asesor, cancelación |
+| `mortgageService.test.ts` | 25 | Formateo créditos, mensajes lead/asesor, finalización flujo, notificaciones |
+| `notificationService.test.ts` | 12 | Notificaciones vendedor/admin, recordatorios citas, encuestas |
 | `ServiceFactory.test.ts` | 3 | Factory de servicios |
 
 ### Load Tests
@@ -3585,7 +3588,7 @@ CREATE TABLE IF NOT EXISTS documentos_broker (
 -- + 3 índices (lead_id, tipo, lead_id+tipo)
 ```
 
-**Tests:** 692/692 pasando
+**Tests:** 798/798 pasando
 **Commit:** `2d82d424`
 **Deploy:** Version ID `9a2a9be3`
 

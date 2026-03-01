@@ -29,7 +29,7 @@
 # 1. Lee la documentación completa
 cat SARA_COMANDOS.md | head -500
 
-# 2. Verifica tests (OBLIGATORIO - 692+ tests)
+# 2. Verifica tests (OBLIGATORIO - 798+ tests)
 npm test
 
 # 3. Si falla algún test, NO hagas cambios
@@ -560,7 +560,7 @@ sara-backend-cloudflare/
 │   ├── utils/
 │   │   └── conversationLogic.ts
 │   └── tests/
-│       └── ...20 archivos de test
+│       └── ...23 archivos de test
 ├── wrangler.toml             # Config Cloudflare
 ├── SARA_COMANDOS.md          # Documentación detallada
 └── CLAUDE.md                 # Este archivo
@@ -1276,10 +1276,15 @@ Lead escribe WhatsApp → SARA responde → Lead en CRM → Vendedor notificado 
 | Session 52 tests (rate limiter, edge cases, handoff) | 37 | ✅ |
 | Session 53 tests (delivery status, R2 backup, load test) | 33 | ✅ |
 | Session 54-55 tests (survey fixes, template context) | 6 | ✅ |
+| Session 58-59 tests (data accuracy, phone normalization) | 95 | ✅ |
+| Session 65-66 tests (carousel, CTA, reactions) | 82 | ✅ |
+| Credit flow service tests | 69 | ✅ |
+| Mortgage service tests | 25 | ✅ |
+| Notification service tests | 12 | ✅ |
 | E2E Lead Journey | 7 | ✅ |
 | E2E Vendor Journey | 5 | ✅ |
 | E2E CEO Journey | 5 | ✅ |
-| **Total** | **515** | ✅ |
+| **Total** | **798** | ✅ |
 
 ### 👥 EQUIPO ACTIVO
 
@@ -5899,7 +5904,7 @@ const leadActualizado = leadFrescoMem || lead;
 | `src/routes/test.ts` | `f1326cc9`, `71aaeafe` | Cached teamMembers, phone normalization |
 | `src/services/meta-whatsapp.ts` | `71aaeafe` | normalizePhone() safety net |
 
-**Tests:** 692/692 pasando (20 archivos de test)
+**Tests:** 798/798 pasando (23 archivos de test)
 **Deploy:** Version ID `d1b6699e`
 **Push:** origin/main
 
@@ -5909,8 +5914,8 @@ const leadActualizado = leadFrescoMem || lead;
 
 | Métrica | Valor |
 |---------|-------|
-| Tests | 692/692 ✅ |
-| Test files | 20 |
+| Tests | 798/798 ✅ |
+| Test files | 23 |
 | Servicios | 85+ |
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 25+ |
@@ -5988,7 +5993,7 @@ const leadActualizado = leadFrescoMem || lead;
 
 **Archivo:** `src/index.ts`
 
-**Tests:** 692/692 pasando
+**Tests:** 798/798 pasando
 **Deploy:** Completado y pusheado a origin/main
 
 ---
@@ -6052,7 +6057,7 @@ static crearCatalogoDB(properties: any[], dev?): string      // Catálogo comple
 
 **Verificación:** Solo queda 1 instancia de `$1.6M` en el código — dentro de `precioMinGlobal()` como fallback para DB vacía (comportamiento correcto).
 
-**Tests:** 692/692 pasando
+**Tests:** 798/798 pasando
 **Deploy:** Version ID `ca43408d`
 **Push:** origin/main
 
@@ -6116,7 +6121,7 @@ Retorna: current voice_id, voice_model, lista de voces con provider, accent, age
 | `src/routes/retell.ts` | `/retell-voices` endpoint, helpers de precio, voice_id param, dynamic prices en prompt/lookup/tool |
 | `src/services/retellService.ts` | `listVoices()` method, removed hardcoded `$1.5 millones` fallback |
 
-**Tests:** 692/692 pasando
+**Tests:** 798/798 pasando
 **Commit:** `633db89a`
 **Deploy:** Version ID `7fdc9ef3`
 **Push:** origin/main
@@ -6237,7 +6242,7 @@ Retorna: current voice_id, voice_model, lista de voces con provider, accent, age
 | `src/crons/nurturing.ts` | `llamadasEscalamientoPostVenta()` (~185 líneas) |
 | `src/index.ts` | 2 nuevos CRONs (12 PM + 1 PM L-V) + imports |
 
-**Tests:** 692/692 pasando
+**Tests:** 798/798 pasando
 **Retell E2E:** 25/25 pasando
 **Retell agent:** Reconfigurado (9 tools, 4818 char prompt)
 
@@ -6247,8 +6252,8 @@ Retorna: current voice_id, voice_model, lista de voces con provider, accent, age
 
 | Métrica | Valor |
 |---------|-------|
-| Tests | 692/692 ✅ |
-| Test files | 20 |
+| Tests | 798/798 ✅ |
+| Test files | 23 |
 | Servicios | 85+ |
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 27+ |
@@ -6319,7 +6324,7 @@ Retorna: current voice_id, voice_model, lista de voces con provider, accent, age
 
 **20 archivos modificados** en total (+805/-715 líneas).
 
-**Tests:** 692/692 pasando
+**Tests:** 798/798 pasando
 **Deploy:** Completado
 
 ---
@@ -6328,8 +6333,8 @@ Retorna: current voice_id, voice_model, lista de voces con provider, accent, age
 
 | Métrica | Valor |
 |---------|-------|
-| Tests | 692/692 ✅ |
-| Test files | 20 |
+| Tests | 798/798 ✅ |
+| Test files | 23 |
 | Servicios | 85+ |
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 27+ |
@@ -6415,7 +6420,7 @@ Cuando lead toca un botón del carousel:
 
 **Endpoint de prueba:** `/test-carousel?phone=X&segment=Y&api_key=Z` (segment: economico/premium/terrenos/all)
 
-**Tests:** 692/692 pasando
+**Tests:** 798/798 pasando
 **Commits:** `159400f0` (implementación), `686c7f2b` (fixes de templates + precios)
 **Deploy:** Completado y verificado — 3 carousels enviados exitosamente
 
@@ -6425,8 +6430,8 @@ Cuando lead toca un botón del carousel:
 
 | Métrica | Valor |
 |---------|-------|
-| Tests | 692/692 ✅ |
-| Test files | 20 |
+| Tests | 798/798 ✅ |
+| Test files | 23 |
 | Servicios | 85+ |
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 27+ |
@@ -6527,7 +6532,7 @@ async sendContactCard(to: string, contact: { name: string; phone: string; compan
 | `src/handlers/whatsapp-vendor.ts` | Contact card del lead en comando `llamar` |
 | `src/handlers/whatsapp-ceo.ts` | Fix `detectRouteCommand` en CEO vendor fallback |
 
-**Tests:** 692/692 pasando
+**Tests:** 798/798 pasando
 **Commits:** `c486f3fb`, `e1ae075a`, `922aa0dc`, `1b248098`
 **Deploy:** Version ID `89423877`
 
@@ -6679,7 +6684,7 @@ await new Promise(r => setTimeout(r, 1500));
 await sendWhatsAppMessage(...);
 ```
 
-**Tests:** 692/692 pasando
+**Tests:** 798/798 pasando
 **Deploy:** Completado y verificado en producción
 
 ---
@@ -6688,8 +6693,8 @@ await sendWhatsAppMessage(...);
 
 | Métrica | Valor |
 |---------|-------|
-| Tests | 692/692 ✅ |
-| Test files | 20 |
+| Tests | 798/798 ✅ |
+| Test files | 23 |
 | Servicios | 85+ |
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 27+ |
@@ -6758,7 +6763,7 @@ Tabla `documentos_broker` creada en Supabase (UUID PK, lead_id FK, tipo, media_u
 | Resilience E2E | ✅ 12/12 |
 | Error logs | ✅ Limpios |
 
-**Tests:** 692/692 pasando
+**Tests:** 798/798 pasando
 **Commits:** `2d82d424`, `0738d21d`
 **Deploy:** Version ID `9a2a9be3`
 
@@ -6768,8 +6773,8 @@ Tabla `documentos_broker` creada en Supabase (UUID PK, lead_id FK, tipo, media_u
 
 | Métrica | Valor |
 |---------|-------|
-| Tests | 692/692 ✅ |
-| Test files | 20 |
+| Tests | 798/798 ✅ |
+| Test files | 23 |
 | Servicios | 85+ |
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 27+ |
