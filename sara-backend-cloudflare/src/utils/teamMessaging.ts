@@ -376,6 +376,7 @@ export function getPendingMessages(notes: any): Array<{
   priority: number;
 }> {
   const pendingKeys = [
+    { key: 'pending_alerta_lead', type: 'alerta_lead', priority: 1 },
     { key: 'pending_briefing', type: 'briefing', priority: 1 },
     { key: 'pending_recap', type: 'recap', priority: 2 },
     { key: 'pending_reporte_diario', type: 'reporte_diario', priority: 2 },

@@ -599,6 +599,15 @@ export async function enviarRecordatoriosCitas(supabase: SupabaseService, meta: 
     const ventanaAbierta = lastMsg > hace24h;
 
     try {
+      // MARK-BEFORE-SEND: Marcar ANTES de enviar para evitar duplicados por race condition
+      const { data: claimed } = await supabase.client
+        .from('appointments')
+        .update({ reminder_24h_sent: true })
+        .eq('id', cita.id)
+        .eq('reminder_24h_sent', false)
+        .select('id');
+      if (!claimed?.length) continue; // Otro CRON ya lo procesó
+
       if (ventanaAbierta && options?.openaiApiKey) {
         // ═══ VENTANA ABIERTA: Mensaje directo + TTS ═══
         const mensajePersonalizado = `¡Hola ${nombreCorto}! 📅\n\nTe recordamos tu cita de mañana:\n\n🏠 *${desarrollo}*\n📍 ${ubicacion}\n⏰ ${horaFormateada}\n\n¿Nos confirmas tu asistencia? ¡Te esperamos! 🙌`;
@@ -637,13 +646,10 @@ export async function enviarRecordatoriosCitas(supabase: SupabaseService, meta: 
         await meta.sendTemplate(lead.phone, 'recordatorio_cita_24h', 'es_MX', templateComponents);
         console.log(`📅 Recordatorio 24h (template) enviado a ${lead.name}`);
       }
-
-      await supabase.client
-        .from('appointments')
-        .update({ reminder_24h_sent: true })
-        .eq('id', cita.id);
     } catch (err) {
       console.error(`❌ Error enviando recordatorio 24h a ${lead.name}:`, err);
+      // Revertir flag si el envío falló para reintentar en el siguiente ciclo
+      await supabase.client.from('appointments').update({ reminder_24h_sent: false }).eq('id', cita.id);
     }
   }
 
@@ -672,6 +678,15 @@ export async function enviarRecordatoriosCitas(supabase: SupabaseService, meta: 
     const ventanaAbierta = lastMsg > hace24h;
 
     try {
+      // MARK-BEFORE-SEND: Marcar ANTES de enviar para evitar duplicados por race condition
+      const { data: claimed } = await supabase.client
+        .from('appointments')
+        .update({ reminder_2h_sent: true })
+        .eq('id', cita.id)
+        .eq('reminder_2h_sent', false)
+        .select('id');
+      if (!claimed?.length) continue; // Otro CRON ya lo procesó
+
       if (ventanaAbierta && options?.openaiApiKey) {
         // ═══ VENTANA ABIERTA: Mensaje directo + TTS ═══
         const mensajePersonalizado = `⏰ ¡${nombreCorto}, tu cita es en 2 horas!\n\n🏠 *${desarrollo}*\n📍 ${ubicacion}\n\n¡Te esperamos! 🙌`;
@@ -709,13 +724,10 @@ export async function enviarRecordatoriosCitas(supabase: SupabaseService, meta: 
         await meta.sendTemplate(lead.phone, 'recordatorio_cita_2h', 'es_MX', templateComponents);
         console.log(`⏰ Recordatorio 2h (template) enviado a ${lead.name}`);
       }
-
-      await supabase.client
-        .from('appointments')
-        .update({ reminder_2h_sent: true })
-        .eq('id', cita.id);
     } catch (err) {
       console.error(`❌ Error enviando recordatorio 2h a ${lead.name}:`, err);
+      // Revertir flag si el envío falló para reintentar en el siguiente ciclo
+      await supabase.client.from('appointments').update({ reminder_2h_sent: false }).eq('id', cita.id);
     }
   }
 }

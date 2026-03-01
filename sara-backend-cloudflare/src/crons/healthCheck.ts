@@ -620,7 +620,8 @@ export async function healthMonitorCron(
       const supabaseLatencies: number[] = [];
       const metaLatencies: number[] = [];
       for (const check of recentChecks) {
-        const dets = check.details || [];
+        const dets = check.details?.services || check.details || [];
+        if (!Array.isArray(dets)) continue;
         for (const d of dets) {
           if (d.service === 'supabase' && d.ok && d.latency_ms > 0) supabaseLatencies.push(d.latency_ms);
           if (d.service === 'meta' && d.ok && d.latency_ms > 0) metaLatencies.push(d.latency_ms);
@@ -761,7 +762,7 @@ export async function getLastHealthCheck(
 
     const ts = new Date(data.created_at);
     const minutesAgo = Math.round((Date.now() - ts.getTime()) / 60000);
-    const details = data.details || [];
+    const details = data.details?.services || data.details || [];
 
     let msg = `🏥 *STATUS DEL SISTEMA*\n\n`;
     msg += `Estado: ${data.status === 'healthy' ? '✅ SALUDABLE' : '⚠️ DEGRADADO'}\n`;
@@ -782,6 +783,7 @@ export async function getLastHealthCheck(
 
     return msg;
   } catch (e) {
+    console.error('❌ Error in getLastHealthCheck:', e);
     return '❌ Error consultando health checks.';
   }
 }

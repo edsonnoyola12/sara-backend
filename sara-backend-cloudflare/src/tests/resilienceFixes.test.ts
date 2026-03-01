@@ -140,12 +140,13 @@ describe('Fix #2: Deliver ALL pending messages', () => {
     expect(pendings[0].key).toBe('pending_mensaje');
   });
 
-  it('getPendingMessages con 5 pending debe retornar 5', () => {
+  it('getPendingMessages con 6 pending (incluyendo alerta_lead) debe retornar 6', () => {
     const now = new Date();
     const futureExpiry = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
     const recentSent = new Date(now.getTime() - 1 * 60 * 60 * 1000).toISOString();
 
     const notes = {
+      pending_alerta_lead: { sent_at: recentSent, mensaje_completo: 'AL', expires_at: futureExpiry },
       pending_briefing: { sent_at: recentSent, mensaje_completo: 'B', expires_at: futureExpiry },
       pending_recap: { sent_at: recentSent, mensaje_completo: 'R', expires_at: futureExpiry },
       pending_reporte_diario: { sent_at: recentSent, mensaje_completo: 'RD', expires_at: futureExpiry },
@@ -154,8 +155,10 @@ describe('Fix #2: Deliver ALL pending messages', () => {
     };
 
     const pendings = getPendingMessages(notes);
-    // ALL 5 must be returned — this is the core of Fix #2
-    expect(pendings.length).toBe(5);
+    // ALL 6 must be returned including alerta_lead
+    expect(pendings.length).toBe(6);
+    // alerta_lead should be first (priority 1)
+    expect(pendings[0].key).toBe('pending_alerta_lead');
   });
 });
 

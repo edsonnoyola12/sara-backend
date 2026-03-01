@@ -280,10 +280,11 @@ export async function enviarRecordatoriosPromociones(supabase: SupabaseService, 
 
       console.log(`📤 ${promo.name}: Enviando ${tipoMensaje}...`);
 
-      // Obtener leads del segmento
+      // Obtener leads del segmento (LIMIT 500 para evitar timeout en CRON)
       const { data: leads } = await supabase.client
         .from('leads')
-        .select('id, name, phone, lead_score, score, status, property_interest');
+        .select('id, name, phone, lead_score, score, status, property_interest')
+        .limit(500);
 
       if (!leads) continue;
 

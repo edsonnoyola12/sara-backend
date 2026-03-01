@@ -3130,22 +3130,23 @@ export default {
           if (necesitaReactivar) {
             console.log(`   📤 Reactivando ventana para ${m.name}...`);
             try {
-              // Enviar template de reactivación directamente via Meta API (sin self-HTTP-call)
-              const nombre = m.name?.split(' ')[0] || 'amigo';
-              await meta.sendTemplate(m.phone, 'reactivar_equipo', 'es_MX', [
-                { type: 'body', parameters: [{ type: 'text', text: nombre }] }
-              ]);
-
-              // Marcar como reactivado hoy para no repetir
+              // MARK-BEFORE-SEND: Marcar ANTES de enviar para evitar duplicados por race condition
               const updatedNotes = { ...notas, reactivacion_enviada: hoyReactivacion };
               await supabase.client
                 .from('team_members')
                 .update({ notes: updatedNotes })
                 .eq('id', m.id);
+
+              // Enviar template de reactivación
+              const nombre = m.name?.split(' ')[0] || 'amigo';
+              await meta.sendTemplate(m.phone, 'reactivar_equipo', 'es_MX', [
+                { type: 'body', parameters: [{ type: 'text', text: nombre }] }
+              ]);
+
               reactivados++;
               console.log(`   ✅ ${m.name} reactivado`);
             } catch (e) {
-              console.log(`   ⚠️ Error reactivando ${m.name}:`, e);
+              console.error(`   ⚠️ Error reactivando ${m.name}:`, e);
             }
           }
         }
