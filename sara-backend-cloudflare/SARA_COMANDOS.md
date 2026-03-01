@@ -228,6 +228,7 @@ Los integration tests prueban flujos completos end-to-end:
 | `mis leads` / `leads` | Ver leads asignados |
 | `status [nombre]` / `info [nombre]` | Ver detalle de un lead |
 | `llamar [nombre]` | Ver teléfono del lead |
+| `llamar ia [nombre]` | SARA llama al lead por teléfono con IA (Retell.ai) |
 | `contactado [nombre]` | Marcar como contactado |
 
 ### Documentos y Crédito
@@ -306,6 +307,7 @@ Los integration tests prueban flujos completos end-to-end:
 | `apartar [nombre] en [desarrollo] [enganche]` | Registrar apartado | `vendedorRegistrarApartado` |
 | `cerrar venta [nombre]` | Marcar venta como cerrada | `vendedorCerrarVenta` |
 | `cancelar [nombre]` | Marcar lead como caído | `vendedorCancelarLead` |
+| `llamar ia [nombre]` | SARA llama al lead con IA (Retell.ai) | `vendedorLlamarIA` |
 | `recordar llamar [nombre] [fecha] [hora]` | Programar llamada a un lead | `vendedorRecordarLlamar` |
 | `llamar [nombre] [día] [hora]` | Alias para programar llamada | `vendedorRecordarLlamar` |
 | `reagendar llamada [nombre] [nueva fecha/hora]` | Cambiar hora de llamada programada | `vendedorReagendarLlamada` |
@@ -362,6 +364,41 @@ Marca lead como caído:
 - `lead caído María López`
 - `descartar Pedro`
 - Actualiza lead a status `fallen`
+
+### Comando: llamar ia [nombre] (Retell.ai)
+SARA llama al lead por teléfono usando inteligencia artificial:
+- `llamar ia Juan` - SARA llama a Juan ahora mismo
+- `llamar ia María López` - Llama a María López
+
+**Qué pasa cuando usas este comando:**
+1. SARA busca al lead en tu cartera
+2. Inicia una llamada telefónica automática desde el número +524923860066
+3. SARA (la voz IA) habla con el lead — le pregunta sobre su interés, presupuesto, zona
+4. Si el lead quiere agendar cita, SARA la agenda directo en el calendario
+5. Al terminar la llamada, te llega un resumen por WhatsApp con lo que pasó
+
+**Llamadas automáticas (CRONs):**
+SARA también hace llamadas automáticas sin que tú las pidas:
+- **11am L-V:** Seguimiento post-visita (leads que visitaron pero no avanzaron)
+- **12pm L-V:** Escalamiento 48h (leads que no contestan WhatsApp en 2 días)
+- **1pm L-V:** Post-venta (NPS, satisfacción, referidos)
+- **3pm L-V:** Reactivación de leads fríos
+- **5pm L-V:** Recordatorio de cita para mañana
+- **Cada 30 min:** Si un vendedor tiene mensaje pendiente sin respuesta por 2h → SARA llama
+
+**Llamadas entrantes:**
+Si un cliente llama al +524923860066, SARA contesta automáticamente. Reconoce al lead por su teléfono y saluda personalizado.
+
+**Herramientas durante la llamada:**
+SARA puede hacer 8 cosas durante la llamada en vivo:
+1. Buscar info de desarrollos (precios, amenidades)
+2. Buscar por presupuesto
+3. Agendar cita (queda en el calendario)
+4. Cancelar cita
+5. Cambiar cita
+6. Enviar info por WhatsApp al lead
+7. Consultar crédito hipotecario
+8. Consultar citas existentes
 
 ### Comando: recordar llamar / llamar
 Programa una llamada a un lead:

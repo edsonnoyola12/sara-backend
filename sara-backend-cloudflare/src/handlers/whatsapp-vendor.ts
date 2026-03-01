@@ -4628,6 +4628,7 @@ export async function vendedorAyuda(ctx: HandlerContext, handler: any, from: str
     `• *bridge [lead]* - Chat directo 6min\n` +
     `• *#cerrar* / *#mas* - Bridge\n` +
     `• *llamar [lead]* - Ver teléfono\n` +
+    `• *llamar ia [lead]* - SARA llama al lead 📞🤖\n` +
     `• *recordar llamar [lead] [fecha]*\n` +
     `• *contactar [lead]* - Template 24h\n\n` +
     `*💰 OFERTAS*\n` +
