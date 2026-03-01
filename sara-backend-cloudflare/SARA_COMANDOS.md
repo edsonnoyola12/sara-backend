@@ -39,7 +39,7 @@ npx wrangler tail --format=pretty
 - KV Cache separado
 - Mismos secrets que producción
 
-### Tests Automatizados (351 tests)
+### Tests Automatizados (692 tests)
 
 | Archivo | Tests | Qué protege |
 |---------|-------|-------------|
@@ -3536,3 +3536,55 @@ Auditoría de 7 flujos de encuesta reveló 8 problemas. 7 fixes aplicados.
 **Tests:** 369/369 pasando
 **Commit:** `429ac260`
 **Deploy:** Version ID `1e542c66`
+
+---
+
+### 2026-02-28 (Sesión 72) - Conectar 3 Servicios Desconectados al Flujo de Conversación
+
+3 servicios que estaban implementados pero NO conectados al flujo real de leads fueron integrados:
+
+#### 1. FinancingCalculatorService → intent `info_credito`
+
+Cuando un lead pregunta por crédito y tiene `property_interest`, SARA ahora muestra una tabla comparativa de bancos (BBVA, Banorte, Santander, HSBC, etc.) con mensualidades estimadas ANTES del menú de opciones de crédito.
+
+| Archivo | Cambio |
+|---------|--------|
+| `aiConversationService.ts` | Lazy import + `compareBanks()` + `formatComparisonForWhatsApp()` en bloque `info_credito` |
+
+#### 2. InventoryService → Fix bug + wire en `executeAIDecision`
+
+| Archivo | Cambio |
+|---------|--------|
+| `inventoryService.ts` | Eliminado `.eq('status', 'available')` (columna no existe en `properties`) |
+| `inventoryService.ts` | Fix `formatPropertyInfo()` y `formatPropertyCard()` para usar campos correctos de DB |
+| `aiConversationService.ts` | Wire `getPropertyByModel()` + `formatPropertyInfo()` cuando lead pregunta por modelo específico |
+
+#### 3. BrokerHipotecarioService → Wire en image handler
+
+Cuando un lead con `needs_mortgage=true` + asesor asignado envía una imagen, SARA la procesa como documento hipotecario (INE, nómina, comprobante domicilio) usando OpenAI Vision API.
+
+| Archivo | Cambio |
+|---------|--------|
+| `brokerHipotecarioService.ts` | Acepta data URLs base64 (Meta URLs requieren auth headers que OpenAI no puede proveer) |
+| `index.ts` | Wire entre credit flow check y desperfecto handler: descarga media como base64, crea data URL, procesa con BrokerService |
+| `index.ts` | Notifica asesor + vendedor original cuando todos los docs están completos (24h-safe) |
+
+#### SQL: tabla `documentos_broker`
+
+```sql
+-- Ejecutado en Supabase Dashboard
+CREATE TABLE IF NOT EXISTS documentos_broker (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
+  tipo TEXT NOT NULL,
+  media_url TEXT,
+  datos_extraidos JSONB,
+  valido BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+-- + 3 índices (lead_id, tipo, lead_id+tipo)
+```
+
+**Tests:** 692/692 pasando
+**Commit:** `2d82d424`
+**Deploy:** Version ID `4ce0babb`
