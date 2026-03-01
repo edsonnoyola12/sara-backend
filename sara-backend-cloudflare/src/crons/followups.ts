@@ -2226,6 +2226,13 @@ interface RetellEnv {
   RETELL_API_KEY?: string;
   RETELL_AGENT_ID?: string;
   RETELL_PHONE_NUMBER?: string;
+  SARA_CACHE?: KVNamespace;
+}
+
+async function isRetellEnabled(env: RetellEnv): Promise<boolean> {
+  const { createFeatureFlags } = await import('../services/featureFlagsService');
+  const flags = createFeatureFlags(env.SARA_CACHE);
+  return flags.isEnabled('retell_enabled');
 }
 
 /**
@@ -2240,6 +2247,10 @@ export async function llamadasSeguimientoPostVisita(
   try {
     if (!env.RETELL_API_KEY || !env.RETELL_AGENT_ID || !env.RETELL_PHONE_NUMBER) {
       console.log('⏭️ Llamadas IA desactivadas - Retell no configurado');
+      return;
+    }
+    if (!(await isRetellEnabled(env))) {
+      console.log('⏭️ Llamadas IA desactivadas - feature flag retell_enabled=false');
       return;
     }
 
@@ -2355,6 +2366,10 @@ export async function llamadasReactivacionLeadsFrios(
   try {
     if (!env.RETELL_API_KEY || !env.RETELL_AGENT_ID || !env.RETELL_PHONE_NUMBER) {
       console.log('⏭️ Llamadas IA desactivadas - Retell no configurado');
+      return;
+    }
+    if (!(await isRetellEnabled(env))) {
+      console.log('⏭️ Llamadas IA desactivadas - feature flag retell_enabled=false');
       return;
     }
 
@@ -2475,6 +2490,10 @@ export async function llamadasRecordatorioCita(
       console.log('⏭️ Llamadas IA desactivadas - Retell no configurado');
       return;
     }
+    if (!(await isRetellEnabled(env))) {
+      console.log('⏭️ Llamadas IA desactivadas - feature flag retell_enabled=false');
+      return;
+    }
 
     console.log('📞 Iniciando llamadas recordatorio de cita...');
 
@@ -2577,6 +2596,10 @@ export async function llamadasEscalamiento48h(
   try {
     if (!env.RETELL_API_KEY || !env.RETELL_AGENT_ID || !env.RETELL_PHONE_NUMBER) {
       console.log('⏭️ Llamadas IA desactivadas - Retell no configurado');
+      return;
+    }
+    if (!(await isRetellEnabled(env))) {
+      console.log('⏭️ Llamadas IA desactivadas - feature flag retell_enabled=false');
       return;
     }
 

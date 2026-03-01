@@ -5958,15 +5958,11 @@ export async function vendedorLlamarIA(ctx: HandlerContext, handler: any, from: 
       return;
     }
 
-    // Verificar feature flag
-    const featureFlags = await ctx.supabase.client
-      .from('system_config')
-      .select('value')
-      .eq('key', 'feature_flags')
-      .maybeSingle();
-
-    const flags = featureFlags?.data?.value || {};
-    if (flags.retell_enabled === false) {
+    // Verificar feature flag (KV-based)
+    const { createFeatureFlags } = await import('../services/featureFlagsService');
+    const flagsService = createFeatureFlags(ctx.env.SARA_CACHE);
+    const retellEnabled = await flagsService.isEnabled('retell_enabled');
+    if (!retellEnabled) {
       await ctx.twilio.sendWhatsAppMessage(from,
         '❌ Llamadas IA desactivadas temporalmente.\n' +
         'Usa "llamar [nombre]" para obtener el teléfono y llamar manualmente.'

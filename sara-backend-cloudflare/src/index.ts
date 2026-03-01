@@ -3813,17 +3813,24 @@ export default {
       console.log('📞 Verificando pending messages para llamar...');
 
       if (env.RETELL_API_KEY && env.RETELL_AGENT_ID && env.RETELL_PHONE_NUMBER) {
-        try {
-          const retellConfig = {
-            apiKey: env.RETELL_API_KEY,
-            agentId: env.RETELL_AGENT_ID,
-            phoneNumber: env.RETELL_PHONE_NUMBER
-          };
+        // Check feature flag before making calls
+        const { createFeatureFlags } = await import('./services/featureFlagsService');
+        const retellFlag = await createFeatureFlags(env.SARA_CACHE).isEnabled('retell_enabled');
+        if (!retellFlag) {
+          console.log('⏭️ Llamadas pendientes saltadas - retell_enabled=false');
+        } else {
+          try {
+            const retellConfig = {
+              apiKey: env.RETELL_API_KEY,
+              agentId: env.RETELL_AGENT_ID,
+              phoneNumber: env.RETELL_PHONE_NUMBER
+            };
 
-          const result = await verificarPendingParaLlamar(supabase, meta, retellConfig);
-          console.log(`📞 Resultado: ${result.llamadas} llamadas, ${result.errores} errores`);
-        } catch (callError) {
-          console.error('⚠️ Error en verificarPendingParaLlamar:', callError);
+            const result = await verificarPendingParaLlamar(supabase, meta, retellConfig);
+            console.log(`📞 Resultado: ${result.llamadas} llamadas, ${result.errores} errores`);
+          } catch (callError) {
+            console.error('⚠️ Error en verificarPendingParaLlamar:', callError);
+          }
         }
       } else {
         console.log('⏭️ Retell no configurado, saltando verificación de llamadas');
