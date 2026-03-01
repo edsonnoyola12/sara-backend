@@ -1,5 +1,41 @@
 ## HISTORIAL DE CAMBIOS IMPORTANTES
 
+### 2026-03-01 (Sesión 75) — Retell Activation + Feature Flag Unification
+
+**Retell.ai activado en producción:**
+
+| Paso | Detalle |
+|------|---------|
+| Feature flag | `retell_enabled` activado via `/api/flags` (KV) |
+| Tools | 9 herramientas registradas en agente Retell (buscar info, presupuesto, agendar/cancelar/cambiar cita, enviar WhatsApp, crédito, consultar citas, end_call) |
+| Inbound | Número +524923860066 asociado a agente, v29 |
+| E2E tests | 25/25 pasando |
+
+**Bug fix — Feature flag inconsistente:**
+
+| Archivo | Antes | Ahora |
+|---------|-------|-------|
+| `whatsapp-vendor.ts` (vendedorLlamarIA) | Leía `system_config` (Supabase) | Lee KV via `FeatureFlagsService` |
+| `followups.ts` (4 funciones CRON) | Sin check de `retell_enabled` | Check flag antes de queries |
+| `nurturing.ts` (llamadasEscalamientoPostVenta) | Sin check de `retell_enabled` | Check flag antes de queries |
+| `index.ts` (verificarPendingParaLlamar) | Sin check de `retell_enabled` | Check flag antes de llamar |
+
+**Otros fixes:**
+
+| Fix | Archivo | Descripción |
+|-----|---------|-------------|
+| Hardcoded phone | `routes/retell.ts:63` | Eliminado fallback `+524923860066`, usa solo `env.RETELL_PHONE_NUMBER` |
+| Staging R2 | `wrangler.toml` | Agregado binding `SARA_BACKUPS` a staging (antes crasheaba `/run-backup`) |
+
+**Documentación:**
+- `SARA_COMANDOS.md`: Agregado comando `llamar ia [nombre]` con explicación completa de llamadas automáticas, entrantes, y herramientas in-call
+- `whatsapp-vendor.ts`: Agregado `llamar ia` al menú de ayuda del vendedor
+
+**Tests:** 1107 (33 archivos) — sin cambios
+**Commits:** `080c3690`, `1f320447`, `23d16dc7`
+
+---
+
 ### 2026-03-01 (Sesión 74) — Resilience & Reliability Overhaul
 
 **13 fixes de resiliencia y rendimiento en 3 commits:**

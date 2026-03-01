@@ -1,6 +1,6 @@
 # SARA CRM - Referencia para Claude Code
 
-> Última actualización: 2026-03-01 (Sesión 74)
+> Última actualización: 2026-03-01 (Sesión 75)
 > Historial detallado de cambios: `docs/CHANGELOG.md`
 
 ---
@@ -157,12 +157,16 @@ WhatsApp solo permite mensajes libres si el usuario escribió en las últimas 24
 
 Pending se verifican PRIMERO en handlers de vendedor y CEO, ANTES de cualquier otra lógica.
 
-### 5. Retell.ai (Llamadas IA)
+### 5. Retell.ai (Llamadas IA) — ACTIVADO
 
+**Comando vendedor:** `llamar ia [nombre]` — SARA llama al lead por teléfono con IA.
 **A leads:** Si no responde WhatsApp en 48h → escalar a llamada. NUNCA WhatsApp + llamada para lo mismo.
 **Al equipo:** Si ventana cerrada y mensaje CRÍTICO → llamar inmediatamente. NORMAL → template, llamar después de 2h.
+**Entrantes:** Llamadas al +524923860066 → SARA contesta, reconoce lead por teléfono.
 
 14+ motivos context-aware con instrucciones específicas por tipo de llamada.
+9 herramientas in-call (buscar info, agendar/cancelar/cambiar cita, enviar WhatsApp, crédito, presupuesto).
+Feature flag: `retell_enabled` en KV (controlable via `/api/flags`). Todos los CRONs y el comando manual lo respetan.
 
 ### 6. Flujos Post-Compra (CRONs automáticos)
 
@@ -317,6 +321,6 @@ npx wrangler deploy      # Re-deploy
 | Propiedades | 32 (9 desarrollos) |
 | Precios | 100% dinámicos (0 hardcoded) |
 | WhatsApp UX | CTA buttons, reactions, contact cards |
-| Voz Retell | ElevenLabs LatAm Spanish |
+| Retell.ai | ACTIVADO — 9 tools, inbound +524923860066, flag unificado KV |
 | Resilience | Retry queue (backoff exponencial), mark-before-send, cache invalidation, AI fallback, KV dedup, fetch timeouts, atomic writes, error persistence, double-booking prevention |
 | Integraciones | Meta/WhatsApp ✅, Supabase ✅, Cloudflare ✅, Google Calendar ✅, Veo 3 ✅, Retell ✅ |
