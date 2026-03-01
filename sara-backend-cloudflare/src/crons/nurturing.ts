@@ -29,6 +29,28 @@ export function isLikelySurveyResponse(mensaje: string, maxWords: number = 6, ma
 }
 
 // ═══════════════════════════════════════════════════════════
+// HELPER: Batch-fetch vendedores para evitar N+1 queries
+// ═══════════════════════════════════════════════════════════
+async function batchFetchVendedores(
+  supabase: SupabaseService,
+  leads: Array<{ assigned_to?: string }>
+): Promise<Map<string, { id: string; name: string; phone: string }>> {
+  const vendedorIds = [...new Set(leads.map(l => l.assigned_to).filter(Boolean))] as string[];
+  if (vendedorIds.length === 0) return new Map();
+
+  const { data: vendedores } = await supabase.client
+    .from('team_members')
+    .select('id, name, phone')
+    .in('id', vendedorIds);
+
+  const map = new Map<string, { id: string; name: string; phone: string }>();
+  for (const v of vendedores || []) {
+    map.set(v.id, v);
+  }
+  return map;
+}
+
+// ═══════════════════════════════════════════════════════════
 // RECUPERACIÓN DE ABANDONOS EN PROCESO DE CRÉDITO
 // Re-engagement para leads que empezaron crédito pero no continuaron
 // ═══════════════════════════════════════════════════════════
@@ -77,6 +99,9 @@ export async function recuperarAbandonosCredito(supabase: SupabaseService, meta:
       console.log('🏦 No hay abandonos de crédito elegibles para recuperación');
       return;
     }
+
+    // Batch-fetch vendedores para evitar N+1 queries
+    const vendedoresMap = await batchFetchVendedores(supabase, leadsAbandonados);
 
     console.log(`🏦 Leads con proceso de crédito abandonado: ${leadsAbandonados.length}`);
 
@@ -151,13 +176,9 @@ Si te interesa retomar, solo responde "quiero crédito" 🏡`;
           })
           .eq('id', lead.id);
 
-        // Notificar al vendedor/asesor
+        // Notificar al vendedor/asesor (usando batch-fetch)
         if (lead.assigned_to) {
-          const { data: vendedor } = await supabase.client
-            .from('team_members')
-            .select('id, name, phone')
-            .eq('id', lead.assigned_to)
-            .single();
+          const vendedor = vendedoresMap.get(lead.assigned_to);
 
           if (vendedor?.phone) {
             const notifVendedor = `📬 *Recuperación de crédito enviada*
@@ -236,6 +257,9 @@ export async function followUpPostVisita(supabase: SupabaseService, meta: MetaWh
       return;
     }
 
+    // Batch-fetch vendedores para evitar N+1 queries
+    const vendedoresMap = await batchFetchVendedores(supabase, leadsElegibles);
+
     console.log(`📍 Leads post-visita para follow-up: ${leadsElegibles.length}`);
 
     let enviados = 0;
@@ -280,13 +304,9 @@ export async function followUpPostVisita(supabase: SupabaseService, meta: MetaWh
           })
           .eq('id', lead.id);
 
-        // Notificar al vendedor
+        // Notificar al vendedor (usando batch-fetch)
         if (lead.assigned_to) {
-          const { data: vendedor } = await supabase.client
-            .from('team_members')
-            .select('id, name, phone')
-            .eq('id', lead.assigned_to)
-            .single();
+          const vendedor = vendedoresMap.get(lead.assigned_to);
 
           if (vendedor?.phone) {
             const notifVendedor = `📍 *Follow-up post-visita enviado*
@@ -698,6 +718,9 @@ export async function solicitarReferidos(supabase: SupabaseService, meta: MetaWh
       return;
     }
 
+    // Batch-fetch vendedores para evitar N+1 queries
+    const vendedoresMap = await batchFetchVendedores(supabase, clientesElegibles);
+
     console.log(`🤝 Clientes para solicitar referidos: ${clientesElegibles.length}`);
 
     let enviados = 0;
@@ -756,13 +779,9 @@ Solo responde con el nombre y teléfono de quien creas que le interese, y yo me 
           .update({ notes: notasActualizadas })
           .eq('id', cliente.id);
 
-        // Notificar al vendedor
+        // Notificar al vendedor (usando batch-fetch)
         if (cliente.assigned_to) {
-          const { data: vendedor } = await supabase.client
-            .from('team_members')
-            .select('id, name, phone')
-            .eq('id', cliente.assigned_to)
-            .single();
+          const vendedor = vendedoresMap.get(cliente.assigned_to);
 
           if (vendedor?.phone) {
             const notifVendedor = `🤝 *Solicitud de referidos enviada*

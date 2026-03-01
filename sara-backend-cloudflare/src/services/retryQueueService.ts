@@ -48,7 +48,8 @@ export async function enqueueFailedMessage(
       last_error: errorMessage?.substring(0, 500),
       status: 'pending',
       attempts: 0,
-      max_attempts: 3
+      max_attempts: 3,
+      next_retry_at: new Date(Date.now() + 2 * 60 * 1000).toISOString()
     });
     if (insertErr) console.error('⚠️ Retry queue insert error:', insertErr.message);
     else console.log(`📥 Retry queue: enqueued ${messageType} to ${recipientPhone}`);
@@ -73,6 +74,7 @@ export async function processRetryQueue(
     .select('*')
     .eq('status', 'pending')
     .lt('attempts', 3)
+    .lte('next_retry_at', new Date().toISOString())
     .order('created_at', { ascending: true })
     .limit(10);
 
@@ -103,7 +105,13 @@ export async function processRetryQueue(
           await meta.sendWhatsAppImage(entry.recipient_phone, entry.payload.imageUrl, entry.payload.caption);
           break;
         default:
-          console.warn(`⚠️ Retry queue: unsupported message_type "${entry.message_type}"`);
+          console.warn(`⚠️ Retry queue: unsupported message_type "${entry.message_type}" — marking as failed`);
+          await supabase.client.from('retry_queue').update({
+            status: 'failed_permanent',
+            resolved_at: new Date().toISOString(),
+            last_error: `Unsupported message_type: ${entry.message_type}`
+          }).eq('id', entry.id);
+          result.failedPermanent++;
           continue;
       }
 
@@ -141,12 +149,15 @@ export async function processRetryQueue(
 
         console.error(`❌ Retry queue: permanent failure for ${entry.recipient_phone} after ${newAttempts} attempts`);
       } else {
-        // Update attempts, keep pending
+        // Update attempts with exponential backoff: 2min, 8min, 32min
+        const backoffMs = Math.pow(2, newAttempts) * 2 * 60 * 1000;
+        const nextRetryAt = new Date(Date.now() + backoffMs).toISOString();
         const { error: retryErr } = await supabase.client
           .from('retry_queue')
-          .update({ attempts: newAttempts, last_attempt_at: new Date().toISOString(), last_error: errMsg.substring(0, 500) })
+          .update({ attempts: newAttempts, last_attempt_at: new Date().toISOString(), last_error: errMsg.substring(0, 500), next_retry_at: nextRetryAt })
           .eq('id', entry.id);
         if (retryErr) console.error('⚠️ Retry queue attempt update error:', retryErr.message);
+        console.log(`🔄 Retry queue: ${entry.recipient_phone} retry #${newAttempts} scheduled for ${nextRetryAt}`);
       }
     }
   }

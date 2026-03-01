@@ -3354,7 +3354,7 @@ export default {
     const notificationService = new NotificationService(supabase, meta, env.OPENAI_API_KEY);
 
     // RECORDATORIOS DE CITAS - cada ejecución del cron (24h y 2h antes)
-    await safeCron('verificarConsistenciaCalendario', () => verificarConsistenciaCalendario(supabase, env));
+    await safeCron('verificarConsistenciaCalendario', () => verificarConsistenciaCalendario(supabase, env, meta));
 
     await safeCron('enviarRecordatoriosCitas', async () => {
       const recordatoriosResult = await notificationService.enviarRecordatoriosCitas();

@@ -95,6 +95,11 @@ export async function handleTeamRoutes(request: Request, env: any, supabase: Sup
       });
     }
 
+    // Invalidate team_members cache
+    if (env.SARA_CACHE) {
+      try { await env.SARA_CACHE.delete('team_members:all'); } catch (_) {}
+    }
+
     return new Response(JSON.stringify(data), {
       status: 201,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -148,6 +153,11 @@ export async function handleTeamRoutes(request: Request, env: any, supabase: Sup
       });
     }
 
+    // Invalidate team_members cache
+    if (env.SARA_CACHE) {
+      try { await env.SARA_CACHE.delete('team_members:all'); } catch (_) {}
+    }
+
     return new Response(JSON.stringify(data), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
@@ -166,6 +176,11 @@ export async function handleTeamRoutes(request: Request, env: any, supabase: Sup
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
+    }
+
+    // Invalidate team_members cache
+    if (env.SARA_CACHE) {
+      try { await env.SARA_CACHE.delete('team_members:all'); } catch (_) {}
     }
 
     return new Response(JSON.stringify({ success: true }), {

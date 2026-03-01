@@ -1937,7 +1937,11 @@ export async function procesarBroadcastQueue(supabase: SupabaseService, meta: Me
 
       // SEGURO POR DEFECTO: Si no hay config, error, o está en false -> NO procesar
       if (error || !config || config.value === 'false' || config.value === false) {
-        console.log('🛑 BROADCASTS DESHABILITADOS - Kill switch activo (config:', config?.value, 'error:', !!error, ')');
+        // Solo loguear en primera ejecución de la hora para no spamear logs
+        const now = new Date();
+        if (now.getMinutes() < 2) {
+          console.log('🛑 Broadcasts: kill switch activo (habilitar en CRM o vía /api/broadcasts-enable)');
+        }
         return;
       }
     } catch (e) {

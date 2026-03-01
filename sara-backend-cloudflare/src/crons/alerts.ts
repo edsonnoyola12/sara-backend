@@ -263,7 +263,8 @@ export async function enviarAlertasLeadsFrios(supabase: SupabaseService, meta: M
 // ═══════════════════════════════════════════════════════════════
 export async function verificarConsistenciaCalendario(
   supabase: SupabaseService,
-  env: any
+  env: any,
+  meta?: any
 ): Promise<{ canceladas: number; verificadas: number }> {
   const resultado = { canceladas: 0, verificadas: 0 };
 
@@ -321,6 +322,25 @@ export async function verificarConsistenciaCalendario(
 
         resultado.canceladas++;
         console.error(`❌ Cita ${cita.id} marcada como cancelled (evento borrado de Google)`);
+
+        // Notificar al vendedor
+        if (meta && cita.vendedor_id) {
+          try {
+            const { data: vendedor } = await supabase.client
+              .from('team_members')
+              .select('id, name, phone')
+              .eq('id', cita.vendedor_id)
+              .single();
+            if (vendedor?.phone) {
+              await enviarMensajeTeamMember(supabase, meta, vendedor,
+                `⚠️ *Cita cancelada automáticamente*\n\nLead: ${cita.lead_name}\nFecha: ${cita.scheduled_date} ${cita.scheduled_time || ''}\n\nMotivo: El evento fue eliminado de Google Calendar. Si fue un error, reagenda con: agendar cita ${cita.lead_name?.split(' ')[0]}`,
+                { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
+              );
+            }
+          } catch (notifErr) {
+            console.error(`⚠️ No se pudo notificar vendedor sobre cita cancelada:`, notifErr);
+          }
+        }
       }
     }
 

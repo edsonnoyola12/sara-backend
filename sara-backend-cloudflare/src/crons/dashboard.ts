@@ -163,33 +163,17 @@ export async function getSystemStatus(
 
   // 4. Get Metrics
   try {
-    // Leads today
-    const { count: leadsToday } = await supabase.client
-      .from('leads')
-      .select('*', { count: 'exact', head: true })
-      .gte('created_at', todayStart);
-    status.metrics.leads_today = leadsToday || 0;
-
-    // Leads this week
-    const { count: leadsWeek } = await supabase.client
-      .from('leads')
-      .select('*', { count: 'exact', head: true })
-      .gte('created_at', weekStart);
-    status.metrics.leads_this_week = leadsWeek || 0;
-
-    // Active conversations (leads with recent activity)
-    const { count: activeConvos } = await supabase.client
-      .from('leads')
-      .select('*', { count: 'exact', head: true })
-      .gte('last_contact', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
-    status.metrics.active_conversations = activeConvos || 0;
-
-    // Pending followups
-    const { count: pendingFollowups } = await supabase.client
-      .from('scheduled_followups')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending');
-    status.metrics.pending_followups = pendingFollowups || 0;
+    // Parallel queries for metrics
+    const [leadsTodayRes, leadsWeekRes, activeConvosRes, pendingFollowupsRes] = await Promise.all([
+      supabase.client.from('leads').select('*', { count: 'exact', head: true }).gte('created_at', todayStart),
+      supabase.client.from('leads').select('*', { count: 'exact', head: true }).gte('created_at', weekStart),
+      supabase.client.from('leads').select('*', { count: 'exact', head: true }).gte('last_contact', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+      supabase.client.from('scheduled_followups').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+    ]);
+    status.metrics.leads_today = leadsTodayRes.count || 0;
+    status.metrics.leads_this_week = leadsWeekRes.count || 0;
+    status.metrics.active_conversations = activeConvosRes.count || 0;
+    status.metrics.pending_followups = pendingFollowupsRes.count || 0;
   } catch (e) {
     console.error('Error getting metrics:', e);
   }

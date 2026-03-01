@@ -2301,6 +2301,12 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
         .eq('id', id)
         .select()
         .single();
+
+      // Invalidate properties cache
+      if (env.SARA_CACHE) {
+        try { await env.SARA_CACHE.delete('properties:all'); } catch (_) {}
+      }
+
       return corsResponse(JSON.stringify(data || {}));
     }
 
