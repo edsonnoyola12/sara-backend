@@ -1,5 +1,32 @@
 ## HISTORIAL DE CAMBIOS IMPORTANTES
 
+### 2026-03-01 (Sesión 74) — Resilience & Reliability Overhaul
+
+**13 fixes de resiliencia y rendimiento en 3 commits:**
+
+| Fix | Tipo | Descripción |
+|-----|------|-------------|
+| Fix #1 | CRITICAL | Verificar retorno de `enviarMensajeTeamMember` en callers críticos |
+| Fix #2 | CRITICAL | Entregar TODOS los pending messages (no solo el primero) |
+| Fix #3 | CRITICAL | Bridge lead→vendor wrapped en try-catch con error notification |
+| Fix #4 | CRITICAL | `moveFunnelStep` retorna `success:false` cuando DB falla |
+| Fix #5 | CRITICAL | Double-booking prevention en `agendarCita` |
+| Fix #6 | CRITICAL | Mensaje al lead cuando no hay asesor disponible |
+| Fix #7 | CRITICAL | `guardarMensajePending` throws on DB failure |
+| B1 | BUG | Health monitor `dets is not iterable` crash |
+| B2 | BUG | `pending_alerta_lead` no se entregaba al vendedor |
+| R1 | RACE | Mark-before-send para recordatorios 24h/2h (evita duplicados) |
+| R2 | RACE | Mark-before-send para reactivación equipo |
+| P2 | PERF | N+1 queries eliminadas en nurturing (batch-fetch vendedores) |
+| P3 | PERF | Dashboard queries parallelizadas con Promise.all |
+| P4 | PERF | Cache invalidation en mutaciones de team_members/properties |
+| M1 | MEJORA | Retry queue con backoff exponencial (2min→8min→32min) |
+| M2 | MEJORA | Notificar vendedor cuando cita se auto-cancela por Calendar |
+
+**Tests:** 1107 (33 archivos) — 24 nuevos tests de resiliencia
+
+---
+
 ### 2026-01-29 (Sesión 2)
 
 **Servicios Avanzados de Inteligencia de Negocio:**

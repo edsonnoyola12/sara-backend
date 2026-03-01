@@ -1,6 +1,6 @@
 # SARA CRM - Referencia para Claude Code
 
-> Última actualización: 2026-03-01 (Sesión 73)
+> Última actualización: 2026-03-01 (Sesión 74)
 > Historial detallado de cambios: `docs/CHANGELOG.md`
 
 ---
@@ -153,7 +153,7 @@ WhatsApp solo permite mensajes libres si el usuario escribió en las últimas 24
 - `casas_premium` — Los Encinos, Miravalle, Paseo Colorines, Distrito Falco
 - `terrenos_nogal` — Villa Campelo, Villa Galiano
 
-**Pending keys:** `pending_briefing`, `pending_recap`, `pending_reporte_diario`, `pending_resumen_semanal`, `pending_mensaje`, `pending_alerta_lead`
+**Pending keys:** `pending_alerta_lead` (prioridad 1), `pending_briefing`, `pending_recap`, `pending_reporte_diario`, `pending_resumen_semanal`, `pending_mensaje`
 
 Pending se verifican PRIMERO en handlers de vendedor y CEO, ANTES de cualquier otra lógica.
 
@@ -309,7 +309,7 @@ npx wrangler deploy      # Re-deploy
 
 | Métrica | Valor |
 |---------|-------|
-| Tests | 1083 (32 archivos) |
+| Tests | 1107 (33 archivos) |
 | Servicios | 89+ |
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 27+ |
@@ -318,5 +318,5 @@ npx wrangler deploy      # Re-deploy
 | Precios | 100% dinámicos (0 hardcoded) |
 | WhatsApp UX | CTA buttons, reactions, contact cards |
 | Voz Retell | ElevenLabs LatAm Spanish |
-| Resilience | Retry queue, AI fallback, KV dedup, fetch timeouts, atomic writes, error persistence |
+| Resilience | Retry queue (backoff exponencial), mark-before-send, cache invalidation, AI fallback, KV dedup, fetch timeouts, atomic writes, error persistence, double-booking prevention |
 | Integraciones | Meta/WhatsApp ✅, Supabase ✅, Cloudflare ✅, Google Calendar ✅, Veo 3 ✅, Retell ✅ |
