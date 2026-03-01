@@ -607,22 +607,104 @@ export async function healthMonitorCron(
     details.push({ service: 'openai', ok: false, latency_ms: 0, error: e?.message });
   }
 
-  // 4. Save to health_checks table
+  // 4. Calculate percentiles from last 100 health checks
+  let percentiles: { p50: number; p95: number; p99: number } | null = null;
+  try {
+    const { data: recentChecks } = await supabase.client
+      .from('health_checks')
+      .select('details')
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (recentChecks && recentChecks.length >= 5) {
+      const supabaseLatencies: number[] = [];
+      const metaLatencies: number[] = [];
+      for (const check of recentChecks) {
+        const dets = check.details || [];
+        for (const d of dets) {
+          if (d.service === 'supabase' && d.ok && d.latency_ms > 0) supabaseLatencies.push(d.latency_ms);
+          if (d.service === 'meta' && d.ok && d.latency_ms > 0) metaLatencies.push(d.latency_ms);
+        }
+      }
+      // Use supabase latencies for percentile calculation (primary service)
+      const allLatencies = [...supabaseLatencies, ...metaLatencies].sort((a, b) => a - b);
+      if (allLatencies.length >= 5) {
+        percentiles = {
+          p50: allLatencies[Math.floor(allLatencies.length * 0.50)],
+          p95: allLatencies[Math.floor(allLatencies.length * 0.95)],
+          p99: allLatencies[Math.floor(allLatencies.length * 0.99)],
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ Could not calculate percentiles:', e);
+  }
+
+  // 5. Get token usage today
+  let tokenUsageToday: { total: number; input: number; output: number; count: number } | null = null;
+  try {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const { data: aiData } = await supabase.client
+      .from('ai_responses')
+      .select('tokens_used, input_tokens, output_tokens, response_time_ms')
+      .gte('created_at', todayStart.toISOString());
+
+    if (aiData && aiData.length > 0) {
+      tokenUsageToday = {
+        total: aiData.reduce((sum: number, r: any) => sum + (r.tokens_used || 0), 0),
+        input: aiData.reduce((sum: number, r: any) => sum + (r.input_tokens || 0), 0),
+        output: aiData.reduce((sum: number, r: any) => sum + (r.output_tokens || 0), 0),
+        count: aiData.length,
+      };
+    }
+  } catch (e) {
+    console.warn('⚠️ Could not get token usage:', e);
+  }
+
+  // 6. Compute avg response time from today's AI responses
+  let avgResponseTimeMs: number | null = null;
+  if (tokenUsageToday && tokenUsageToday.count > 0) {
+    try {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const { data: aiTiming } = await supabase.client
+        .from('ai_responses')
+        .select('response_time_ms')
+        .gte('created_at', todayStart.toISOString())
+        .not('response_time_ms', 'is', null);
+
+      if (aiTiming && aiTiming.length > 0) {
+        const totalMs = aiTiming.reduce((sum: number, r: any) => sum + (r.response_time_ms || 0), 0);
+        avgResponseTimeMs = Math.round(totalMs / aiTiming.length);
+      }
+    } catch (e) {
+      // Ignore - non-critical
+    }
+  }
+
+  // 7. Save to health_checks table with enhanced details
   try {
     const allOk = result.supabase_ok && result.meta_ok && result.openai_ok;
+    const enhancedDetails: any = {
+      services: details,
+      ...(percentiles && { percentiles }),
+      ...(tokenUsageToday && { token_usage_today: tokenUsageToday }),
+      ...(avgResponseTimeMs !== null && { avg_response_time_ms: avgResponseTimeMs }),
+    };
     await supabase.client.from('health_checks').insert({
       status: allOk ? 'healthy' : 'degraded',
       supabase_ok: result.supabase_ok,
       meta_ok: result.meta_ok,
       openai_ok: result.openai_ok,
-      details: details,
+      details: enhancedDetails,
     });
     result.saved = true;
   } catch (e) {
     console.warn('⚠️ Could not save health check to DB:', e);
   }
 
-  // 5. Alert on failure
+  // 8. Alert on failure
   const failedServices = details.filter(d => !d.ok).map(d => d.service);
   if (failedServices.length > 0) {
     const detailStr = details.map(d => `${d.ok ? '✅' : '❌'} ${d.service}: ${d.ok ? `${d.latency_ms}ms` : d.error}`).join('\n');
@@ -632,6 +714,28 @@ export async function healthMonitorCron(
       env,
       `health_monitor_${failedServices.join('_')}`
     );
+  }
+
+  // 9. Latency alerts (p95 thresholds)
+  if (percentiles) {
+    const supLatency = details.find(d => d.service === 'supabase');
+    const metaLatency = details.find(d => d.service === 'meta');
+    if (supLatency && supLatency.ok && supLatency.latency_ms > 5000) {
+      await enviarAlertaSistema(
+        meta,
+        `⚠️ LATENCIA ALTA SUPABASE\n\nLatencia actual: ${supLatency.latency_ms}ms\nP95: ${percentiles.p95}ms\nUmbral: 5000ms`,
+        env,
+        'latency_supabase_high'
+      );
+    }
+    if (metaLatency && metaLatency.ok && metaLatency.latency_ms > 3000) {
+      await enviarAlertaSistema(
+        meta,
+        `⚠️ LATENCIA ALTA META API\n\nLatencia actual: ${metaLatency.latency_ms}ms\nP95: ${percentiles.p95}ms\nUmbral: 3000ms`,
+        env,
+        'latency_meta_high'
+      );
+    }
   }
 
   console.log(`🏥 Health monitor: supabase=${result.supabase_ok} meta=${result.meta_ok} openai=${result.openai_ok}`);

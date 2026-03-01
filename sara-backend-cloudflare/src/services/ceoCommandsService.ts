@@ -11,6 +11,9 @@ import { CustomerValueService } from './customerValueService';
 import { PDFReportService } from './pdfReportService';
 import { getLastHealthCheck, getLastAIResponses } from '../crons/healthCheck';
 import { getBackupLog } from '../crons/dashboard';
+import { getObservabilityDashboard, formatObservabilityForWhatsApp } from './observabilityService';
+import { DevelopmentFunnelService } from './developmentFunnelService';
+import { ReferralService } from './referralService';
 
 export interface CEOCommandResult {
   handled: boolean;
@@ -39,7 +42,8 @@ export class CEOCommandsService {
           `*📈 ANÁLISIS*\n` +
           `• *probabilidad* - Cierre\n` +
           `• *visitas* / *alertas* / *mercado*\n` +
-          `• *clv* - Valor cliente\n\n` +
+          `• *clv* - Valor cliente\n` +
+          `• *programa referidos* - Referral program\n\n` +
           `*💰 OFERTAS*\n` +
           `• *cotizar [lead] [precio]*\n` +
           `• *enviar oferta [lead]*\n` +
@@ -159,8 +163,10 @@ export class CEOCommandsService {
 
     // ═══ COMPARADOR DE PROPIEDADES ═══
     // Matches: "comparar monte verde vs distrito falco", "vs miravalle encinos"
+    // Excludes: "comparar desarrollos", "comparativo" → those go to developmentComparison
     const compareMatch = msgLower.match(/^(?:comparar|compara|vs)\s+(.+)$/);
-    if (compareMatch || msgLower.includes(' vs ')) {
+    const isDevelopmentComparison = msgLower === 'comparar' || msgLower === 'comparar desarrollos' || msgLower === 'comparativo' || msgLower === 'desarrollos';
+    if ((compareMatch || msgLower.includes(' vs ')) && !isDevelopmentComparison) {
       const query = compareMatch?.[1] || msgLower;
       return {
         action: 'call_handler',
@@ -201,8 +207,9 @@ export class CEOCommandsService {
     }
 
     // ═══ VALOR DEL CLIENTE (CLV) ═══
+    // Note: 'programa referidos' routes to referralProgram handler, NOT here
     if (msgLower === 'clv' || msgLower === 'valor cliente' ||
-        msgLower === 'referidos' || msgLower === 'programa referidos' ||
+        msgLower === 'referidos' ||
         msgLower === 'clientes vip' || msgLower === 'top clientes') {
       return { action: 'call_handler', handlerName: 'valorCliente' };
     }
@@ -360,6 +367,22 @@ export class CEOCommandsService {
       return { action: 'call_handler', handlerName: 'ceoVideo', handlerParams: { desarrollo: matchVideo[1].trim() } };
     }
 
+    // ═══ FUNNEL DE DESARROLLO ═══
+    const matchFunnel = msgLower.match(/^(?:funnel|embudo|conversión|conversion)\s+(.+)$/i);
+    if (matchFunnel) {
+      return { action: 'call_handler', handlerName: 'developmentFunnel', handlerParams: { desarrollo: matchFunnel[1].trim() } };
+    }
+
+    // ═══ COMPARAR DESARROLLOS ═══
+    if (msgLower === 'comparar' || msgLower === 'comparar desarrollos' || msgLower === 'comparativo' || msgLower === 'desarrollos') {
+      return { action: 'call_handler', handlerName: 'developmentComparison' };
+    }
+
+    // ═══ PROGRAMA REFERIDOS ═══
+    if (msgLower === 'programa referidos' || msgLower === 'referidos programa' || msgLower === 'programa de referidos' || msgLower === 'referral' || msgLower === 'referrals') {
+      return { action: 'call_handler', handlerName: 'referralProgram' };
+    }
+
     // ═══ STATUS DEL SISTEMA ═══
     if (msgLower === 'status' || msgLower === 'estado' || msgLower === 'salud' || msgLower === 'health') {
       return { action: 'call_handler', handlerName: 'healthStatus' };
@@ -368,6 +391,11 @@ export class CEOCommandsService {
     // ═══ ÚLTIMAS RESPUESTAS DE IA ═══
     if (msgLower === 'respuestas' || msgLower === 'respuestas ia' || msgLower === 'respuestas ai' || msgLower === 'ai log' || msgLower === 'log ia') {
       return { action: 'call_handler', handlerName: 'ultimasRespuestasAI' };
+    }
+
+    // ═══ OBSERVABILIDAD ═══
+    if (msgLower === 'observabilidad' || msgLower === 'observability' || msgLower === 'obs' || msgLower === 'crons' || msgLower === 'metricas') {
+      return { action: 'call_handler', handlerName: 'observabilidad' };
     }
 
     // ═══ HANDOFFS (leads con IA desactivada) ═══
@@ -1161,6 +1189,34 @@ export class CEOCommandsService {
         case 'ultimasRespuestasAI': {
           const respMsg = await getLastAIResponses(this.supabase);
           return { message: respMsg };
+        }
+
+        // ═══ OBSERVABILIDAD ═══
+        case 'observabilidad': {
+          const obsDashboard = await getObservabilityDashboard(this.supabase);
+          return { message: formatObservabilityForWhatsApp(obsDashboard) };
+        }
+
+        // ═══ FUNNEL POR DESARROLLO ═══
+        case 'developmentFunnel': {
+          const funnelService = new DevelopmentFunnelService(this.supabase);
+          const desarrollo = handlerParams?.desarrollo || '';
+          const funnelData = await funnelService.getFunnel(desarrollo);
+          return { message: funnelService.formatFunnelForWhatsApp(funnelData) };
+        }
+
+        // ═══ COMPARATIVO DE DESARROLLOS ═══
+        case 'developmentComparison': {
+          const compService = new DevelopmentFunnelService(this.supabase);
+          const comparison = await compService.compareAll();
+          return { message: compService.formatComparisonForWhatsApp(comparison) };
+        }
+
+        // ═══ PROGRAMA REFERIDOS ═══
+        case 'referralProgram': {
+          const refService = new ReferralService(this.supabase);
+          const stats = await refService.getReferralStats(90);
+          return { message: refService.formatStatsForWhatsApp(stats) };
         }
 
         // ═══ HANDOFFS (leads con IA desactivada) ═══

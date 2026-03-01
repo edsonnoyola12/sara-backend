@@ -31,6 +31,7 @@ import { processRetryQueue, enqueueFailedMessage } from './services/retryQueueSe
 import { createLeadAttribution } from './services/leadAttributionService';
 import { createSLAMonitoring } from './services/slaMonitoringService';
 import { createLeadDeduplication } from './services/leadDeduplicationService';
+import { CronTracker, getObservabilityDashboard, formatObservabilityForWhatsApp } from './services/observabilityService';
 
 // CRON modules
 import {
@@ -2664,9 +2665,10 @@ export default {
       .select('*')
       .eq('active', true);
 
-    // Helper para aislar errores de CRONs individuales
+    // CronTracker: tracks execution time + errors for each CRON task
+    const cronTracker = new CronTracker(event.cron);
     async function safeCron(label: string, fn: () => Promise<any>): Promise<void> {
-      try { await fn(); } catch (e) { console.error(`❌ Error en ${label}:`, e); }
+      await cronTracker.track(label, fn);
     }
 
     console.log(`👥 Vendedores activos: ${vendedores?.length || 0}`);
@@ -3826,6 +3828,15 @@ export default {
         console.log('⏭️ Retell no configurado, saltando verificación de llamadas');
       }
     }
+    // Persist CRON execution summary for observability
+    await cronTracker.persist(supabase);
+    const cronSummary = cronTracker.getSummary();
+    if (cronSummary.failCount > 0) {
+      console.warn(`⚠️ CRON run: ${cronSummary.failCount}/${cronSummary.tasks.length} tasks failed (${cronSummary.totalDuration_ms}ms)`);
+    } else {
+      console.log(`✅ CRON run: ${cronSummary.tasks.length} tasks OK (${cronSummary.totalDuration_ms}ms)`);
+    }
+
     } catch (error) {
       // Capturar errores de cron en Sentry
       sentry.captureException(error, {

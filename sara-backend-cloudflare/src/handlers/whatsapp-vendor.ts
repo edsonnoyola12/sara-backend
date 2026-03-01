@@ -14,6 +14,7 @@ import { AppointmentService } from '../services/appointmentService';
 import { safeJsonParse } from '../utils/safeHelpers';
 import { formatVendorFeedback } from './whatsapp-utils';
 import { createSLAMonitoring } from '../services/slaMonitoringService';
+import { ReferralService } from '../services/referralService';
 
 export async function handleVendedorMessage(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, teamMembers: any[]): Promise<void> {
   const mensaje = body.toLowerCase().trim();
@@ -2382,42 +2383,42 @@ export async function vendedorGuardarEmail(ctx: HandlerContext, handler: any, fr
 }
 
 /**
- * Registra un referido por vendedor
+ * Registra un referido por vendedor (usa ReferralService)
  */
 export async function vendedorRegistrarReferido(ctx: HandlerContext, handler: any, from: string, match: RegExpMatchArray, vendedor: any): Promise<void> {
   const nombreReferido = match[1].trim();
   const telReferido = match[2];
   const nombreReferidor = match[3].trim();
-  
-  const referidores = await findLeadByName(ctx.supabase, nombreReferidor, {
-    statusFilter: 'delivered', limit: 1
+
+  const refService = new ReferralService(ctx.supabase);
+  const result = await refService.registerReferral({
+    referrerName: nombreReferidor,
+    referredName: nombreReferido,
+    referredPhone: telReferido,
+    vendorId: vendedor.id
   });
-  const referidor = referidores[0] || null;
-  
-  await ctx.supabase.client
-    .from('leads')
-    .insert({
-      name: nombreReferido,
-      phone: '52' + telReferido.slice(-10),
-      source: 'referido',
-      referrer_id: referidor?.id || null,
-      assigned_to: vendedor.id,
-      status: 'new',
-      score: 80,
-      notes: { referido_por: nombreReferidor, fecha_referido: new Date().toISOString() }
-    });
-  
-  await ctx.twilio.sendWhatsAppMessage(handler.formatPhoneMX(telReferido),
+
+  if (!result.success) {
+    await ctx.meta.sendWhatsAppMessage(from, `⚠️ Error al registrar referido: ${result.error}`);
+    return;
+  }
+
+  // Send welcome message to referred lead
+  const cleanPhone = telReferido.replace(/\D/g, '');
+  const phoneFormatted = cleanPhone.length === 10 ? `521${cleanPhone}` : cleanPhone;
+  await ctx.meta.sendWhatsAppMessage(phoneFormatted,
     '👋 ¡Hola *' + nombreReferido.split(' ')[0] + '*!\n\n' +
     'Tu amigo *' + nombreReferidor.split(' ')[0] + '* te recomendó con nosotros para ayudarte a encontrar tu casa ideal. 🏠\n\n' +
     'Tenemos opciones increíbles para ti.\n\n' +
     'Pronto te contactará uno de nuestros asesores. ¿Mientras tanto, te gustaría ver información de nuestras propiedades?\n\n' +
     'Responde *SÍ* para conocer más.');
-  
-  await ctx.twilio.sendWhatsAppMessage(from,
+
+  // Confirm to vendor
+  await ctx.meta.sendWhatsAppMessage(from,
     '✅ *Referido registrado*\n\n' +
     '*' + nombreReferido + '* - ' + telReferido + '\n' +
-    '👤 Por: ' + nombreReferidor + '\n\n' +
+    '👤 Por: ' + nombreReferidor +
+    (result.referrer ? ` (${result.referrer.name})` : '') + '\n\n' +
     'Ya le enviamos mensaje de bienvenida.');
 }
 
@@ -5498,24 +5499,29 @@ export async function vendedorEnviarOferta(ctx: HandlerContext, handler: any, fr
       month: 'long'
     });
 
+    // Generate cotización link
+    const cotizacionUrl = `https://sara-backend.edson-633.workers.dev/cotizacion/${offer.id}`;
+
     const ofertaMsg =
-      `🏠 *COTIZACIÓN PARA TI*\n\n` +
-      `📦 *Propiedad:* ${offer.property_name}\n` +
-      `🏘️ *Desarrollo:* ${offer.development}\n\n` +
+      `🏠 *COTIZACIÓN PERSONALIZADA*\n\n` +
+      `📦 *${offer.property_name}*\n` +
+      `🏘️ ${offer.development}\n\n` +
       `💰 *Precio especial:* $${precioFmt} MXN\n` +
       (offer.discount_percent > 0 ? `📉 *Descuento:* ${offer.discount_percent}%\n` : '') +
       `📅 *Válido hasta:* ${vencimientoStr}\n\n` +
+      `👉 Ver cotización completa:\n${cotizacionUrl}\n\n` +
       `¿Te interesa? Responde a este mensaje para que te ayude con los siguientes pasos. 🙌`;
 
     await ctx.meta.sendWhatsAppMessage(leadPhone, ofertaMsg);
 
     // Actualizar status de la oferta
     const offerService = new OfferTrackingService(ctx.supabase);
-    await offerService.updateOfferStatus(offer.id, 'sent', 'Enviada vía WhatsApp', vendedor.id);
+    await offerService.updateOfferStatus(offer.id, 'sent', 'Enviada vía WhatsApp con cotización', vendedor.id);
 
     await ctx.meta.sendWhatsAppMessage(from,
       `✅ *Oferta enviada a ${lead.name}*\n\n` +
-      `📤 La cotización fue enviada por WhatsApp.\n\n` +
+      `📤 Cotización enviada con link profesional.\n` +
+      `🔗 ${cotizacionUrl}\n\n` +
       `💡 Cuando responda puedes actualizar el status:\n` +
       `• *oferta aceptada ${lead.name.split(' ')[0]}*\n` +
       `• *oferta rechazada ${lead.name.split(' ')[0]} [razón]*`

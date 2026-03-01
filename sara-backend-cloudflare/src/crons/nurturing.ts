@@ -251,42 +251,11 @@ export async function followUpPostVisita(supabase: SupabaseService, meta: MetaWh
       // Calcular días desde visita
       const diasDesdeVisita = Math.floor((ahora.getTime() - new Date(lead.updated_at).getTime()) / (1000 * 60 * 60 * 24));
 
-      // Mensaje personalizado según tiempo transcurrido
-      let mensaje = '';
-      if (diasDesdeVisita <= 3) {
-        mensaje = `¡Hola ${nombre}! 👋
+      // Vendor feedback rating (1=hot, 2=interested, 3=lukewarm, 4=cold)
+      const vendorRating = (notas as any)?.vendor_feedback?.rating || 0;
 
-¿Qué te pareció tu visita a ${desarrollo}? Me encantaría saber tu opinión.
-
-Si tienes alguna duda sobre:
-🏠 Las casas que viste
-💰 Precios o formas de pago
-📋 El proceso de compra
-
-¡Estoy aquí para ayudarte! 🙂`;
-      } else if (diasDesdeVisita <= 7) {
-        mensaje = `¡Hola ${nombre}! 👋
-
-Han pasado unos días desde que visitaste ${desarrollo} y quería saber cómo va tu decisión.
-
-¿Hay algo que te gustaría aclarar? Puedo ayudarte con:
-✅ Segunda visita para ver otros modelos
-✅ Cotización detallada
-✅ Opciones de financiamiento
-
-Solo responde y con gusto te atiendo 🏡`;
-      } else {
-        mensaje = `¡Hola ${nombre}! 👋
-
-Te escribo porque recuerdo que visitaste ${desarrollo} y me quedé pensando si encontraste lo que buscabas.
-
-Si aún estás buscando casa, me encantaría:
-🔑 Mostrarte nuevas opciones
-💡 Compartirte promociones actuales
-📊 Revisar tu presupuesto juntos
-
-¿Te interesa? Solo responde "sí" y te contacto 🏠`;
-      }
+      // Mensaje inteligente: combina tiempo + interés del vendedor
+      const mensaje = generarMensajePostVisita(nombre, desarrollo, diasDesdeVisita, vendorRating);
 
       try {
         await meta.sendWhatsAppMessage(lead.phone, mensaje);
@@ -347,6 +316,56 @@ Hace: ${diasDesdeVisita} días
     console.error('Error en followUpPostVisita:', e);
     await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'followUpPostVisita', stack: (e as Error).stack });
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// GENERADOR DE MENSAJES POST-VISITA INTELIGENTE
+// Combina tiempo + vendor rating para mensajes personalizados
+// ═══════════════════════════════════════════════════════════
+export function generarMensajePostVisita(nombre: string, desarrollo: string, diasDesdeVisita: number, vendorRating: number): string {
+  // HOT (rating 1) - Muy interesado: urgencia y next steps
+  if (vendorRating === 1) {
+    if (diasDesdeVisita <= 3) {
+      return `¡Hola ${nombre}! 🔥\n\n¡Qué gusto que te encantó ${desarrollo}!\n\nPara avanzar rápido, te puedo ayudar con:\n📋 Cotización personalizada\n💰 Simulación de crédito\n📅 Segunda visita para elegir tu lote\n\n¿Qué te gustaría hacer primero?`;
+    } else if (diasDesdeVisita <= 7) {
+      return `¡Hola ${nombre}! 🏡\n\nSé que ${desarrollo} te gustó mucho. No quiero que pierdas la oportunidad.\n\n¿Ya checaste las opciones de financiamiento? Te puedo preparar una cotización con los mejores bancos.\n\nSolo responde "cotización" y te la envío 📊`;
+    }
+    return `¡Hola ${nombre}! 👋\n\nRecuerdo que ${desarrollo} te encantó. Las unidades disponibles van bajando — ¿quieres que te aparte una cita para elegir tu casa?\n\nResponde "sí" y te agendo 📅`;
+  }
+
+  // INTERESTED (rating 2) - Interesado: info adicional
+  if (vendorRating === 2) {
+    if (diasDesdeVisita <= 3) {
+      return `¡Hola ${nombre}! 👋\n\n¿Qué te pareció tu visita a ${desarrollo}? Vi que te interesaron varias opciones.\n\n¿Te gustaría que te envíe:\n🏠 Fichas técnicas de los modelos\n💰 Tabla de precios actualizada\n📋 Opciones de financiamiento\n\n¡Solo dime y te lo envío!`;
+    } else if (diasDesdeVisita <= 7) {
+      return `¡Hola ${nombre}! 👋\n\nHan pasado unos días desde tu visita a ${desarrollo}. ¿Cómo va tu decisión?\n\nPuedo ayudarte con:\n✅ Comparar opciones de desarrollos\n✅ Cotización detallada\n✅ Segunda visita\n\nSolo responde y te atiendo 🏡`;
+    }
+    return `¡Hola ${nombre}! 👋\n\nRecuerdo que visitaste ${desarrollo} y me quedé pensando si encontraste lo que buscabas.\n\nSi quieres, te puedo mostrar:\n🔑 Opciones similares en otros desarrollos\n💡 Promociones vigentes\n\n¿Te interesa? 🏠`;
+  }
+
+  // LUKEWARM (rating 3) - Tibio: resolver dudas
+  if (vendorRating === 3) {
+    if (diasDesdeVisita <= 5) {
+      return `¡Hola ${nombre}! 👋\n\nSé que después de visitar ${desarrollo} quedaron algunas dudas. Es completamente normal.\n\n¿Hay algo específico que te gustaría saber?\n🤔 Precios y formas de pago\n📍 Ubicación y servicios cercanos\n🏗️ Tiempos de entrega\n\nEstoy para resolver cualquier duda 😊`;
+    }
+    return `¡Hola ${nombre}! 👋\n\nQuerría saber si hay algo que pueda hacer por ti respecto a ${desarrollo}.\n\nA veces ayuda:\n📊 Ver una cotización con números reales\n🏠 Visitar otro modelo que se ajuste mejor\n💡 Conocer las promociones del mes\n\n¿Qué te parece? Solo responde y platicamos 🙂`;
+  }
+
+  // COLD (rating 4) or NO RATING - No le convenció / sin data
+  if (vendorRating === 4) {
+    if (diasDesdeVisita <= 5) {
+      return `¡Hola ${nombre}! 👋\n\nGracias por tomarte el tiempo de visitar ${desarrollo}. Entiendo que no era exactamente lo que buscabas.\n\n¿Me cuentas qué es lo más importante para ti en una casa? Así puedo recomendarte algo que sí se ajuste 🏡`;
+    }
+    return `¡Hola ${nombre}! 👋\n\nSé que ${desarrollo} no fue tu favorito. Pero tenemos otros desarrollos que podrían gustarte más.\n\n¿Quieres que te muestre opciones diferentes? Solo dime tu presupuesto y zona preferida 📍`;
+  }
+
+  // DEFAULT (no vendor feedback) - Mensaje genérico basado en tiempo
+  if (diasDesdeVisita <= 3) {
+    return `¡Hola ${nombre}! 👋\n\n¿Qué te pareció tu visita a ${desarrollo}? Me encantaría saber tu opinión.\n\nSi tienes alguna duda sobre:\n🏠 Las casas que viste\n💰 Precios o formas de pago\n📋 El proceso de compra\n\n¡Estoy aquí para ayudarte! 🙂`;
+  } else if (diasDesdeVisita <= 7) {
+    return `¡Hola ${nombre}! 👋\n\nHan pasado unos días desde que visitaste ${desarrollo} y quería saber cómo va tu decisión.\n\n¿Hay algo que te gustaría aclarar? Puedo ayudarte con:\n✅ Segunda visita para ver otros modelos\n✅ Cotización detallada\n✅ Opciones de financiamiento\n\nSolo responde y con gusto te atiendo 🏡`;
+  }
+  return `¡Hola ${nombre}! 👋\n\nTe escribo porque recuerdo que visitaste ${desarrollo} y me quedé pensando si encontraste lo que buscabas.\n\nSi aún estás buscando casa, me encantaría:\n🔑 Mostrarte nuevas opciones\n💡 Compartirte promociones actuales\n📊 Revisar tu presupuesto juntos\n\n¿Te interesa? Solo responde "sí" y te contacto 🏠`;
 }
 
 // ═══════════════════════════════════════════════════════════

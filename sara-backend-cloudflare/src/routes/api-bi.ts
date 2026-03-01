@@ -34,6 +34,10 @@ import { createEmailReports } from '../services/emailReportsService';
 import { createFeatureFlags } from '../services/featureFlagsService';
 import { generateOpenAPISpec, generateSwaggerUI, generateReDocUI } from '../services/apiDocsService';
 import { getSystemStatus, getAnalyticsDashboard, renderStatusPage, renderAnalyticsPage, exportBackup } from '../crons/dashboard';
+import { getObservabilityDashboard } from '../services/observabilityService';
+import { buildCotizacionFromOffer, generateCotizacionHTML } from '../services/cotizacionService';
+import { DevelopmentFunnelService } from '../services/developmentFunnelService';
+import { ReferralService } from '../services/referralService';
 
 interface Env {
   SUPABASE_URL: string;
@@ -2302,6 +2306,79 @@ CREATE INDEX idx_mds_updated ON message_delivery_status(updated_at);`
       }
 
       return corsResponse(JSON.stringify(analytics, null, 2), 200, 'application/json', request);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // OBSERVABILITY DASHBOARD - CRONs, errors, health, business metrics
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/observability') {
+      const authErr = checkApiAuth(request, env);
+      if (authErr) {
+        const origin = request.headers.get('Origin');
+        if (!isAllowedCrmOrigin(origin)) return authErr;
+      }
+      try {
+        const dashboard = await getObservabilityDashboard(supabase);
+        return corsResponse(JSON.stringify(dashboard, null, 2), 200, 'application/json', request);
+      } catch (e) {
+        return corsResponse(JSON.stringify({ error: 'Error generating observability dashboard' }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // DEVELOPMENT FUNNEL - Per-development conversion metrics
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/development-funnel') {
+      const authErr = checkApiAuth(request, env);
+      if (authErr) {
+        const origin = request.headers.get('Origin');
+        if (!isAllowedCrmOrigin(origin)) return authErr;
+      }
+
+      const development = url.searchParams.get('development');
+      const days = parseInt(url.searchParams.get('days') || '90');
+      const funnelService = new DevelopmentFunnelService(supabase);
+
+      try {
+        if (development) {
+          const funnel = await funnelService.getFunnel(development, days);
+          return corsResponse(JSON.stringify(funnel, null, 2), 200, 'application/json', request);
+        } else {
+          const comparison = await funnelService.compareAll(days);
+          return corsResponse(JSON.stringify(comparison, null, 2), 200, 'application/json', request);
+        }
+      } catch (e) {
+        return corsResponse(JSON.stringify({ error: 'Error generating funnel data' }), 500);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // COTIZACIÓN HTML - Professional quote page (public, accessed via link)
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/cotizacion/')) {
+      const offerId = url.pathname.split('/')[2];
+      if (!offerId) return corsResponse(JSON.stringify({ error: 'Missing offer ID' }), 400);
+
+      try {
+        const cotizacion = await buildCotizacionFromOffer(supabase, offerId);
+        if (!cotizacion) {
+          return new Response('<html><body style="font-family:sans-serif;text-align:center;padding:60px;"><h1>Cotización no encontrada</h1><p>Esta cotización ya no está disponible o ha expirado.</p></body></html>', {
+            status: 404,
+            headers: { 'Content-Type': 'text/html; charset=utf-8' }
+          });
+        }
+        const html = generateCotizacionHTML(cotizacion);
+        return new Response(html, {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }
+        });
+      } catch (e) {
+        console.error('Error generating cotización:', e);
+        return new Response('<html><body><h1>Error</h1></body></html>', {
+          status: 500,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' }
+        });
+      }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -4728,6 +4805,40 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
           }), 400, 'application/json', request);
         }
       }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // API Routes - Referrals
+    // ═══════════════════════════════════════════════════════════
+
+    if (url.pathname === '/api/referrals' && request.method === 'GET') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const days = parseInt(url.searchParams.get('days') || '90');
+      const refService = new ReferralService(supabase);
+      const stats = await refService.getReferralStats(days);
+      const records = await refService.getReferralRecords(days);
+
+      return corsResponse(JSON.stringify({
+        success: true,
+        stats,
+        records
+      }), 200, 'application/json', request);
+    }
+
+    if (url.pathname === '/api/referrals/stats' && request.method === 'GET') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const days = parseInt(url.searchParams.get('days') || '90');
+      const refService = new ReferralService(supabase);
+      const stats = await refService.getReferralStats(days);
+
+      return corsResponse(JSON.stringify({
+        success: true,
+        stats
+      }), 200, 'application/json', request);
     }
 
   return null;
