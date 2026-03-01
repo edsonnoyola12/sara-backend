@@ -1010,7 +1010,7 @@ export default {
                     .from('leads')
                     .select('*')
                     .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`)
-                    .single();
+                    .maybeSingle();
 
                   if (lead) {
                     const enFlujoCredito = await creditService.estaEnFlujoCredito(lead.id);
@@ -1042,10 +1042,10 @@ export default {
                           // Fetch ambos team members en paralelo
                           const [asesorResult, vendedorResult] = await Promise.all([
                             needAsesor
-                              ? supabase.client.from('team_members').select('*').eq('id', asesor.id).single()
+                              ? supabase.client.from('team_members').select('*').eq('id', asesor.id).maybeSingle()
                               : Promise.resolve({ data: null }),
                             needVendor
-                              ? supabase.client.from('team_members').select('*').eq('id', vendedorOriginalId).single()
+                              ? supabase.client.from('team_members').select('*').eq('id', vendedorOriginalId).maybeSingle()
                               : Promise.resolve({ data: null })
                           ]);
 
@@ -1095,7 +1095,7 @@ export default {
 
                   // ═══ BROKER HIPOTECARIO - ANÁLISIS DE DOCUMENTOS ═══
                   // Si el lead tiene needs_mortgage=true y asesor asignado, procesar como doc hipotecario
-                  const leadNotesBroker = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+                  const leadNotesBroker = safeJsonParse(lead.notes);
                   const needsMortgage = leadNotesBroker.needs_mortgage === true;
                   const asesorAsignado = leadNotesBroker.asesor_asignado || lead.assigned_advisor_id;
 
@@ -1213,7 +1213,7 @@ export default {
               .from('leads')
               .select('*, team_members!leads_assigned_to_fkey(phone, name)')
               .or(`phone.eq.${cleanPhone},phone.like.%${cleanPhone.slice(-10)}`)
-              .single();
+              .maybeSingle();
 
             const esClientePostEntrega = leadImg && ['delivered', 'sold', 'closed'].includes(leadImg.status);
 
@@ -1617,7 +1617,7 @@ export default {
                 .from('leads')
                 .select('id, name, phone, assigned_to, property_interest, notes, status')
                 .or(`phone.eq.${cleanPhoneHot},phone.like.%${cleanPhoneHot.slice(-10)}`)
-                .single();
+                .maybeSingle();
 
               if (leadHot) {
                 // PRIMERO: Verificar si hay encuesta pendiente en tabla surveys (enviada desde CRM)
@@ -1997,7 +1997,7 @@ export default {
               .from('leads')
               .select('*')
               .eq('phone', leadPhone)
-              .single();
+              .maybeSingle();
             existingLead = byPhone;
           }
 
@@ -2036,7 +2036,7 @@ export default {
               notes: `Lead de Facebook Ads\n${leadNotes}\n---\nLeadgen ID: ${leadgenId}\nForm ID: ${formId}\nPage ID: ${pageId}`
             })
             .select()
-            .single();
+            .maybeSingle();
 
           if (error) {
             console.error('Error creando lead de Facebook:', error);
@@ -2195,7 +2195,7 @@ export default {
               .from('appointments')
               .select('*')
               .eq('google_event_vendedor_id', event.id)
-              .single();
+              .maybeSingle();
             
             if (appointment) {
               // Verificar si el evento fue cancelado (marcado como cancelled en Google)
@@ -3415,14 +3415,14 @@ export default {
               .from('team_members')
               .select('id, name, phone')
               .eq('id', cita.team_member_id)
-              .single();
+              .maybeSingle();
 
             // Obtener lead
             const { data: lead } = await supabase.client
               .from('leads')
               .select('name, phone')
               .eq('id', cita.lead_id)
-              .single();
+              .maybeSingle();
 
             if (vendedor?.phone && lead) {
               await meta.sendWhatsAppMessage(vendedor.phone,

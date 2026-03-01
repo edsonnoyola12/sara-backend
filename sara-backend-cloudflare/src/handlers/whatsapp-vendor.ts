@@ -6021,7 +6021,7 @@ export async function vendedorLlamarIA(ctx: HandlerContext, handler: any, from: 
     let desarrolloInteres = '';
     let precioDesde = '';
     if (lead.notes?.desarrollo_interes) {
-      desarrolloInteres = lead.notes.desarrollo_interes;
+      desarrolloInteres = lead.notes?.desarrollo_interes;
     } else if (lead.interested_in) {
       desarrolloInteres = lead.interested_in;
     }
