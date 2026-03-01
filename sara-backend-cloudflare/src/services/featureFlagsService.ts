@@ -26,6 +26,9 @@ export interface FeatureFlags {
   voice_messages_enabled: boolean;      // Enviar mensajes de voz
   retell_enabled: boolean;              // Llamadas telefónicas con IA (Retell.ai)
 
+  // Cadencia
+  cadencia_inteligente: boolean;        // Cadencia multi-paso (WhatsApp + llamada IA)
+
   // Operaciones
   outside_hours_responses: boolean;     // Respuestas fuera de horario
   smart_caching_enabled: boolean;       // Caché inteligente
@@ -59,6 +62,7 @@ const DEFAULT_FLAGS: FeatureFlags = {
   voice_messages_enabled: true,       // ✅ Activado - Enviar mensajes de voz
   retell_enabled: false,              // ❌ Desactivado - Requiere API key de Retell.ai
 
+  cadencia_inteligente: false,          // ❌ Desactivado - Activar cuando esté probado
   outside_hours_responses: true,
   smart_caching_enabled: true,
   audit_log_enabled: true,

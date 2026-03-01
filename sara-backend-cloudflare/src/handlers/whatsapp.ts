@@ -395,6 +395,32 @@ export class WhatsAppHandler {
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // DESACTIVAR CADENCIA SI LEAD RESPONDE
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      if (lead?.id) {
+        try {
+          // Re-read notes fresh from DB to avoid JSONB stale
+          const { data: freshCadLead } = await this.supabase.client
+            .from('leads')
+            .select('notes')
+            .eq('id', lead.id)
+            .single();
+
+          if (freshCadLead) {
+            const cadNotes = typeof freshCadLead.notes === 'object' ? (freshCadLead.notes || {}) : {};
+            if ((cadNotes as any).cadencia?.activa) {
+              (cadNotes as any).cadencia.activa = false;
+              (cadNotes as any).cadencia.motivo_fin = 'lead_respondio';
+              await this.supabase.client.from('leads').update({ notes: cadNotes }).eq('id', lead.id);
+              console.log(`🎵 Cadencia desactivada para ${lead.name} - lead respondió`);
+            }
+          }
+        } catch (cadErr) {
+          console.error('⚠️ Error desactivando cadencia:', cadErr);
+        }
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // 📲 NOTIFICACIÓN EN TIEMPO REAL AL VENDEDOR (lead respondió)
       // Solo si: tiene vendedor asignado, no es mensaje corto/automatizado
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

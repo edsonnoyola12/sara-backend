@@ -121,7 +121,10 @@ import {
   llamadasSeguimientoPostVisita,
   llamadasReactivacionLeadsFrios,
   llamadasRecordatorioCita,
-  llamadasEscalamiento48h
+  llamadasEscalamiento48h,
+  reintentarLlamadasSinRespuesta,
+  activarCadenciasAutomaticas,
+  ejecutarCadenciasInteligentes
 } from './crons/followups';
 
 // Lead Scoring y Objeciones
@@ -3715,6 +3718,21 @@ export default {
     // LLAMADAS ESCALAMIENTO POST-VENTA: Diario 1pm L-V
     if (mexicoHour === 13 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 5) {
       await safeCron('llamadasEscalamientoPostVenta', () => llamadasEscalamientoPostVenta(supabase, meta, env));
+    }
+
+    // REINTENTAR LLAMADAS SIN RESPUESTA: Cada hora L-S 9am-7pm MX
+    if (isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 6 && mexicoHour >= 9 && mexicoHour <= 19) {
+      await safeCron('reintentarLlamadasSinRespuesta', () => reintentarLlamadasSinRespuesta(supabase, meta, env));
+    }
+
+    // EJECUTAR CADENCIAS INTELIGENTES: Cada 2h pares L-S 8am-8pm MX
+    if (isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 6 && mexicoHour >= 8 && mexicoHour <= 20 && mexicoHour % 2 === 0) {
+      await safeCron('ejecutarCadenciasInteligentes', () => ejecutarCadenciasInteligentes(supabase, meta, env));
+    }
+
+    // ACTIVAR CADENCIAS AUTOMÁTICAS: Diario 9am MX L-S
+    if (mexicoHour === 9 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 6) {
+      await safeCron('activarCadenciasAutomaticas', () => activarCadenciasAutomaticas(supabase, meta, env));
     }
 
     // BRIDGES - Verificar bridges por expirar (cada 2 min)

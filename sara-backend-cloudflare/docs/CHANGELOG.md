@@ -1,5 +1,40 @@
 ## HISTORIAL DE CAMBIOS IMPORTANTES
 
+### 2026-03-01 (Sesión 76) — Retry Llamadas + Dashboard Llamadas + Cadencia Inteligente
+
+**Feature 1: Retry Llamadas Sin Respuesta**
+
+| Cambio | Archivo | Detalle |
+|--------|---------|---------|
+| Bug fix outcome | `routes/retell.ts` | `call_logs.outcome` ahora usa `determinarOutcome(call)` que lee `disconnection_reason` (antes siempre era 'successful'/'unknown') |
+| Bug fix vendor notification | `routes/retell.ts` | Outcome en notificación al vendedor ahora muestra el valor real (📵 No contestó, 📭 Buzón, etc.) |
+| Retry metadata | `routes/retell.ts` | Si outcome retryable + outbound → guarda `pending_retry_call` en notes (motivo, attempt, retry_after) |
+| Retry CRON | `crons/followups.ts` | `reintentarLlamadasSinRespuesta`: cada hora L-S 9-19 MX, max 5/ciclo, mark-before-send |
+| Notificación manual | `crons/followups.ts` | Si 2+ intentos fallan → notifica vendedor "llama manual" |
+
+**Feature 2: Dashboard Llamadas (CEO)**
+
+| Cambio | Archivo | Detalle |
+|--------|---------|---------|
+| Comando | `services/ceoCommandsService.ts` | `llamadas` / `llamadas ia` / `calls` → `reporteLlamadas` |
+| Handler | `services/ceoCommandsService.ts` | Query `call_logs` mes actual + pasado: totales, outcomes, duración, sentimiento, conversión, top vendedores |
+
+**Feature 3: Cadencia Inteligente**
+
+| Cambio | Archivo | Detalle |
+|--------|---------|---------|
+| Feature flag | `services/featureFlagsService.ts` | `cadencia_inteligente: boolean` (default false) |
+| Tipos + constantes | `crons/followups.ts` | 3 cadencias: `lead_nuevo` (5 pasos), `lead_frio` (4 pasos), `post_visita` (4 pasos) |
+| Activar | `crons/followups.ts` | `activarCadenciasAutomaticas`: diario 9am L-S, max 10/tipo |
+| Ejecutar | `crons/followups.ts` | `ejecutarCadenciasInteligentes`: cada 2h pares 8-20 L-S, mark-before-send |
+| Skip CRONs | `crons/followups.ts` | 3 funciones existentes saltan leads con `cadencia.activa` |
+| Lead responde | `handlers/whatsapp.ts` | Desactiva cadencia si lead envía mensaje (re-read notes, motivo_fin='lead_respondio') |
+| CRONs | `index.ts` | 3 nuevos dispatches + 3 imports |
+
+**Tests:** 1107/1107 pasando (33 archivos)
+
+---
+
 ### 2026-03-01 (Sesión 75) — Retell Activation + Feature Flag Unification
 
 **Retell.ai activado en producción:**

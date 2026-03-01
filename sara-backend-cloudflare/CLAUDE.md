@@ -1,6 +1,6 @@
 # SARA CRM - Referencia para Claude Code
 
-> Última actualización: 2026-03-01 (Sesión 75)
+> Última actualización: 2026-03-01 (Sesión 76)
 > Historial detallado de cambios: `docs/CHANGELOG.md`
 
 ---
@@ -167,6 +167,9 @@ Pending se verifican PRIMERO en handlers de vendedor y CEO, ANTES de cualquier o
 14+ motivos context-aware con instrucciones específicas por tipo de llamada.
 9 herramientas in-call (buscar info, agendar/cancelar/cambiar cita, enviar WhatsApp, crédito, presupuesto).
 Feature flag: `retell_enabled` en KV (controlable via `/api/flags`). Todos los CRONs y el comando manual lo respetan.
+**Retry automático:** Si nadie contesta → reintento en 3h (intento 1) o mañana 10am (intento 2). Max 2 reintentos.
+**Dashboard:** CEO comando `llamadas` → métricas mensuales (outcomes, sentimiento, conversión, top vendedores).
+**Cadencia inteligente:** Secuencia multi-paso WhatsApp + llamada IA (3 tipos: lead_nuevo, lead_frio, post_visita). Flag: `cadencia_inteligente`.
 
 ### 6. Flujos Post-Compra (CRONs automáticos)
 
@@ -196,7 +199,7 @@ Tipos: `lead_frio`, `reengagement`, `cumpleanos`, `aniversario`, `postventa`, `r
 | Categoría | Comandos |
 |-----------|----------|
 | Reportes | `leads`, `hoy`, `briefing`, `equipo`, `ventas`, `conexiones`, `reporte semanal/mensual`, `meta`, `status/salud`, `respuestas/log ia`, `backups` |
-| Análisis | `pipeline/funnel`, `probabilidad/forecast`, `visitas`, `alertas/riesgos`, `mercado/competencia`, `clv/referidos`, `programa referidos/referral`, `segmentos` |
+| Análisis | `pipeline/funnel`, `probabilidad/forecast`, `visitas`, `alertas/riesgos`, `mercado/competencia`, `clv/referidos`, `programa referidos/referral`, `segmentos`, `llamadas/calls` |
 | Finanzas | `calcular [precio]`, `bancos`, `comparar [A] vs [B]` |
 | Comunicación | `bridge [nombre]`, `#cerrar/#mas`, `mensaje [nombre] [texto]`, `broadcast`, `enviar a [segmento]: [msg]` |
 | Leads | `adelante/atrás [nombre]`, `quién es`, `historial`, `nota`, `notas`, `asignar [lead] a [vendedor]` |
@@ -316,7 +319,7 @@ npx wrangler deploy      # Re-deploy
 | Tests | 1107 (33 archivos) |
 | Servicios | 89+ |
 | Comandos verificados | 342/342 (4 roles) |
-| CRONs activos | 27+ |
+| CRONs activos | 30+ |
 | Templates WA | 6 (3 equipo + 3 carousel) |
 | Propiedades | 32 (9 desarrollos) |
 | Precios | 100% dinámicos (0 hardcoded) |

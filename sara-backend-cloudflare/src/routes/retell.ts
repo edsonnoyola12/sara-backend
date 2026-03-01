@@ -31,6 +31,34 @@ interface Env {
 type CorsResponseFn = (body: string | null, status?: number, contentType?: string, request?: Request) => Response;
 type CheckApiAuthFn = (request: Request, env: Env) => Response | null;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// DETERMINAR OUTCOME DE LLAMADA
+// Lee disconnection_reason de Retell + call_analysis para mapear a outcome preciso
+// ═══════════════════════════════════════════════════════════════════════════
+function determinarOutcome(call: any): string {
+  const reason = call.disconnection_reason || '';
+
+  // Razones de no-conexión (Retell disconnection_reason values)
+  if (reason === 'dial_no_answer' || reason === 'no_answer') return 'no_answer';
+  if (reason === 'dial_busy' || reason === 'busy') return 'busy';
+  if (reason === 'dial_failed' || reason === 'call_failed') return 'failed';
+  if (reason === 'voicemail_reached' || reason === 'machine_detected') return 'voicemail';
+
+  // Si la llamada conectó, usar call_analysis
+  if (call.call_analysis) {
+    if (call.call_analysis.call_successful === true) return 'successful';
+    if (call.call_analysis.call_successful === false) return 'not_interested';
+  }
+
+  // Si hubo duración > 10s, asumir que conectó pero sin análisis
+  if (call.duration_ms && call.duration_ms > 10000) return 'successful';
+
+  return 'unknown';
+}
+
+// Outcomes que ameritan reintento
+const RETRYABLE_OUTCOMES = ['no_answer', 'busy', 'failed', 'voicemail'];
+
 export async function handleRetellRoutes(
   url: URL,
   request: Request,
@@ -1752,7 +1780,7 @@ CASOS ESPECIALES:
                 transcript: call.transcript || null,
                 summary: call.call_analysis?.summary || null,
                 sentiment: call.call_analysis?.sentiment || null,
-                outcome: call.call_analysis?.call_successful ? 'successful' : 'unknown',
+                outcome: determinarOutcome(call),
                 created_at: new Date().toISOString()
               });
               console.log(`✅ Call log guardado: ${call.call_id}`);
@@ -1853,6 +1881,60 @@ CASOS ESPECIALES:
 
               await supabase.client.from('leads').update(updateData).eq('id', lead.id);
               console.log(`📝 Nota de llamada agregada a lead ${lead.id}`);
+
+              // ═══ RETRY: Si no contestó y es outbound, agendar reintento ═══
+              const callOutcomeForRetry = determinarOutcome(call);
+              if (RETRYABLE_OUTCOMES.includes(callOutcomeForRetry) && !isInbound && lead) {
+                try {
+                  // Re-leer notes frescas (acabamos de escribir arriba)
+                  const { data: freshForRetry } = await supabase.client
+                    .from('leads')
+                    .select('notes')
+                    .eq('id', lead.id)
+                    .single();
+                  const retryNotes = freshForRetry?.notes || {};
+                  const existing = retryNotes.pending_retry_call;
+                  const currentAttempt = existing?.attempt || 0;
+
+                  if (currentAttempt < 2) {
+                    const nextAttempt = currentAttempt + 1;
+                    const ahora = new Date();
+                    let retryAfter: string;
+
+                    if (nextAttempt === 1) {
+                      // Retry 1: en 3 horas
+                      retryAfter = new Date(ahora.getTime() + 3 * 60 * 60 * 1000).toISOString();
+                    } else {
+                      // Retry 2: mañana 10am MX (UTC-6 = 16:00 UTC)
+                      const manana = new Date(ahora);
+                      manana.setDate(manana.getDate() + 1);
+                      manana.setUTCHours(16, 0, 0, 0); // 10am MX
+                      retryAfter = manana.toISOString();
+                    }
+
+                    retryNotes.pending_retry_call = {
+                      motivo: call.metadata?.motivo || 'seguimiento',
+                      attempt: nextAttempt,
+                      retry_after: retryAfter,
+                      original_call_id: call.call_id,
+                      reason: callOutcomeForRetry,
+                      created_at: ahora.toISOString()
+                    };
+
+                    await supabase.client.from('leads').update({ notes: retryNotes }).eq('id', lead.id);
+                    console.log(`🔄 Retry ${nextAttempt} agendado para lead ${lead.id} (${callOutcomeForRetry}) → ${retryAfter}`);
+                  } else {
+                    // Max reintentos alcanzados - limpiar
+                    if (retryNotes.pending_retry_call) {
+                      delete retryNotes.pending_retry_call;
+                      await supabase.client.from('leads').update({ notes: retryNotes }).eq('id', lead.id);
+                      console.log(`⏹️ Max reintentos alcanzados para lead ${lead.id}, limpiando pending_retry_call`);
+                    }
+                  }
+                } catch (retryErr) {
+                  console.error('⚠️ Error agendando retry:', retryErr);
+                }
+              }
             }
 
             // Notificar al vendedor (re-leer lead para tener nombre fresco)
@@ -1881,17 +1963,18 @@ CASOS ESPECIALES:
                 };
                 const sentiment = sentimentMap[call.call_analysis?.user_sentiment || ''] || '';
 
-                // Resultado de la llamada
-                const outcomeMap: Record<string, string> = {
-                  'interested': '🔥 INTERESADO',
-                  'callback_requested': '📞 PIDIÓ QUE LE LLAMEN',
-                  'appointment_scheduled': '📅 CITA AGENDADA',
+                // Resultado de la llamada (usa determinarOutcome)
+                const callOutcome = determinarOutcome(call);
+                const outcomeDisplayMap: Record<string, string> = {
+                  'successful': '🔥 EXITOSA',
                   'not_interested': '❌ No interesado',
                   'no_answer': '📵 No contestó',
                   'voicemail': '📭 Buzón de voz',
                   'busy': '📵 Ocupado',
+                  'failed': '⚠️ Falló conexión',
+                  'unknown': '❓ Sin clasificar',
                 };
-                const outcome = outcomeMap[call.call_analysis?.call_successful ? 'interested' : 'not_interested'] || '';
+                const outcome = outcomeDisplayMap[callOutcome] || '';
 
                 let mensaje = `📞 Llamada IA completada con *${leadDisplayName}*\n`;
                 mensaje += `⏱️ Duración: ${durationMin} min\n`;

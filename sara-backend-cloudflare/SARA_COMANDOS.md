@@ -766,6 +766,7 @@ El CEO tiene fallback a todos los roles. Orden de prioridad:
 | `mercado` | ✅ Probado 2026-01-29 (inteligencia mercado) |
 | `clv` | ✅ Probado 2026-01-29 (valor cliente) |
 | `programa referidos` | ✅ Probado 2026-03-01 (programa referidos: stats, tiers bronce/plata/oro/diamante) |
+| `llamadas` / `calls` | ✅ Agregado 2026-03-01 (dashboard llamadas IA: totales, outcomes, sentimiento, conversión, top vendedores) |
 | **🏦 FINANCIAMIENTO** | |
 | `calcular [precio]` | ✅ Probado 2026-01-29 (calculadora) |
 | `bancos` | ✅ Probado 2026-01-29 (tasas actuales) |

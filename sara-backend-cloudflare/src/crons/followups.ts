@@ -2285,6 +2285,13 @@ export async function llamadasSeguimientoPostVisita(
     for (const lead of leadsPostVisita) {
       try {
         const notes = typeof lead.notes === 'object' ? lead.notes : {};
+
+        // Skip si tiene cadencia activa (la cadencia se encarga)
+        if ((notes as any).cadencia?.activa) {
+          console.log(`⏭️ ${lead.name} tiene cadencia activa, skip post-visita`);
+          continue;
+        }
+
         const ultimaLlamadaIA = (notes as any).ultima_llamada_ia;
         const hoyStr = ahora.toISOString().split('T')[0];
 
@@ -2405,6 +2412,13 @@ export async function llamadasReactivacionLeadsFrios(
     for (const lead of leadsFrios) {
       try {
         const notes = typeof lead.notes === 'object' ? lead.notes : {};
+
+        // Skip si tiene cadencia activa
+        if ((notes as any).cadencia?.activa) {
+          console.log(`⏭️ ${lead.name} tiene cadencia activa, skip reactivación`);
+          continue;
+        }
+
         const ultimaLlamadaIA = (notes as any).ultima_llamada_ia;
 
         if (ultimaLlamadaIA) {
@@ -2641,6 +2655,13 @@ export async function llamadasEscalamiento48h(
 
       try {
         const notes = typeof lead.notes === 'object' ? (lead.notes || {}) : {};
+
+        // Skip si tiene cadencia activa
+        if ((notes as any).cadencia?.activa) {
+          console.log(`⏭️ ${lead.name} tiene cadencia activa, skip escalamiento 48h`);
+          continue;
+        }
+
         const ultimaLlamadaIA = (notes as any).ultima_llamada_ia;
 
         // No llamar si ya recibió llamada IA en últimos 7 días
@@ -2725,5 +2746,554 @@ export async function llamadasEscalamiento48h(
   } catch (e) {
     console.error('Error en llamadasEscalamiento48h:', e);
     await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'llamadasEscalamiento48h', stack: (e as Error).stack }).catch(() => {});
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REINTENTAR LLAMADAS SIN RESPUESTA
+// Busca leads con pending_retry_call y retry_after <= ahora, los llama de nuevo
+// Max 5 por ciclo, 5s delay. Mark-before-send para evitar duplicados.
+// ═══════════════════════════════════════════════════════════════════════════
+export async function reintentarLlamadasSinRespuesta(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  env: RetellEnv
+): Promise<void> {
+  try {
+    if (!env.RETELL_API_KEY || !env.RETELL_AGENT_ID || !env.RETELL_PHONE_NUMBER) {
+      console.log('⏭️ Retry llamadas desactivado - Retell no configurado');
+      return;
+    }
+    if (!(await isRetellEnabled(env))) {
+      console.log('⏭️ Retry llamadas desactivado - feature flag retell_enabled=false');
+      return;
+    }
+
+    console.log('🔄 Buscando llamadas pendientes de reintento...');
+
+    const ahora = new Date().toISOString();
+
+    // Buscar leads con pending_retry_call cuyo retry_after ya pasó
+    const { data: allLeads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, assigned_to, interested_in')
+      .not('notes->pending_retry_call', 'is', null);
+
+    if (!allLeads || allLeads.length === 0) {
+      console.log('🔄 No hay llamadas pendientes de reintento');
+      return;
+    }
+
+    // Filtrar manualmente: retry_after <= ahora
+    const leadsParaRetry = allLeads.filter(lead => {
+      const notes = typeof lead.notes === 'object' ? lead.notes : {};
+      const retry = (notes as any).pending_retry_call;
+      return retry && retry.retry_after && retry.retry_after <= ahora;
+    }).slice(0, 5); // Max 5 por ciclo
+
+    if (leadsParaRetry.length === 0) {
+      console.log('🔄 No hay retries listos aún');
+      return;
+    }
+
+    const { createRetellService } = await import('../services/retellService');
+    const retell = createRetellService(
+      env.RETELL_API_KEY,
+      env.RETELL_AGENT_ID,
+      env.RETELL_PHONE_NUMBER
+    );
+
+    let reintentos = 0;
+
+    for (const lead of leadsParaRetry) {
+      try {
+        if (!lead.phone) continue;
+
+        const notes = typeof lead.notes === 'object' ? lead.notes : {};
+        const retry = (notes as any).pending_retry_call;
+        if (!retry) continue;
+
+        const motivo = retry.motivo || 'seguimiento';
+        const attempt = retry.attempt || 1;
+        const desarrolloInteres = lead.interested_in || (notes as any).desarrollo_interes || '';
+
+        // Mark-before-send: limpiar pending_retry_call ANTES de llamar
+        const notesLimpio = { ...notes };
+        delete (notesLimpio as any).pending_retry_call;
+        (notesLimpio as any).ultima_llamada_ia = new Date().toISOString().split('T')[0];
+        (notesLimpio as any).llamadas_ia_count = ((notes as any).llamadas_ia_count || 0) + 1;
+        await supabase.client.from('leads').update({ notes: notesLimpio }).eq('id', lead.id);
+
+        const result = await retell.initiateCall({
+          leadId: lead.id,
+          leadName: lead.name,
+          leadPhone: lead.phone,
+          vendorId: lead.assigned_to,
+          desarrolloInteres,
+          motivo
+        });
+
+        if (result.success) {
+          reintentos++;
+          console.log(`🔄 Reintento ${attempt} exitoso para ${lead.name} (${motivo})`);
+        } else {
+          console.log(`⚠️ Reintento ${attempt} falló para ${lead.name}: ${result.error || 'unknown'}`);
+
+          // Si es intento 2+ y Retell falla, notificar vendedor "llama manual"
+          if (attempt >= 2 && lead.assigned_to) {
+            const { data: vendedor } = await supabase.client
+              .from('team_members')
+              .select('*')
+              .eq('id', lead.assigned_to)
+              .single();
+
+            if (vendedor) {
+              await enviarMensajeTeamMember(supabase, meta, vendedor,
+                `📵 *NO PUDIMOS CONTACTAR*\n\n` +
+                `Lead: *${lead.name}*\n` +
+                `Intentos IA: ${attempt}\n` +
+                `Razón: ${retry.reason || 'sin respuesta'}\n\n` +
+                `💡 *Por favor llama manualmente* para dar seguimiento.`,
+                { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
+              );
+            }
+          }
+        }
+
+        // Notificar vendedor del reintento
+        if (result.success && lead.assigned_to) {
+          const { data: vendedor } = await supabase.client
+            .from('team_members')
+            .select('*')
+            .eq('id', lead.assigned_to)
+            .single();
+
+          if (vendedor) {
+            await enviarMensajeTeamMember(supabase, meta, vendedor,
+              `🔄 *REINTENTO LLAMADA IA* (intento ${attempt})\n\n` +
+              `SARA está reintentando llamar a *${lead.name}*\n` +
+              `Razón anterior: ${retry.reason === 'no_answer' ? 'no contestó' : retry.reason === 'busy' ? 'ocupado' : retry.reason === 'voicemail' ? 'buzón' : retry.reason || 'sin respuesta'}\n` +
+              `Desarrollo: ${desarrolloInteres || 'General'}`,
+              { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
+            );
+          }
+        }
+
+        await new Promise(r => setTimeout(r, 5000));
+      } catch (err) {
+        console.error(`Error en reintento para ${lead.name}:`, err);
+      }
+    }
+
+    console.log(`🔄 Reintentos completados: ${reintentos} de ${leadsParaRetry.length}`);
+
+  } catch (e) {
+    console.error('Error en reintentarLlamadasSinRespuesta:', e);
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'reintentarLlamadasSinRespuesta', stack: (e as Error).stack }).catch(() => {});
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CADENCIA INTELIGENTE - Secuencia multi-paso WhatsApp + Llamada IA
+// ═══════════════════════════════════════════════════════════════════════════
+
+type TipoCadencia = 'lead_nuevo' | 'lead_frio' | 'post_visita';
+
+interface PasoCadencia {
+  dia: number;        // días desde inicio de cadencia
+  hora: number;       // hora MX (24h)
+  accion: 'whatsapp' | 'llamada';
+  motivo?: string;    // motivo Retell para llamadas
+  plantilla: string;  // texto WhatsApp o motivo descripción
+}
+
+interface CadenciaState {
+  activa: boolean;
+  tipo: TipoCadencia;
+  paso_actual: number;     // 0-indexed
+  inicio: string;          // ISO date
+  proxima_accion: string;  // ISO datetime
+  motivo_fin?: string;
+}
+
+const CADENCIAS: Record<TipoCadencia, PasoCadencia[]> = {
+  lead_nuevo: [
+    { dia: 1, hora: 10, accion: 'whatsapp', plantilla: '¡Hola {nombre}! 👋 Soy SARA de Grupo Santa Rita. ¿Pudiste ver la información que te compartimos? Estoy para resolver cualquier duda.' },
+    { dia: 2, hora: 10, accion: 'llamada', motivo: 'calificacion', plantilla: 'Llamada de calificación' },
+    { dia: 3, hora: 16, accion: 'whatsapp', plantilla: '¡Hola {nombre}! ¿Te quedó alguna duda sobre nuestros desarrollos? Me encantaría ayudarte a encontrar tu casa ideal. 🏡' },
+    { dia: 5, hora: 10, accion: 'llamada', motivo: 'seguimiento', plantilla: 'Llamada de seguimiento' },
+    { dia: 7, hora: 16, accion: 'whatsapp', plantilla: '¡Hola {nombre}! Solo quería saber si sigues interesado en conocer nuestros desarrollos. Si prefieres que no te contacte, solo dímelo. ¡Que tengas excelente día! 🙂' },
+  ],
+  lead_frio: [
+    { dia: 0, hora: 10, accion: 'whatsapp', plantilla: '¡Hola {nombre}! Hace tiempo platicamos sobre casas en Zacatecas. Tenemos novedades que te podrían interesar. ¿Te gustaría saber más? 🏠' },
+    { dia: 2, hora: 16, accion: 'llamada', motivo: 'reactivacion', plantilla: 'Llamada de reactivación' },
+    { dia: 5, hora: 10, accion: 'whatsapp', plantilla: '¡Hola {nombre}! Tenemos nuevas opciones de financiamiento y desarrollos que podrían ajustarse a lo que buscas. ¿Te interesa una cotización actualizada? 📋' },
+    { dia: 7, hora: 16, accion: 'llamada', motivo: 'seguimiento', plantilla: 'Llamada de seguimiento' },
+  ],
+  post_visita: [
+    { dia: 1, hora: 10, accion: 'whatsapp', plantilla: '¡Hola {nombre}! ¿Qué te pareció tu visita al desarrollo? Me encantaría conocer tu opinión. 🏡' },
+    { dia: 3, hora: 10, accion: 'llamada', motivo: 'encuesta', plantilla: 'Llamada de encuesta post-visita' },
+    { dia: 5, hora: 16, accion: 'whatsapp', plantilla: '¡Hola {nombre}! Si te interesa, puedo prepararte una cotización personalizada con las mejores opciones de financiamiento. ¿Te gustaría? 📊' },
+    { dia: 7, hora: 10, accion: 'llamada', motivo: 'seguimiento', plantilla: 'Llamada de seguimiento' },
+  ],
+};
+
+function computeProximaAccion(tipo: TipoCadencia, pasoActual: number, inicioISO: string): string | null {
+  const pasos = CADENCIAS[tipo];
+  if (pasoActual >= pasos.length) return null; // Cadencia completada
+
+  const paso = pasos[pasoActual];
+  const inicio = new Date(inicioISO);
+  const target = new Date(inicio);
+  target.setDate(target.getDate() + paso.dia);
+  // Hora MX = UTC-6 → target UTC hour = paso.hora + 6
+  target.setUTCHours(paso.hora + 6, 0, 0, 0);
+
+  return target.toISOString();
+}
+
+async function isCadenciaEnabled(env: RetellEnv): Promise<boolean> {
+  const { createFeatureFlags } = await import('../services/featureFlagsService');
+  const flags = createFeatureFlags(env.SARA_CACHE);
+  return flags.isEnabled('cadencia_inteligente');
+}
+
+/**
+ * ACTIVAR CADENCIAS AUTOMÁTICAS
+ * Diario 9am MX - Detecta leads que califican para cada tipo de cadencia
+ * Max 10 por tipo por ejecución
+ */
+export async function activarCadenciasAutomaticas(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  env: RetellEnv
+): Promise<void> {
+  try {
+    if (!(await isCadenciaEnabled(env))) {
+      console.log('⏭️ Cadencia inteligente desactivada - feature flag cadencia_inteligente=false');
+      return;
+    }
+
+    console.log('🎯 Activando cadencias automáticas...');
+    const ahora = new Date();
+    let activadas = 0;
+
+    // ── LEAD NUEVO: new/contacted, sin respuesta 24h+ ──
+    const hace24h = new Date(ahora.getTime() - 24 * 60 * 60 * 1000);
+    const hace7d = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const { data: leadsNuevos } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, status')
+      .in('status', ['new', 'contacted'])
+      .lt('last_message_at', hace24h.toISOString())
+      .gt('created_at', hace7d.toISOString())
+      .limit(30);
+
+    for (const lead of (leadsNuevos || []).slice(0, 10)) {
+      const notes = typeof lead.notes === 'object' ? (lead.notes || {}) : {};
+      if ((notes as any).cadencia?.activa) continue;
+      if ((notes as any).do_not_contact || (notes as any).no_contactar) continue;
+
+      const inicioISO = ahora.toISOString();
+      const proxima = computeProximaAccion('lead_nuevo', 0, inicioISO);
+      if (!proxima) continue;
+
+      (notes as any).cadencia = {
+        activa: true,
+        tipo: 'lead_nuevo',
+        paso_actual: 0,
+        inicio: inicioISO,
+        proxima_accion: proxima
+      } as CadenciaState;
+
+      await supabase.client.from('leads').update({ notes }).eq('id', lead.id);
+      activadas++;
+      console.log(`🎯 Cadencia lead_nuevo activada para ${lead.name}`);
+    }
+
+    // ── LEAD FRÍO: contacted/qualified, 7+ días sin respuesta ──
+    const hace30d = new Date(ahora.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const { data: leadsFrios } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, status')
+      .in('status', ['contacted', 'qualified'])
+      .lt('last_message_at', hace7d.toISOString())
+      .gt('last_message_at', hace30d.toISOString())
+      .limit(30);
+
+    for (const lead of (leadsFrios || []).slice(0, 10)) {
+      const notes = typeof lead.notes === 'object' ? (lead.notes || {}) : {};
+      if ((notes as any).cadencia?.activa) continue;
+      if ((notes as any).do_not_contact || (notes as any).no_contactar) continue;
+
+      const inicioISO = ahora.toISOString();
+      const proxima = computeProximaAccion('lead_frio', 0, inicioISO);
+      if (!proxima) continue;
+
+      (notes as any).cadencia = {
+        activa: true,
+        tipo: 'lead_frio',
+        paso_actual: 0,
+        inicio: inicioISO,
+        proxima_accion: proxima
+      } as CadenciaState;
+
+      await supabase.client.from('leads').update({ notes }).eq('id', lead.id);
+      activadas++;
+      console.log(`🎯 Cadencia lead_frio activada para ${lead.name}`);
+    }
+
+    // ── POST VISITA: visited, 3+ días sin decisión ──
+    const hace3d = new Date(ahora.getTime() - 3 * 24 * 60 * 60 * 1000);
+
+    const { data: leadsPostVisita } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, status')
+      .eq('status', 'visited')
+      .lt('updated_at', hace3d.toISOString())
+      .gt('updated_at', hace30d.toISOString())
+      .limit(30);
+
+    for (const lead of (leadsPostVisita || []).slice(0, 10)) {
+      const notes = typeof lead.notes === 'object' ? (lead.notes || {}) : {};
+      if ((notes as any).cadencia?.activa) continue;
+      if ((notes as any).do_not_contact || (notes as any).no_contactar) continue;
+
+      const inicioISO = ahora.toISOString();
+      const proxima = computeProximaAccion('post_visita', 0, inicioISO);
+      if (!proxima) continue;
+
+      (notes as any).cadencia = {
+        activa: true,
+        tipo: 'post_visita',
+        paso_actual: 0,
+        inicio: inicioISO,
+        proxima_accion: proxima
+      } as CadenciaState;
+
+      await supabase.client.from('leads').update({ notes }).eq('id', lead.id);
+      activadas++;
+      console.log(`🎯 Cadencia post_visita activada para ${lead.name}`);
+    }
+
+    console.log(`🎯 Cadencias activadas: ${activadas} total`);
+
+  } catch (e) {
+    console.error('Error en activarCadenciasAutomaticas:', e);
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'activarCadenciasAutomaticas', stack: (e as Error).stack }).catch(() => {});
+  }
+}
+
+/**
+ * EJECUTAR CADENCIAS INTELIGENTES
+ * Cada 2h en horas pares L-S 8am-8pm MX
+ * Ejecuta el paso actual de leads con cadencia activa y proxima_accion <= ahora
+ */
+export async function ejecutarCadenciasInteligentes(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  env: RetellEnv
+): Promise<void> {
+  try {
+    if (!(await isCadenciaEnabled(env))) {
+      console.log('⏭️ Cadencia inteligente desactivada - feature flag');
+      return;
+    }
+
+    console.log('🎵 Ejecutando cadencias inteligentes...');
+
+    const ahora = new Date();
+    const ahoraISO = ahora.toISOString();
+
+    // Buscar leads con cadencia activa
+    const { data: allLeads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, assigned_to, interested_in, status')
+      .not('notes->cadencia', 'is', null);
+
+    if (!allLeads || allLeads.length === 0) {
+      console.log('🎵 No hay leads con cadencia activa');
+      return;
+    }
+
+    // Filtrar: cadencia.activa=true y proxima_accion <= ahora
+    const leadsListos = allLeads.filter(lead => {
+      const notes = typeof lead.notes === 'object' ? (lead.notes || {}) : {};
+      const cadencia = (notes as any).cadencia;
+      return cadencia && cadencia.activa && cadencia.proxima_accion && cadencia.proxima_accion <= ahoraISO;
+    });
+
+    if (leadsListos.length === 0) {
+      console.log('🎵 No hay cadencias listas para ejecutar');
+      return;
+    }
+
+    console.log(`🎵 ${leadsListos.length} leads con cadencia lista`);
+
+    let retellService: any = null;
+    const retellConfigured = env.RETELL_API_KEY && env.RETELL_AGENT_ID && env.RETELL_PHONE_NUMBER;
+    const retellEnabled = retellConfigured ? await isRetellEnabled(env) : false;
+
+    let ejecutados = 0;
+
+    for (const lead of leadsListos) {
+      try {
+        if (!lead.phone) continue;
+
+        // Re-leer notes frescas (evitar JSONB stale)
+        const { data: freshLead } = await supabase.client
+          .from('leads')
+          .select('notes')
+          .eq('id', lead.id)
+          .single();
+
+        if (!freshLead) continue;
+        const notes = typeof freshLead.notes === 'object' ? (freshLead.notes || {}) : {};
+        const cadencia = (notes as any).cadencia as CadenciaState;
+        if (!cadencia || !cadencia.activa) continue;
+
+        const tipo = cadencia.tipo;
+        const pasoIdx = cadencia.paso_actual;
+        const pasos = CADENCIAS[tipo];
+
+        if (!pasos || pasoIdx >= pasos.length) {
+          // Cadencia completada
+          (notes as any).cadencia = {
+            ...cadencia,
+            activa: false,
+            motivo_fin: 'completada'
+          };
+          await supabase.client.from('leads').update({ notes }).eq('id', lead.id);
+          console.log(`✅ Cadencia ${tipo} completada para ${lead.name}`);
+
+          // Notificar vendedor
+          if (lead.assigned_to) {
+            const { data: vendedor } = await supabase.client
+              .from('team_members').select('*').eq('id', lead.assigned_to).single();
+            if (vendedor) {
+              await enviarMensajeTeamMember(supabase, meta, vendedor,
+                `📋 *CADENCIA COMPLETADA*\n\n` +
+                `Lead: *${lead.name}*\n` +
+                `Tipo: ${tipo}\n` +
+                `Pasos ejecutados: ${pasos.length}\n\n` +
+                `_El lead no respondió a la cadencia automática. Considera contactar manualmente._`,
+                { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
+              );
+            }
+          }
+          continue;
+        }
+
+        const paso = pasos[pasoIdx];
+
+        // Mark-before-send: avanzar paso_actual ANTES de ejecutar
+        const nextPasoIdx = pasoIdx + 1;
+        const proximaAccion = computeProximaAccion(tipo, nextPasoIdx, cadencia.inicio);
+
+        (notes as any).cadencia = {
+          ...cadencia,
+          paso_actual: nextPasoIdx,
+          proxima_accion: proximaAccion || ahoraISO, // si null, se desactivará en próximo ciclo
+          activa: nextPasoIdx < pasos.length
+        };
+        if (nextPasoIdx >= pasos.length) {
+          (notes as any).cadencia.motivo_fin = 'completada';
+        }
+
+        await supabase.client.from('leads').update({ notes }).eq('id', lead.id);
+
+        // Ejecutar acción
+        if (paso.accion === 'whatsapp') {
+          // Verificar límite de mensajes automáticos
+          if (!(await puedeEnviarMensajeAutomatico(supabase, lead.id))) {
+            console.log(`⏭️ ${lead.name} alcanzó límite de mensajes automáticos`);
+            continue;
+          }
+
+          const mensaje = paso.plantilla.replace(/\{nombre\}/g, lead.name?.split(' ')[0] || 'Hola');
+          await meta.sendWhatsAppMessage(lead.phone, mensaje);
+          await registrarMensajeAutomatico(supabase, lead.id);
+
+          // Guardar pending_auto_response para capturar respuesta con contexto
+          const { data: latestLead } = await supabase.client
+            .from('leads').select('notes').eq('id', lead.id).single();
+          if (latestLead) {
+            const updNotes = typeof latestLead.notes === 'object' ? (latestLead.notes || {}) : {};
+            (updNotes as any).pending_auto_response = {
+              type: `cadencia_${tipo}`,
+              sent_at: ahoraISO,
+              paso: pasoIdx + 1,
+              context: paso.plantilla.substring(0, 100)
+            };
+            await supabase.client.from('leads').update({ notes: updNotes }).eq('id', lead.id);
+          }
+
+          ejecutados++;
+          console.log(`🎵 Cadencia ${tipo} paso ${pasoIdx + 1}: WhatsApp a ${lead.name}`);
+
+        } else if (paso.accion === 'llamada') {
+          if (!retellEnabled || !retellConfigured) {
+            console.log(`⏭️ Paso llamada skip para ${lead.name} - Retell no disponible`);
+            continue;
+          }
+
+          if (!retellService) {
+            const { createRetellService } = await import('../services/retellService');
+            retellService = createRetellService(
+              env.RETELL_API_KEY!,
+              env.RETELL_AGENT_ID!,
+              env.RETELL_PHONE_NUMBER!
+            );
+          }
+
+          const desarrolloInteres = lead.interested_in || (notes as any).desarrollo_interes || '';
+          const result = await retellService.initiateCall({
+            leadId: lead.id,
+            leadName: lead.name,
+            leadPhone: lead.phone,
+            vendorId: lead.assigned_to,
+            desarrolloInteres,
+            motivo: paso.motivo || 'seguimiento'
+          });
+
+          if (result.success) {
+            ejecutados++;
+            console.log(`🎵 Cadencia ${tipo} paso ${pasoIdx + 1}: Llamada a ${lead.name}`);
+          } else {
+            console.log(`⚠️ Cadencia llamada falló para ${lead.name}: ${result.error}`);
+          }
+        }
+
+        // Notificar vendedor del paso
+        if (lead.assigned_to) {
+          const { data: vendedor } = await supabase.client
+            .from('team_members').select('*').eq('id', lead.assigned_to).single();
+          if (vendedor) {
+            const accionStr = paso.accion === 'whatsapp' ? '💬 WhatsApp' : '📞 Llamada IA';
+            await enviarMensajeTeamMember(supabase, meta, vendedor,
+              `🎵 *CADENCIA ${tipo.toUpperCase()}* (${pasoIdx + 1}/${pasos.length})\n\n` +
+              `Lead: *${lead.name}*\n` +
+              `Acción: ${accionStr}\n` +
+              `${paso.accion === 'llamada' ? `Motivo: ${paso.motivo}\n` : ''}` +
+              `${nextPasoIdx < pasos.length ? `Próximo paso: día ${pasos[nextPasoIdx].dia}` : '✅ Último paso'}`,
+              { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
+            );
+          }
+        }
+
+        await new Promise(r => setTimeout(r, 3000));
+
+      } catch (err) {
+        console.error(`Error ejecutando cadencia para ${lead.name}:`, err);
+      }
+    }
+
+    console.log(`🎵 Cadencias ejecutadas: ${ejecutados}`);
+
+  } catch (e) {
+    console.error('Error en ejecutarCadenciasInteligentes:', e);
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'ejecutarCadenciasInteligentes', stack: (e as Error).stack }).catch(() => {});
   }
 }

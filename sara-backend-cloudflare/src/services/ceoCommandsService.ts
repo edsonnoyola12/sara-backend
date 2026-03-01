@@ -40,6 +40,7 @@ export class CEOCommandsService {
           `• *conexiones* - Actividad hoy\n` +
           `• *leads* / *ventas* / *pipeline*\n\n` +
           `*📈 ANÁLISIS*\n` +
+          `• *llamadas* - Dashboard llamadas IA\n` +
           `• *probabilidad* - Cierre\n` +
           `• *visitas* / *alertas* / *mercado*\n` +
           `• *clv* - Valor cliente\n` +
@@ -391,6 +392,11 @@ export class CEOCommandsService {
     // ═══ ÚLTIMAS RESPUESTAS DE IA ═══
     if (msgLower === 'respuestas' || msgLower === 'respuestas ia' || msgLower === 'respuestas ai' || msgLower === 'ai log' || msgLower === 'log ia') {
       return { action: 'call_handler', handlerName: 'ultimasRespuestasAI' };
+    }
+
+    // ═══ DASHBOARD LLAMADAS IA ═══
+    if (msgLower === 'llamadas' || msgLower === 'llamadas ia' || msgLower === 'calls' || msgLower === 'llamadas ai') {
+      return { action: 'call_handler', handlerName: 'reporteLlamadas' };
     }
 
     // ═══ OBSERVABILIDAD ═══
@@ -1118,6 +1124,112 @@ export class CEOCommandsService {
           const data = await reportService.generateReportData(config);
           const message = reportService.formatForWhatsApp(data);
           return { message };
+        }
+
+        // ═══ DASHBOARD LLAMADAS IA ═══
+        case 'reporteLlamadas': {
+          const ahora = new Date();
+          const inicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1).toISOString();
+          const inicioMesPasado = new Date(ahora.getFullYear(), ahora.getMonth() - 1, 1).toISOString();
+          const finMesPasado = new Date(ahora.getFullYear(), ahora.getMonth(), 0, 23, 59, 59).toISOString();
+
+          const [callsMesRes, callsMesPasadoRes, vendedoresRes] = await Promise.all([
+            this.supabase.client.from('call_logs').select('*').gte('created_at', inicioMes),
+            this.supabase.client.from('call_logs').select('id, outcome').gte('created_at', inicioMesPasado).lte('created_at', finMesPasado),
+            this.supabase.client.from('team_members').select('id, name').eq('active', true).eq('role', 'vendedor')
+          ]);
+
+          const callsMes = callsMesRes.data || [];
+          const callsMesPasado = callsMesPasadoRes.data || [];
+          const vendedores = vendedoresRes.data || [];
+
+          const totalMes = callsMes.length;
+          const totalMesPasado = callsMesPasado.length;
+          const diff = totalMes - totalMesPasado;
+          const tendencia = diff > 0 ? `📈 (+${diff} vs mes ant.)` : diff < 0 ? `📉 (${diff} vs mes ant.)` : '➡️ (igual que mes ant.)';
+
+          // Por outcome
+          const exitosas = callsMes.filter((c: any) => c.outcome === 'successful').length;
+          const sinRespuesta = callsMes.filter((c: any) => c.outcome === 'no_answer').length;
+          const buzon = callsMes.filter((c: any) => c.outcome === 'voicemail').length;
+          const ocupado = callsMes.filter((c: any) => c.outcome === 'busy').length;
+          const noInteresado = callsMes.filter((c: any) => c.outcome === 'not_interested').length;
+          const sinClasificar = callsMes.filter((c: any) => !c.outcome || c.outcome === 'unknown').length;
+
+          // Duración promedio (solo llamadas con duración)
+          const conDuracion = callsMes.filter((c: any) => c.duration_seconds && c.duration_seconds > 0);
+          let duracionPromedio = '—';
+          if (conDuracion.length > 0) {
+            const totalSeg = conDuracion.reduce((s: number, c: any) => s + c.duration_seconds, 0);
+            const promSeg = Math.round(totalSeg / conDuracion.length);
+            duracionPromedio = `${Math.floor(promSeg / 60)}m ${promSeg % 60}s`;
+          }
+
+          // Sentimiento
+          const positivo = callsMes.filter((c: any) => c.sentiment?.toLowerCase() === 'positive').length;
+          const neutral = callsMes.filter((c: any) => c.sentiment?.toLowerCase() === 'neutral').length;
+          const negativo = callsMes.filter((c: any) => c.sentiment?.toLowerCase() === 'negative').length;
+
+          // Conversión: citas de llamadas exitosas
+          const callLeadIds = [...new Set(callsMes.filter((c: any) => c.outcome === 'successful' && c.lead_id).map((c: any) => c.lead_id))];
+          let citasDeExitosas = 0;
+          if (callLeadIds.length > 0) {
+            const { count } = await this.supabase.client
+              .from('appointments')
+              .select('id', { count: 'exact' })
+              .in('lead_id', callLeadIds)
+              .gte('created_at', inicioMes);
+            citasDeExitosas = count || 0;
+          }
+          const pctConversion = exitosas > 0 ? Math.round((citasDeExitosas / exitosas) * 100) : 0;
+
+          // Top vendedores por llamadas
+          const vendedorCallCount: Record<string, number> = {};
+          for (const c of callsMes) {
+            if (c.vendor_id) {
+              vendedorCallCount[c.vendor_id] = (vendedorCallCount[c.vendor_id] || 0) + 1;
+            }
+          }
+          const topVendedores = Object.entries(vendedorCallCount)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([vid, cnt]) => {
+              const v = vendedores.find((vd: any) => vd.id === vid);
+              return { nombre: v?.name || 'Sin asignar', llamadas: cnt };
+            });
+
+          const medallas = ['🥇', '🥈', '🥉'];
+          const mesNombre = ahora.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+
+          let msg = `📞 *DASHBOARD LLAMADAS IA*\n${mesNombre}\n\n`;
+          msg += `📊 *Resumen del Mes*\n`;
+          msg += `Total: ${totalMes} llamadas ${tendencia}\n`;
+          msg += `⏱️ Duración promedio: ${duracionPromedio}\n\n`;
+          msg += `📋 *Por Resultado*\n`;
+          msg += `✅ Exitosas: ${exitosas}\n`;
+          if (noInteresado > 0) msg += `❌ No interesado: ${noInteresado}\n`;
+          msg += `📵 Sin respuesta: ${sinRespuesta}\n`;
+          msg += `📭 Buzón: ${buzon}\n`;
+          if (ocupado > 0) msg += `📵 Ocupado: ${ocupado}\n`;
+          if (sinClasificar > 0) msg += `❓ Sin clasificar: ${sinClasificar}\n`;
+          msg += `\n`;
+
+          if (positivo > 0 || neutral > 0 || negativo > 0) {
+            msg += `💭 *Sentimiento*\n`;
+            msg += `😊 Positivo: ${positivo} | 😐 Neutral: ${neutral} | 😟 Negativo: ${negativo}\n\n`;
+          }
+
+          msg += `📅 *Conversión*\n`;
+          msg += `${citasDeExitosas} citas de ${exitosas} exitosas = ${pctConversion}%\n\n`;
+
+          if (topVendedores.length > 0) {
+            msg += `🏆 *Top Vendedores*\n`;
+            topVendedores.forEach((v, i) => {
+              msg += `${medallas[i]} ${v.nombre}: ${v.llamadas} llamadas\n`;
+            });
+          }
+
+          return { message: msg };
         }
 
         // Handlers que requieren lógica externa (en whatsapp.ts)
