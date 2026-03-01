@@ -728,6 +728,7 @@ El CEO tiene fallback a todos los roles. Orden de prioridad:
 | `alertas` | ✅ Probado 2026-01-29 (alertas inteligentes) |
 | `mercado` | ✅ Probado 2026-01-29 (inteligencia mercado) |
 | `clv` | ✅ Probado 2026-01-29 (valor cliente) |
+| `programa referidos` | ✅ Probado 2026-03-01 (programa referidos: stats, tiers bronce/plata/oro/diamante) |
 | **🏦 FINANCIAMIENTO** | |
 | `calcular [precio]` | ✅ Probado 2026-01-29 (calculadora) |
 | `bancos` | ✅ Probado 2026-01-29 (tasas actuales) |
@@ -2553,7 +2554,7 @@ SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
 
 ### 📱 COMANDOS WHATSAPP (Verificados 2026-01-29)
 
-**CEO:** leads, briefing, equipo, ventas, pipeline, probabilidad, visitas, alertas, mercado, clv, calcular, bancos, comparar, bridge, broadcast, adelante/atrás, nota, ofertas, brochure/ubicación/video ✅
+**CEO:** leads, briefing, equipo, ventas, pipeline, probabilidad, visitas, alertas, mercado, clv, programa referidos, calcular, bancos, comparar, bridge, broadcast, adelante/atrás, nota, ofertas, brochure/ubicación/video ✅
 
 **Vendedor:** citas, mis leads, hot, pendientes, meta, agendar/reagendar/cancelar cita, nota, notas, bridge, cotizar, ofertas, brochure/ubicación/video, crédito, llamar, coaching ✅
 
@@ -2578,6 +2579,7 @@ SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
 | Inteligencia | `/api/pipeline/*`, `/api/probability/*`, `/api/visits/*`, `/api/offers/*`, `/api/alerts/*` |
 | Finanzas | `/api/financing/*`, `/api/compare/*` |
 | Marketing | `/api/attribution/*`, `/api/tracking/*`, `/api/market/*`, `/api/clv/*` |
+| Referidos | `/api/referrals`, `/api/referrals/stats` |
 | Reportes | `/api/reports/*` |
 
 ### ⏰ CRONs AUTOMATIZADOS
