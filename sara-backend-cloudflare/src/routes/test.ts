@@ -6214,6 +6214,9 @@ Keep the camera focused on this specific house facade. Golden hour lighting, 4k.
 
     // Enviar TEMPLATE a un teléfono (para fuera de ventana 24h)
     if (url.pathname === '/send-template') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
       const phone = url.searchParams.get('phone');
       const template = url.searchParams.get('template') || 'reactivar_equipo';
       const nombre = url.searchParams.get('nombre') || 'amigo';

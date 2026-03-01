@@ -1661,7 +1661,7 @@ export default {
                       console.log(`✅ Brochure enviado para ${devName}`);
                     } else {
                       // Fallback brochure URL
-                      const fallbackUrl = `https://brochures-santarita.pages.dev/${slug}`;
+                      const fallbackUrl = `https://sara-backend.edson-633.workers.dev/brochure/${slug.replace(/_/g, '-').replace(/\.html$/, '')}`;
                       await meta.sendCTAButton(from,
                         `📋 Brochure de *${devName}*`,
                         'Ver brochure 📋',
@@ -3039,19 +3039,20 @@ export default {
           if (necesitaReactivar) {
             console.log(`   📤 Reactivando ventana para ${m.name}...`);
             try {
-              // Enviar template de reactivación
-              const response = await fetch(`https://sara-backend.edson-633.workers.dev/send-template?phone=${m.phone}&template=reactivar_equipo&nombre=${encodeURIComponent(m.name.split(' ')[0])}`);
+              // Enviar template de reactivación directamente via Meta API (sin self-HTTP-call)
+              const nombre = m.name?.split(' ')[0] || 'amigo';
+              await meta.sendTemplate(m.phone, 'reactivar_equipo', 'es_MX', [
+                { type: 'body', parameters: [{ type: 'text', text: nombre }] }
+              ]);
 
-              if (response.ok) {
-                // Marcar como reactivado hoy para no repetir
-                const updatedNotes = { ...notas, reactivacion_enviada: hoyReactivacion };
-                await supabase.client
-                  .from('team_members')
-                  .update({ notes: updatedNotes })
-                  .eq('id', m.id);
-                reactivados++;
-                console.log(`   ✅ ${m.name} reactivado`);
-              }
+              // Marcar como reactivado hoy para no repetir
+              const updatedNotes = { ...notas, reactivacion_enviada: hoyReactivacion };
+              await supabase.client
+                .from('team_members')
+                .update({ notes: updatedNotes })
+                .eq('id', m.id);
+              reactivados++;
+              console.log(`   ✅ ${m.name} reactivado`);
             } catch (e) {
               console.log(`   ⚠️ Error reactivando ${m.name}:`, e);
             }
@@ -3201,7 +3202,7 @@ export default {
 
     // 12:01am DÍA 1 DE CADA MES: Aplicar nuevos precios programados
     if (mexicoHour === 0 && isFirstRunOfHour && now.getUTCDate() === 1) {
-      await safeCron('aplicarPreciosProgramados', () => aplicarPreciosProgramados(supabase, meta));
+      await safeCron('aplicarPreciosProgramados', () => aplicarPreciosProgramados(supabase, meta, env));
     }
 
     // ═══════════════════════════════════════════════════════════════

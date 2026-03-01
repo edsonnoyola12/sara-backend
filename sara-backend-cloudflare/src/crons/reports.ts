@@ -13,7 +13,7 @@ import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { enviarMensajeTeamMember, EnviarMensajeTeamResult } from '../utils/teamMessaging';
 import { parseNotasSafe, formatVendorFeedback } from '../handlers/whatsapp-utils';
-import { logErrorToDB } from './healthCheck';
+import { logErrorToDB, enviarAlertaSistema } from './healthCheck';
 
 // ═══════════════════════════════════════════════════════════════
 // REPORTES CEO AUTOMÁTICOS
@@ -2577,7 +2577,7 @@ export async function enviarReporteMensualMarketing(supabase: SupabaseService, m
 // ═══════════════════════════════════════════════════════════════════════════
 const INCREMENTO_MENSUAL = 0.005; // 0.5% mensual = 6% anual
 
-export async function aplicarPreciosProgramados(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+export async function aplicarPreciosProgramados(supabase: SupabaseService, meta: MetaWhatsAppService, env?: { API_SECRET?: string; SARA_CACHE?: KVNamespace; DEV_PHONE?: string }): Promise<void> {
   // ═══════════════════════════════════════════════════════════════════════════
   // ACTUALIZACIÓN MENSUAL DE PRECIOS - Día 1 de cada mes a las 12:00 AM México
   // Incrementa 0.5% mensual (6% anual) TODOS los campos de precio
@@ -2585,11 +2585,31 @@ export async function aplicarPreciosProgramados(supabase: SupabaseService, meta:
   try {
     const hoy = new Date();
     const mesActual = hoy.toLocaleString('es-MX', { month: 'long', year: 'numeric' });
+    const mesKey = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
+    const idempotencyKey = `precio_aplicado_${mesKey}`;
 
-    // Obtener TODAS las propiedades con TODOS los campos de precio
+    // ── IDEMPOTENCY CHECK ──
+    // Si ya se aplicó este mes, no volver a aplicar (previene doble incremento si CRON corre 2 veces)
+    const { data: yaAplicado } = await supabase.client
+      .from('system_config')
+      .select('value')
+      .eq('key', idempotencyKey)
+      .maybeSingle();
+
+    if (yaAplicado) {
+      console.log(`⏭️ Precios ya aplicados para ${mesKey}, saltando`);
+      return;
+    }
+
+    // ── MARCAR ANTES DE APLICAR (mark-before-send pattern) ──
+    await supabase.client
+      .from('system_config')
+      .upsert({ key: idempotencyKey, value: new Date().toISOString() }, { onConflict: 'key' });
+
+    // Obtener TODAS las propiedades con TODOS los campos de precio (incluye price_min, price_max)
     const { data: propiedades, error } = await supabase.client
       .from('properties')
-      .select('id, name, development, price, price_equipped, price_from, price_to');
+      .select('id, name, development, price, price_equipped, price_from, price_to, price_min, price_max');
 
     if (error || !propiedades || propiedades.length === 0) {
       console.error('⚠️ Error obteniendo propiedades:', error?.message);
@@ -2599,35 +2619,49 @@ export async function aplicarPreciosProgramados(supabase: SupabaseService, meta:
     console.log(`💰 Aplicando aumento del ${INCREMENTO_MENSUAL * 100}% a ${propiedades.length} propiedades...`);
 
     let aplicados = 0;
+    let fallidos = 0;
     const resumen: string[] = [];
+    const errores: string[] = [];
 
     for (const prop of propiedades) {
       try {
-        // Obtener precios actuales
+        // Obtener precios actuales (incluye price_min y price_max)
         const precioAnterior = Number(prop.price) || 0;
         const precioEquipadoAnterior = Number(prop.price_equipped) || 0;
         const precioFromAnterior = Number(prop.price_from) || 0;
         const precioToAnterior = Number(prop.price_to) || 0;
+        const precioMinAnterior = Number(prop.price_min) || 0;
+        const precioMaxAnterior = Number(prop.price_max) || 0;
 
         // Calcular nuevos precios (redondear a enteros)
         const nuevoPrecio = precioAnterior > 0 ? Math.round(precioAnterior * (1 + INCREMENTO_MENSUAL)) : null;
         const nuevoPrecioEquipado = precioEquipadoAnterior > 0 ? Math.round(precioEquipadoAnterior * (1 + INCREMENTO_MENSUAL)) : null;
         const nuevoPrecioFrom = precioFromAnterior > 0 ? Math.round(precioFromAnterior * (1 + INCREMENTO_MENSUAL)) : null;
         const nuevoPrecioTo = precioToAnterior > 0 ? Math.round(precioToAnterior * (1 + INCREMENTO_MENSUAL)) : null;
+        const nuevoPrecioMin = precioMinAnterior > 0 ? Math.round(precioMinAnterior * (1 + INCREMENTO_MENSUAL)) : null;
+        const nuevoPrecioMax = precioMaxAnterior > 0 ? Math.round(precioMaxAnterior * (1 + INCREMENTO_MENSUAL)) : null;
 
-        // Actualizar TODOS los campos de precio en DB
-        await supabase.client
+        // Actualizar TODOS los campos de precio en DB (incluye price_min, price_max)
+        const { error: updateError } = await supabase.client
           .from('properties')
           .update({
             price: nuevoPrecio,
             price_equipped: nuevoPrecioEquipado,
             price_from: nuevoPrecioFrom,
             price_to: nuevoPrecioTo,
+            price_min: nuevoPrecioMin,
+            price_max: nuevoPrecioMax,
             updated_at: new Date().toISOString()
           })
           .eq('id', prop.id);
 
-        aplicados++;
+        if (updateError) {
+          fallidos++;
+          errores.push(`${prop.name}: ${updateError.message}`);
+          console.error(`❌ Error actualizando ${prop.name}:`, updateError.message);
+        } else {
+          aplicados++;
+        }
 
         // Guardar para resumen (solo primeros 3 por desarrollo)
         const precioMostrar = precioAnterior || precioFromAnterior;
@@ -2636,6 +2670,8 @@ export async function aplicarPreciosProgramados(supabase: SupabaseService, meta:
           resumen.push(`• ${prop.development}: ${prop.name} $${(precioMostrar/1000000).toFixed(2)}M → $${(nuevoPrecioMostrar!/1000000).toFixed(2)}M`);
         }
       } catch (e) {
+        fallidos++;
+        errores.push(`${prop.name}: ${(e as Error).message}`);
         console.error(`❌ Error actualizando ${prop.name}:`, e);
       }
     }
@@ -2648,13 +2684,40 @@ export async function aplicarPreciosProgramados(supabase: SupabaseService, meta:
           fecha: hoy.toISOString().split('T')[0],
           incremento_porcentaje: INCREMENTO_MENSUAL * 100,
           propiedades_actualizadas: aplicados,
-          notas: `Aumento automático ${mesActual}`
+          notas: `Aumento automático ${mesActual}${fallidos > 0 ? ` (${fallidos} fallidos)` : ''}`
         });
     } catch (e) {
       // Tabla price_history no existe, ignorar
     }
 
-    // Notificar al CEO/Admin
+    // ── ACTUALIZAR RETELL ──
+    let retellOk = false;
+    if (env?.API_SECRET) {
+      try {
+        const retellResp = await fetch(
+          `https://sara-backend.edson-633.workers.dev/configure-retell-tools?api_key=${env.API_SECRET}`
+        );
+        if (retellResp.ok) {
+          retellOk = true;
+          console.log('🤖 Retell actualizado con nuevos precios');
+        } else {
+          const retellBody = await retellResp.text();
+          console.error('⚠️ Error actualizando Retell:', retellResp.status, retellBody);
+          // Alertar al dev sobre fallo de Retell
+          await enviarAlertaSistema(meta, `⚠️ Retell NO se actualizó después del incremento de precios (HTTP ${retellResp.status}): ${retellBody.slice(0, 200)}`, env, `retell_price_update_fail_${mesKey}`);
+        }
+      } catch (e) {
+        console.error('⚠️ Error actualizando Retell:', e);
+        await enviarAlertaSistema(meta, `⚠️ Retell NO se actualizó después del incremento de precios: ${(e as Error).message}`, env, `retell_price_update_fail_${mesKey}`);
+      }
+    }
+
+    // Alertar si hubo fallos en propiedades
+    if (fallidos > 0) {
+      await enviarAlertaSistema(meta, `⚠️ Incremento de precios ${mesActual}: ${fallidos}/${propiedades.length} propiedades FALLARON.\n${errores.slice(0, 5).join('\n')}`, env, `price_update_fail_${mesKey}`);
+    }
+
+    // Notificar al CEO/Admin con info PRECISA
     const { data: admins } = await supabase.client
       .from('team_members')
       .select('phone')
@@ -2662,14 +2725,18 @@ export async function aplicarPreciosProgramados(supabase: SupabaseService, meta:
       .eq('active', true);
 
     if (admins && admins.length > 0 && aplicados > 0) {
+      const statusRetell = retellOk ? '✅ Retell actualizado' : '⚠️ Retell NO se actualizó';
+      const statusFallos = fallidos > 0 ? `\n⚠️ ${fallidos} propiedades fallaron` : '';
+
       const mensaje = `💰 *AUMENTO DE PRECIOS ${mesActual.toUpperCase()}*
 
-Se aplicó el incremento mensual del ${INCREMENTO_MENSUAL * 100}% a ${aplicados} propiedades.
+Se aplicó el incremento mensual del ${INCREMENTO_MENSUAL * 100}% a ${aplicados} propiedades.${statusFallos}
 
 *Ejemplos:*
 ${resumen.slice(0, 5).join('\n')}
 
-✅ Brochures y catálogos actualizados automáticamente.`;
+${statusRetell}
+✅ Brochures dinámicos (siempre actualizados).`;
 
       for (const admin of admins) {
         try {
@@ -2686,9 +2753,9 @@ ${resumen.slice(0, 5).join('\n')}
       }
     }
 
-    console.log(`💰 Aumento aplicado: ${aplicados}/${propiedades.length} propiedades (+${INCREMENTO_MENSUAL * 100}%)`);
+    console.log(`💰 Aumento aplicado: ${aplicados}/${propiedades.length} propiedades (+${INCREMENTO_MENSUAL * 100}%)${fallidos > 0 ? `, ${fallidos} fallidos` : ''}`);
   } catch (e) {
-    console.log('Error aplicando aumento de precios:', e);
+    console.error('Error aplicando aumento de precios:', e);
     await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'aplicarPreciosProgramados', stack: (e as Error).stack });
   }
 }
