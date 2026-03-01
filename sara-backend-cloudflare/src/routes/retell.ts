@@ -59,8 +59,8 @@ export async function handleRetellRoutes(
           }), 400);
         }
 
-        // Buscar el número de SARA (+524923860066)
-        const saraNumber = env.RETELL_PHONE_NUMBER || '+524923860066';
+        // Buscar el número de SARA (desde env, sin fallback hardcodeado)
+        const saraNumber = env.RETELL_PHONE_NUMBER;
         const saraNumberClean = saraNumber.replace('+', '');
         const found = phoneNumbers.find((pn: any) =>
           pn.phone_number?.replace('+', '') === saraNumberClean ||

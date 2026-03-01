@@ -81,3 +81,8 @@ crons = []
 [[env.staging.kv_namespaces]]
 binding = "SARA_CACHE"
 id = "1b0b7ddc2dc7459fa7f9ed2e00caab36"
+
+# R2 Bucket para backups (STAGING - mismo bucket, separado por prefijo)
+[[env.staging.r2_buckets]]
+binding = "SARA_BACKUPS"
+bucket_name = "sara-backups"
