@@ -5056,7 +5056,7 @@ Mensaje: ${mensaje}`;
         const reglasRequeridas = [
           { texto: 'NUNCA pidas el celular', desc: 'No pedir teléfono' },
           { texto: 'enviar_info_whatsapp', desc: 'Puede enviar WhatsApp' },
-          { texto: 'Zacatecas o en Guadalupe', desc: 'Pregunta zona primero' },
+          { texto: 'Zacatecas', desc: 'Pregunta zona primero' },
           { texto: 'presupuesto', desc: 'Pregunta presupuesto' },
           { texto: 'CORTO', desc: 'Respuestas cortas' },
           { texto: 'UNA sola pregunta', desc: 'Una pregunta por turno' },
