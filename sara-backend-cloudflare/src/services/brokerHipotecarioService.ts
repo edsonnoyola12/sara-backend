@@ -31,19 +31,29 @@ export class BrokerHipotecarioService {
   // ═══════════════════════════════════════════════════════════════
   async procesarDocumento(leadId: string, mediaUrl: string, nombreLead: string): Promise<{ respuesta: string; todosCompletos: boolean }> {
     console.log('🏦 procesarDocumento para lead:', leadId);
-    
+
     if (!this.openaiKey) {
       return { respuesta: '😕 Error de configuración. Intenta de nuevo.', todosCompletos: false };
     }
 
-    // Obtener documentos que YA tenemos
-    const { data: docsExistentes } = await this.supabase
-      .from('documentos_broker')
-      .select('tipo')
-      .eq('lead_id', leadId)
-      .eq('valido', true);
-    
-    const inventarioActual = this.contarInventario(docsExistentes || []);
+    // Obtener documentos que YA tenemos (try-catch: tabla puede no existir)
+    let docsExistentes: { tipo: string }[] = [];
+    try {
+      const { data, error } = await this.supabase
+        .from('documentos_broker')
+        .select('tipo')
+        .eq('lead_id', leadId)
+        .eq('valido', true);
+      if (!error && data) {
+        docsExistentes = data;
+      } else if (error) {
+        console.warn('🏦 Tabla documentos_broker no disponible:', error.message);
+      }
+    } catch (e) {
+      console.warn('🏦 Error consultando documentos_broker:', e);
+    }
+
+    const inventarioActual = this.contarInventario(docsExistentes);
     console.log('🏦 Inventario actual:', inventarioActual);
 
     // Analizar imagen con Vision API
@@ -67,14 +77,18 @@ export class BrokerHipotecarioService {
 
     // Guardar documentos nuevos
     for (const doc of aportaciones) {
-      await this.supabase.from('documentos_broker').insert({
-        lead_id: leadId,
-        tipo: doc.tipo,
-        media_url: mediaUrl,
-        datos_extraidos: analisis.datosExtraidos,
-        valido: true,
-        created_at: new Date().toISOString()
-      });
+      try {
+        await this.supabase.from('documentos_broker').insert({
+          lead_id: leadId,
+          tipo: doc.tipo,
+          media_url: mediaUrl,
+          datos_extraidos: analisis.datosExtraidos,
+          valido: true,
+          created_at: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn('🏦 Error guardando documento en documentos_broker:', e);
+      }
     }
 
     // Actualizar inventario

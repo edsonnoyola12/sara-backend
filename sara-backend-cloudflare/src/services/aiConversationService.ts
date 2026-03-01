@@ -4847,6 +4847,33 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 
               // Credit-specific options when lead asks about financing
               if (analysis.intent === 'info_credito') {
+                // Si el lead tiene desarrollo de interés, enviar comparativa de bancos
+                if (lead.property_interest) {
+                  try {
+                    const devInterest = lead.property_interest;
+                    const prop = properties.find((p: any) => {
+                      const devName = (p.development_name || p.development || p.name || '').toLowerCase();
+                      return devName && devInterest.toLowerCase().includes(devName);
+                    });
+                    if (prop && (prop.price_equipped || prop.price)) {
+                      const { FinancingCalculatorService } = await import('./financingCalculatorService');
+                      const finCalc = new FinancingCalculatorService(this.supabase);
+                      const comparison = finCalc.compareBanks({
+                        property_price: prop.price_equipped || prop.price,
+                        down_payment_percent: 10,
+                        term_years: 20
+                      });
+                      const comparisonText = finCalc.formatComparisonForWhatsApp(comparison);
+                      if (comparisonText) {
+                        await this.meta.sendWhatsAppMessage(from, comparisonText);
+                        console.log('💰 Comparativa de bancos enviada para', devInterest);
+                      }
+                    }
+                  } catch (finErr) {
+                    console.warn('⚠️ Error calculando financiamiento:', finErr);
+                  }
+                }
+
                 opciones = [
                   { id: 'btn_credito_infonavit', title: '🏛️ INFONAVIT', description: 'Crédito con subcuenta INFONAVIT' },
                   { id: 'btn_credito_bancario', title: '🏦 Crédito bancario', description: 'BBVA, Banorte, Santander, HSBC' },
@@ -5585,7 +5612,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 
                 // Fallback: if no resources at all, add brochure URL as CTA
                 if (buttons.length === 0) {
-                  const brochureFallback = `https://brochures-santarita.pages.dev/${slug}`;
+                  const brochureFallback = `https://sara-backend.edson-633.workers.dev/brochure/${slug.replace(/_/g, '-').replace(/\.html$/, '')}`;
                   await new Promise(r => setTimeout(r, 300));
                   await this.safeSendCTA(from,
                     `📋 Información de *${dev}* — fotos, planos y precios`,
@@ -5660,7 +5687,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               } else {
                 // Fallback: no encontró propiedad en DB — buscar brochure HTML como mínimo
                 console.error(`⚠️ No se encontró propiedad para: ${dev} — intentando fallback`);
-                const brochureFallbackUrl = `https://brochures-santarita.pages.dev/${dev.toLowerCase().replace(/\s+/g, '_')}`;
+                const brochureFallbackUrl = `https://sara-backend.edson-633.workers.dev/brochure/${dev.toLowerCase().replace(/\s+/g, '-')}`;
                 await this.meta.sendWhatsAppMessage(from,
                   `📋 Aquí te comparto información de *${dev}*:\n${brochureFallbackUrl}\n\n_Fotos, planos y precios_`);
                 accionesHistorial.push({ accion: 'Envié brochure fallback (propiedad no en DB)', detalles: dev });
@@ -8192,11 +8219,28 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
       // CASO 1: Modelos específicos (ej. "el Encino Verde y el Gardenia")
       if (todosModelos.length > 0) {
         const propsModelos = this.handler.getPropsParaModelos(todosModelos, properties);
-        
+
+        // Enviar ficha de modelo con specs (InventoryService formatPropertyCard)
+        for (const prop of propsModelos) {
+          if (recursosEnviados < MAX_RECURSOS) {
+            try {
+              const { InventoryService } = await import('./inventoryService');
+              const card = InventoryService.formatPropertyCard(prop);
+              if (card) {
+                await this.meta.sendWhatsAppMessage(from, card);
+                recursosEnviados++;
+                console.log(`✅ Ficha de modelo enviada: ${prop.name || prop.model} (${recursosEnviados}/${MAX_RECURSOS})`);
+              }
+            } catch (cardErr) {
+              console.warn('⚠️ Error enviando ficha de modelo:', cardErr);
+            }
+          }
+        }
+
         for (const prop of propsModelos) {
           const nombreModelo = prop.model || prop.name || 'Casa';
           const nombreDesarrollo = prop.development || 'Desarrollo';
-          
+
           // Video YouTube del modelo (personalizado + texto vendedor)
           if (prop.youtube_link && !videosEnviados.has(prop.youtube_link) && recursosEnviados < MAX_RECURSOS) {
             const saludo = clientName !== 'Cliente' ? `*${clientName}*, mira` : 'Mira';

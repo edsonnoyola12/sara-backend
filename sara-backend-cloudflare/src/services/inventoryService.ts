@@ -10,8 +10,7 @@ export class InventoryService {
   async getAvailableProperties(development?: string, maxPrice?: number): Promise<any[]> {
     let query = this.supabase.client
       .from('properties')
-      .select('*')
-      .eq('status', 'available');
+      .select('*');
 
     if (development) {
       query = query.ilike('development', `%${development}%`);
@@ -37,7 +36,6 @@ export class InventoryService {
       .select('*')
       .ilike('development', `%${development}%`)
       .ilike('model', `%${model}%`)
-      .eq('status', 'available')
       .limit(1)
       .single();
 
@@ -45,10 +43,28 @@ export class InventoryService {
   }
 
   formatPropertyInfo(property: any): string {
-    return `🏠 *${property.name}*
-📍 ${property.development} - Modelo ${property.model}
-🛏️ ${property.bedrooms} recámaras | 🚿 ${property.bathrooms} baños
-📐 ${property.size_m2}m²
-💰 $${(property.price / 1000000).toFixed(1)}M`;
+    const nombre = property.name || property.model || 'Casa';
+    const dev = property.development || property.development_name || '';
+    const precio = property.price_equipped || property.price || 0;
+    const precioStr = precio > 0 ? `$${(precio / 1000000).toFixed(2)}M equipada` : '';
+    const rec = property.bedrooms ? `${property.bedrooms} recámaras` : '';
+    const banos = property.bathrooms ? `${property.bathrooms} baños` : '';
+    const area = property.area_m2 || property.construction_size || 0;
+    const areaStr = area ? `${area}m²` : '';
+    const specs = [rec, banos, areaStr].filter(Boolean).join(' | ');
+    return `🏠 *${nombre}*${dev ? `\n📍 ${dev}` : ''}${specs ? `\n${specs}` : ''}${precioStr ? `\n💰 ${precioStr}` : ''}`;
+  }
+
+  static formatPropertyCard(property: any): string {
+    const nombre = property.name || property.model || 'Casa';
+    const dev = property.development || property.development_name || '';
+    const precio = property.price_equipped || property.price || 0;
+    const precioStr = precio > 0 ? `$${(precio / 1000000).toFixed(2)}M equipada` : '';
+    const rec = property.bedrooms ? `${property.bedrooms} recámaras` : '';
+    const banos = property.bathrooms ? `${property.bathrooms} baños` : '';
+    const area = property.area_m2 || property.construction_size || 0;
+    const areaStr = area ? `${area}m²` : '';
+    const specs = [rec, banos, areaStr].filter(Boolean).join(' | ');
+    return `🏠 *${nombre}*${dev ? `\n📍 ${dev}` : ''}${specs ? `\n${specs}` : ''}${precioStr ? `\n💰 ${precioStr}` : ''}`;
   }
 }

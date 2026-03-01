@@ -1092,6 +1092,95 @@ export default {
                       return new Response('OK', { status: 200 });
                     }
                   }
+
+                  // ═══ BROKER HIPOTECARIO - ANÁLISIS DE DOCUMENTOS ═══
+                  // Si el lead tiene needs_mortgage=true y asesor asignado, procesar como doc hipotecario
+                  const leadNotesBroker = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+                  const needsMortgage = leadNotesBroker.needs_mortgage === true;
+                  const asesorAsignado = leadNotesBroker.asesor_asignado || lead.assigned_advisor_id;
+
+                  if (needsMortgage && asesorAsignado) {
+                    try {
+                      console.log(`🏦 Lead ${lead.name} tiene needs_mortgage + asesor - procesando doc hipotecario`);
+
+                      // Meta media URLs require auth headers — download as base64 first
+                      const base64Data = await meta.downloadMediaAsBase64(mediaUrl);
+                      if (base64Data) {
+                        const dataUrl = `data:image/jpeg;base64,${base64Data}`;
+
+                        const { BrokerHipotecarioService } = await import('./services/brokerHipotecarioService');
+                        const brokerService = new BrokerHipotecarioService(supabase.client, env.OPENAI_API_KEY);
+
+                        const resultadoBroker = await brokerService.procesarDocumento(lead.id, dataUrl, lead.name || 'Cliente');
+
+                        // Enviar respuesta al lead
+                        await meta.sendWhatsAppMessage(from, resultadoBroker.respuesta);
+
+                        // Si todos los documentos están completos, notificar equipo
+                        if (resultadoBroker.todosCompletos) {
+                          const notifBroker: Promise<any>[] = [];
+
+                          // Notificar asesor asignado
+                          const asesorId = typeof asesorAsignado === 'string' ? asesorAsignado : String(asesorAsignado);
+                          const { data: asesorMember } = await supabase.client
+                            .from('team_members')
+                            .select('*')
+                            .eq('id', asesorId)
+                            .maybeSingle();
+
+                          if (asesorMember) {
+                            const msgAsesorBroker = `🏦 *DOCUMENTOS COMPLETOS*\n\n` +
+                              `👤 *${lead.name || 'Lead'}*\n` +
+                              `📱 ${lead.phone ? formatPhoneForDisplay(lead.phone) : 'Sin tel'}\n\n` +
+                              `¡Ya tiene todos los documentos para el trámite hipotecario!\n` +
+                              `Revisa y continúa con el proceso.`;
+                            notifBroker.push(
+                              enviarMensajeTeamMember(supabase, meta, asesorMember, msgAsesorBroker, {
+                                tipoMensaje: 'alerta_lead',
+                                guardarPending: true,
+                                pendingKey: 'pending_alerta_lead'
+                              })
+                            );
+                          }
+
+                          // Notificar vendedor original
+                          const vendedorOrigId = leadNotesBroker.vendedor_original_id || lead.assigned_to;
+                          if (vendedorOrigId && vendedorOrigId !== asesorId) {
+                            const { data: vendedorMember } = await supabase.client
+                              .from('team_members')
+                              .select('*')
+                              .eq('id', vendedorOrigId)
+                              .maybeSingle();
+
+                            if (vendedorMember) {
+                              const msgVendedorBroker = `🏦 *DOCS HIPOTECARIOS LISTOS*\n\n` +
+                                `👤 *${lead.name || 'Lead'}*\n` +
+                                `📱 ${lead.phone ? formatPhoneForDisplay(lead.phone) : 'Sin tel'}\n\n` +
+                                `Tu lead ya completó todos los documentos para su crédito.\n` +
+                                `El asesor procederá con el trámite.`;
+                              notifBroker.push(
+                                enviarMensajeTeamMember(supabase, meta, vendedorMember, msgVendedorBroker, {
+                                  tipoMensaje: 'alerta_lead',
+                                  guardarPending: true,
+                                  pendingKey: 'pending_alerta_lead'
+                                })
+                              );
+                            }
+                          }
+
+                          if (notifBroker.length > 0) {
+                            await Promise.all(notifBroker);
+                          }
+                        }
+
+                        console.log('✅ Documento hipotecario procesado por BrokerService');
+                        return new Response('OK', { status: 200 });
+                      }
+                    } catch (brokerErr) {
+                      console.warn('⚠️ Error en BrokerHipotecarioService:', brokerErr);
+                      // Fall through to desperfecto handler
+                    }
+                  }
                 }
               } catch (imgErr) {
                 console.error('❌ Error procesando imagen:', imgErr);
