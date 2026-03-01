@@ -165,10 +165,11 @@ export async function handlePromotionRoutes(
     }
 
     // 4. Actualizar contadores
-    await supabase.client.from('promotions').update({
+    const { error: updateErr } = await supabase.client.from('promotions').update({
       total_reached: (promo.total_reached || 0) + sent,
       updated_at: new Date().toISOString()
     }).eq('id', promo.id);
+    if (updateErr) console.error('Error actualizando contadores promo:', updateErr);
 
     return corsResponse(JSON.stringify({
       success: true,

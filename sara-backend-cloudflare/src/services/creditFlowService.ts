@@ -1213,7 +1213,7 @@ Por ejemplo: "mañana a las 11am" o "el sábado a las 10"`,
 
       let notas: any = {};
       if (typeof lead.notes === 'string') {
-        try { notas = JSON.parse(lead.notes); } catch (e) { return null; }
+        try { notas = JSON.parse(lead.notes); } catch (e) { console.error('Error parsing credit flow notes:', e); return null; }
       } else if (typeof lead.notes === 'object') {
         notas = lead.notes;
       }
