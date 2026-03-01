@@ -91,115 +91,86 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
   await freshNotesUpdate(ctx, vendedor.id, n => { n.last_sara_interaction = new Date().toISOString(); });
 
   // ═══════════════════════════════════════════════════════════
-  // PENDING MESSAGES: Usa deliverPendingMessage() que resuelve:
+  // PENDING MESSAGES: Entrega TODOS los pending acumulados (no solo el primero)
+  // Usa deliverPendingMessage() que resuelve:
   // 1. Re-lee notes frescas de DB (evita sobreescribir cambios de CRONs)
   // 2. Captura wamid de Meta API (verifica delivery)
   // 3. Verifica errores de Supabase .update() (no falla silenciosamente)
   // ═══════════════════════════════════════════════════════════
+  let pendingDelivered = 0;
 
-  // PENDING BRIEFING (mañana) - Usa expiración configurable (18h para briefing)
-  const pendingBriefingInicio = notasVendedor?.pending_briefing;
-  if (pendingBriefingInicio?.sent_at && pendingBriefingInicio?.mensaje_completo) {
-    if (!isPendingExpired(pendingBriefingInicio, 'briefing')) {
-      console.log(`📋 [PENDING] ${nombreVendedor} respondió template - enviando briefing`);
-      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_briefing', pendingBriefingInicio.mensaje_completo, 'last_briefing_context');
-      return;
-    }
-  }
+  // Orden de prioridad: briefing → recap → reportes → video → audio → mensaje → alerta
+  const pendingChecks: Array<{
+    key: string;
+    data: any;
+    tipo: string;
+    contextKey?: string;
+    label: string;
+    isSpecial?: 'audio' | 'video';
+  }> = [
+    { key: 'pending_briefing', data: notasVendedor?.pending_briefing, tipo: 'briefing', contextKey: 'last_briefing_context', label: 'briefing' },
+    { key: 'pending_recap', data: notasVendedor?.pending_recap, tipo: 'recap', contextKey: 'last_recap_context', label: 'recap' },
+    { key: 'pending_reporte_diario', data: notasVendedor?.pending_reporte_diario, tipo: 'reporte_diario', contextKey: 'last_reporte_diario_context', label: 'reporte diario' },
+    { key: 'pending_reporte_semanal', data: notasVendedor?.pending_reporte_semanal, tipo: 'resumen_semanal', contextKey: 'last_reporte_semanal_context', label: 'reporte semanal' },
+    { key: 'pending_resumen_semanal', data: notasVendedor?.pending_resumen_semanal, tipo: 'resumen_semanal', contextKey: 'last_resumen_semanal_context', label: 'resumen semanal' },
+    { key: 'pending_video_semanal', data: notasVendedor?.pending_video_semanal, tipo: 'video', label: 'video semanal', isSpecial: 'video' },
+    { key: 'pending_audio', data: notasVendedor?.pending_audio, tipo: 'audio', label: 'audio TTS', isSpecial: 'audio' },
+    { key: 'pending_mensaje', data: notasVendedor?.pending_mensaje, tipo: 'notificacion', label: 'mensaje pendiente' },
+    { key: 'pending_alerta_lead', data: notasVendedor?.pending_alerta_lead, tipo: 'notificacion', label: 'alerta de lead' },
+  ];
 
-  // PENDING RECAP (noche - no usó SARA) - Usa expiración configurable (18h para recap)
-  const pendingRecapInicio = notasVendedor?.pending_recap;
-  if (pendingRecapInicio?.sent_at && pendingRecapInicio?.mensaje_completo) {
-    if (!isPendingExpired(pendingRecapInicio, 'recap')) {
-      console.log(`📋 [PENDING] ${nombreVendedor} respondió template - enviando recap`);
-      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_recap', pendingRecapInicio.mensaje_completo, 'last_recap_context');
-      return;
-    }
-  }
-
-  // PENDING REPORTE DIARIO (7 PM) - Usa expiración configurable (24h para reporte_diario)
-  const pendingReporteDiarioInicio = notasVendedor?.pending_reporte_diario;
-  if (pendingReporteDiarioInicio?.sent_at && pendingReporteDiarioInicio?.mensaje_completo) {
-    if (!isPendingExpired(pendingReporteDiarioInicio, 'reporte_diario')) {
-      console.log(`📊 [PENDING] ${nombreVendedor} respondió template - enviando reporte diario`);
-      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_reporte_diario', pendingReporteDiarioInicio.mensaje_completo, 'last_reporte_diario_context');
-      return;
-    }
-  }
-
-  // PENDING REPORTE SEMANAL (lunes) - Usa expiración configurable (72h para resumen_semanal)
-  const pendingReporteSemanalInicio = notasVendedor?.pending_reporte_semanal;
-  if (pendingReporteSemanalInicio?.sent_at && pendingReporteSemanalInicio?.mensaje_completo) {
-    if (!isPendingExpired(pendingReporteSemanalInicio, 'resumen_semanal')) {
-      console.log(`📊 [PENDING] ${nombreVendedor} respondió template - enviando reporte semanal`);
-      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_reporte_semanal', pendingReporteSemanalInicio.mensaje_completo, 'last_reporte_semanal_context');
-      return;
-    }
-  }
-
-  // PENDING RESUMEN SEMANAL (recap semanal - sábado) - Usa expiración configurable (72h)
-  const pendingResumenSemanalInicio = notasVendedor?.pending_resumen_semanal;
-  if (pendingResumenSemanalInicio?.sent_at && pendingResumenSemanalInicio?.mensaje_completo) {
-    if (!isPendingExpired(pendingResumenSemanalInicio, 'resumen_semanal')) {
-      console.log(`📋 [PENDING] ${nombreVendedor} respondió template - enviando resumen semanal`);
-      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_resumen_semanal', pendingResumenSemanalInicio.mensaje_completo, 'last_resumen_semanal_context');
-      return;
-    }
-  }
-
-  // PENDING VIDEO SEMANAL (resumen semanal de logros - viernes)
-  const pendingVideoSemanalInicio = notasVendedor?.pending_video_semanal;
-  if (pendingVideoSemanalInicio?.sent_at && pendingVideoSemanalInicio?.mensaje_completo) {
-    const horasDesde = (Date.now() - new Date(pendingVideoSemanalInicio.sent_at).getTime()) / (1000 * 60 * 60);
-    if (horasDesde <= 24) {
-      console.log(`🎬 [PENDING PRIORITY] ${nombreVendedor} respondió template - enviando resumen semanal de logros`);
-      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_video_semanal', pendingVideoSemanalInicio.mensaje_completo);
-      return;
-    }
-  }
-
-  // PENDING AUDIO (TTS) - Enviar nota de voz pendiente
-  const pendingAudioVendedor = notasVendedor?.pending_audio;
-  if (pendingAudioVendedor?.sent_at && pendingAudioVendedor?.texto) {
-    const horasDesdeAudioV = (Date.now() - new Date(pendingAudioVendedor.sent_at).getTime()) / (1000 * 60 * 60);
-    if (horasDesdeAudioV <= 24 && ctx.env?.OPENAI_API_KEY) {
-      console.log(`🔊 [PENDING] ${nombreVendedor} respondió template - enviando audio TTS`);
-      try {
-        const { createTTSService } = await import('../services/ttsService');
-        const tts = createTTSService(ctx.env.OPENAI_API_KEY);
-        const audioResult = await tts.generateAudio(pendingAudioVendedor.texto);
-        if (audioResult.success && audioResult.audioBuffer) {
-          await ctx.meta.sendVoiceMessage(from, audioResult.audioBuffer, audioResult.mimeType || 'audio/ogg');
-          console.log(`✅ Audio TTS entregado a ${nombreVendedor} (${audioResult.audioBuffer.byteLength} bytes)`);
+  for (const pc of pendingChecks) {
+    try {
+      // Audio special case
+      if (pc.isSpecial === 'audio' && pc.data?.sent_at && pc.data?.texto) {
+        const horasDesde = (Date.now() - new Date(pc.data.sent_at).getTime()) / (1000 * 60 * 60);
+        if (horasDesde <= 24 && ctx.env?.OPENAI_API_KEY) {
+          console.log(`🔊 [PENDING] ${nombreVendedor} - enviando ${pc.label}`);
+          try {
+            const { createTTSService } = await import('../services/ttsService');
+            const tts = createTTSService(ctx.env.OPENAI_API_KEY);
+            const audioResult = await tts.generateAudio(pc.data.texto);
+            if (audioResult.success && audioResult.audioBuffer) {
+              await ctx.meta.sendVoiceMessage(from, audioResult.audioBuffer, audioResult.mimeType || 'audio/ogg');
+              console.log(`✅ Audio TTS entregado a ${nombreVendedor} (${audioResult.audioBuffer.byteLength} bytes)`);
+            }
+          } catch (ttsErr) {
+            console.error('⚠️ Error generando audio TTS:', ttsErr);
+          }
+          await deliverPendingMessage(ctx, vendedor.id, from, pc.key, '__ALREADY_SENT__');
+          pendingDelivered++;
         }
-      } catch (ttsErr) {
-        console.error('⚠️ Error generando audio TTS:', ttsErr);
+        continue;
       }
 
-      // Fresh re-read + error check (avoid stale data overwrite)
-      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_audio', '__ALREADY_SENT__');
-      return;
+      // Video special case (24h expiration)
+      if (pc.isSpecial === 'video' && pc.data?.sent_at && pc.data?.mensaje_completo) {
+        const horasDesde = (Date.now() - new Date(pc.data.sent_at).getTime()) / (1000 * 60 * 60);
+        if (horasDesde <= 24) {
+          console.log(`🎬 [PENDING] ${nombreVendedor} - enviando ${pc.label}`);
+          await deliverPendingMessage(ctx, vendedor.id, from, pc.key, pc.data.mensaje_completo);
+          pendingDelivered++;
+        }
+        continue;
+      }
+
+      // Standard pending messages
+      if (pc.data?.sent_at && pc.data?.mensaje_completo) {
+        if (!isPendingExpired(pc.data, pc.tipo)) {
+          console.log(`📬 [PENDING] ${nombreVendedor} - enviando ${pc.label}`);
+          await deliverPendingMessage(ctx, vendedor.id, from, pc.key, pc.data.mensaje_completo, pc.contextKey);
+          pendingDelivered++;
+        }
+      }
+    } catch (pendingErr) {
+      console.error(`⚠️ Error entregando ${pc.key} a ${nombreVendedor}:`, pendingErr);
+      // Continuar con el siguiente pending, no perder los demás
     }
   }
 
-  // PENDING MENSAJE GENÉRICO (notificaciones de citas, alertas, etc.)
-  const pendingMensajeInicio = notasVendedor?.pending_mensaje;
-  if (pendingMensajeInicio?.sent_at && pendingMensajeInicio?.mensaje_completo) {
-    if (!isPendingExpired(pendingMensajeInicio, 'notificacion')) {
-      console.log(`📬 [PENDING] ${nombreVendedor} respondió template - enviando mensaje pendiente`);
-      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_mensaje', pendingMensajeInicio.mensaje_completo);
-      return;
-    }
-  }
-
-  // PENDING ALERTA LEAD (alertas prioritarias)
-  const pendingAlertaLeadInicio = notasVendedor?.pending_alerta_lead;
-  if (pendingAlertaLeadInicio?.sent_at && pendingAlertaLeadInicio?.mensaje_completo) {
-    if (!isPendingExpired(pendingAlertaLeadInicio, 'notificacion')) {
-      console.log(`🔥 [PENDING] ${nombreVendedor} respondió template - enviando alerta de lead`);
-      await deliverPendingMessage(ctx, vendedor.id, from, 'pending_alerta_lead', pendingAlertaLeadInicio.mensaje_completo);
-      return;
-    }
+  if (pendingDelivered > 0) {
+    console.log(`✅ ${pendingDelivered} pending(s) entregados a ${nombreVendedor}`);
+    return;
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -3213,13 +3184,16 @@ export async function vendedorCerrarVenta(ctx: HandlerContext, handler: any, fro
     if (ceo?.phone) {
       const msgCEO = `🏆 *¡VENTA CERRADA!*\n\n👤 Cliente: ${leadVenta.name || 'N/A'}\n🏠 Desarrollo: ${leadVenta.property_interest || 'N/A'}\n💼 Vendedor: ${nombre}\n📅 Fecha: ${new Date().toLocaleDateString('es-MX')}\n\n¡Felicidades al equipo! 🎉`;
       const { enviarMensajeTeamMember } = await import('../utils/teamMessaging');
-      await enviarMensajeTeamMember(ctx.supabase, ctx.twilio as any, ceo, msgCEO, {
-        tipoMensaje: 'notificacion',
-        pendingKey: 'pending_mensaje'
+      const ceoResult = await enviarMensajeTeamMember(ctx.supabase, ctx.twilio as any, ceo, msgCEO, {
+        tipoMensaje: 'alerta_lead',
+        pendingKey: 'pending_alerta_lead'
       });
+      if (!ceoResult.success) {
+        console.error(`❌ CRITICAL: CEO NO fue notificado de venta cerrada (${leadVenta.name})`);
+      }
     }
   } catch (e) {
-    console.error('Error notificando CEO de venta:', e);
+    console.error('❌ CRITICAL: Error notificando CEO de venta:', e);
   }
 }
 export async function vendedorCancelarLead(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, nombre: string): Promise<void> {
@@ -3504,13 +3478,16 @@ export async function vendedorEntregado(ctx: HandlerContext, from: string, nombr
     if (ceo?.phone) {
       const msgCEO = `🔑 *¡ENTREGA REALIZADA!*\n\n👤 Cliente: ${lead.name || 'N/A'}\n🏠 Desarrollo: ${desarrolloNombre}\n💼 Vendedor: ${nombre}\n📅 Fecha: ${new Date().toLocaleDateString('es-MX')}\n\n¡Otra familia feliz en su nuevo hogar! 🏡`;
       const { enviarMensajeTeamMember } = await import('../utils/teamMessaging');
-      await enviarMensajeTeamMember(ctx.supabase, ctx.twilio as any, ceo, msgCEO, {
-        tipoMensaje: 'notificacion',
-        pendingKey: 'pending_mensaje'
+      const ceoResult = await enviarMensajeTeamMember(ctx.supabase, ctx.twilio as any, ceo, msgCEO, {
+        tipoMensaje: 'alerta_lead',
+        pendingKey: 'pending_alerta_lead'
       });
+      if (!ceoResult.success) {
+        console.error(`❌ CRITICAL: CEO NO fue notificado de entrega (${lead.name})`);
+      }
     }
   } catch (e) {
-    console.error('Error notificando CEO de entrega:', e);
+    console.error('❌ CRITICAL: Error notificando CEO de entrega:', e);
   }
 }
 

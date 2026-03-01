@@ -1426,7 +1426,10 @@ export class VendorCommandsService {
           .from('leads')
           .update({ status: newStatus, updated_at: new Date().toISOString() })
           .eq('id', lead.id);
-        if (errFunnelReset) console.error('⚠️ Error updating lead funnel reset:', errFunnelReset);
+        if (errFunnelReset) {
+          console.error('⚠️ Error updating lead funnel reset:', errFunnelReset);
+          return { success: false, error: '❌ Error guardando cambio en base de datos' };
+        }
         return { success: true, lead, newStatus };
       }
 
@@ -1450,7 +1453,10 @@ export class VendorCommandsService {
         .from('leads')
         .update({ status: newStatus, updated_at: new Date().toISOString() })
         .eq('id', lead.id);
-      if (errFunnelMove) console.error('⚠️ Error moving lead in funnel for lead', lead.id, ':', errFunnelMove);
+      if (errFunnelMove) {
+        console.error('❌ Error moving lead in funnel for lead', lead.id, ':', errFunnelMove);
+        return { success: false, error: '❌ Error guardando cambio en base de datos' };
+      }
 
       console.log(`✅ Lead ${lead.name} movido de ${lead.status} a ${newStatus}`);
 

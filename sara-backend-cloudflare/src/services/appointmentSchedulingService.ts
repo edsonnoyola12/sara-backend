@@ -793,6 +793,23 @@ agendar ${nombreLead} mañana 4pm`;
       }
 
       // ═══════════════════════════════════════════════════════════════
+      // VERIFICAR DOUBLE-BOOKING: misma fecha + hora ya existe
+      // ═══════════════════════════════════════════════════════════════
+      const { data: citaDuplicada } = await this.supabase.client
+        .from('appointments')
+        .select('id')
+        .eq('lead_id', lead.id)
+        .eq('scheduled_date', fechaStr)
+        .eq('scheduled_time', horaISO)
+        .in('status', ['scheduled', 'confirmed'])
+        .limit(1)
+        .maybeSingle();
+
+      if (citaDuplicada) {
+        return { error: `⚠️ ${lead.name} ya tiene una cita agendada para esa fecha y hora.` };
+      }
+
+      // ═══════════════════════════════════════════════════════════════
       // CANCELAR CITAS ANTERIORES (evita duplicados al reagendar)
       // ═══════════════════════════════════════════════════════════════
       const { data: citasAnteriores } = await this.supabase.client
@@ -974,6 +991,23 @@ agendar ${nombreLead} mañana 4pm`;
         } else {
           console.error('⚠️ No se encontró propiedad para:', desarrolloBuscar);
         }
+      }
+
+      // ═══════════════════════════════════════════════════════════════
+      // VERIFICAR DOUBLE-BOOKING: misma fecha + hora ya existe
+      // ═══════════════════════════════════════════════════════════════
+      const { data: citaDuplicada } = await this.supabase.client
+        .from('appointments')
+        .select('id')
+        .eq('lead_id', lead.id)
+        .eq('scheduled_date', fechaStr)
+        .eq('scheduled_time', horaISO)
+        .in('status', ['scheduled', 'confirmed'])
+        .limit(1)
+        .maybeSingle();
+
+      if (citaDuplicada) {
+        return { error: `⚠️ ${lead.name} ya tiene una cita agendada para esa fecha y hora.` };
       }
 
       // ═══════════════════════════════════════════════════════════════

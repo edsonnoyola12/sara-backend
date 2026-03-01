@@ -227,8 +227,12 @@ export async function enviarMensajeTeamMember(
           console.error(`   ❌ Fallback también falló: ${fallbackError?.message}`);
           // Guardar como pending para reintento cuando la ventana se abra
           if (guardarPending) {
-            await guardarMensajePending(supabase, teamMember.id, notasActuales, pendingKey, mensaje, expirationHours);
-            console.log(`   💾 Guardado como pending para reintento posterior`);
+            try {
+              await guardarMensajePending(supabase, teamMember.id, notasActuales, pendingKey, mensaje, expirationHours);
+              console.log(`   💾 Guardado como pending para reintento posterior`);
+            } catch (pendingSaveErr) {
+              console.error(`   ❌ CRITICAL: Pending TAMPOCO se guardó — mensaje PERDIDO:`, pendingSaveErr);
+            }
           }
           // VENDEDOR CIEGO FIX: Log critical error — TODOS los paths fallaron
           try {
@@ -243,8 +247,12 @@ export async function enviarMensajeTeamMember(
       } else {
         // Template genérico también falló — guardar como pending
         if (guardarPending) {
-          await guardarMensajePending(supabase, teamMember.id, notasActuales, pendingKey, mensaje, expirationHours);
-          console.log(`   💾 Guardado como pending para reintento posterior`);
+          try {
+            await guardarMensajePending(supabase, teamMember.id, notasActuales, pendingKey, mensaje, expirationHours);
+            console.log(`   💾 Guardado como pending para reintento posterior`);
+          } catch (pendingSaveErr) {
+            console.error(`   ❌ CRITICAL: Pending TAMPOCO se guardó — mensaje PERDIDO:`, pendingSaveErr);
+          }
         }
         // VENDEDOR CIEGO FIX: Log critical error — template genérico falló
         try {
@@ -260,7 +268,12 @@ export async function enviarMensajeTeamMember(
 
     // 5. Template enviado exitosamente → Guardar mensaje como pending
     if (guardarPending) {
-      await guardarMensajePending(supabase, teamMember.id, notasActuales, pendingKey, mensaje, expirationHours, templateWamid, tipoMensaje);
+      try {
+        await guardarMensajePending(supabase, teamMember.id, notasActuales, pendingKey, mensaje, expirationHours, templateWamid, tipoMensaje);
+      } catch (pendingSaveErr) {
+        console.error(`   ⚠️ Template enviado pero pending NO se guardó:`, pendingSaveErr);
+        // Template ya se envió, no es crítico pero el mensaje no se entregará cuando respondan
+      }
     }
 
     return { success: true, method: 'template', ventanaAbierta: false, messageId: templateWamid };
@@ -329,6 +342,8 @@ async function guardarMensajePending(
         context: { teamMemberId, pendingKey, tipoMensaje, dbError: pendingError.code || pendingError.message }
       });
     } catch (logErr) { console.error('⚠️ logErrorToDB failed (guardarMensajePending):', logErr); }
+    // Propagar error para que el caller sepa que el pending NO se guardó
+    throw new Error(`Failed to save pending ${pendingKey}: ${pendingError.message || pendingError.code}`);
   } else {
     console.log(`   💾 Mensaje guardado como ${pendingKey} (expira en ${expirationHours}h)${wamid ? `, wamid: ${wamid.substring(0, 15)}...` : ''}`);
   }

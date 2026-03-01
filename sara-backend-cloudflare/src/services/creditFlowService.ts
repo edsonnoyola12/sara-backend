@@ -612,11 +612,21 @@ Atendemos de Lunes a Viernes 9am-6pm y Sábados 9am-2pm 😊`,
           // Buscar asesor
           const asesor = await this.buscarAsesor(context.banco_preferido);
 
-          if (asesor) {
-            context.asesor_id = asesor.id;
-            context.asesor_name = asesor.name;
-            context.asesor_phone = asesor.phone;
+          if (!asesor) {
+            console.error('❌ No hay asesores hipotecarios disponibles para lead', leadId);
+            context.state = 'esperando_cita_presencial';
+            await this.guardarContexto(leadId, context);
+            return {
+              respuesta: `Gracias por completar tu información, ${context.lead_name?.split(' ')[0] || ''}. 🙏\n\n` +
+                `En este momento nuestros asesores hipotecarios están ocupados, pero uno te contactará muy pronto.\n\n` +
+                `Mientras tanto, ¿te gustaría agendar una visita al desarrollo? Te puedo ayudar con eso. 🏡`,
+              context
+            };
           }
+
+          context.asesor_id = asesor.id;
+          context.asesor_name = asesor.name;
+          context.asesor_phone = asesor.phone;
 
           // Obtener vendedor original ANTES de reasignar
           const { data: leadActual } = await this.supabase.client

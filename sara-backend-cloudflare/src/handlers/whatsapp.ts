@@ -283,7 +283,7 @@ export class WhatsAppHandler {
               `Este lead te fue asignado automáticamente. ¡Responde pronto!\n\n` +
               `Escribe *mis leads* para ver tu lista.`;
             try {
-              await enviarMensajeTeamMember(this.supabase, this.meta, vendedorAsignado, notifMsg, {
+              const notifResult = await enviarMensajeTeamMember(this.supabase, this.meta, vendedorAsignado, notifMsg, {
                 tipoMensaje: 'alerta_lead',
                 guardarPending: true,
                 pendingKey: 'pending_alerta_lead',
@@ -298,9 +298,13 @@ export class WhatsAppHandler {
                   ]
                 }
               });
-              console.log(`📤 Vendedor ${vendedorAsignado.name} notificado del nuevo lead`);
+              if (!notifResult.success) {
+                console.error(`❌ CRITICAL: Vendedor ${vendedorAsignado.name} NO fue notificado del nuevo lead (method: ${notifResult.method})`);
+              } else {
+                console.log(`📤 Vendedor ${vendedorAsignado.name} notificado del nuevo lead (${notifResult.method})`);
+              }
             } catch (e) {
-              console.error('Error notificando vendedor de nuevo lead:', e);
+              console.error('❌ CRITICAL: Error notificando vendedor de nuevo lead:', e);
             }
           }
         }
@@ -426,10 +430,14 @@ export class WhatsAppHandler {
                     `💬 "${trimmedBody.substring(0, 80)}${trimmedBody.length > 80 ? '...' : ''}"\n\n` +
                     `${scoreTemp} Score: ${lead.lead_score || 0} | 🏠 ${lead.property_interest || 'Sin desarrollo'}\n\n` +
                     `💡 *bridge ${lead.name?.split(' ')[0] || 'lead'}* para chat directo`;
-                  await enviarMensajeTeamMember(this.supabase, this.meta, vendedorAsignado, notifMsg, {
+                  const rtResult = await enviarMensajeTeamMember(this.supabase, this.meta, vendedorAsignado, notifMsg, {
                     tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
                   });
-                  console.log(`📲 Notificación en tiempo real enviada a ${vendedorAsignado.name}`);
+                  if (!rtResult.success) {
+                    console.error(`⚠️ Notificación real-time a ${vendedorAsignado.name} falló (${rtResult.method})`);
+                  } else {
+                    console.log(`📲 Notificación en tiempo real enviada a ${vendedorAsignado.name}`);
+                  }
 
                   // Actualizar timestamp de última notificación
                   await this.supabase.client.from('team_members')
@@ -1040,7 +1048,16 @@ export class WhatsAppHandler {
       if (activeBridge && activeBridge.expires_at && new Date(activeBridge.expires_at) > new Date()) {
         console.log('🔗 BRIDGE activo detectado, reenviando mensaje directo a:', activeBridge.vendedor_name);
         const msgDirecto = `💬 *${lead.name}:*\n${body}`;
-        await this.meta.sendWhatsAppMessage(activeBridge.vendedor_phone, msgDirecto);
+        try {
+          await this.meta.sendWhatsAppMessage(activeBridge.vendedor_phone, msgDirecto);
+        } catch (bridgeSendErr: any) {
+          console.error(`❌ Bridge: Error reenviando a vendedor ${activeBridge.vendedor_name}:`, bridgeSendErr?.message);
+          // Intentar notificar al vendedor que el bridge falló
+          try {
+            await this.meta.sendWhatsAppMessage(activeBridge.vendedor_phone,
+              `⚠️ No se pudo reenviar el mensaje de ${lead.name}. Es posible que la ventana de WhatsApp haya expirado. Usa "bridge ${lead.name?.split(' ')[0]}" para reconectar.`);
+          } catch (_) { /* best effort */ }
+        }
 
         // ═══ REGISTRAR ACTIVIDAD EN BITÁCORA (cuenta para el vendedor) ═══
         if (activeBridge.vendedor_id) {
