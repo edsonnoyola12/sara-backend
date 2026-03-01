@@ -3431,7 +3431,7 @@ export async function vendedorBotLead(ctx: HandlerContext, from: string, nombreL
   );
 }
 
-// ═══ ENTREGADO: Ver status de delivery de últimos 5 mensajes a un lead ═══
+// ═══ ENTREGADO: Marcar lead como entregado (casa entregada) ═══
 export async function vendedorEntregado(ctx: HandlerContext, from: string, nombreLead: string, vendedor: any): Promise<void> {
   if (!nombreLead) {
     await ctx.twilio.sendWhatsAppMessage(from, '❌ Escribe: *entregado [nombre del lead]*');
@@ -3439,7 +3439,7 @@ export async function vendedorEntregado(ctx: HandlerContext, from: string, nombr
   }
 
   const leads = await findLeadByName(ctx.supabase, nombreLead, {
-    vendedorId: vendedor.id, select: 'id, name, phone', limit: 5
+    vendedorId: vendedor.id, select: 'id, name, phone, status, property_interest, notes', limit: 5
   });
 
   if (!leads || leads.length === 0) {
@@ -3453,32 +3453,64 @@ export async function vendedorEntregado(ctx: HandlerContext, from: string, nombr
   }
 
   const lead = leads[0];
-  const cleanPhone = lead.phone?.replace(/\D/g, '') || '';
+  const nombre = vendedor.name?.split(' ')[0] || 'Vendedor';
 
-  // Buscar últimos 5 mensajes enviados a este lead
-  const { data: statuses } = await ctx.supabase.client
-    .from('message_delivery_status')
-    .select('message_id, status, timestamp, error_code, error_message')
-    .eq('recipient_phone', cleanPhone)
-    .order('timestamp', { ascending: false })
-    .limit(5);
+  // Actualizar status a delivered + guardar delivery_date en notes
+  const notasActuales = typeof lead.notes === 'string' ? safeJsonParse(lead.notes, {}) : (lead.notes || {});
+  notasActuales.delivery_date = new Date().toISOString();
+  notasActuales.status_before_delivered = lead.status;
 
-  if (!statuses || statuses.length === 0) {
-    await ctx.twilio.sendWhatsAppMessage(from, `📬 *${lead.name}*: No hay registros de delivery recientes.`);
+  const { error: updateErr } = await ctx.supabase.client
+    .from('leads')
+    .update({
+      status: 'delivered',
+      notes: JSON.stringify(notasActuales)
+    })
+    .eq('id', lead.id);
+
+  if (updateErr) {
+    console.error('Error marcando lead como entregado:', updateErr);
+    await ctx.twilio.sendWhatsAppMessage(from, `❌ Error al marcar como entregado: ${updateErr.message}`);
     return;
   }
 
-  const statusEmoji: Record<string, string> = { sent: '📤', delivered: '✅', read: '👁️', failed: '❌' };
-  const lines = statuses.map((s: any) => {
-    const emoji = statusEmoji[s.status] || '❓';
-    const fecha = s.timestamp ? new Date(s.timestamp).toLocaleString('es-MX', { timeZone: 'America/Mexico_City', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '?';
-    const error = s.error_code ? ` (Error: ${s.error_code})` : '';
-    return `${emoji} ${s.status.toUpperCase()} - ${fecha}${error}`;
-  });
-
+  // Confirmar al vendedor
+  const desarrolloNombre = lead.property_interest || 'su nuevo hogar';
   await ctx.twilio.sendWhatsAppMessage(from,
-    `📬 *Delivery status — ${lead.name}*\n\nÚltimos ${statuses.length} mensajes:\n${lines.join('\n')}`
+    `🔑 *¡Entrega registrada!*\n\n👤 Cliente: ${lead.name}\n🏠 Desarrollo: ${desarrolloNombre}\n📅 Fecha: ${new Date().toLocaleDateString('es-MX')}\n\nSe activarán los seguimientos post-entrega automáticos.`
   );
+
+  // Enviar celebración al CLIENTE
+  if (lead.phone) {
+    try {
+      const msgCliente = `🔑 *¡Felicidades ${lead.name || ''}!*\n\n¡Tu nuevo hogar en *${desarrolloNombre}* ya es tuyo!\n\nEsperamos que disfrutes cada momento en tu nueva casa. Tu asesor *${nombre}* seguirá disponible para cualquier cosa que necesites.\n\n¡Bienvenido(a) a tu hogar! 🏡`;
+      await ctx.twilio.sendWhatsAppMessage(lead.phone, msgCliente);
+      console.log(`🔑 Celebración de entrega enviada al cliente ${lead.name}`);
+    } catch (e) {
+      console.error('Error enviando celebración de entrega al cliente:', e);
+    }
+  }
+
+  // Notificar al CEO (24h-safe)
+  try {
+    const { data: ceo } = await ctx.supabase.client
+      .from('team_members')
+      .select('*')
+      .eq('role', 'admin')
+      .eq('active', true)
+      .limit(1)
+      .single();
+    if (ceo?.phone) {
+      const msgCEO = `🔑 *¡ENTREGA REALIZADA!*\n\n👤 Cliente: ${lead.name || 'N/A'}\n🏠 Desarrollo: ${desarrolloNombre}\n💼 Vendedor: ${nombre}\n📅 Fecha: ${new Date().toLocaleDateString('es-MX')}\n\n¡Otra familia feliz en su nuevo hogar! 🏡`;
+      const { enviarMensajeTeamMember } = await import('../utils/teamMessaging');
+      await enviarMensajeTeamMember(ctx.supabase, ctx.twilio as any, ceo, msgCEO, {
+        tipoMensaje: 'notificacion',
+        pendingKey: 'pending_mensaje'
+      });
+    }
+  } catch (e) {
+    console.error('Error notificando CEO de entrega:', e);
+  }
 }
 
 export async function vendedorAgendarCita(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, nombre: string): Promise<void> {
