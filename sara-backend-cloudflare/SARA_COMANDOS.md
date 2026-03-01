@@ -3587,4 +3587,22 @@ CREATE TABLE IF NOT EXISTS documentos_broker (
 
 **Tests:** 692/692 pasando
 **Commit:** `2d82d424`
-**Deploy:** Version ID `4ce0babb`
+**Deploy:** Version ID `9a2a9be3`
+
+#### Verificación en Producción (completa)
+
+| Suite | Resultado |
+|-------|-----------|
+| Health check | ✅ allPassed, 19 team members, 32 properties |
+| FinancingCalculator (crédito + Monte Verde) | ✅ Intent info_credito, desarrollo detectado, opciones de 8 bancos |
+| InventoryService (modelo Eucalipto) | ✅ Precio $2.01M, 2 recámaras, card formateada |
+| BrokerHipotecarioService | ✅ Wired en image handler (requiere lead con needs_mortgage=true) |
+| Retell E2E | ✅ 25/25 passed |
+| CEO commands | ✅ Detecta y ejecuta |
+| Vendedor commands | ✅ Detecta y ejecuta |
+| Asesor commands | ✅ Detecta y ejecuta |
+| Agencia commands | ✅ Detecta y ejecuta |
+| Resilience E2E | ✅ 12/12 passed |
+| Error logs | ✅ Limpios (3 errores de endpoints eliminados resueltos) |
+
+**Push:** origin/main (`2d82d424` + `0738d21d`)

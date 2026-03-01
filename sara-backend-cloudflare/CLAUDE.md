@@ -1,7 +1,7 @@
 # SARA CRM - Memoria Principal para Claude Code
 
 > **IMPORTANTE**: Este archivo se carga automáticamente en cada sesión.
-> Última actualización: 2026-02-26 (Sesión 71)
+> Última actualización: 2026-02-28 (Sesión 72)
 
 ---
 
@@ -6714,6 +6714,85 @@ await sendWhatsAppMessage(...);
 | CRM | https://sara-crm-new.vercel.app |
 | Videos | https://sara-videos.onrender.com |
 
-**Sistema 100% completo y operativo — Última verificación: 2026-02-26 (Sesión 71)**
+### 2026-02-28 (Sesión 72) - Conectar 3 Servicios Desconectados al Flujo de Conversación
 
-**Sistema 100% completo y operativo — Última verificación: 2026-02-25 (Sesión 66)**
+**3 servicios implementados pero NO conectados al flujo real fueron wired:**
+
+#### 1. FinancingCalculatorService → Intent `info_credito`
+
+Cuando un lead pregunta por crédito y tiene `property_interest`, SARA calcula estimado con 8 bancos (BBVA, Banorte, Santander, HSBC, Scotiabank, INFONAVIT, FOVISSSTE, Cofinavit) y envía tabla comparativa ANTES del menú de opciones de crédito.
+
+| Archivo | Cambio |
+|---------|--------|
+| `aiConversationService.ts` | Lazy import + `compareBanks()` + `formatComparisonForWhatsApp()` en bloque `info_credito` |
+
+#### 2. InventoryService → Fix bug + wire en `executeAIDecision`
+
+| Archivo | Cambio |
+|---------|--------|
+| `inventoryService.ts` | Eliminado `.eq('status', 'available')` (columna no existe) + fix `formatPropertyInfo()` |
+| `aiConversationService.ts` | Wire `getPropertyByModel()` + `formatPropertyInfo()` cuando lead pregunta por modelo específico |
+
+#### 3. BrokerHipotecarioService → Wire en image handler
+
+Cuando un lead con `needs_mortgage=true` + asesor asignado envía una imagen, SARA la procesa como documento hipotecario con OpenAI Vision API.
+
+| Archivo | Cambio |
+|---------|--------|
+| `brokerHipotecarioService.ts` | Acepta data URLs base64 (Meta URLs requieren auth headers) |
+| `index.ts` | Wire entre credit flow check y desperfecto handler + notificaciones 24h-safe |
+
+#### SQL ejecutado
+
+Tabla `documentos_broker` creada en Supabase (UUID PK, lead_id FK, tipo, media_url, datos_extraidos JSONB, valido, created_at + 3 índices).
+
+#### Verificación en Producción
+
+| Suite | Resultado |
+|-------|-----------|
+| Health check | ✅ allPassed |
+| FinancingCalculator | ✅ Intent info_credito, comparativa 8 bancos |
+| InventoryService | ✅ Eucalipto $2.01M, 2 rec |
+| Retell E2E | ✅ 25/25 |
+| CEO/Vendedor/Asesor/Agencia commands | ✅ Todos pasan |
+| Resilience E2E | ✅ 12/12 |
+| Error logs | ✅ Limpios |
+
+**Tests:** 692/692 pasando
+**Commits:** `2d82d424`, `0738d21d`
+**Deploy:** Version ID `9a2a9be3`
+
+---
+
+**Estado final del sistema:**
+
+| Métrica | Valor |
+|---------|-------|
+| Tests | 692/692 ✅ |
+| Test files | 20 |
+| Servicios | 85+ |
+| Comandos verificados | 342/342 (4 roles) |
+| CRONs activos | 27+ |
+| Capas de resilience | 9+ |
+| Templates WA aprobados | 6 (3 equipo + 3 carousel v2) |
+| Propiedades en catálogo | 32 |
+| Desarrollos | 9 (Monte Verde, Monte Real, Andes, Falco, Encinos, Miravalle, Colorines, Alpes, Citadella) |
+| **pending_auto_response types** | **16** |
+| **CRM UX/UI Rounds** | **8 completados** |
+| **Precios dinámicos** | **100% — 0 hardcoded (WhatsApp + Retell)** |
+| **Voz Retell** | **ElevenLabs LatAm Spanish** |
+| **Motivos Retell** | **14+ context-aware prompts** |
+| **Carousel Templates** | **3 segmentos v2 (economico, premium, terrenos)** |
+| **WhatsApp UX Features** | **3 activas: CTA buttons, reactions, contact cards** |
+| **Robustness** | **Fetch timeouts, atomic writes, error persistence, 24h-safe sends** |
+| **Servicios conectados (Sesión 72)** | **FinancingCalculator, InventoryService, BrokerHipotecario** |
+
+**URLs de producción:**
+
+| Servicio | URL |
+|----------|-----|
+| Backend | https://sara-backend.edson-633.workers.dev |
+| CRM | https://sara-crm-new.vercel.app |
+| Videos | https://sara-videos.onrender.com |
+
+**Sistema 100% completo y operativo — Última verificación: 2026-02-28 (Sesión 72)**

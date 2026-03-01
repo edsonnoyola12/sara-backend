@@ -1165,8 +1165,8 @@ export async function handleApiBiRoutes(
                 {
                   type: 'URL',
                   text: 'Ver brochure',
-                  url: 'https://brochures-santarita.pages.dev/{{1}}',
-                  example: ['monte_verde.html']
+                  url: 'https://sara-backend.edson-633.workers.dev/brochure/{{1}}',
+                  example: ['monte-verde']
                 },
                 {
                   type: 'URL',

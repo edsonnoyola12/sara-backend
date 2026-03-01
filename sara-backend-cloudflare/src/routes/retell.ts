@@ -2383,7 +2383,7 @@ Reglas de fecha:
                           const urls = Array.isArray(brochureRaw) ? brochureRaw : [brochureRaw];
                           const htmlUrl = urls.find((u: string) => u.includes('.html') || u.includes('pages.dev'));
                           if (htmlUrl) {
-                            // Extraer slug: "https://brochures-santarita.pages.dev/monte_verde.html" → "monte_verde.html"
+                            // Extraer slug: "https://sara-backend.edson-633.workers.dev/brochure/monte-verde" → "monte-verde"
                             const parts = htmlUrl.split('/');
                             brochureSlug = parts[parts.length - 1] || '';
                           }

@@ -56,6 +56,272 @@ function checkSensitiveAuth(request: Request, env: Env, corsResponse: CorsRespon
   }), 401);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// DYNAMIC BROCHURE GENERATOR
+// Generates HTML brochures from DB data — always shows current prices
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface DevConfig {
+  primaryColor: string;
+  tagline: string;
+  location: string;
+  badge?: string;
+  poiHtml: string | null;
+}
+
+const DEV_CONFIG: Record<string, DevConfig> = {
+  'monte-verde': {
+    primaryColor: '#2d5a27',
+    tagline: 'TU NUEVO HOGAR EN ZACATECAS',
+    location: 'Colinas del Padre, Zacatecas, Zac.',
+    poiHtml: '<div class="poi-grid"><div><h4>🛒 Comercio</h4><ul><li>🏪 Walmart Colinas del Padre - 5 min</li><li>🏬 Plaza Galerías - 15 min</li><li>🏦 Zona bancaria - 7 min</li></ul></div><div><h4>🏥 Salud</h4><ul><li>🏥 Hospital General - 10 min</li><li>💊 Farmacias - 3 min</li><li>🩺 Clínicas - 5 min</li></ul></div><div><h4>🎓 Educación</h4><ul><li>📚 Escuelas primarias y secundarias</li><li>🎒 Preparatorias</li><li>🏫 UAZ Campus - 15 min</li></ul></div><div><h4>🎡 Entretenimiento</h4><ul><li>🌳 Parque La Encantada - 7 min</li><li>🏛️ Centro Histórico - 15 min</li><li>🍽️ Restaurantes y cafés</li></ul></div></div>'
+  },
+  'andes': {
+    primaryColor: '#2d5a27',
+    tagline: 'TU NUEVO HOGAR EN GUADALUPE',
+    location: 'Vialidad Siglo XXI, Guadalupe, Zac.',
+    badge: '🏊 CON ALBERCA',
+    poiHtml: '<div class="poi-grid"><div><h4>🛒 Comercio</h4><ul><li>🏪 Walmart Siglo XXI - 5 min</li><li>🏬 Plaza Bicentenario - 10 min</li><li>🍽️ Restaurantes y cafés</li></ul></div><div><h4>🏥 Salud</h4><ul><li>🏥 Hospital General - 15 min</li><li>💊 Farmacias - 3 min</li></ul></div><div><h4>🎓 Educación</h4><ul><li>📚 Escuelas - 5 min</li><li>🏫 UAZ - 15 min</li></ul></div><div><h4>🏊 Deporte</h4><ul><li>🏊 ALBERCA del fraccionamiento</li><li>🌳 Áreas verdes</li></ul></div></div>'
+  },
+  'distrito-falco': {
+    primaryColor: '#0f3460',
+    tagline: 'EXCLUSIVIDAD EN ZONA DORADA DE GUADALUPE',
+    location: 'Calzada Solidaridad, Guadalupe, Zac.',
+    poiHtml: '<div class="poi-grid"><div><h4>🛒 Comercio</h4><ul><li>🏪 Centro Comercial Guadalupe - 5 min</li><li>🏬 Plaza del Sol - 10 min</li><li>🍽️ Restaurantes - 5 min</li></ul></div><div><h4>🏥 Salud</h4><ul><li>🏥 Hospital IMSS - 10 min</li><li>💊 Farmacias - 3 min</li></ul></div><div><h4>🎓 Educación</h4><ul><li>📚 Escuelas - 5 min</li><li>🎒 Preparatorias - 10 min</li></ul></div><div><h4>🎡 Entretenimiento</h4><ul><li>🌳 Parque Arroyo - 5 min</li><li>🍽️ Zona de restaurantes</li></ul></div></div>'
+  },
+  'los-encinos': {
+    primaryColor: '#2d5a27',
+    tagline: 'RESIDENCIAL PREMIUM EN COLINAS DEL PADRE',
+    location: 'Colinas del Padre, Zacatecas, Zac.',
+    poiHtml: '<div class="poi-grid"><div><h4>🛒 Comercio</h4><ul><li>🏪 Walmart Colinas del Padre - 5 min</li><li>🏬 Plaza Galerías - 15 min</li><li>🏦 Zona bancaria - 7 min</li></ul></div><div><h4>🏥 Salud</h4><ul><li>🏥 Hospital General - 10 min</li><li>💊 Farmacias - 3 min</li><li>🩺 Clínicas - 5 min</li></ul></div><div><h4>🎓 Educación</h4><ul><li>📚 Escuelas primarias y secundarias</li><li>🎒 Preparatorias</li><li>🏫 UAZ Campus - 15 min</li></ul></div><div><h4>🎡 Entretenimiento</h4><ul><li>🌳 Parque La Encantada - 7 min</li><li>🏛️ Centro Histórico - 15 min</li><li>🍽️ Restaurantes y cafés</li></ul></div></div>'
+  },
+  'miravalle': {
+    primaryColor: '#2d5a27',
+    tagline: 'DISEÑO PREMIUM EN ZACATECAS',
+    location: 'Colinas del Padre, Zacatecas, Zac.',
+    poiHtml: '<div class="poi-grid"><div><h4>🛒 Comercio</h4><ul><li>🏪 Walmart Colinas del Padre - 5 min</li><li>🏬 Plaza Galerías - 15 min</li><li>🏦 Zona bancaria - 7 min</li></ul></div><div><h4>🏥 Salud</h4><ul><li>🏥 Hospital General - 10 min</li><li>💊 Farmacias - 3 min</li></ul></div><div><h4>🎓 Educación</h4><ul><li>📚 Escuelas primarias y secundarias</li><li>🏫 UAZ Campus - 15 min</li></ul></div><div><h4>🎡 Entretenimiento</h4><ul><li>🌳 Parque La Encantada - 7 min</li><li>🏛️ Centro Histórico - 15 min</li></ul></div></div>'
+  },
+  'paseo-colorines': {
+    primaryColor: '#2d5a27',
+    tagline: 'TU HOGAR EN COLINAS DEL PADRE',
+    location: 'Colinas del Padre, Zacatecas, Zac.',
+    poiHtml: '<div class="poi-grid"><div><h4>🛒 Comercio</h4><ul><li>🏪 Walmart Colinas del Padre - 5 min</li><li>🏬 Plaza Galerías - 15 min</li><li>🏦 Zona bancaria - 7 min</li></ul></div><div><h4>🏥 Salud</h4><ul><li>🏥 Hospital General - 10 min</li><li>💊 Farmacias - 3 min</li></ul></div><div><h4>🎓 Educación</h4><ul><li>📚 Escuelas primarias y secundarias</li><li>🏫 UAZ Campus - 15 min</li></ul></div><div><h4>🎡 Entretenimiento</h4><ul><li>🌳 Parque La Encantada - 7 min</li><li>🏛️ Centro Histórico - 15 min</li></ul></div></div>'
+  },
+  'monte-real': {
+    primaryColor: '#2d5a27',
+    tagline: 'PRÓXIMAMENTE',
+    location: 'Colinas del Padre, Zacatecas',
+    badge: '🏗️ Nuevo desarrollo en Colinas del Padre',
+    poiHtml: null
+  },
+  'alpes': {
+    primaryColor: '#2d5a27',
+    tagline: 'TU NUEVO HOGAR EN GUADALUPE',
+    location: 'Vialidad Siglo XXI, Guadalupe, Zac.',
+    poiHtml: '<div class="poi-grid"><div><h4>🛒 Comercio</h4><ul><li>🏪 Walmart Siglo XXI - 5 min</li><li>🏬 Plaza Bicentenario - 10 min</li><li>🍽️ Restaurantes y cafés</li></ul></div><div><h4>🏥 Salud</h4><ul><li>🏥 Hospital General - 15 min</li><li>💊 Farmacias - 3 min</li></ul></div><div><h4>🎓 Educación</h4><ul><li>📚 Escuelas - 5 min</li><li>🏫 UAZ - 15 min</li></ul></div><div><h4>🎡 Entretenimiento</h4><ul><li>🌳 Áreas verdes</li><li>🍽️ Zona de restaurantes</li></ul></div></div>'
+  }
+};
+
+// Slug aliases: support both dash and underscore formats
+const SLUG_ALIASES: Record<string, string> = {
+  'monte_verde': 'monte-verde',
+  'distrito_falco': 'distrito-falco',
+  'los_encinos': 'los-encinos',
+  'paseo_colorines': 'paseo-colorines',
+  'monte_real': 'monte-real',
+};
+
+function generateBrochureHTML(devSlug: string, devConfig: DevConfig, properties: any[]): string {
+  const devName = properties[0]?.development || devSlug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const WHATSAPP = '524921170835';
+  const color = devConfig.primaryColor;
+
+  // Spec background color (lighter version of primary)
+  const specBg = color === '#0f3460' ? '#e3eaf5' : '#e8f5e9';
+
+  // Current month/year for footer
+  const now = new Date();
+  const monthYear = now.toLocaleString('es-MX', { month: 'long', year: 'numeric', timeZone: 'America/Mexico_City' });
+  const monthCapitalized = monthYear.charAt(0).toUpperCase() + monthYear.slice(1);
+
+  // Min price for hero
+  const minPrice = Math.min(...properties.map((p: any) => Number(p.price_equipped) || Number(p.price) || Infinity));
+  const heroPrice = minPrice < Infinity ? `Desde ${formatPriceMXN(minPrice)} (equipada)` : '';
+
+  // Badge HTML
+  const badgeHtml = devConfig.badge
+    ? `<div style="background:rgba(255,255,255,0.2);display:inline-block;padding:8px 25px;border-radius:25px;font-size:1.1em;margin-bottom:15px;font-weight:bold">${devConfig.badge}</div>`
+    : '';
+
+  // Build models JS array from DB
+  const modelsJS = properties.map((p: any) => {
+    const obj: Record<string, any> = {
+      name: p.name || '',
+      bedrooms: p.bedrooms || 0,
+      bathrooms: p.bathrooms || 1,
+      area_m2: p.area_m2 || 0,
+      floors: p.floors || 1,
+      land: p.land_size ? `${p.land_size}m²` : '',
+      price_equipped: Number(p.price_equipped) || Number(p.price) || 0,
+      price_base: Number(p.price) || 0,
+      photo: p.photo_url || '',
+      youtube: p.youtube_link || '',
+      matterport: p.matterport_link || '',
+      gps: p.gps_link || '',
+      sales_phrase: p.sales_phrase || '',
+      ideal: p.ideal_client || '',
+      includes: p.includes || 'Cocina integral, clósets, canceles en baños'
+    };
+    if (p.has_vestidor) obj.has_vestidor = true;
+    if (p.has_study) obj.has_study = true;
+    if (p.has_roof_garden) obj.has_roof_garden = true;
+    return obj;
+  });
+
+  // POI section
+  const poiSection = devConfig.poiHtml ? `
+    <div class="section-title"><h2>📍 ¿Qué hay cerca?</h2></div>
+    <div class="poi-section"><div class="poi-card">${devConfig.poiHtml}</div></div>` : '';
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${devName} - Grupo Santa Rita</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f5f5f5; }
+        .hero { background: linear-gradient(135deg, ${color} 0%, ${lightenColor(color)} 100%); color: white; text-align: center; padding: 60px 20px; }
+        .hero-brand { font-size: 0.9em; letter-spacing: 3px; margin-bottom: 20px; opacity: 0.9; }
+        .hero h1 { font-size: 3.5em; font-family: Georgia, serif; margin-bottom: 15px; }
+        .hero-tagline { font-size: 1.1em; opacity: 0.9; margin-bottom: 30px; }
+        .hero-price { background: rgba(255,255,255,0.15); display: inline-block; padding: 15px 50px; border-radius: 50px; font-size: 1.4em; font-weight: bold; }
+        .hero-location { margin-top: 25px; font-size: 1em; }
+        .section-title { text-align: center; padding: 50px 20px 30px; }
+        .section-title h2 { font-family: Georgia, serif; font-size: 2em; color: #333; border-bottom: 3px solid ${color}; display: inline-block; padding-bottom: 10px; }
+        .models { max-width: 1100px; margin: 0 auto; padding: 0 20px 50px; }
+        .model-card { background: white; border-radius: 15px; overflow: hidden; margin-bottom: 40px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); }
+        .model-image { width: 100%; height: 350px; object-fit: cover; }
+        .model-content { padding: 30px; }
+        .model-name { font-family: Georgia, serif; font-size: 2em; color: ${color}; margin-bottom: 5px; }
+        .model-desc { color: #666; font-style: italic; margin-bottom: 15px; font-size: 1.05em; }
+        .model-phrase { background: #f8f9fa; padding: 15px 20px; border-radius: 10px; margin-bottom: 20px; color: #555; border-left: 4px solid ${color}; }
+        .specs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px; }
+        .spec { background: ${specBg}; padding: 20px 15px; border-radius: 12px; text-align: center; }
+        .spec-icon { font-size: 1.8em; margin-bottom: 8px; }
+        .spec-value { font-size: 1.5em; font-weight: bold; color: ${color}; }
+        .spec-label { font-size: 0.85em; color: #666; margin-top: 5px; }
+        .badges { display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap; }
+        .badge { background: ${specBg}; color: ${color}; padding: 6px 14px; border-radius: 20px; font-size: 0.85em; font-weight: 600; }
+        .model-price { font-size: 2.2em; font-weight: bold; color: #333; margin-bottom: 5px; }
+        .model-price-alt { font-size: 1.1em; color: #888; margin-bottom: 25px; }
+        .model-includes { font-size: 0.95em; color: #666; margin-bottom: 15px; padding: 10px 15px; background: #f0f7f0; border-radius: 8px; }
+        .buttons { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        .btn { padding: 16px 20px; border-radius: 12px; text-decoration: none; color: white; font-weight: 600; text-align: center; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 1em; transition: transform 0.2s, opacity 0.2s; }
+        .btn:hover { transform: translateY(-2px); opacity: 0.9; }
+        .btn-whatsapp { background: #25D366; }
+        .btn-video { background: #FF0000; }
+        .btn-3d { background: #7C3AED; }
+        .btn-location { background: #3B82F6; }
+        .btn-disabled { background: #ccc; pointer-events: none; }
+        .poi-section { max-width: 1100px; margin: 0 auto 50px; padding: 0 20px; }
+        .poi-card { background: white; border-radius: 15px; padding: 30px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); }
+        .poi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 25px; }
+        .poi-grid h4 { color: ${color}; margin-bottom: 15px; }
+        .poi-grid ul { list-style: none; color: #555; line-height: 2; }
+        .footer { background: ${color}; color: white; text-align: center; padding: 40px 20px; }
+        .footer-brand { font-size: 1.3em; font-weight: bold; margin-bottom: 10px; }
+        .footer-note { opacity: 0.8; font-size: 0.9em; }
+        @media (max-width: 768px) {
+            .specs { grid-template-columns: repeat(2, 1fr); }
+            .buttons { grid-template-columns: 1fr; }
+            .hero h1 { font-size: 2.5em; }
+        }
+    </style>
+</head>
+<body>
+    <div class="hero">
+        <div class="hero-brand">G R U P O &nbsp; S A N T A &nbsp; R I T A</div>
+        <h1>${escapeHtml(devName)}</h1>
+        ${badgeHtml}
+        <p class="hero-tagline">${escapeHtml(devConfig.tagline)}</p>
+        ${heroPrice ? `<div class="hero-price">${heroPrice}</div>` : ''}
+        <p class="hero-location"><span style="color:#ff6b6b">📍</span> ${escapeHtml(devConfig.location)}</p>
+    </div>
+    ${properties.length > 0 ? `<div class="section-title"><h2>Nuestros Modelos</h2></div>
+    <div class="models" id="models-container"></div>` : ''}
+    ${poiSection}
+    <div class="footer">
+        <div class="footer-brand">🏗️ Grupo Santa Rita</div>
+        <p>Más de 50 años construyendo hogares en Zacatecas</p>
+        <p class="footer-note">Precios vigentes ${monthCapitalized} | Incluye: Cocina integral, clósets, canceles en baños</p>
+        <p class="footer-note" style="margin-top:15px;font-size:0.7em;line-height:1.5;max-width:800px;margin-left:auto;margin-right:auto;text-align:justify">⚠️ <strong>AVISO LEGAL:</strong> Disponibilidad sujeta a cambio. Las propiedades anunciadas están sujetas a disponibilidad y pueden dejar de estar en venta sin previo aviso. El vendedor se reserva el derecho de modificar precios, características, acabados, planos arquitectónicos, equipamiento y condiciones comerciales sin previo aviso. Fotografías, renders y planos son de carácter ilustrativo y pueden no representar con exactitud el producto final. Superficies y medidas aproximadas pueden variar al acabar la obra o mediciones oficiales. La información presentada no constituye compromiso contractual; las condiciones definitivas se establecerán en el contrato de compraventa. El comprador deberá verificar información actualizada directamente con el vendedor o asesor autorizado antes de tomar decisiones de compra. No aplica con otras promociones.</p>
+    </div>
+    ${properties.length > 0 ? `<script>
+        const DEVELOPMENT = ${JSON.stringify(devName)};
+        const WHATSAPP = '${WHATSAPP}';
+        const models = ${JSON.stringify(modelsJS)};
+
+        function formatPrice(price) {
+            return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(price);
+        }
+
+        function renderModel(model) {
+            const hasVideo = model.youtube && model.youtube !== 'none' && model.youtube !== '';
+            const has3D = model.matterport && model.matterport !== 'none' && model.matterport !== '';
+            const badges = [];
+            if (model.has_vestidor) badges.push('👔 Vestidor');
+            if (model.has_study) badges.push('📚 Estudio');
+            if (model.has_roof_garden) badges.push('🌿 Roof Garden');
+            const badgesHtml = badges.length > 0 ? '<div class="badges">' + badges.map(b => '<span class="badge">' + b + '</span>').join('') + '</div>' : '';
+            return '<div class="model-card">' +
+                (model.photo ? '<img class="model-image" src="' + model.photo + '" alt="' + model.name + '" onerror="this.style.display=\\'none\\'">' : '') +
+                '<div class="model-content">' +
+                    '<h3 class="model-name">' + model.name + '</h3>' +
+                    '<p class="model-desc">' + (model.land ? 'Terreno: ' + model.land : '') + '</p>' +
+                    badgesHtml +
+                    (model.sales_phrase ? '<div class="model-phrase">🏡 ' + model.sales_phrase + (model.ideal ? ' 👫 Ideal: ' + model.ideal : '') + '</div>' : '') +
+                    '<div class="specs">' +
+                        '<div class="spec"><div class="spec-icon">🛏️</div><div class="spec-value">' + model.bedrooms + '</div><div class="spec-label">Recámaras</div></div>' +
+                        '<div class="spec"><div class="spec-icon">🚿</div><div class="spec-value">' + model.bathrooms + '</div><div class="spec-label">Baños</div></div>' +
+                        '<div class="spec"><div class="spec-icon">📐</div><div class="spec-value">' + model.area_m2 + '</div><div class="spec-label">m² construidos</div></div>' +
+                        '<div class="spec"><div class="spec-icon">🏠</div><div class="spec-value">' + model.floors + '</div><div class="spec-label">Planta' + (model.floors > 1 ? 's' : '') + '</div></div>' +
+                    '</div>' +
+                    '<div class="model-price">Equipada: ' + formatPrice(model.price_equipped) + '</div>' +
+                    '<div class="model-price-alt">Sin equipo: ' + formatPrice(model.price_base) + '</div>' +
+                    '<div class="model-includes">✅ Incluye: ' + model.includes + '</div>' +
+                    '<div class="buttons">' +
+                        '<a href="https://wa.me/' + WHATSAPP + '?text=Hola,%20me%20interesa%20el%20modelo%20' + encodeURIComponent(model.name) + '%20en%20' + encodeURIComponent(DEVELOPMENT) + '" class="btn btn-whatsapp" target="_blank">💬 WhatsApp</a>' +
+                        '<a href="' + (hasVideo ? model.youtube : '#') + '" class="btn btn-video ' + (!hasVideo ? 'btn-disabled' : '') + '" target="_blank">▶️ ' + (hasVideo ? 'Ver Video' : 'Próximamente') + '</a>' +
+                        '<a href="' + (has3D ? model.matterport : '#') + '" class="btn btn-3d ' + (!has3D ? 'btn-disabled' : '') + '" target="_blank">🏠 ' + (has3D ? 'Recorrido 3D' : 'Próximamente') + '</a>' +
+                        '<a href="' + (model.gps || '#') + '" class="btn btn-location" target="_blank">📍 Ver Ubicación</a>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+        }
+
+        document.getElementById('models-container').innerHTML = models.map(renderModel).join('');
+    </script>` : ''}
+</body>
+</html>`;
+}
+
+function formatPriceMXN(price: number): string {
+  return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(price);
+}
+
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function lightenColor(hex: string): string {
+  // Simple lightening for gradient second stop
+  if (hex === '#0f3460') return '#1a4d8f';
+  if (hex === '#2d5a27') return '#4a7c43';
+  return hex;
+}
+
 export async function handleApiCoreRoutes(
   url: URL,
   request: Request,
@@ -64,6 +330,62 @@ export async function handleApiCoreRoutes(
   corsResponse: CorsResponseFn,
   checkApiAuth: CheckApiAuthFn
 ): Promise<Response | null> {
+
+    // ═══════════════════════════════════════════════════════════════
+    // PUBLIC: Dynamic Brochure — /brochure/:desarrollo
+    // Always shows current prices from DB, no auth needed
+    // ═══════════════════════════════════════════════════════════════
+    const brochureMatch = url.pathname.match(/^\/brochure\/([a-z0-9_-]+)$/i);
+    if (brochureMatch && request.method === "GET") {
+      try {
+        let slug = brochureMatch[1].toLowerCase();
+        // Normalize underscore to dash
+        if (SLUG_ALIASES[slug]) slug = SLUG_ALIASES[slug];
+
+        const config = DEV_CONFIG[slug];
+        if (!config) {
+          return new Response(`<h1>Desarrollo no encontrado</h1><p>Disponibles: ${Object.keys(DEV_CONFIG).join(', ')}</p>`, {
+            status: 404,
+            headers: { 'Content-Type': 'text/html; charset=utf-8' }
+          });
+        }
+
+        // Map slug to development_name for DB query
+        const devNameMap: Record<string, string> = {
+          'monte-verde': 'Monte Verde',
+          'andes': 'Andes',
+          'distrito-falco': 'Distrito Falco',
+          'los-encinos': 'Los Encinos',
+          'miravalle': 'Miravalle',
+          'paseo-colorines': 'Paseo Colorines',
+          'monte-real': 'Monte Real',
+          'alpes': 'Alpes',
+        };
+        const devName = devNameMap[slug] || slug;
+
+        // Fetch properties from DB
+        const { data: properties } = await supabase.client
+          .from('properties')
+          .select('name, development, bedrooms, bathrooms, area_m2, floors, land_size, price, price_equipped, photo_url, youtube_link, matterport_link, gps_link, sales_phrase, ideal_client, includes, has_vestidor, has_study, has_roof_garden')
+          .ilike('development', `%${devName}%`)
+          .order('price_equipped', { ascending: true });
+
+        const html = generateBrochureHTML(slug, config, properties || []);
+        return new Response(html, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'public, max-age=300', // 5 min cache
+          }
+        });
+      } catch (e) {
+        console.error('Error generating brochure:', e);
+        return new Response('<h1>Error generando brochure</h1>', {
+          status: 500,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' }
+        });
+      }
+    }
 
     if (url.pathname === "/api/diagnostico" && request.method === "GET") {
       const ahora = new Date();
@@ -1965,7 +2287,7 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
       const rawBody = await request.json() as any;
 
       // Whitelist de campos permitidos para actualización de propiedades
-      const ALLOWED_PROPERTY_UPDATE_FIELDS = ['name', 'development_name', 'price', 'price_equipped', 'price_min', 'price_max', 'bedrooms', 'bathrooms', 'construction_size', 'land_size', 'floors', 'description', 'gps_link', 'youtube_link', 'matterport_link', 'brochure_urls', 'photo_url', 'gallery_urls', 'features'];
+      const ALLOWED_PROPERTY_UPDATE_FIELDS = ['name', 'development_name', 'price', 'price_equipped', 'price_min', 'price_max', 'bedrooms', 'bathrooms', 'construction_size', 'area_m2', 'land_size', 'floors', 'description', 'gps_link', 'youtube_link', 'matterport_link', 'brochure_urls', 'photo_url', 'gallery_urls', 'features'];
       const body = Object.fromEntries(
         Object.entries(rawBody).filter(([k]) => ALLOWED_PROPERTY_UPDATE_FIELDS.includes(k))
       );
