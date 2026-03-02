@@ -1,5 +1,44 @@
 ## HISTORIAL DE CAMBIOS IMPORTANTES
 
+### 2026-03-02 (Sesión 77) — Staging Parity + Resilience E2E Fix
+
+**Staging environment — paridad completa con producción:**
+
+| Paso | Detalle |
+|------|---------|
+| Retell secrets | `RETELL_API_KEY`, `RETELL_AGENT_ID`, `RETELL_PHONE_NUMBER` configurados en staging |
+| Supabase fix | Staging apuntaba a proyecto muerto (`bpxnknoldqyjacvlxqzl`), corregido a `hwyrxlnycrlgohrecbpx` |
+| 14 secrets copiados | Todos los secrets de producción replicados a staging (Meta, Anthropic, Google, Twilio, etc.) |
+| `.dev.vars` actualizado | URL y key de Supabase corregidos para desarrollo local |
+
+**Bug fix — Retell E2E test "Agendar cita":**
+
+| Archivo | Antes | Ahora |
+|---------|-------|-------|
+| `routes/test.ts` | `upsert` con `onConflict: 'phone'` (fallaba con error 1016 en staging) | `select-then-insert` pattern + error reporting detallado |
+
+**Bug fix — Resilience E2E: 2 tests fallando (10/12 → 12/12):**
+
+| Archivo | Problema | Solución |
+|---------|----------|----------|
+| `services/retryQueueService.ts` | Insert usaba columna `next_retry_at` que NO existe en tabla `retry_queue` → insert fallaba silenciosamente | Removido `next_retry_at` de insert, select filter (`.lte()`), y update |
+| `tests/resilience.test.ts` | 9 mock chains incluían `.lte()` en la cadena → `order is not a function` | Removido nivel `lte` de todas las mock chains |
+
+**Root cause:** La tabla `retry_queue` (definida en `sql/retry_queue.sql`) nunca tuvo columna `next_retry_at`, pero el código la referenciaba en 3 lugares. El insert fallaba silenciosamente porque `enqueueFailedMessage` swallows errors via try-catch.
+
+**Verificación final:**
+
+| Test Suite | Staging | Production |
+|------------|---------|------------|
+| Health | 7/7 | 7/7 |
+| Retell E2E | 25/25 | 25/25 |
+| Resilience E2E | 12/12 | 12/12 |
+| Unit tests | 1107/1107 (33 archivos) | — |
+
+**Commits:** `a6dc4c26` (upsert fix), `ebd535a8` (.dev.vars), `9d45620d` (next_retry_at fix)
+
+---
+
 ### 2026-03-01 (Sesión 76) — Retry Llamadas + Dashboard Llamadas + Cadencia Inteligente
 
 **Feature 1: Retry Llamadas Sin Respuesta**
