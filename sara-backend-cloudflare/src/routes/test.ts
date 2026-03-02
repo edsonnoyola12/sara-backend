@@ -5115,17 +5115,34 @@ Mensaje: ${mensaje}`;
         });
 
         // ── TEST 4: Agendar cita - flujo de nombre + cita en BD ──
-        // Crear lead de prueba temporal
-        const { data: testLeadCreated } = await supabase.client
+        // Buscar o crear lead de prueba temporal
+        let testLeadCreated: any = null;
+        let testLeadError: any = null;
+        const testLeadPhone = `521${testPhone}`;
+
+        // Try select first, then insert if not found
+        const { data: existingLead } = await supabase.client
           .from('leads')
-          .upsert({
-            phone: `521${testPhone}`,
-            name: 'Lead Telefónico',
-            source: 'test_e2e',
-            status: 'new'
-          }, { onConflict: 'phone' })
-          .select()
-          .single();
+          .select('*')
+          .eq('phone', testLeadPhone)
+          .maybeSingle();
+
+        if (existingLead) {
+          testLeadCreated = existingLead;
+        } else {
+          const { data: newLead, error: insertErr } = await supabase.client
+            .from('leads')
+            .insert({
+              phone: testLeadPhone,
+              name: 'Lead Telefónico',
+              source: 'test_e2e',
+              status: 'new'
+            })
+            .select()
+            .single();
+          testLeadCreated = newLead;
+          testLeadError = insertErr;
+        }
 
         if (testLeadCreated) {
           // Simular la actualización de nombre (como lo hace agendar-cita handler)
@@ -5185,7 +5202,7 @@ Mensaje: ${mensaje}`;
           results.push({
             test: 'Agendar cita: crear lead de prueba',
             status: '❌',
-            detail: 'No se pudo crear lead de prueba'
+            detail: `No se pudo crear lead de prueba: ${testLeadError?.message || 'unknown'} | code: ${testLeadError?.code || 'n/a'} | hint: ${testLeadError?.hint || 'n/a'} | details: ${testLeadError?.details || 'n/a'}`
           });
         }
 
