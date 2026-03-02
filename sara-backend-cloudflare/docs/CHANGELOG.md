@@ -1,5 +1,40 @@
 ## HISTORIAL DE CAMBIOS IMPORTANTES
 
+### 2026-03-02 (Sesión 78) — Template Fallback para Leads + Ghost Column Fixes
+
+**Bug fix — columnas fantasma en `appointmentService.ts`:**
+
+| Archivo | Problema | Solución |
+|---------|----------|----------|
+| `services/appointmentService.ts` | Update usaba `confirmation_sent` y `confirmation_sent_at` — columnas que NO existen en tabla `appointments` → update fallaba silenciosamente → `lead_notified` nunca se ponía `true` | Removidas columnas fantasma, ahora solo actualiza `lead_notified: true` |
+
+**Root cause:** Mismo patrón que `next_retry_at` (sesión 77). Supabase PostgREST falla silenciosamente en updates con columnas inexistentes si están dentro de try-catch.
+
+**Feature — Template fallback para notificaciones a leads:**
+
+| Cambio | Archivo | Detalle |
+|--------|---------|---------|
+| Helper `notificarLeadCita()` | `handlers/whatsapp-vendor.ts` | Verifica ventana 24h del lead. Si abierta → directo. Si cerrada → `appointment_confirmation_v2` template (agendar/reagendar) o `seguimiento_lead` + pending (cancelar) |
+| Agendar notify | `handlers/whatsapp-vendor.ts` | Usa `notificarLeadCita('agendar')` en vez de `sendWhatsAppMessage` directo |
+| Cancelar notify | `handlers/whatsapp-vendor.ts` | Usa `notificarLeadCita('cancelar')` + guarda `pending_notification_message` en lead notes |
+| Reagendar notify | `handlers/whatsapp-vendor.ts` | Usa `notificarLeadCita('reagendar')` en vez de `sendWhatsAppMessage` directo |
+| Entrega pending | `handlers/whatsapp.ts` | Cuando lead responde, revisa `pending_notification_message` y lo entrega (TTL 72h) |
+| Feedback vendedor | `handlers/whatsapp-vendor.ts` | Vendedor recibe "(via template, ventana 24h cerrada)" si se usó fallback |
+
+**Verificación E2E real (producción):**
+
+| Paso | Flujo | Resultado |
+|------|-------|-----------|
+| 1 | Lead "que casas tienen" → carrusel | ✅ |
+| 2 | Lead "me interesa monte verde, brochure" → recursos | ✅ |
+| 3 | Lead "agendar cita monte verde lunes 10am" → cita en DB + Google Calendar + vendor notified + `lead_notified: true` | ✅ |
+| 4 | Vendor "reagendar cita roberto martes 11am" → cita actualizada + `pending_reagendar_notify` | ✅ |
+| 5 | Vendor responde "1" → lead notificado del cambio | ✅ |
+
+**Commit:** `8866b361`
+
+---
+
 ### 2026-03-02 (Sesión 77) — Staging Parity + Resilience E2E Fix
 
 **Staging environment — paridad completa con producción:**

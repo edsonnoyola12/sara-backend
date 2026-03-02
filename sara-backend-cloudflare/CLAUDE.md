@@ -1,6 +1,6 @@
 # SARA CRM - Referencia para Claude Code
 
-> Última actualización: 2026-03-02 (Sesión 77)
+> Última actualización: 2026-03-02 (Sesión 78)
 > Historial detallado de cambios: `docs/CHANGELOG.md`
 
 ---
