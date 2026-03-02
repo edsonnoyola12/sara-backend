@@ -24,10 +24,8 @@ function createMockSupabase(overrides?: {
         select: vi.fn(() => ({
           eq: vi.fn(() => ({
             lt: vi.fn(() => ({
-              lte: vi.fn(() => ({
-                order: vi.fn(() => ({
-                  limit: vi.fn().mockResolvedValue({ data: overrides?.selectData || [], error: null })
-                }))
+              order: vi.fn(() => ({
+                limit: vi.fn().mockResolvedValue({ data: overrides?.selectData || [], error: null })
               }))
             })),
             order: vi.fn(() => ({
@@ -156,10 +154,8 @@ describe('TEST 1: RETRY QUEUE', () => {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
                 lt: vi.fn(() => ({
-                  lte: vi.fn(() => ({
-                    order: vi.fn(() => ({
-                      limit: vi.fn().mockResolvedValue({ data: [pendingEntry], error: null })
-                    }))
+                  order: vi.fn(() => ({
+                    limit: vi.fn().mockResolvedValue({ data: [pendingEntry], error: null })
                   }))
                 }))
               }))
@@ -202,10 +198,8 @@ describe('TEST 1: RETRY QUEUE', () => {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
                 lt: vi.fn(() => ({
-                  lte: vi.fn(() => ({
-                    order: vi.fn(() => ({
-                      limit: vi.fn().mockResolvedValue({ data: [pendingEntry], error: null })
-                    }))
+                  order: vi.fn(() => ({
+                    limit: vi.fn().mockResolvedValue({ data: [pendingEntry], error: null })
                   }))
                 }))
               }))
@@ -247,10 +241,8 @@ describe('TEST 1: RETRY QUEUE', () => {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
                 lt: vi.fn(() => ({
-                  lte: vi.fn(() => ({
-                    order: vi.fn(() => ({
-                      limit: vi.fn().mockResolvedValue({ data: [pendingEntry], error: null })
-                    }))
+                  order: vi.fn(() => ({
+                    limit: vi.fn().mockResolvedValue({ data: [pendingEntry], error: null })
                   }))
                 }))
               }))
@@ -292,10 +284,8 @@ describe('TEST 1: RETRY QUEUE', () => {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
                 lt: vi.fn(() => ({
-                  lte: vi.fn(() => ({
-                    order: vi.fn(() => ({
-                      limit: vi.fn().mockResolvedValue({ data: [pendingEntry], error: null })
-                    }))
+                  order: vi.fn(() => ({
+                    limit: vi.fn().mockResolvedValue({ data: [pendingEntry], error: null })
                   }))
                 }))
               }))
@@ -351,10 +341,8 @@ describe('TEST 1: RETRY QUEUE', () => {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
                 lt: vi.fn(() => ({
-                  lte: vi.fn(() => ({
-                    order: vi.fn(() => ({
-                      limit: vi.fn().mockResolvedValue({ data: [pendingEntry], error: null })
-                    }))
+                  order: vi.fn(() => ({
+                    limit: vi.fn().mockResolvedValue({ data: [pendingEntry], error: null })
                   }))
                 }))
               }))
@@ -516,10 +504,8 @@ describe('TEST 1: RETRY QUEUE', () => {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
                 lt: vi.fn(() => ({
-                  lte: vi.fn(() => ({
-                    order: vi.fn(() => ({
-                      limit: vi.fn().mockResolvedValue({ data: [], error: null })
-                    }))
+                  order: vi.fn(() => ({
+                    limit: vi.fn().mockResolvedValue({ data: [], error: null })
                   }))
                 }))
               }))
@@ -924,10 +910,8 @@ describe('TEST 4: INTEGRACIÓN', () => {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
                 lt: vi.fn(() => ({
-                  lte: vi.fn(() => ({
-                    order: vi.fn(() => ({
-                      limit: vi.fn().mockResolvedValue({ data: [pendingEntry], error: null })
-                    }))
+                  order: vi.fn(() => ({
+                    limit: vi.fn().mockResolvedValue({ data: [pendingEntry], error: null })
                   }))
                 }))
               }))
@@ -990,10 +974,8 @@ describe('TEST 4: INTEGRACIÓN', () => {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
                 lt: vi.fn(() => ({
-                  lte: vi.fn(() => ({
-                    order: vi.fn(() => ({
-                      limit: vi.fn().mockResolvedValue({ data: entries, error: null })
-                    }))
+                  order: vi.fn(() => ({
+                    limit: vi.fn().mockResolvedValue({ data: entries, error: null })
                   }))
                 }))
               }))

@@ -48,8 +48,7 @@ export async function enqueueFailedMessage(
       last_error: errorMessage?.substring(0, 500),
       status: 'pending',
       attempts: 0,
-      max_attempts: 3,
-      next_retry_at: new Date(Date.now() + 2 * 60 * 1000).toISOString()
+      max_attempts: 3
     });
     if (insertErr) console.error('⚠️ Retry queue insert error:', insertErr.message);
     else console.log(`📥 Retry queue: enqueued ${messageType} to ${recipientPhone}`);
@@ -74,7 +73,6 @@ export async function processRetryQueue(
     .select('*')
     .eq('status', 'pending')
     .lt('attempts', 3)
-    .lte('next_retry_at', new Date().toISOString())
     .order('created_at', { ascending: true })
     .limit(10);
 
@@ -149,15 +147,13 @@ export async function processRetryQueue(
 
         console.error(`❌ Retry queue: permanent failure for ${entry.recipient_phone} after ${newAttempts} attempts`);
       } else {
-        // Update attempts with exponential backoff: 2min, 8min, 32min
-        const backoffMs = Math.pow(2, newAttempts) * 2 * 60 * 1000;
-        const nextRetryAt = new Date(Date.now() + backoffMs).toISOString();
+        // Update attempts — CRON runs every 4 min providing natural backoff
         const { error: retryErr } = await supabase.client
           .from('retry_queue')
-          .update({ attempts: newAttempts, last_attempt_at: new Date().toISOString(), last_error: errMsg.substring(0, 500), next_retry_at: nextRetryAt })
+          .update({ attempts: newAttempts, last_attempt_at: new Date().toISOString(), last_error: errMsg.substring(0, 500) })
           .eq('id', entry.id);
         if (retryErr) console.error('⚠️ Retry queue attempt update error:', retryErr.message);
-        console.log(`🔄 Retry queue: ${entry.recipient_phone} retry #${newAttempts} scheduled for ${nextRetryAt}`);
+        console.log(`🔄 Retry queue: ${entry.recipient_phone} retry #${newAttempts}`);
       }
     }
   }
