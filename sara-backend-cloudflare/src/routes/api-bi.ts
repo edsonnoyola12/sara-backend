@@ -2514,7 +2514,7 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
 
         try {
           const rawBody = await request.json() as Record<string, any>;
-          const ALLOWED_FLAG_FIELDS = ['ai_responses_enabled', 'ai_credit_flow_enabled', 'ai_multilang_enabled', 'slack_notifications_enabled', 'email_reports_enabled', 'sentry_enabled', 'audio_transcription_enabled', 'auto_followups_enabled', 'broadcast_enabled', 'tts_enabled', 'voice_messages_enabled', 'retell_enabled', 'outside_hours_responses', 'smart_caching_enabled', 'audit_log_enabled', 'ab_test_greeting', 'ab_test_cta', 'rate_limit_per_minute', 'max_ai_tokens'];
+          const ALLOWED_FLAG_FIELDS = ['ai_responses_enabled', 'ai_credit_flow_enabled', 'ai_multilang_enabled', 'slack_notifications_enabled', 'email_reports_enabled', 'sentry_enabled', 'audio_transcription_enabled', 'auto_followups_enabled', 'broadcast_enabled', 'tts_enabled', 'voice_messages_enabled', 'retell_enabled', 'cadencia_inteligente', 'outside_hours_responses', 'smart_caching_enabled', 'audit_log_enabled', 'ab_test_greeting', 'ab_test_cta', 'rate_limit_per_minute', 'max_ai_tokens'];
           const body = Object.fromEntries(
             Object.entries(rawBody).filter(([k]) => ALLOWED_FLAG_FIELDS.includes(k))
           );
