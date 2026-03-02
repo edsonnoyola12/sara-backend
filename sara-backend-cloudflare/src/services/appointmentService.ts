@@ -450,8 +450,7 @@ export class AppointmentService {
     try {
       if (appointment?.id) {
         await this.supabase.client.from('appointments').update({
-          confirmation_sent: true,
-          confirmation_sent_at: new Date().toISOString()
+          lead_notified: true
         }).eq('id', appointment.id);
       }
     } catch (e) {
@@ -756,8 +755,7 @@ ${infoContactos}
 
   async markAppointmentConfirmationSent(leadId: string): Promise<void> {
     await this.supabase.client.from('appointments').update({
-      confirmation_sent: true,
-      confirmation_sent_at: new Date().toISOString()
+      lead_notified: true
     }).eq('lead_id', leadId).eq('status', 'scheduled');
   }
 

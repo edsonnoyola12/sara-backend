@@ -1129,6 +1129,31 @@ export class WhatsAppHandler {
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // ENTREGAR NOTIFICACIÓN PENDIENTE (si ventana 24h se reabrió)
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const notasLeadPending = typeof lead.notes === 'object' && lead.notes ? lead.notes : {};
+      if (notasLeadPending.pending_notification_message) {
+        const pendingNotif = notasLeadPending.pending_notification_message;
+        // Solo entregar si fue guardado en las últimas 72h
+        const savedAt = pendingNotif.saved_at ? new Date(pendingNotif.saved_at) : null;
+        const horasDesdeGuardado = savedAt ? (Date.now() - savedAt.getTime()) / (1000 * 60 * 60) : 999;
+        if (horasDesdeGuardado <= 72 && pendingNotif.mensaje) {
+          try {
+            await this.meta.sendWhatsAppMessage(cleanPhone, pendingNotif.mensaje);
+            console.log(`📤 Notificación pendiente (${pendingNotif.tipo}) entregada a lead ${lead.name}`);
+          } catch (pendingErr) {
+            console.error('⚠️ Error entregando notificación pendiente:', pendingErr);
+          }
+        }
+        // Limpiar siempre (expirada o entregada)
+        const { pending_notification_message, ...restNotas } = notasLeadPending;
+        await this.supabase.client
+          .from('leads')
+          .update({ notes: restNotas })
+          .eq('id', lead.id);
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // PROCESAR MENSAJE DE LEAD (delegado a LeadMessageService)
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       const leadMessageService = new LeadMessageService(this.supabase);

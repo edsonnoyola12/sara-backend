@@ -16,6 +16,106 @@ import { formatVendorFeedback } from './whatsapp-utils';
 import { createSLAMonitoring } from '../services/slaMonitoringService';
 import { ReferralService } from '../services/referralService';
 
+// ═══════════════════════════════════════════════════════════
+// Helper: Notificar lead de cita con fallback a template si ventana 24h cerrada
+// ═══════════════════════════════════════════════════════════
+async function notificarLeadCita(
+  ctx: HandlerContext,
+  leadPhone: string,
+  mensajeDirecto: string,
+  pendingNotify: any,
+  tipo: 'agendar' | 'reagendar' | 'cancelar'
+): Promise<{ enviado: boolean; metodo: string }> {
+  // 1. Verificar ventana 24h del lead
+  const { data: leadInfo } = await ctx.supabase.client
+    .from('leads')
+    .select('last_message_at')
+    .eq('id', pendingNotify.lead_id)
+    .single();
+
+  const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const ventanaAbierta = leadInfo?.last_message_at && leadInfo.last_message_at > hace24h;
+
+  if (ventanaAbierta) {
+    // Ventana abierta → mensaje directo
+    await ctx.meta.sendWhatsAppMessage(leadPhone, mensajeDirecto);
+    console.log(`📤 Notificación ${tipo} enviada DIRECTO a lead ${leadPhone}`);
+    return { enviado: true, metodo: 'directo' };
+  }
+
+  // 2. Ventana cerrada → template fallback
+  console.log(`📤 Ventana cerrada para lead ${leadPhone}, usando template para ${tipo}...`);
+  const nombreCorto = pendingNotify.lead_name?.split(' ')[0] || 'Hola';
+
+  if (tipo === 'agendar' || tipo === 'reagendar') {
+    // appointment_confirmation_v2: ¡Hola {{1}}! Gracias por agendar con {{2}}. Tu cita {{3}} el {{4}} a las {{5}} está confirmada.
+    try {
+      const tipoTexto = tipo === 'reagendar'
+        ? 'reagendada'
+        : `visita a ${pendingNotify.ubicacion || 'nuestras oficinas'}`;
+
+      await ctx.meta.sendTemplate(leadPhone, 'appointment_confirmation_v2', 'es', [{
+        type: 'body',
+        parameters: [
+          { type: 'text', text: nombreCorto },
+          { type: 'text', text: 'Grupo Santa Rita' },
+          { type: 'text', text: tipoTexto },
+          { type: 'text', text: pendingNotify.fecha },
+          { type: 'text', text: pendingNotify.hora }
+        ]
+      }]);
+      console.log(`✅ Template appointment_confirmation_v2 enviado a lead (${tipo})`);
+      return { enviado: true, metodo: 'template' };
+    } catch (templateErr: any) {
+      console.log(`⚠️ Template appointment_confirmation_v2 falló: ${templateErr?.message}`);
+    }
+  }
+
+  // 3. Para cancelar o si el template de cita falló → seguimiento_lead genérico + guardar mensaje pendiente
+  try {
+    await ctx.meta.sendTemplate(leadPhone, 'seguimiento_lead', 'es_MX', [{
+      type: 'body',
+      parameters: [
+        { type: 'text', text: nombreCorto },
+        { type: 'text', text: 'Grupo Santa Rita' }
+      ]
+    }]);
+    console.log(`✅ Template seguimiento_lead enviado a lead (fallback ${tipo})`);
+
+    // Guardar mensaje real como pendiente en notes del lead
+    try {
+      const { data: leadData } = await ctx.supabase.client
+        .from('leads')
+        .select('notes')
+        .eq('id', pendingNotify.lead_id)
+        .single();
+
+      const notasLead = typeof leadData?.notes === 'object' && leadData?.notes ? leadData.notes : {};
+      await ctx.supabase.client
+        .from('leads')
+        .update({
+          notes: {
+            ...notasLead,
+            pending_notification_message: {
+              mensaje: mensajeDirecto,
+              tipo,
+              saved_at: new Date().toISOString()
+            }
+          }
+        })
+        .eq('id', pendingNotify.lead_id);
+      console.log(`💾 Mensaje ${tipo} guardado como pending_notification_message`);
+    } catch (saveErr) {
+      console.error('⚠️ Error guardando pending_notification_message:', saveErr);
+    }
+
+    return { enviado: true, metodo: 'template_pending' };
+  } catch (e2: any) {
+    console.log(`⚠️ Todos los templates fallaron para lead: ${e2?.message}`);
+    return { enviado: false, metodo: 'fallido' };
+  }
+}
+
 export async function handleVendedorMessage(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, teamMembers: any[]): Promise<void> {
   const mensaje = body.toLowerCase().trim();
   const nombreVendedor = vendedor.name?.split(' ')[0] || 'crack';
@@ -973,7 +1073,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
       .eq('id', vendedor.id);
 
     if (mensaje.trim() === '1') {
-      // Enviar notificación al lead
+      // Enviar notificación al lead (con fallback a template si ventana cerrada)
       const leadPhone = pendingNotify.lead_phone.startsWith('521')
         ? pendingNotify.lead_phone
         : `521${pendingNotify.lead_phone.replace(/\D/g, '').slice(-10)}`;
@@ -986,7 +1086,6 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
         `📅 ${pendingNotify.fecha}\n` +
         `🕐 ${pendingNotify.hora}`;
 
-      // Agregar ubicación si existe
       if (pendingNotify.ubicacion && pendingNotify.ubicacion !== 'Por confirmar') {
         mensajeLead += `\n📍 ${pendingNotify.ubicacion}`;
       }
@@ -994,16 +1093,15 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
         mensajeLead += `\n🗺️ ${pendingNotify.gpsLink}`;
       }
 
-      // Agregar info del asesor
       mensajeLead += `\n\n👤 Te atenderá: *${nombreVendedor}*`;
       if (vendedorPhoneFormatted) {
         mensajeLead += `\n📱 ${vendedorPhoneFormatted}`;
       }
-
       mensajeLead += `\n\n¡Te esperamos!`;
 
-      await ctx.meta.sendWhatsAppMessage(leadPhone, mensajeLead);
-      await ctx.twilio.sendWhatsAppMessage(from, `✅ *Notificación enviada a ${pendingNotify.lead_name}*`);
+      const resultado = await notificarLeadCita(ctx, leadPhone, mensajeLead, pendingNotify, 'agendar');
+      const metodoMsg = resultado.metodo === 'directo' ? '' : ' (via template, ventana 24h cerrada)';
+      await ctx.twilio.sendWhatsAppMessage(from, `✅ *Notificación enviada a ${pendingNotify.lead_name}*${metodoMsg}`);
 
       // Registrar actividad
       await ctx.supabase.client
@@ -1011,7 +1109,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
         .insert({
           lead_id: pendingNotify.lead_id,
           type: 'whatsapp',
-          notes: `Lead notificado de cita por ${nombreVendedor}`,
+          notes: `Lead notificado de cita por ${nombreVendedor} (${resultado.metodo})`,
           created_by: vendedor.id
         });
     } else {
@@ -1036,7 +1134,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
       .eq('id', vendedor.id);
 
     if (mensaje.trim() === '1') {
-      // Enviar notificación al lead
+      // Enviar notificación al lead (con fallback a template si ventana cerrada)
       const leadPhone = pendingNotify.lead_phone.startsWith('521')
         ? pendingNotify.lead_phone
         : `521${pendingNotify.lead_phone.replace(/\D/g, '').slice(-10)}`;
@@ -1045,8 +1143,9 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
         `Si deseas reagendar, por favor contacta a tu asesor.\n\n` +
         `Disculpa las molestias.`;
 
-      await ctx.meta.sendWhatsAppMessage(leadPhone, mensajeLead);
-      await ctx.twilio.sendWhatsAppMessage(from, `✅ *Notificación enviada a ${pendingNotify.lead_name}*`);
+      const resultado = await notificarLeadCita(ctx, leadPhone, mensajeLead, pendingNotify, 'cancelar');
+      const metodoMsg = resultado.metodo === 'directo' ? '' : ' (via template, ventana 24h cerrada)';
+      await ctx.twilio.sendWhatsAppMessage(from, `✅ *Notificación enviada a ${pendingNotify.lead_name}*${metodoMsg}`);
 
       // Registrar actividad
       await ctx.supabase.client
@@ -1054,7 +1153,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
         .insert({
           lead_id: pendingNotify.lead_id,
           type: 'whatsapp',
-          notes: `Lead notificado de cancelación por ${nombreVendedor}`,
+          notes: `Lead notificado de cancelación por ${nombreVendedor} (${resultado.metodo})`,
           created_by: vendedor.id
         });
     } else {
@@ -1079,12 +1178,11 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
       .eq('id', vendedor.id);
 
     if (mensaje.trim() === '1') {
-      // Enviar notificación al lead
+      // Enviar notificación al lead (con fallback a template si ventana cerrada)
       const leadPhone = pendingNotify.lead_phone.startsWith('521')
         ? pendingNotify.lead_phone
         : `521${pendingNotify.lead_phone.replace(/\D/g, '').slice(-10)}`;
 
-      // Formatear teléfono del vendedor para el lead
       const vendedorPhoneFormatted = vendedor.phone ? formatPhoneForDisplay(vendedor.phone) : '';
 
       let mensajeLead = `¡Hola ${pendingNotify.lead_name.split(' ')[0]}! 👋\n\n` +
@@ -1092,16 +1190,15 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
         `📅 ${pendingNotify.fecha}\n` +
         `🕐 ${pendingNotify.hora}`;
 
-      // Agregar info del asesor
       mensajeLead += `\n\n👤 Te atenderá: *${nombreVendedor}*`;
       if (vendedorPhoneFormatted) {
         mensajeLead += `\n📱 ${vendedorPhoneFormatted}`;
       }
-
       mensajeLead += `\n\n¡Te esperamos!`;
 
-      await ctx.meta.sendWhatsAppMessage(leadPhone, mensajeLead);
-      await ctx.twilio.sendWhatsAppMessage(from, `✅ *Notificación enviada a ${pendingNotify.lead_name}*`);
+      const resultado = await notificarLeadCita(ctx, leadPhone, mensajeLead, pendingNotify, 'reagendar');
+      const metodoMsg = resultado.metodo === 'directo' ? '' : ' (via template, ventana 24h cerrada)';
+      await ctx.twilio.sendWhatsAppMessage(from, `✅ *Notificación enviada a ${pendingNotify.lead_name}*${metodoMsg}`);
 
       // Registrar actividad
       await ctx.supabase.client
@@ -1109,7 +1206,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
         .insert({
           lead_id: pendingNotify.lead_id,
           type: 'whatsapp',
-          notes: `Lead notificado de reagenda por ${nombreVendedor}`,
+          notes: `Lead notificado de reagenda por ${nombreVendedor} (${resultado.metodo})`,
           created_by: vendedor.id
         });
     } else {
