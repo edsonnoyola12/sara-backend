@@ -1,5 +1,41 @@
 ## HISTORIAL DE CAMBIOS IMPORTANTES
 
+### 2026-03-02 (Sesión 79) — Testing E2E Retell Features + Ghost Column Fix
+
+**Bug fix — Ghost column `interested_in` en followups.ts:**
+
+| Archivo | Problema | Solución |
+|---------|----------|----------|
+| `crons/followups.ts` (6 queries) | `.select()` pedía `interested_in` — columna que NO existe en tabla `leads` → query fallaba silenciosamente → 5 CRONs de Retell + cadencias no procesaban leads | Cambiado a `property_interest` en todas las queries |
+| `handlers/whatsapp-vendor.ts` | `lead.interested_in` en comando `llamar ia` | Cambiado a `lead.property_interest` |
+
+**CRONs afectados (ahora corregidos):**
+- `ejecutarCadenciasInteligentes` — cadencias no ejecutaban pasos
+- `llamadasSeguimientoPostVisita` — no hacía llamadas post-visita
+- `llamadasReactivacionLeadsFrios` — no reactivaba leads fríos
+- `llamadasEscalamiento48h` — no escalaba leads sin respuesta
+- `reintentarLlamadasSinRespuesta` — retries no procesaban
+
+**Nuevo endpoint:** `/test-cadencias?action=activar|ejecutar&api_key=XXX`
+
+**Testing E2E de las 3 features Retell (staging + producción):**
+
+| Feature | Test | Resultado |
+|---------|------|-----------|
+| Dashboard CEO | `llamadas` → métricas correctas | PASS |
+| Retry: outcome | `dial_no_answer` → `no_answer` en call_log | PASS |
+| Retry: intento 1 | `pending_retry_call.attempt=1`, retry en 3h | PASS |
+| Retry: intento 2 | `attempt=2`, retry mañana 10am MX | PASS |
+| Retry: max | `attempt=3` → limpia pending | PASS |
+| Cadencia: activar | `lead_nuevo` detectado correctamente | PASS |
+| Cadencia: ejecutar | `paso_actual` 0→1, WhatsApp enviado | PASS |
+| Cadencia: pending | `cadencia_lead_nuevo` en auto_response | PASS |
+| Cadencia: msg limit | `mensajes_automaticos_hoy.count=1` | PASS |
+
+**Commit:** `87e0a764`
+
+---
+
 ### 2026-03-02 (Sesión 78) — Template Fallback para Leads + Ghost Column Fixes
 
 **Bug fix — columnas fantasma en `appointmentService.ts`:**
