@@ -1133,7 +1133,7 @@ export async function verificarReengagement(supabase: SupabaseService, meta: Met
       for (const lead of leadsConHoras) {
         const nombre = lead.name || lead.phone;
         const categoria = lead.lead_category ? ` (${lead.lead_category})` : '';
-        const interes = lead.notes?.interested_in ? `\n   Interés: ${lead.notes.interested_in}` : '';
+        const interes = (lead.property_interest || lead.notes?.desarrollo_interes) ? `\n   Interés: ${lead.property_interest || lead.notes?.desarrollo_interes}` : '';
         mensaje += `• *${nombre}*${categoria}\n   ⏰ ${lead.horasSinRespuesta}h sin respuesta${interes}\n\n`;
       }
 
@@ -2262,7 +2262,7 @@ export async function llamadasSeguimientoPostVisita(
 
     const { data: leadsPostVisita } = await supabase.client
       .from('leads')
-      .select('id, name, phone, notes, assigned_to, interested_in')
+      .select('id, name, phone, notes, assigned_to, property_interest')
       .eq('status', 'visited')
       .lt('updated_at', hace1Dia.toISOString())
       .gt('updated_at', hace2Dias.toISOString())
@@ -2302,7 +2302,7 @@ export async function llamadasSeguimientoPostVisita(
 
         if (!lead.phone) continue;
 
-        const desarrolloInteres = lead.interested_in || (notes as any).desarrollo_interes || '';
+        const desarrolloInteres = lead.property_interest || (notes as any).desarrollo_interes || '';
 
         const result = await retell.initiateCall({
           leadId: lead.id,
@@ -2388,7 +2388,7 @@ export async function llamadasReactivacionLeadsFrios(
 
     const { data: leadsFrios } = await supabase.client
       .from('leads')
-      .select('id, name, phone, notes, assigned_to, interested_in')
+      .select('id, name, phone, notes, assigned_to, property_interest')
       .in('status', ['contacted', 'qualified'])
       .lt('last_message_at', hace7Dias.toISOString())
       .gt('last_message_at', hace30Dias.toISOString())
@@ -2437,7 +2437,7 @@ export async function llamadasReactivacionLeadsFrios(
           leadName: lead.name,
           leadPhone: lead.phone,
           vendorId: lead.assigned_to,
-          desarrolloInteres: lead.interested_in || (notes as any).desarrollo_interes || '',
+          desarrolloInteres: lead.property_interest || (notes as any).desarrollo_interes || '',
           motivo: 'seguimiento'
         });
 
@@ -2468,7 +2468,7 @@ export async function llamadasReactivacionLeadsFrios(
               await enviarMensajeTeamMember(supabase, meta, vendedor,
                 `📞 *LLAMADA IA REACTIVACIÓN*\n\n` +
                 `SARA está llamando a *${lead.name}* (lead frío)\n` +
-                `Desarrollo: ${lead.interested_in || (notes as any).desarrollo_interes || 'General'}\n\n` +
+                `Desarrollo: ${lead.property_interest || (notes as any).desarrollo_interes || 'General'}\n\n` +
                 `Si responde, te aviso.`,
                 { tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead' }
               );
@@ -2626,7 +2626,7 @@ export async function llamadasEscalamiento48h(
     // Leads nuevos/contactados que SARA les escribió hace 48-72h y no respondieron
     const { data: leadsSinRespuesta } = await supabase.client
       .from('leads')
-      .select('id, name, phone, notes, assigned_to, interested_in, last_message_at, last_activity_at, score')
+      .select('id, name, phone, notes, assigned_to, property_interest, last_message_at, last_activity_at, score')
       .in('status', ['new', 'contacted'])
       .lt('last_activity_at', hace48h.toISOString())   // Última actividad hace +48h
       .gt('last_activity_at', hace72h.toISOString())    // Pero no más de 72h (evita leads muy viejos)
@@ -2683,7 +2683,7 @@ export async function llamadasEscalamiento48h(
 
         if (!lead.phone) continue;
 
-        const desarrolloInteres = lead.interested_in || (notes as any).desarrollo_interes || '';
+        const desarrolloInteres = lead.property_interest || (notes as any).desarrollo_interes || '';
 
         const result = await retell.initiateCall({
           leadId: lead.id,
@@ -2776,7 +2776,7 @@ export async function reintentarLlamadasSinRespuesta(
     // Buscar leads con pending_retry_call cuyo retry_after ya pasó
     const { data: allLeads } = await supabase.client
       .from('leads')
-      .select('id, name, phone, notes, assigned_to, interested_in')
+      .select('id, name, phone, notes, assigned_to, property_interest')
       .not('notes->pending_retry_call', 'is', null);
 
     if (!allLeads || allLeads.length === 0) {
@@ -2815,7 +2815,7 @@ export async function reintentarLlamadasSinRespuesta(
 
         const motivo = retry.motivo || 'seguimiento';
         const attempt = retry.attempt || 1;
-        const desarrolloInteres = lead.interested_in || (notes as any).desarrollo_interes || '';
+        const desarrolloInteres = lead.property_interest || (notes as any).desarrollo_interes || '';
 
         // Mark-before-send: limpiar pending_retry_call ANTES de llamar
         const notesLimpio = { ...notes };
@@ -3110,7 +3110,7 @@ export async function ejecutarCadenciasInteligentes(
     // Buscar leads con cadencia activa
     const { data: allLeads } = await supabase.client
       .from('leads')
-      .select('id, name, phone, notes, assigned_to, interested_in, status')
+      .select('id, name, phone, notes, assigned_to, property_interest, status')
       .not('notes->cadencia', 'is', null);
 
     if (!allLeads || allLeads.length === 0) {
@@ -3248,7 +3248,7 @@ export async function ejecutarCadenciasInteligentes(
             );
           }
 
-          const desarrolloInteres = lead.interested_in || (notes as any).desarrollo_interes || '';
+          const desarrolloInteres = lead.property_interest || (notes as any).desarrollo_interes || '';
           const result = await retellService.initiateCall({
             leadId: lead.id,
             leadName: lead.name,

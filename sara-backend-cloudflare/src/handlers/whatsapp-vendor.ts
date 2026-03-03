@@ -6099,8 +6099,8 @@ export async function vendedorLlamarIA(ctx: HandlerContext, handler: any, from: 
     let precioDesde = '';
     if (lead.notes?.desarrollo_interes) {
       desarrolloInteres = lead.notes?.desarrollo_interes;
-    } else if (lead.interested_in) {
-      desarrolloInteres = lead.interested_in;
+    } else if (lead.property_interest) {
+      desarrolloInteres = lead.property_interest;
     }
 
     // Iniciar llamada con Retell

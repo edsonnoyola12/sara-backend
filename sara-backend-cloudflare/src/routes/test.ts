@@ -26,6 +26,7 @@ import { CreditFlowService } from '../services/creditFlowService';
 import { PostVisitService } from '../services/postVisitService';
 import { PipelineService, formatPipelineForWhatsApp, formatCurrency } from '../services/pipelineService';
 import { enviarMensajeTeamMember, isPendingExpired, getPendingMessages, verificarPendingParaLlamar, CALL_CONFIG } from '../utils/teamMessaging';
+import { activarCadenciasAutomaticas, ejecutarCadenciasInteligentes } from '../crons/followups';
 import { parseFechaEspanol, getMexicoNow } from '../handlers/dateParser';
 import { findLeadByName } from '../handlers/whatsapp-utils';
 
@@ -10822,6 +10823,68 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
           error: error.message,
           cards_attempted: cards.length
         }, null, 2));
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // TEST CADENCIAS - Ejecutar activación y ejecución de cadencias
+    // USO: /test-cadencias?action=activar|ejecutar&api_key=XXX
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-cadencias' && request.method === 'GET') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const action = url.searchParams.get('action') || 'activar';
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+
+      try {
+        if (action === 'ejecutar') {
+          // Debug: check leads with cadencia before running
+          const { data: preCheck } = await supabase.client
+            .from('leads')
+            .select('id, name, notes')
+            .not('notes->cadencia', 'is', null)
+            .limit(10);
+
+          const ahora = new Date().toISOString();
+          const debugLeads = (preCheck || []).map((l: any) => {
+            const cad = l.notes?.cadencia;
+            return {
+              name: l.name,
+              activa: cad?.activa,
+              paso: cad?.paso_actual,
+              proxima: cad?.proxima_accion,
+              listo: cad?.activa && cad?.proxima_accion && cad.proxima_accion <= ahora
+            };
+          });
+
+          await ejecutarCadenciasInteligentes(supabase, meta, env);
+
+          // Post-check
+          const { data: postCheck } = await supabase.client
+            .from('leads')
+            .select('id, name, notes')
+            .not('notes->cadencia', 'is', null)
+            .limit(10);
+          const postLeads = (postCheck || []).map((l: any) => ({
+            name: l.name,
+            paso: l.notes?.cadencia?.paso_actual,
+            activa: l.notes?.cadencia?.activa
+          }));
+
+          return corsResponse(JSON.stringify({
+            ok: true,
+            action: 'ejecutar',
+            ahora,
+            debug_pre: debugLeads,
+            debug_post: postLeads
+          }, null, 2));
+        } else {
+          await activarCadenciasAutomaticas(supabase, meta, env);
+          return corsResponse(JSON.stringify({ ok: true, action: 'activar', message: 'Cadencias activadas — revisa logs' }));
+        }
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ ok: false, error: e.message, stack: e.stack }), 500);
       }
     }
 
