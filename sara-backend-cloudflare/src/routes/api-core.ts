@@ -1939,16 +1939,20 @@ Creada desde CRM`;
         if (body.scheduled_time) updateData.scheduled_time = body.scheduled_time;
         if (body.property_name) updateData.property_name = body.property_name;
         
-        const { data, error } = await supabase.client
+        const { data: rows, error } = await supabase.client
           .from('appointments')
           .update(updateData)
           .eq('id', id)
-          .select()
-          .single();
-        
+          .select();
+
         if (error) {
           console.error('❌ Error DB:', error);
           throw error;
+        }
+
+        const data = rows?.[0];
+        if (!data) {
+          return corsResponse(JSON.stringify({ error: 'Cita no encontrada' }), 404);
         }
         
         // ✅ FIX 14-ENE-2026: SIEMPRE sincronizar con Google Calendar si existe evento

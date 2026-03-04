@@ -705,7 +705,7 @@ CASOS ESPECIALES:
           .select('price_equipped, price')
           .order('price_equipped', { ascending: true })
           .limit(10);
-        let precioDesdeGlobal = `$${(precioMinimoGlobal / 1000000).toFixed(1)} millones`;
+        let precioDesdeGlobal = '$1.6 millones';
         if (minPriceProps && minPriceProps.length > 0) {
           const minP = minPriceProps.reduce((min: number, p: any) => {
             const precio = p.price_equipped || p.price || 0;

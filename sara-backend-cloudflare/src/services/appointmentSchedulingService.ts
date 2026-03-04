@@ -851,7 +851,9 @@ agendar ${nombreLead} mañana 4pm`;
         .insert({
           lead_id: lead.id,
           lead_name: lead.name,
+          lead_phone: lead.phone,
           vendedor_id: vendedor.id,
+          vendedor_name: vendedor.name,
           scheduled_date: fechaStr,
           scheduled_time: horaISO,
           status: 'scheduled',
@@ -1052,7 +1054,9 @@ agendar ${nombreLead} mañana 4pm`;
         .insert({
           lead_id: lead.id,
           lead_name: lead.name,
+          lead_phone: lead.phone,
           vendedor_id: vendedor.id,
+          vendedor_name: vendedor.name,
           scheduled_date: fechaStr,
           scheduled_time: horaISO,
           status: 'scheduled',

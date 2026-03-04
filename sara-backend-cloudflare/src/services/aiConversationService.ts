@@ -4884,8 +4884,15 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 
               // Credit-specific options when lead asks about financing
               if (analysis.intent === 'info_credito') {
-                // Si el lead tiene desarrollo de interés, enviar comparativa de bancos
-                if (lead.property_interest) {
+                // ═══ FIX: No reenviar comparativa si ya se envió, y detectar banco específico ═══
+                const yaEnvioComparativa = historial.slice(-6).some((m: any) =>
+                  m.role === 'assistant' && m.content?.includes('OPCIONES:') && m.content?.includes('Mensualidad:')
+                );
+                const msgLowerCredito = originalMessage.toLowerCase();
+                const bancosConocidos = ['bbva', 'banorte', 'santander', 'hsbc', 'scotiabank', 'infonavit', 'fovissste'];
+                const bancoMencionado = bancosConocidos.find(b => msgLowerCredito.includes(b));
+
+                if (lead.property_interest && !yaEnvioComparativa && !bancoMencionado) {
                   try {
                     const devInterest = lead.property_interest;
                     const prop = properties.find((p: any) => {
@@ -4909,15 +4916,33 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   } catch (finErr) {
                     console.warn('⚠️ Error calculando financiamiento:', finErr);
                   }
+                } else if (yaEnvioComparativa || bancoMencionado) {
+                  console.log(`💰 Comparativa omitida — ${bancoMencionado ? 'banco específico: ' + bancoMencionado : 'ya enviada previamente'}`);
                 }
 
-                opciones = [
-                  { id: 'btn_credito_infonavit', title: '🏛️ INFONAVIT', description: 'Crédito con subcuenta INFONAVIT' },
-                  { id: 'btn_credito_bancario', title: '🏦 Crédito bancario', description: 'BBVA, Banorte, Santander, HSBC' },
-                  { id: 'btn_credito_cofinavit', title: '🤝 Cofinavit', description: 'INFONAVIT + banco combinado' },
-                  { id: 'btn_credito_fovissste', title: '🏢 FOVISSSTE', description: 'Para trabajadores del Estado' }
-                ];
-                menuBody = '¿Qué tipo de crédito te interesa?';
+                // ═══ FIX: Si el lead ya mencionó un banco específico o ya eligió tipo, NO preguntar de nuevo ═══
+                const yaEligioTipo = bancoMencionado || yaEnvioComparativa ||
+                  msgLowerCredito.includes('bancario') || msgLowerCredito.includes('infonavit') ||
+                  msgLowerCredito.includes('fovissste') || msgLowerCredito.includes('cofinavit');
+
+                if (yaEligioTipo) {
+                  // Ya sabe qué quiere — ofrecer siguiente paso
+                  opciones = [
+                    { id: 'btn_conectar_asesor', title: '👤 Hablar con asesor', description: 'Te conectamos con un especialista' },
+                    { id: 'btn_simular_credito', title: '🧮 Simular mi crédito', description: 'Calcular con mis datos reales' },
+                    { id: 'btn_docs_necesarios', title: '📋 Documentos', description: 'Qué necesito para tramitar' }
+                  ];
+                  menuBody = '¿Cómo quieres continuar?';
+                  console.log(`💰 Menú crédito: siguiente paso (lead ya eligió${bancoMencionado ? ' ' + bancoMencionado.toUpperCase() : ''})`);
+                } else {
+                  opciones = [
+                    { id: 'btn_credito_infonavit', title: '🏛️ INFONAVIT', description: 'Crédito con subcuenta INFONAVIT' },
+                    { id: 'btn_credito_bancario', title: '🏦 Crédito bancario', description: 'BBVA, Banorte, Santander, HSBC' },
+                    { id: 'btn_credito_cofinavit', title: '🤝 Cofinavit', description: 'INFONAVIT + banco combinado' },
+                    { id: 'btn_credito_fovissste', title: '🏢 FOVISSSTE', description: 'Para trabajadores del Estado' }
+                  ];
+                  menuBody = '¿Qué tipo de crédito te interesa?';
+                }
               } else {
                 const hasAppointment = lead?.status === 'scheduled' || lead?.status === 'visit_scheduled';
                 opciones = getBotonesContextuales(analysis.intent, lead.status, hasAppointment);
