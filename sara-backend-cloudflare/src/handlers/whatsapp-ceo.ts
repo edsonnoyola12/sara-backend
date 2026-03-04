@@ -378,7 +378,9 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
     // MENSAJE PENDIENTE A LEAD (Sara como intermediario)
     // ═══════════════════════════════════════════════════════════
     const pendingMsgToLead = notasCEO?.pending_message_to_lead;
-    if (pendingMsgToLead && pendingMsgToLead.lead_phone) {
+    // ═══ GUARD: Si parece comando conocido, NO reenviar al lead ═══
+    const esComandoCEO = /^(leads?|hoy|pipeline|equipo|ventas|reporte|llamadas|status|funnel|calcular|probabilidad|comparar|mercado|segmentos|referidos|backups|alertas|broadcast|bridge|#cerrar|#mas|#más|mensaje|adelante|atras|atrás|quien|quién|historial|nota|notas|asignar|brochure|ubicacion|video|propiedades|ofertas?|ayuda|help|ver|briefing)/i.test(mensaje);
+    if (pendingMsgToLead && pendingMsgToLead.lead_phone && !esComandoCEO) {
       const sentAt = pendingMsgToLead.timestamp ? new Date(pendingMsgToLead.timestamp) : null;
       const minutosTranscurridos = sentAt ? (Date.now() - sentAt.getTime()) / (1000 * 60) : 999;
 

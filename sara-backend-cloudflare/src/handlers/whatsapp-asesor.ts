@@ -40,7 +40,9 @@ export async function handleAsesorMessage(ctx: HandlerContext, handler: any, fro
         return;
       }
 
-      if (notes?.pending_message_to_lead) {
+      // ═══ GUARD: Si parece comando conocido, NO reenviar al lead ═══
+      const esComandoAsesor = /^(mis|docs|preaprobado|rechazado|contactado|status|reporte|llamar|hoy|mañana|semana|adelante|atras|atrás|on|off|bridge|#cerrar|#mas|#más|ayuda|help|nota|notas|quien|quién|historial)/i.test(mensaje);
+      if (notes?.pending_message_to_lead && !esComandoAsesor) {
         console.log('📤 Asesor enviando mensaje pendiente a lead:', notes.pending_message_to_lead.lead_name);
         await handler.enviarMensajePendienteLead(from, body, asesor, notes.pending_message_to_lead);
         return;

@@ -7,7 +7,6 @@ import { VentasService } from '../services/ventasService';
 import { OfferTrackingService, CreateOfferParams, OfferStatus } from '../services/offerTrackingService';
 import { FollowupService } from '../services/followupService';
 import { BridgeService } from '../services/bridgeService';
-import { CalendarService } from '../services/calendar';
 import { isPendingExpired } from '../utils/teamMessaging';
 import { deliverPendingMessage, parseNotasSafe, formatPhoneForDisplay, findLeadByName, freshNotesUpdate } from './whatsapp-utils';
 import { AppointmentService } from '../services/appointmentService';
@@ -414,7 +413,9 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
   // MENSAJE PENDIENTE A LEAD (después de comando "ver")
   // ═══════════════════════════════════════════════════════════
   const pendingMsgToLead = notasVendedor?.pending_message_to_lead;
-  if (pendingMsgToLead && pendingMsgToLead.lead_phone) {
+  // ═══ GUARD: Si parece comando conocido, NO reenviar al lead — dejar que el routing normal lo maneje ═══
+  const esComandoPending = /^(ver|bridge|citas?|leads?|hoy|ayuda|help|resumen|briefing|meta|brochure|ubicacion|video|coach|quien|quién|info|hot|pendientes|credito|crédito|nuevo|reagendar|cambiar|mover|cancelar|agendar|recordar|llamar|nota|notas|contactar|conectar|cerrar|apartado|aparto|reserva|cumple|email|correo|referido|programar|propiedades|inventario|asignar|adelante|atras|atrás|perdido|cotizar|ofertas?|enviar|coaching|historial|pausar|reanudar|on|off|mis|#)/i.test(mensaje);
+  if (pendingMsgToLead && pendingMsgToLead.lead_phone && !esComandoPending) {
     const sentAt = pendingMsgToLead.timestamp ? new Date(pendingMsgToLead.timestamp) : null;
     const minutosTranscurridos = sentAt ? (Date.now() - sentAt.getTime()) / (1000 * 60) : 999;
 
@@ -996,12 +997,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
         .eq('id', vendedor.id);
 
       // Crear cita con el lead seleccionado
-      const calendarLocal = new CalendarService(
-        ctx.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-        ctx.env.GOOGLE_PRIVATE_KEY,
-        ctx.env.GOOGLE_CALENDAR_ID
-      );
-      const schedulingService = new AppointmentSchedulingService(ctx.supabase, calendarLocal);
+      const schedulingService = new AppointmentSchedulingService(ctx.supabase, ctx.calendar);
 
       if (!pendingAgendar.dia || !pendingAgendar.hora) {
         // Si no hay día/hora, pedir que complete
@@ -4132,12 +4128,7 @@ export async function asignarHipotecaALead(ctx: HandlerContext, handler: any, fr
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export async function vendedorAgendarCitaCompleta(ctx: HandlerContext, handler: any, from: string, body: string, vendedor: any, nombre: string): Promise<void> {
   try {
-    const calendarLocal = new CalendarService(
-      ctx.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      ctx.env.GOOGLE_PRIVATE_KEY,
-      ctx.env.GOOGLE_CALENDAR_ID
-    );
-    const schedulingService = new AppointmentSchedulingService(ctx.supabase, calendarLocal);
+    const schedulingService = new AppointmentSchedulingService(ctx.supabase, ctx.calendar);
 
     const result = await schedulingService.agendarCitaCompleto(body, vendedor);
 
