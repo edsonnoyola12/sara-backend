@@ -98,7 +98,8 @@ import {
   procesarCumpleañosLeads,
   felicitarCumpleañosEquipo,
   alertaCitaNoConfirmada,
-  alertarLeadsEstancados
+  alertarLeadsEstancados,
+  alertarChurnCritico
 } from './crons/alerts';
 
 // Follow-ups y Nurturing
@@ -124,7 +125,8 @@ import {
   llamadasEscalamiento48h,
   reintentarLlamadasSinRespuesta,
   activarCadenciasAutomaticas,
-  ejecutarCadenciasInteligentes
+  ejecutarCadenciasInteligentes,
+  recuperacionHipotecasRechazadas
 } from './crons/followups';
 
 // Lead Scoring y Objeciones
@@ -134,6 +136,8 @@ import {
   calcularLeadScore,
   alertarLeadCaliente,
   actualizarLeadScores,
+  computeBuyerReadiness,
+  computeChurnRisk,
   Objecion,
   OBJECIONES_COMUNES,
   detectarObjeciones,
@@ -785,17 +789,101 @@ export default {
               // Log especial para errores + encolar en retry_queue
               if (statusType === 'failed') {
                 console.error(`❌ MENSAJE FALLIDO: ${recipientId} - Error ${errorCode}: ${errorTitle}`);
-                // Encolar en retry_queue para reintento
-                try {
-                  await enqueueFailedMessage(
-                    supabase,
-                    recipientId,
-                    'text', // tipo genérico, se resolverá en retry
-                    { body: `[Re-send from failed status: ${messageId}]`, originalMessageId: messageId },
-                    `Status webhook failed: ${errorCode}`,
-                    `Meta delivery failed: ${errorCode} - ${errorTitle}`
-                  );
-                } catch (retryErr) { console.error('⚠️ Error encolando retry:', retryErr); }
+
+                // ── 131047 = ventana 24h cerrada → enviar template fallback ──
+                if (errorCode === 131047 || String(errorCode) === '131047') {
+                  console.log(`📱 131047 detectado para ${recipientId}, enviando template fallback...`);
+                  try {
+                    // Buscar contenido original en messages_sent
+                    const { data: msgRow } = await supabase.client
+                      .from('messages_sent')
+                      .select('contenido, recipient_type, recipient_id')
+                      .eq('message_id', messageId)
+                      .single();
+
+                    const phoneSuffix = recipientId?.slice(-10) || '';
+
+                    // Determinar si es team member o lead
+                    const { data: tmMatch } = await supabase.client
+                      .from('team_members')
+                      .select('id, name, notes')
+                      .like('phone', `%${phoneSuffix}`)
+                      .eq('active', true)
+                      .limit(1);
+
+                    if (tmMatch && tmMatch.length > 0) {
+                      // ── TEAM MEMBER → resumen_vendedor + pending ──
+                      const tm = tmMatch[0];
+                      const nombreCorto = tm.name.split(' ')[0];
+                      await meta.sendTemplate(recipientId, 'resumen_vendedor', 'es_MX', [{
+                        type: 'body',
+                        parameters: [
+                          { type: 'text', text: nombreCorto },
+                          { type: 'text', text: '-' },
+                          { type: 'text', text: '-' },
+                          { type: 'text', text: '-' },
+                          { type: 'text', text: '-' },
+                          { type: 'text', text: 'Responde para ver tu mensaje.' }
+                        ]
+                      }], true);
+                      // Guardar pending
+                      const notes = (tm.notes && typeof tm.notes === 'object') ? { ...tm.notes } : {};
+                      if (!notes.pending_mensaje) {
+                        notes.pending_mensaje = {
+                          texto: msgRow?.contenido || 'SARA te envió un mensaje. Responde para verlo.',
+                          timestamp: new Date().toISOString(),
+                          expires_at: new Date(Date.now() + 48 * 3600000).toISOString()
+                        };
+                        await supabase.client.from('team_members').update({ notes }).eq('id', tm.id);
+                      }
+                      console.log(`📱 131047 recovery OK: template resumen_vendedor → ${tm.name}`);
+                    } else {
+                      // ── LEAD → seguimiento_lead + pending ──
+                      const { data: leadMatch } = await supabase.client
+                        .from('leads')
+                        .select('id, name, notes, property_interest')
+                        .like('phone', `%${phoneSuffix}`)
+                        .limit(1);
+                      const lead = leadMatch?.[0];
+                      const nombreCorto = lead?.name?.split(' ')[0] || 'Amigo';
+                      const desarrollo = lead?.property_interest || 'nuestros desarrollos';
+                      await meta.sendTemplate(recipientId, 'seguimiento_lead', 'es_MX', [{
+                        type: 'body',
+                        parameters: [
+                          { type: 'text', text: nombreCorto },
+                          { type: 'text', text: desarrollo }
+                        ]
+                      }], true);
+                      // Guardar pending en lead
+                      if (lead?.id) {
+                        const notes = (lead.notes && typeof lead.notes === 'object') ? { ...lead.notes } : {};
+                        if (!notes.pending_mensaje) {
+                          notes.pending_mensaje = {
+                            texto: msgRow?.contenido || 'SARA te envió un mensaje. Responde para verlo.',
+                            timestamp: new Date().toISOString(),
+                            expires_at: new Date(Date.now() + 48 * 3600000).toISOString()
+                          };
+                          await supabase.client.from('leads').update({ notes }).eq('id', lead.id);
+                        }
+                      }
+                      console.log(`📱 131047 recovery OK: template seguimiento_lead → ${nombreCorto}`);
+                    }
+                  } catch (fallbackErr) {
+                    console.error(`❌ 131047 template fallback error: ${(fallbackErr as Error).message}`);
+                  }
+                } else {
+                  // Otros errores → encolar en retry_queue
+                  try {
+                    await enqueueFailedMessage(
+                      supabase,
+                      recipientId,
+                      'text',
+                      { body: `[Re-send from failed status: ${messageId}]`, originalMessageId: messageId },
+                      `Status webhook failed: ${errorCode}`,
+                      `Meta delivery failed: ${errorCode} - ${errorTitle}`
+                    );
+                  } catch (retryErr) { console.error('⚠️ Error encolando retry:', retryErr); }
+                }
               }
             } catch (dbError) {
               // Si la tabla no existe, solo loguear
@@ -2646,7 +2734,22 @@ export default {
     const dayOfWeek = dayMap[mexicoWeekday] ?? now.getUTCDay();
 
     // Solo ejecutar tareas horarias en el minuto exacto (evita duplicados)
-    const isFirstRunOfHour = mexicoMinute === 0;
+    let isFirstRunOfHour = mexicoMinute === 0;
+
+    // ═══ DEDUP CRON FIX ═══
+    // El CRON '*/2 * * * *' dispara al minuto 0 de CADA hora, al mismo tiempo
+    // que los CRONs dedicados ('0 1 * * *' a las 7PM MX, '0 14 * * 1-5' a las 8AM MX L-V).
+    // Esto causa que reportes/briefings se envíen DOBLE.
+    // Fix: El */2 cede las tareas horarias al CRON dedicado en horarios de overlap.
+    if (event.cron === '*/2 * * * *' && isFirstRunOfHour) {
+      const hasDedicatedCron =
+        mexicoHour === 19 || // '0 1 * * *' cubre 7 PM diario
+        (mexicoHour === 8 && dayOfWeek >= 1 && dayOfWeek <= 5); // '0 14 * * 1-5' cubre 8 AM L-V
+      if (hasDedicatedCron) {
+        isFirstRunOfHour = false;
+        console.log(`⚠️ DEDUP: */2 skip hourly tasks at ${mexicoHour}:00 — dedicated CRON handles these`);
+      }
+    }
 
     console.log(`═══════════════════════════════════════════════════════════`);
     console.log(`🕐 CRON EJECUTADO`);
@@ -3142,8 +3245,15 @@ export default {
 
               // Enviar template de reactivación
               const nombre = m.name?.split(' ')[0] || 'amigo';
-              await meta.sendTemplate(m.phone, 'reactivar_equipo', 'es_MX', [
-                { type: 'body', parameters: [{ type: 'text', text: nombre }] }
+              await meta.sendTemplate(m.phone, 'resumen_vendedor', 'es_MX', [
+                { type: 'body', parameters: [
+                  { type: 'text', text: nombre },
+                  { type: 'text', text: '-' },
+                  { type: 'text', text: '-' },
+                  { type: 'text', text: '-' },
+                  { type: 'text', text: '-' },
+                  { type: 'text', text: 'Responde para reactivar tu sesion.' }
+                ] }
               ]);
 
               reactivados++;
@@ -3646,9 +3756,19 @@ export default {
       await safeCron('recuperarAbandonosCredito', () => recuperarAbandonosCredito(supabase, meta));
     }
 
+    // RECUPERACIÓN HIPOTECAS RECHAZADAS: 10am L/Mi/Vi
+    if (mexicoHour === 10 && isFirstRunOfHour && (dayOfWeek === 1 || dayOfWeek === 3 || dayOfWeek === 5)) {
+      await safeCron('recuperacionHipotecasRechazadas', () => recuperacionHipotecasRechazadas(supabase, meta));
+    }
+
     // LEAD SCORING AUTOMÁTICO: cada 2 horas en horario laboral
     if (isFirstRunOfHour && mexicoHour >= 8 && mexicoHour <= 20 && mexicoHour % 2 === 0) {
       await safeCron('actualizarLeadScores', () => actualizarLeadScores(supabase));
+    }
+
+    // ALERTA CHURN CRÍTICO: cada 2h pares (8-20), L-S, después de lead scoring
+    if (isFirstRunOfHour && mexicoHour >= 8 && mexicoHour <= 20 && mexicoHour % 2 === 0 && dayOfWeek >= 1 && dayOfWeek <= 6) {
+      await safeCron('alertarChurnCritico', () => alertarChurnCritico(supabase, meta));
     }
 
     // FOLLOW-UP POST-VISITA: 4pm L-V

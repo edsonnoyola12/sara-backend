@@ -1296,6 +1296,74 @@ export async function handleApiBiRoutes(
     }
 
 
+    // Recrear templates del equipo como UTILITY (los actuales son MARKETING → Meta los bloquea con 131049)
+    // USO: POST /api/create-utility-templates?api_key=XXX
+    if (url.pathname === '/api/create-utility-templates' && request.method === 'POST') {
+      try {
+        const WABA_ID = '1227849769248437';
+        const results: any[] = [];
+
+        // Templates para equipo — texto limpio, sin emojis excesivos, transaccional
+        const utilityTemplates = [
+          {
+            name: 'agenda_diaria_v2',
+            category: 'UTILITY',
+            text: 'Buenos dias {{1}}, tu agenda del dia esta lista.\n\nCitas: {{2}}\nLeads pendientes: {{3}}\n\nResponde para ver detalles.',
+            example: [['Oscar', '3 citas programadas', '5 leads activos']]
+          },
+          {
+            name: 'resumen_vendedor',
+            category: 'UTILITY',
+            text: 'Resumen del día {{1}}.\n\nLeads nuevos: {{2}}\nCitas: {{3}} completadas de {{4}}\nPipeline: {{5}}\n\n{{6}}\n\nResponde para ver detalles.',
+            example: [['Oscar', '4', '2', '3', '$5.2M', 'Tienes 2 citas mañana.']]
+          },
+          {
+            name: 'resumen_asesor_v2',
+            category: 'UTILITY',
+            text: 'Resumen del día {{1}}.\n\nSolicitudes nuevas: {{2}}\nAprobadas hoy: {{3}}\nPipeline activo: {{4}}\n\nResponde para ver detalles.',
+            example: [['Leticia', '2', '1', '5 expedientes']]
+          },
+          {
+            name: 'notificacion_equipo_v2',
+            category: 'UTILITY',
+            text: 'Hola {{1}}, tienes una actualizacion pendiente. Responde para ver el mensaje.',
+            example: [['Oscar']]
+          }
+        ];
+
+        for (const tmpl of utilityTemplates) {
+          const payload = {
+            name: tmpl.name,
+            language: 'es_MX',
+            category: tmpl.category,
+            components: [
+              {
+                type: 'BODY',
+                text: tmpl.text,
+                example: { body_text: tmpl.example }
+              }
+            ]
+          };
+
+          const response = await fetch(`https://graph.facebook.com/v22.0/${WABA_ID}/message_templates`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${env.META_ACCESS_TOKEN}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          const result = await response.json();
+          results.push({ name: tmpl.name, success: response.ok, status: response.status, result });
+        }
+
+        return corsResponse(JSON.stringify({ templates_created: results }, null, 2));
+      } catch (error: any) {
+        return corsResponse(JSON.stringify({ error: error.message }), 500);
+      }
+    }
+
     // Endpoint genérico para enviar cualquier template
     if (url.pathname === '/api/send-template' && request.method === 'POST') {
       try {

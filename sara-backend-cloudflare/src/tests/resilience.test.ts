@@ -181,8 +181,8 @@ describe('TEST 1: RETRY QUEUE', () => {
         id: 'entry-retry-2',
         recipient_phone: '5610016226',
         message_type: 'template',
-        payload: { templateName: 'reactivar_equipo', languageCode: 'es_MX', components: [{ type: 'body', parameters: [{ type: 'text', text: 'Test' }] }] },
-        context: 'sendTemplate:reactivar_equipo:5610016226',
+        payload: { templateName: 'resumen_vendedor', languageCode: 'es_MX', components: [{ type: 'body', parameters: [{ type: 'text', text: 'Test' }] }] },
+        context: 'sendTemplate:resumen_vendedor:5610016226',
         attempts: 0,
         max_attempts: 3,
         status: 'pending'
@@ -213,7 +213,7 @@ describe('TEST 1: RETRY QUEUE', () => {
       const result = await processRetryQueue(mockSupabase as any, mockMeta as any, '5610016226');
 
       expect(mockMeta.sendTemplate).toHaveBeenCalledWith(
-        '5610016226', 'reactivar_equipo', 'es_MX',
+        '5610016226', 'resumen_vendedor', 'es_MX',
         expect.any(Array), true
       );
       expect(result.delivered).toBe(1);

@@ -202,6 +202,12 @@ export function calcularLeadScore(lead: any): { score: number; factors: LeadScor
   if ((notas as any)?.appointment_scheduled) factors.engagementScore += 4;
   if ((notas as any)?.active_bridge_to_vendedor) factors.engagementScore += 3;
   if (lead.property_interest) factors.engagementScore += 2;
+
+  // Buyer readiness boost (from intent_history)
+  const buyerReadiness = (notas as any)?.buyer_readiness;
+  if (buyerReadiness?.score >= 40) factors.engagementScore += 3;
+  else if (buyerReadiness?.score >= 15) factors.engagementScore += 1;
+
   factors.engagementScore = Math.min(factors.engagementScore, 10);
 
   // CALCULAR SCORE TOTAL (0-100)
@@ -391,17 +397,30 @@ export async function actualizarLeadScores(supabase: SupabaseService): Promise<v
 
     for (const lead of leads) {
       const { score, factors, categoria } = calcularLeadScore(lead);
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
 
-      // Solo actualizar si el score cambió significativamente (±5 puntos)
+      // Compute churn risk
+      const churnRisk = computeChurnRisk(lead, notas);
+      const prevChurn = (notas as any)?.churn_risk;
+      const churnChanged = !prevChurn || Math.abs(churnRisk.score - (prevChurn.score || 0)) >= 10;
+
+      // Solo actualizar si el score cambió significativamente (±5 puntos) o churn cambió
       const scoreActual = lead.score || lead.lead_score || 0;
-      if (Math.abs(score - scoreActual) >= 5 || !lead.score) {
+      if (Math.abs(score - scoreActual) >= 5 || !lead.score || churnChanged) {
+        const updatePayload: any = {
+          score: score,
+          lead_score: score,
+          lead_category: categoria
+        };
+
+        // Merge churn_risk into notes if changed (single write)
+        if (churnChanged) {
+          updatePayload.notes = { ...notas, churn_risk: churnRisk };
+        }
+
         await supabase.client
           .from('leads')
-          .update({
-            score: score,
-            lead_score: score,
-            lead_category: categoria
-          })
+          .update(updatePayload)
           .eq('id', lead.id);
 
         actualizados++;
@@ -417,6 +436,124 @@ export async function actualizarLeadScores(supabase: SupabaseService): Promise<v
     console.error('Error en actualizarLeadScores:', e);
     await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'actualizarLeadScores', stack: (e as Error).stack });
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// BUYER READINESS - Calcula disposición de compra basada en intent_history
+// ═══════════════════════════════════════════════════════════
+export interface BuyerReadiness {
+  score: number;   // 0-100
+  label: 'ready_to_buy' | 'evaluating' | 'browsing' | 'cold';
+}
+
+const INTENT_WEIGHTS: Record<string, number> = {
+  confirmar_cita: 30,
+  solicitar_cita: 25,
+  info_credito: 20,
+  interes_desarrollo: 15,
+  reagendar: 10,
+  info_cita: 8,
+  post_venta: 5,
+  saludo: 2,
+  cancelar_cita: -10,
+  queja: -15,
+  hablar_humano: -5
+};
+
+export function computeBuyerReadiness(intentHistory: { intent: string; ts: string; sentiment?: string }[]): BuyerReadiness {
+  if (!Array.isArray(intentHistory) || intentHistory.length === 0) {
+    return { score: 0, label: 'cold' };
+  }
+
+  const ahora = Date.now();
+  let rawScore = 0;
+
+  for (const entry of intentHistory) {
+    const weight = INTENT_WEIGHTS[entry.intent] ?? 0;
+    const ts = new Date(entry.ts).getTime();
+    const diasAtras = Math.max(0, (ahora - ts) / (1000 * 60 * 60 * 24));
+    const decay = Math.max(0.1, 1 - diasAtras / 30);
+    rawScore += weight * decay;
+  }
+
+  const score = Math.max(0, Math.min(100, Math.round(rawScore)));
+
+  let label: BuyerReadiness['label'];
+  if (score >= 70) label = 'ready_to_buy';
+  else if (score >= 40) label = 'evaluating';
+  else if (score >= 15) label = 'browsing';
+  else label = 'cold';
+
+  return { score, label };
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHURN PREDICTION - Predice riesgo de pérdida de lead
+// ═══════════════════════════════════════════════════════════
+export interface ChurnRisk {
+  score: number;   // 0-100
+  label: 'safe' | 'cooling' | 'at_risk' | 'critical';
+  reasons: string[];
+}
+
+const INACTIVITY_THRESHOLDS: Record<string, number> = {
+  new: 2, contacted: 3, qualified: 3, scheduled: 3,
+  visited: 5, negotiation: 7, reserved: 7,
+  credit_qualified: 5, pre_approved: 5, approved: 5
+};
+
+export function computeChurnRisk(lead: any, notas: any): ChurnRisk {
+  let score = 0;
+  const reasons: string[] = [];
+
+  // 1. Inactividad (max 40pts)
+  const ultimaActividad = lead.updated_at ? new Date(lead.updated_at) : new Date(lead.created_at);
+  const diasInactivo = Math.floor((Date.now() - ultimaActividad.getTime()) / (1000 * 60 * 60 * 24));
+  const umbral = INACTIVITY_THRESHOLDS[lead.status] || 3;
+  if (diasInactivo > umbral) {
+    const inactivityPts = Math.min(40, (diasInactivo - umbral) * 5);
+    score += inactivityPts;
+    reasons.push(`${diasInactivo}d sin actividad`);
+  }
+
+  // 2. Sentimiento negativo en últimos 5 intents (max 15pts)
+  const intentHistory: any[] = Array.isArray(notas?.intent_history) ? notas.intent_history : [];
+  const last5 = intentHistory.slice(-5);
+  const negativos = last5.filter((e: any) => e.sentiment === 'negative').length;
+  if (negativos >= 2) {
+    score += 15;
+    reasons.push(`${negativos} mensajes negativos recientes`);
+  }
+
+  // 3. Re-engagement agotado (20pts)
+  if (notas?.reengagement?.paso3_sent) {
+    score += 20;
+    reasons.push('Re-engagement paso 3 completado');
+  }
+
+  // 4. Buyer readiness bajo (10pts)
+  const br = notas?.buyer_readiness;
+  if (br && br.score < 15) {
+    score += 10;
+    reasons.push('Buyer readiness bajo');
+  }
+
+  // 5. Objeciones acumuladas (10pts)
+  const histObjeciones: any[] = Array.isArray(notas?.historial_objeciones) ? notas.historial_objeciones : [];
+  if (histObjeciones.length >= 2) {
+    score += 10;
+    reasons.push(`${histObjeciones.length} objeciones registradas`);
+  }
+
+  score = Math.min(100, score);
+
+  let label: ChurnRisk['label'];
+  if (score >= 76) label = 'critical';
+  else if (score >= 51) label = 'at_risk';
+  else if (score >= 26) label = 'cooling';
+  else label = 'safe';
+
+  return { score, label, reasons };
 }
 
 // ═══════════════════════════════════════════════════════════

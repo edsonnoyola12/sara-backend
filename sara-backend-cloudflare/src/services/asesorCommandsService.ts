@@ -645,6 +645,51 @@ Tu asesor *${nombreAsesor}* se pondrá en contacto contigo para los siguientes p
 
     const nombreCorto = lead.name.split(' ')[0];
 
+    // Categorizar motivo de rechazo
+    const motivoLower = motivo.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    let rejectionCategory: string;
+    if (/buro|buró|historial.?credit|score.?bajo/i.test(motivoLower)) {
+      rejectionCategory = 'buro_crediticio';
+    } else if (/ingreso|sueldo|capacidad.?pago|no.?alcanza|insuficiente/i.test(motivoLower)) {
+      rejectionCategory = 'ingresos_insuficientes';
+    } else if (/document|papeles|falta|incompleto|comprobante/i.test(motivoLower)) {
+      rejectionCategory = 'documentacion_incompleta';
+    } else if (/deuda|endeud|pasivo|adeudo/i.test(motivoLower)) {
+      rejectionCategory = 'deuda_excesiva';
+    } else {
+      rejectionCategory = 'otro';
+    }
+
+    // Consejos específicos por categoría
+    const consejosPorCategoria: Record<string, string> = {
+      buro_crediticio: `Te recomendamos:
+• Revisar tu reporte de buró en www.burodecredito.com.mx
+• Pagar deudas pendientes pequeñas para mejorar tu score
+• Evitar solicitar nuevos créditos por 3-6 meses
+• Hay bancos con criterios más flexibles que podemos explorar`,
+      ingresos_insuficientes: `Te recomendamos:
+• Explorar opciones de co-acreditado (esposo/a, familiar)
+• Considerar un modelo de vivienda con precio menor
+• Revisar opciones de crédito con enganche mayor
+• Algunos bancos aceptan ingresos combinados`,
+      documentacion_incompleta: `La buena noticia es que esto tiene solución rápida:
+• Reúne los documentos que te pidieron
+• Tu asesor puede indicarte exactamente qué falta
+• Una vez completa la documentación, se puede re-enviar
+• No necesitas esperar, actúa pronto`,
+      deuda_excesiva: `Te recomendamos:
+• Enfocarte en reducir deudas actuales
+• Consolidar deudas si es posible
+• Revisar opciones de financiamiento directo con la constructora
+• Intentar nuevamente cuando tu nivel de endeudamiento baje`,
+      otro: `Te recomendamos:
+• Revisar tu historial crediticio
+• Mejorar tu capacidad de pago
+• Intentar nuevamente en 3-6 meses`
+    };
+
+    const consejo = consejosPorCategoria[rejectionCategory] || consejosPorCategoria.otro;
+
     const mensajeParaLead = `Hola ${nombreCorto} 👋
 
 Tu asesor *${nombreAsesor}* me pidió informarte sobre tu solicitud de crédito.
@@ -653,17 +698,32 @@ Lamentablemente, en esta ocasión no fue posible aprobar tu crédito.
 
 📋 *Motivo:* ${motivo}
 
-Esto no significa que no puedas obtener un crédito en el futuro. Te recomendamos:
-• Revisar tu historial crediticio
-• Mejorar tu capacidad de pago
-• Intentar nuevamente en 3-6 meses
+Esto no significa que no puedas obtener un crédito en el futuro.
+
+${consejo}
 
 Si tienes preguntas, tu asesor está disponible para orientarte.
 
 ¡No te desanimes! 💪`;
 
-    // Buscar vendedor asignado para notificarle (usar assigned_to como fallback)
+    // Guardar mortgage_recovery en notas del lead
     const notes = this.safeParseNotes(lead.notes);
+    const retryDate = new Date();
+    retryDate.setDate(retryDate.getDate() + 30);
+    notes.mortgage_recovery = {
+      rejected_at: new Date().toISOString(),
+      rejection_category: rejectionCategory,
+      bank_rejected: motivo,
+      recovery_step: 'initial',
+      alternatives_sent: false,
+      retry_eligible_at: retryDate.toISOString()
+    };
+    await this.supabase.client
+      .from('leads')
+      .update({ notes })
+      .eq('id', lead.id);
+
+    // Buscar vendedor asignado para notificarle (usar assigned_to como fallback)
     const ctx = notes?.credit_flow_context;
     let vendedorPhone: string | undefined;
     let vendedorMessage: string | undefined;

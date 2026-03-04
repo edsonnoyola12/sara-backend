@@ -120,6 +120,14 @@ export type RateLimitEnqueueCallback = (data: {
   context: string;
 }) => Promise<void>;
 
+// Tipo para callback de ventana 24h cerrada (131047)
+// Recibe teléfono y mensaje original, debe enviar template + guardar pending
+export type WindowClosedCallback = (data: {
+  recipientPhone: string;
+  originalMessage: string;
+  meta: MetaWhatsAppService;
+}) => Promise<{ sent: boolean; method: string; messageId?: string }>;
+
 export class MetaWhatsAppService {
   private phoneNumberId: string;
   private accessToken: string;
@@ -127,6 +135,7 @@ export class MetaWhatsAppService {
   private trackingCallback?: MessageTrackingCallback;
   private failedMessageCallback?: FailedMessageCallback;
   private rateLimitEnqueueCallback?: RateLimitEnqueueCallback;
+  private windowClosedCallback?: WindowClosedCallback;
   private kvNamespace?: KVNamespace;
   private adminPhone: string = DEFAULT_ADMIN_PHONE;
 
@@ -194,6 +203,10 @@ export class MetaWhatsAppService {
 
   setFailedMessageCallback(callback: FailedMessageCallback): void {
     this.failedMessageCallback = callback;
+  }
+
+  setWindowClosedCallback(callback: WindowClosedCallback): void {
+    this.windowClosedCallback = callback;
   }
 
   /**
@@ -498,6 +511,24 @@ export class MetaWhatsAppService {
 
     const data = await response.json() as any;
     if (!response.ok) {
+      const errorCode = data.error?.code;
+      // 131047 = ventana 24h cerrada — fallback a template
+      if (errorCode === 131047 && this.windowClosedCallback) {
+        console.warn(`⚠️ 131047 ventana cerrada para ${phone}, intentando template fallback...`);
+        try {
+          const result = await this.windowClosedCallback({
+            recipientPhone: phone,
+            originalMessage: body,
+            meta: this
+          });
+          if (result.sent) {
+            console.log(`📱 Template fallback OK para ${phone} (${result.method})`);
+            return { template_fallback: true, method: result.method, messageId: result.messageId };
+          }
+        } catch (cbErr) {
+          console.error(`❌ Template fallback falló para ${phone}:`, (cbErr as Error).message);
+        }
+      }
       console.error('❌ Meta WA error:', JSON.stringify(data));
       throw new Error(data.error?.message || 'Error enviando mensaje');
     }
@@ -586,7 +617,7 @@ export class MetaWhatsAppService {
   async sendWhatsAppImage(to: string, imageUrl: string, caption?: string): Promise<any> {
     const phone = this.normalizePhone(to);
     const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`;
-    
+
     const payload: any = {
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
@@ -607,6 +638,13 @@ export class MetaWhatsAppService {
       recipientPhone: phone, messageType: 'image', payload: { url: imageUrl, caption }
     });
     const data = await response.json() as any;
+
+    // 131047 = ventana cerrada → template fallback
+    if (data.error?.code === 131047 && this.windowClosedCallback) {
+      console.warn(`⚠️ 131047 en imagen para ${phone}, template fallback...`);
+      const desc = caption ? `📷 ${caption.substring(0, 100)}` : '📷 Imagen pendiente';
+      return this.windowClosedCallback({ recipientPhone: phone, originalMessage: desc, meta: this });
+    }
 
     // 📊 Tracking de imagen enviada
     const messageId = data.messages?.[0]?.id;
@@ -647,6 +685,13 @@ export class MetaWhatsAppService {
       recipientPhone: phone, messageType: 'video', payload: { url: videoUrl, caption }
     });
     const data = await response.json() as any;
+
+    // 131047 = ventana cerrada → template fallback
+    if (data.error?.code === 131047 && this.windowClosedCallback) {
+      console.warn(`⚠️ 131047 en video para ${phone}, template fallback...`);
+      const desc = caption ? `🎬 ${caption.substring(0, 100)}` : '🎬 Video pendiente';
+      return this.windowClosedCallback({ recipientPhone: phone, originalMessage: desc, meta: this });
+    }
 
     // 📊 Tracking de video enviado
     const messageId = data.messages?.[0]?.id;
@@ -694,6 +739,10 @@ export class MetaWhatsAppService {
 
     const data = await response.json() as any;
     if (!response.ok) {
+      if (data.error?.code === 131047 && this.windowClosedCallback) {
+        console.warn(`⚠️ 131047 en documento para ${phone}, template fallback...`);
+        return this.windowClosedCallback({ recipientPhone: phone, originalMessage: `📄 Documento: ${filename}`, meta: this });
+      }
       console.error('❌ Error enviando documento:', JSON.stringify(data));
       throw new Error(data.error?.message || 'Error enviando documento');
     }
@@ -1072,6 +1121,12 @@ export class MetaWhatsAppService {
       recipientPhone: phone, messageType: 'image_buttons', payload: { imageUrl, bodyText: bodyText.substring(0, 100), buttons: buttons.map(b => b.title) }
     });
     const data = await response.json() as any;
+
+    // 131047 = ventana cerrada → template fallback
+    if (data.error?.code === 131047 && this.windowClosedCallback) {
+      console.warn(`⚠️ 131047 en imagen+botones para ${phone}, template fallback...`);
+      return this.windowClosedCallback({ recipientPhone: phone, originalMessage: bodyText.substring(0, 500), meta: this });
+    }
 
     const messageId = data.messages?.[0]?.id;
     if (messageId) {
@@ -1591,6 +1646,10 @@ export class MetaWhatsAppService {
 
     const data = await response.json() as any;
     if (!response.ok) {
+      if (data.error?.code === 131047 && this.windowClosedCallback) {
+        console.warn(`⚠️ 131047 en CTA button para ${phone}, template fallback...`);
+        return this.windowClosedCallback({ recipientPhone: phone, originalMessage: bodyText.substring(0, 500), meta: this });
+      }
       console.error('❌ Error CTA button:', JSON.stringify(data));
       throw new Error(data.error?.message || 'Error enviando CTA button');
     }

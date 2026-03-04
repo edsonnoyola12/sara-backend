@@ -1,5 +1,60 @@
 ## HISTORIAL DE CAMBIOS IMPORTANTES
 
+### 2026-03-03 (Sesión 80b) — Fix duplicados CRON + recursos + templates + crédito
+
+**6 bug fixes críticos que causaban duplicados y flujos rotos.**
+
+**Fix 1: CRON overlap — reportes se enviaban DOBLE**
+- `index.ts`: A las 7PM MX (1AM UTC), tanto `*/2 * * * *` como `0 1 * * *` disparan. Ambos pasaban `mexicoHour === 19 && isFirstRunOfHour` → reportes/briefings se enviaban 2 veces. Fix: el `*/2` cede `isFirstRunOfHour = false` cuando existe CRON dedicado (7PM diario, 8AM L-V).
+- `crons/reports.ts`: Skip vendedores de prueba (nombre contiene "test"/"prueba") en reportes nocturnos.
+
+**Fix 2: Recursos duplicados — Path 2 no checaba BD**
+- `aiConversationService.ts`: Path 2 (línea ~8265) solo checaba historial de conversación para URLs, no `resources_sent_for` en BD. Path 1 envía image+buttons (sin URL en texto) → Path 2 nunca los detectaba. Fix: Path 2 ahora lee Y escribe `resources_sent_for`.
+
+**Fix 3: `pidioRecursosExplicito` demasiado amplio**
+- `aiConversationService.ts`: Era true siempre que `send_video_desarrollo === true`, que Claude pone en cualquier mención. Fix: solo true con palabras explícitas (mándame, envíame, quiero ver, video, brochure, fotos, etc.).
+
+**Fix 4: Templates vacíos spam a vendedores**
+- `utils/teamMessaging.ts`: Default era `resumen_vendedor` con parámetros '−' cuando no había `templateOverride`. Fix: default cambió a `notificacion_cita_vendedor` con datos extraídos del mensaje.
+
+**Fix 5: `quiereVisitar` override hijacking crédito**
+- `aiConversationService.ts`: "si quiero" en "si quiero saber de crédito" matcheaba `quiereVisitar` → forzaba cierre de cita ignorando crédito. Fix: guards `!tieneCitaActiva && !esIntentCredito`.
+
+**Fix 6: Notificaciones al vendedor sin datos útiles**
+- `handlers/whatsapp.ts`: "Lead respondió" ahora incluye `templateOverride` con nombre, wa.me link, desarrollo y preview del mensaje.
+- `aiConversationService.ts`: Score jump alert ahora incluye `templateOverride` con datos del lead.
+
+**Tests:** 1107/1107 (33 archivos) — sin regresiones
+
+---
+
+### 2026-03-03 (Sesión 80) — Intent Tagging + Churn Prediction + Mortgage Recovery
+
+**3 features de inteligencia implementadas como cadena: intent → churn → mortgage.**
+
+**Feature 1: Intent Tagging & Buyer Readiness**
+- `aiConversationService.ts`: Persiste `notes.intent_history[]` (max 20, con intent + timestamp + sentiment) en cada mensaje
+- `leadScoring.ts`: `computeBuyerReadiness()` — pesos por tipo de intent con decay temporal (30d), labels: ready_to_buy/evaluating/browsing/cold
+- `calcularLeadScore()` boost: +3 engagement si buyer_readiness ≥40, +1 si ≥15
+
+**Feature 2: Churn Prediction**
+- `leadScoring.ts`: `computeChurnRisk()` — 5 señales (inactividad max 40pts, sentimiento negativo 15pts, re-engagement agotado 20pts, buyer readiness bajo 10pts, objeciones 10pts)
+- Labels: safe/cooling/at_risk/critical. Calculado en `actualizarLeadScores()` sin doble write
+- `alerts.ts`: `alertarChurnCritico()` — CRON 2h pares L-S, max 5 alertas, cooldown 48h
+- `followups.ts`: Escalación paso3 — si churn=critical, notifica vendedor con urgencia antes de marcar frío
+
+**Feature 3: Mortgage Recovery**
+- `asesorCommandsService.ts`: `notificarRechazado()` categoriza motivo (buró_crediticio/ingresos_insuficientes/documentacion_incompleta/deuda_excesiva/otro), guarda `notes.mortgage_recovery`, mensaje con consejos específicos por categoría
+- `followups.ts`: `recuperacionHipotecasRechazadas()` — día 7 alternativas por categoría, día 30 reintento + notifica equipo. CRON L/Mi/Vi 10am
+
+**CRONs nuevos:**
+- `alertarChurnCritico`: cada 2h pares (8-20) L-S
+- `recuperacionHipotecasRechazadas`: L/Mi/Vi 10am MX
+
+**Tests:** 1107/1107 (33 archivos) — sin regresiones
+
+---
+
 ### 2026-03-02 (Sesión 79) — Testing E2E Retell Features + Ghost Column Fix
 
 **Bug fix — Ghost column `interested_in` en followups.ts:**

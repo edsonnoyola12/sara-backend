@@ -1467,6 +1467,13 @@ export async function enviarReporteDiarioVendedores(supabase: SupabaseService, m
       try {
       if (!vendedor.phone) continue;
 
+      // Skip vendedores de prueba (no enviar reportes con 0 actividad real)
+      const nombreLower = (vendedor.name || '').toLowerCase();
+      if (nombreLower.includes('test') || nombreLower.includes('prueba')) {
+        console.log(`⏭️ Skip reporte diario para ${vendedor.name} (cuenta de prueba)`);
+        continue;
+      }
+
       // Datos individuales del vendedor - HOY
       const leadsVendedorHoy = todosLeadsHoy?.filter(l => l.assigned_to === vendedor.id) || [];
       const cierresVendedorHoy = todosCierresHoy?.filter(c => c.assigned_to === vendedor.id) || [];
@@ -2064,7 +2071,7 @@ export async function enviarReporteDiarioAsesores(supabase: SupabaseService, met
           guardarPending: true,
           pendingKey: 'pending_reporte_diario',
           templateOverride: {
-            name: 'reporte_asesor',
+            name: 'resumen_asesor_v2',
             params: templateParams
           }
         });

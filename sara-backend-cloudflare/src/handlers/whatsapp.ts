@@ -457,7 +457,19 @@ export class WhatsAppHandler {
                     `${scoreTemp} Score: ${lead.lead_score || 0} | 🏠 ${lead.property_interest || 'Sin desarrollo'}\n\n` +
                     `💡 *bridge ${lead.name?.split(' ')[0] || 'lead'}* para chat directo`;
                   const rtResult = await enviarMensajeTeamMember(this.supabase, this.meta, vendedorAsignado, notifMsg, {
-                    tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+                    tipoMensaje: 'alerta_lead',
+                    guardarPending: true,
+                    pendingKey: 'pending_alerta_lead',
+                    templateOverride: {
+                      name: 'notificacion_cita_vendedor',
+                      params: [
+                        '📲 Lead respondió',
+                        lead.name || 'Lead',
+                        `wa.me/${(lead.phone || cleanPhone).replace(/\D/g, '').replace(/^521?/, '')}`,
+                        lead.property_interest || 'Sin desarrollo',
+                        `"${trimmedBody.substring(0, 40)}${trimmedBody.length > 40 ? '...' : ''}"`
+                      ]
+                    }
                   });
                   if (!rtResult.success) {
                     console.error(`⚠️ Notificación real-time a ${vendedorAsignado.name} falló (${rtResult.method})`);

@@ -8226,7 +8226,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
           if (resp.ok) {
             const data: any = await resp.json();
             const templates = data.data || [];
-            const required = ['briefing_matutino', 'reporte_vendedor', 'reporte_asesor', 'reactivar_equipo'];
+            const required = ['resumen_vendedor', 'resumen_asesor_v2', 'reporte_vendedor', 'seguimiento_lead'];
             const found = required.filter(r => templates.some((t: any) => t.name === r && t.status === 'APPROVED'));
             const missing = required.filter(r => !found.includes(r));
             addTest('Templates: critical templates exist', found.length === required.length,

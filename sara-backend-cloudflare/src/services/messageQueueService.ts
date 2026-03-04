@@ -70,12 +70,12 @@ export interface DeliveryResult {
 
 // Configuración por tipo de mensaje
 const MESSAGE_TYPE_CONFIG: Record<MessageType, { expirationHours: number; priority: number; templateName: string }> = {
-  briefing: { expirationHours: 18, priority: 1, templateName: 'reactivar_equipo' },
-  recap: { expirationHours: 18, priority: 2, templateName: 'reactivar_equipo' },
-  reporte_diario: { expirationHours: 24, priority: 2, templateName: 'reactivar_equipo' },
-  resumen_semanal: { expirationHours: 72, priority: 3, templateName: 'reactivar_equipo' },
-  alerta: { expirationHours: 6, priority: 1, templateName: 'reactivar_equipo' },
-  notificacion: { expirationHours: 48, priority: 3, templateName: 'reactivar_equipo' },
+  briefing: { expirationHours: 18, priority: 1, templateName: 'resumen_vendedor' },
+  recap: { expirationHours: 18, priority: 2, templateName: 'resumen_vendedor' },
+  reporte_diario: { expirationHours: 24, priority: 2, templateName: 'resumen_vendedor' },
+  resumen_semanal: { expirationHours: 72, priority: 3, templateName: 'resumen_vendedor' },
+  alerta: { expirationHours: 6, priority: 1, templateName: 'resumen_vendedor' },
+  notificacion: { expirationHours: 48, priority: 3, templateName: 'resumen_vendedor' },
 };
 
 export class MessageQueueService {

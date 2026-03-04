@@ -2396,3 +2396,83 @@ export async function alertarLeadsEstancados(supabase: SupabaseService, meta: Me
     await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'alertarLeadsEstancados', stack: (e as Error).stack });
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// ALERTA CHURN CRÍTICO - Notifica vendedores de leads en riesgo de pérdida
+// Ejecuta cada 2h pares (8-20), L-S
+// ═══════════════════════════════════════════════════════════════
+export async function alertarChurnCritico(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('⚠️ Iniciando alerta de churn crítico...');
+
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, assigned_to, updated_at')
+      .not('status', 'in', '("closed","delivered","lost","fallen","paused","cold")')
+      .order('updated_at', { ascending: true })
+      .limit(200);
+
+    if (!leads || leads.length === 0) {
+      console.log('✅ Sin leads para churn check');
+      return;
+    }
+
+    const ahora = new Date();
+    const hace48h = new Date(ahora.getTime() - 48 * 60 * 60 * 1000).toISOString();
+    let alertasEnviadas = 0;
+
+    for (const lead of leads) {
+      if (alertasEnviadas >= 5) break;
+
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      const churnRisk = (notas as any)?.churn_risk;
+
+      if (!churnRisk || (churnRisk.label !== 'critical' && churnRisk.label !== 'at_risk')) continue;
+
+      // No alertar si ya se alertó en últimas 48h
+      const ultimaAlerta = (notas as any)?.churn_alert_sent;
+      if (ultimaAlerta && ultimaAlerta > hace48h) continue;
+
+      if (!lead.assigned_to) continue;
+
+      const { data: vendedor } = await supabase.client
+        .from('team_members')
+        .select('id, name, phone')
+        .eq('id', lead.assigned_to)
+        .single();
+
+      if (!vendedor?.phone) continue;
+
+      const nombreLead = lead.name || 'Sin nombre';
+      const razones = Array.isArray(churnRisk.reasons) ? churnRisk.reasons.join(', ') : '';
+      const emoji = churnRisk.label === 'critical' ? '🚨' : '⚠️';
+
+      const alertaMsg = `${emoji} *LEAD EN RIESGO: ${nombreLead}*
+
+📊 Riesgo: *${churnRisk.label.toUpperCase()}* (${churnRisk.score}/100)
+📋 Razones: ${razones}
+
+💡 Contacta hoy para evitar perder este lead.
+📞 Responde: bridge ${nombreLead.split(' ')[0]}`;
+
+      await enviarMensajeTeamMember(supabase, meta, vendedor, alertaMsg, {
+        tipoMensaje: 'alerta_lead',
+        pendingKey: 'pending_alerta_lead'
+      });
+
+      // Mark alert sent
+      await supabase.client
+        .from('leads')
+        .update({ notes: { ...notas, churn_alert_sent: ahora.toISOString() } })
+        .eq('id', lead.id);
+
+      alertasEnviadas++;
+      console.log(`${emoji} Alerta churn enviada a ${vendedor.name} por ${nombreLead} (${churnRisk.label})`);
+    }
+
+    console.log(`⚠️ Alertas churn completadas: ${alertasEnviadas} enviadas`);
+  } catch (e) {
+    console.error('Error en alertarChurnCritico:', e);
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'alertarChurnCritico', stack: (e as Error).stack });
+  }
+}

@@ -212,6 +212,142 @@ export async function seguimientoHipotecas(supabase: SupabaseService, meta: Meta
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// RECUPERACIÓN DE HIPOTECAS RECHAZADAS
+// Día 7: Alternativas, Día 30: Reintento elegible
+// ═══════════════════════════════════════════════════════════════════════════
+export async function recuperacionHipotecasRechazadas(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('🏦 Iniciando recuperación hipotecas rechazadas...');
+
+    const { data: leads } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, status, notes, assigned_to, property_interest')
+      .eq('status', 'rejected')
+      .not('phone', 'is', null)
+      .order('updated_at', { ascending: true })
+      .limit(50);
+
+    if (!leads || leads.length === 0) {
+      console.log('✅ Sin leads rechazados para recovery');
+      return;
+    }
+
+    const ahora = new Date();
+    let enviados = 0;
+
+    for (const lead of leads) {
+      if (enviados >= 5) break;
+
+      const notas = typeof lead.notes === 'object' ? lead.notes : {};
+      const recovery = (notas as any)?.mortgage_recovery;
+      if (!recovery) continue;
+
+      const rejectedAt = new Date(recovery.rejected_at);
+      const diasDesdeRechazo = Math.floor((ahora.getTime() - rejectedAt.getTime()) / (1000 * 60 * 60 * 24));
+      const nombreCorto = (lead.name || '').split(' ')[0] || 'cliente';
+      const desarrollo = lead.property_interest || 'nuestros desarrollos';
+
+      // DÍA 7+: Enviar alternativas (si no se han enviado)
+      if (diasDesdeRechazo >= 7 && !recovery.alternatives_sent) {
+        const puedeEnviar = await puedeEnviarMensajeAutomatico(supabase, lead.id);
+        if (!puedeEnviar) continue;
+
+        // Mark-before-send
+        const updatedRecovery = { ...recovery, alternatives_sent: true, alternatives_sent_at: ahora.toISOString() };
+        await supabase.client.from('leads')
+          .update({
+            notes: {
+              ...notas,
+              mortgage_recovery: updatedRecovery,
+              pending_auto_response: { type: 'seguimiento_credito', sent_at: ahora.toISOString() }
+            }
+          })
+          .eq('id', lead.id);
+
+        // Mensaje personalizado por categoría
+        const mensajesPorCategoria: Record<string, string> = {
+          buro_crediticio: `Hola ${nombreCorto} 👋\n\nSé que tu solicitud de crédito no fue aprobada, pero quiero que sepas que *hay otras opciones*.\n\n🏦 Trabajamos con varios bancos y cada uno tiene criterios diferentes. También contamos con *financiamiento directo* con la constructora.\n\n¿Te gustaría que exploremos alternativas? Estoy aquí para ayudarte.`,
+          ingresos_insuficientes: `Hola ${nombreCorto} 👋\n\nQuiero contarte sobre opciones que pueden funcionar para ti:\n\n👥 *Co-acreditado:* Con un familiar pueden sumar ingresos\n🏠 *Modelos accesibles:* Tenemos opciones desde precios menores\n💰 *Enganche mayor:* Reduce la mensualidad requerida\n\n¿Te interesa explorar alguna de estas opciones?`,
+          documentacion_incompleta: `Hola ${nombreCorto} 👋\n\n¡Buenas noticias! El rechazo por documentación *tiene solución*.\n\n📋 Solo necesitas completar los documentos que faltaron y podemos re-enviar tu solicitud.\n\n¿Necesitas ayuda para saber qué documentos te faltan?`,
+          deuda_excesiva: `Hola ${nombreCorto} 👋\n\nEntiendo que la situación de deudas puede ser complicada, pero hay caminos:\n\n📊 *Financiamiento directo:* La constructora tiene esquemas propios\n🤝 *Plan de ahorro:* Puedes ir apartando mientras reduces deudas\n\n¿Te gustaría que te explique estas opciones?`,
+          otro: `Hola ${nombreCorto} 👋\n\nSé que la noticia del crédito no fue la esperada, pero hay más opciones disponibles.\n\n🏦 Trabajamos con múltiples instituciones y esquemas de financiamiento. ¿Te gustaría explorar alternativas?\n\nEstoy aquí para ayudarte a encontrar la mejor opción.`
+        };
+
+        const mensaje = mensajesPorCategoria[recovery.rejection_category] || mensajesPorCategoria.otro;
+
+        try {
+          const templateComponents = [
+            { type: 'body', parameters: [
+              { type: 'text', text: nombreCorto },
+              { type: 'text', text: desarrollo }
+            ]}
+          ];
+          await meta.sendTemplate(lead.phone, 'seguimiento_lead', 'es_MX', templateComponents);
+          await registrarMensajeAutomatico(supabase, lead.id);
+          enviados++;
+          console.log(`🏦 Alternativas enviadas a ${lead.name} (${recovery.rejection_category})`);
+        } catch (err) {
+          console.error(`Error enviando alternativas a ${lead.name}:`, err);
+        }
+        continue;
+      }
+
+      // DÍA 30+: Reintento elegible
+      if (diasDesdeRechazo >= 30 && recovery.recovery_step !== 'retry_eligible') {
+        const puedeEnviar = await puedeEnviarMensajeAutomatico(supabase, lead.id);
+        if (!puedeEnviar) continue;
+
+        // Mark-before-send
+        const updatedRecovery = { ...recovery, recovery_step: 'retry_eligible', retry_notified_at: ahora.toISOString() };
+        await supabase.client.from('leads')
+          .update({ notes: { ...notas, mortgage_recovery: updatedRecovery } })
+          .eq('id', lead.id);
+
+        try {
+          const templateComponents = [
+            { type: 'body', parameters: [
+              { type: 'text', text: nombreCorto },
+              { type: 'text', text: desarrollo }
+            ]}
+          ];
+          await meta.sendTemplate(lead.phone, 'seguimiento_lead', 'es_MX', templateComponents);
+          await registrarMensajeAutomatico(supabase, lead.id);
+          enviados++;
+          console.log(`🏦 Reintento elegible notificado a ${lead.name}`);
+        } catch (err) {
+          console.error(`Error notificando reintento a ${lead.name}:`, err);
+        }
+
+        // Notificar asesor y vendedor
+        try {
+          const vendedorId = (notas as any)?.credit_flow_context?.vendedor_id || lead.assigned_to;
+          if (vendedorId) {
+            const { data: vendedor } = await supabase.client
+              .from('team_members')
+              .select('id, name, phone')
+              .eq('id', vendedorId)
+              .single();
+            if (vendedor?.phone) {
+              await enviarMensajeTeamMember(supabase, meta, vendedor,
+                `🏦 *REINTENTO CRÉDITO DISPONIBLE*\n\n${lead.name} fue rechazado hace 30+ días y ya puede reintentar.\n📋 Motivo original: ${recovery.bank_rejected}\n\n💡 Contacta al cliente para explorar nuevas opciones.`,
+                { tipoMensaje: 'notificacion', pendingKey: 'pending_alerta_lead' }
+              );
+            }
+          }
+        } catch (notifErr) {
+          console.error(`Error notificando equipo sobre reintento ${lead.name}:`, notifErr);
+        }
+      }
+    }
+
+    console.log(`🏦 Recuperación hipotecas completada: ${enviados} mensajes enviados`);
+  } catch (e) {
+    console.error('Error en recuperacionHipotecasRechazadas:', e);
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'recuperacionHipotecasRechazadas', stack: (e as Error).stack }).catch(() => {});
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // PROMOCIONES - Recordatorios automáticos
 // ═══════════════════════════════════════════════════════════════
@@ -1243,6 +1379,31 @@ export async function reengagementDirectoLeads(supabase: SupabaseService, meta: 
 
       // No enviar si ya completamos la secuencia
       if (paso3Enviado) {
+        // Escalación churn: notificar vendedor antes de marcar frío
+        const churnRisk = notas?.churn_risk;
+        if (churnRisk?.label === 'critical' && !notas?.churn_escalation_sent && lead.assigned_to) {
+          try {
+            const { data: vendedor } = await supabase.client
+              .from('team_members')
+              .select('id, name, phone')
+              .eq('id', lead.assigned_to)
+              .single();
+            if (vendedor?.phone) {
+              const escalMsg = `🚨 *ÚLTIMA OPORTUNIDAD: ${lead.name || 'Lead'}*\n\nEste lead completó re-engagement sin responder y está en riesgo CRÍTICO.\n📋 ${Array.isArray(churnRisk.reasons) ? churnRisk.reasons.join(', ') : ''}\n\n⚡ *Contacta HOY* o será marcado como frío.\n📞 bridge ${(lead.name || '').split(' ')[0]}`;
+              await enviarMensajeTeamMember(supabase, meta, vendedor, escalMsg, {
+                tipoMensaje: 'alerta_lead',
+                pendingKey: 'pending_alerta_lead'
+              });
+              await supabase.client.from('leads')
+                .update({ notes: { ...notas, churn_escalation_sent: ahora.toISOString() } })
+                .eq('id', lead.id);
+              console.log(`🚨 Escalación churn enviada a ${vendedor.name} por ${lead.name}`);
+            }
+          } catch (escErr) {
+            console.error(`Error escalación churn ${lead.name}:`, escErr);
+          }
+        }
+
         // Si pasaron 21+ días sin respuesta después del paso 3, marcar como frío
         if (diasSinRespuesta >= 21 && !notas?.marked_cold) {
           await supabase.client

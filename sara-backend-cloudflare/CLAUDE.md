@@ -1,6 +1,6 @@
 # SARA CRM - Referencia para Claude Code
 
-> Última actualización: 2026-03-02 (Sesión 79)
+> Última actualización: 2026-03-03 (Sesión 80b)
 > Historial detallado de cambios: `docs/CHANGELOG.md`
 
 ---
@@ -29,7 +29,7 @@
 # 1. Lee la documentación completa
 cat SARA_COMANDOS.md | head -500
 
-# 2. Verifica tests (OBLIGATORIO - 1083+ tests, 32 archivos)
+# 2. Verifica tests (OBLIGATORIO - 1107+ tests, 33 archivos)
 npm test
 
 # 3. Si falla algún test, NO hagas cambios
@@ -69,9 +69,9 @@ npm test
 |--------|-----------|
 | `src/crons/reports.ts` | Reportes diarios/semanales/mensuales |
 | `src/crons/briefings.ts` | Briefings matutinos, logEvento |
-| `src/crons/alerts.ts` | Alertas de leads, cumpleaños, leads fríos/calientes |
-| `src/crons/followups.ts` | Follow-ups, nurturing, broadcasts, re-engagement |
-| `src/crons/leadScoring.ts` | Scoring, señales calientes, objeciones |
+| `src/crons/alerts.ts` | Alertas de leads, cumpleaños, leads fríos/calientes, churn crítico |
+| `src/crons/followups.ts` | Follow-ups, nurturing, broadcasts, re-engagement, recovery hipotecas |
+| `src/crons/leadScoring.ts` | Scoring, señales calientes, objeciones, buyer readiness, churn risk |
 | `src/crons/nurturing.ts` | NPS, referidos, post-compra, satisfacción, cleanup |
 | `src/crons/maintenance.ts` | Bridges, leads estancados, aniversarios |
 | `src/crons/videos.ts` | Videos Veo 3 personalizados |
@@ -133,6 +133,8 @@ CEO/Vendedor: `bridge [nombre]` → 6 min → `#cerrar` / `#mas`
 ### 3. Crédito Hipotecario
 Lead pregunta crédito → SARA califica → Asigna asesor + notifica vendedor original + asesor via `enviarMensajeTeamMember`. AMBOS reciben recordatorios 24h y 2h.
 
+**Mortgage Recovery (rechazados):** Asesor dice `rechazado [nombre] [motivo]` → categoriza motivo (buró/ingresos/docs/deuda/otro) → guarda `notes.mortgage_recovery` → mensaje personalizado al lead. CRON L/Mi/Vi 10am: día 7 envía alternativas, día 30 notifica reintento elegible.
+
 ### 4. Ventana de 24 Horas de WhatsApp (CRÍTICO)
 
 WhatsApp solo permite mensajes libres si el usuario escribió en las últimas 24h.
@@ -181,6 +183,8 @@ Feature flag: `retell_enabled` en KV (controlable via `/api/flags`). Todos los C
 | Viernes | 10am | Encuestas NPS | 7-30 días post-visita/compra |
 | Sábado | 10am | Check-in mantenimiento | ~1 año post-delivered |
 | L-V | 9am | Aniversarios | Cada año |
+| L-S | cada 2h (8-20) | Alerta churn crítico | leads at_risk/critical |
+| L/Mi/Vi | 10am | Recovery hipotecas rechazadas | día 7 alternativas, día 30 reintento |
 
 Encuestas usan patrón **mark-before-send** + regex estrictos + TTL 48h + `isLikelySurveyResponse()`.
 
@@ -189,6 +193,23 @@ Encuestas usan patrón **mark-before-send** + regex estrictos + TTL 48h + `isLik
 Cuando SARA envía mensaje automático a un lead, guarda `pending_auto_response` en notes. Si el lead responde, `checkAutoMessageResponse()` captura con contexto antes de pasar a IA genérica.
 
 Tipos: `lead_frio`, `reengagement`, `cumpleanos`, `aniversario`, `postventa`, `recordatorio_pago`, `seguimiento_credito`, `followup_inactivo`, `remarketing`, `recordatorio_cita`, `referidos`, `nps`, `post_entrega`, `satisfaccion_casa`, `mantenimiento`, `checkin_60d`
+
+### 8. Intent Tagging & Buyer Readiness
+
+Cada mensaje de lead persiste `analysis.intent` en `notes.intent_history[]` (máx 20 entradas con timestamp + sentiment). Se calcula `notes.buyer_readiness` = `{ score: 0-100, label }` con decay temporal (30d).
+
+Labels: `ready_to_buy ≥70`, `evaluating ≥40`, `browsing ≥15`, `cold <15`.
+Integrado en lead scoring: +3 engagement si ≥40, +1 si ≥15.
+
+### 9. Churn Prediction
+
+`notes.churn_risk` = `{ score: 0-100, label, reasons[] }` calculado en CRON de lead scoring.
+
+**Señales (5):** inactividad (max 40pts, umbral por status), sentimiento negativo (15pts), re-engagement agotado (20pts), buyer readiness bajo (10pts), objeciones (10pts).
+Labels: `safe <26`, `cooling 26-50`, `at_risk 51-75`, `critical ≥76`.
+
+**Alerta churn crítico:** CRON cada 2h pares L-S → max 5 alertas/run, 48h cooldown → vendedor recibe "LEAD EN RIESGO".
+**Escalación paso3:** Antes de marcar frío (21d), si churn=critical → notifica vendedor con urgencia.
 
 ---
 
@@ -319,11 +340,12 @@ npx wrangler deploy      # Re-deploy
 | Tests | 1107 (33 archivos) |
 | Servicios | 89+ |
 | Comandos verificados | 342/342 (4 roles) |
-| CRONs activos | 30+ |
+| CRONs activos | 32+ |
 | Templates WA | 6 (3 equipo + 3 carousel) |
 | Propiedades | 32 (9 desarrollos) |
 | Precios | 100% dinámicos (0 hardcoded) |
 | WhatsApp UX | CTA buttons, reactions, contact cards |
 | Retell.ai | ACTIVADO — 9 tools, inbound +524923860066, flag unificado KV |
-| Resilience | Retry queue (backoff exponencial), mark-before-send, cache invalidation, AI fallback, KV dedup, fetch timeouts, atomic writes, error persistence, double-booking prevention |
+| Inteligencia | Intent tagging, buyer readiness scoring, churn prediction, mortgage recovery |
+| Resilience | Retry queue (backoff exponencial), mark-before-send, cache invalidation, AI fallback, KV dedup, fetch timeouts, atomic writes, error persistence, double-booking prevention, CRON overlap dedup |
 | Integraciones | Meta/WhatsApp ✅, Supabase ✅, Cloudflare ✅, Google Calendar ✅, Veo 3 ✅, Retell ✅ |

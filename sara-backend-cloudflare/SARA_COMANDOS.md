@@ -237,7 +237,7 @@ Los integration tests prueban flujos completos end-to-end:
 | `docs [nombre]` | Pedir documentos al lead |
 | `docs pendientes` / `pendientes` | Ver leads esperando documentos |
 | `preaprobado [nombre]` | Notificar pre-aprobación |
-| `rechazado [nombre] [motivo]` | Notificar rechazo |
+| `rechazado [nombre] [motivo]` | Notificar rechazo + categorizar motivo + guardar `mortgage_recovery` + mensaje personalizado |
 | `actualizar [nombre] banco=[banco] monto=[monto]` | Actualizar datos del lead |
 
 ### Comunicación
@@ -813,7 +813,7 @@ El CEO tiene fallback a todos los roles. Orden de prioridad:
 | `status [nombre]` | ✅ Probado 2026-01-18 |
 | `docs [nombre]` | ✅ Probado 2026-01-18 |
 | `preaprobado [nombre]` | ✅ Probado 2026-01-19 (sync con mortgage_applications OK) |
-| `rechazado [nombre] [motivo]` | ✅ Probado 2026-01-19 (sync con mortgage_applications OK) |
+| `rechazado [nombre] [motivo]` | ✅ Probado 2026-01-19 (sync + mortgage_recovery + categorización + mensaje personalizado) |
 | `dile [nombre] que [msg]` | ✅ Probado 2026-01-19 |
 | `llamar [nombre]` | ✅ Probado 2026-01-18 |
 | `adelante [nombre]` | ✅ Probado 2026-01-18 (sync con mortgage_applications OK) |
@@ -1531,16 +1531,49 @@ El sistema ejecuta automáticamente estos follow-ups para no perder leads:
 - **Límite**: Máx 5 por ejecución
 - **Función**: `recuperarAbandonosCredito()`
 
+### 7. Recuperación Hipotecas Rechazadas
+- **Horario**: 10am L/Mi/Vi
+- **Target**: Leads con `status='rejected'` y `notes.mortgage_recovery` existente
+- **Campos de control**: `mortgage_recovery.alternatives_sent`, `mortgage_recovery.recovery_step`
+- **Día 7**: Envía alternativas personalizadas por categoría de rechazo (buró, ingresos, docs, deuda)
+- **Día 30**: Notifica reintento elegible + alerta a asesor/vendedor
+- **Límite**: Máx 5 por ejecución
+- **Función**: `recuperacionHipotecasRechazadas()`
+
+### 8. Alerta Churn Crítico
+- **Horario**: Cada 2h pares (8-20), L-S
+- **Target**: Leads con `notes.churn_risk.label` = `critical` o `at_risk`
+- **Campo de control**: `notes.churn_alert_sent` (cooldown 48h)
+- **Acción**: Notifica vendedor "LEAD EN RIESGO" con razones específicas
+- **Límite**: Máx 5 alertas por ejecución
+- **Función**: `alertarChurnCritico()`
+
+### 9. Intent Tagging & Buyer Readiness (automático)
+- **Trigger**: Cada mensaje de lead procesado por IA
+- **Acción**: Persiste `analysis.intent` en `notes.intent_history[]` (máx 20 entradas)
+- **Cálculo**: `computeBuyerReadiness(intentHistory)` → `notes.buyer_readiness` (0-100 + label)
+- **Labels**: `ready_to_buy ≥70`, `evaluating ≥40`, `browsing ≥15`, `cold <15`
+- **Efecto**: Boost en lead scoring (+3 engagement si ≥40, +1 si ≥15)
+
+### 10. Churn Risk (automático en lead scoring)
+- **Trigger**: CRON lead scoring cada 2h
+- **Cálculo**: `computeChurnRisk(lead, notas)` → `notes.churn_risk` (0-100 + label + reasons)
+- **Señales**: Inactividad (40pts), sentimiento negativo (15pts), re-engagement agotado (20pts), buyer readiness bajo (10pts), objeciones (10pts)
+- **Labels**: `safe <26`, `cooling 26-50`, `at_risk 51-75`, `critical ≥76`
+- **Escalación**: Si churn=critical en paso3 re-engagement → notifica vendedor antes de marcar frío
+
 ### Otros Follow-ups Existentes
 | Función | Horario | Descripción |
 |---------|---------|-------------|
 | `followUpLeadsInactivos` | 11am L-V | Leads 3+ días sin responder |
-| `reengagementDirectoLeads` | 11am/5pm L-S | Día 3, 7, 14 sin actividad |
+| `reengagementDirectoLeads` | 11am/5pm L-S | Día 3, 7, 14 sin actividad + escalación churn |
 | `remarketingLeadsFrios` | Miércoles | Remarketing semanal |
 | `felicitarCumpleañosLeads` | 9am diario | Cumpleaños de leads |
 | `seguimientoCredito` | 12pm L-V | Leads con crédito estancado |
 | `seguimientoPostVenta` | 10am diario | 30, 60, 90 días post-venta |
 | `enviarRecapDiario` | 7pm L-V | Recap solo si NO usó SARA hoy |
+| `recuperacionHipotecasRechazadas` | 10am L/Mi/Vi | Recovery hipotecas rechazadas |
+| `alertarChurnCritico` | Cada 2h L-S | Leads en riesgo de pérdida |
 
 ---
 
@@ -1606,9 +1639,9 @@ El archivo `index.ts` fue refactorizado de ~22,700 líneas a ~14,300 líneas (-3
 |------|--------|--------|-----------|
 | 1 | `reports.ts` | ~400 | Reportes diarios/semanales/mensuales |
 | 2 | `briefings.ts` | ~500 | Briefings matutinos, logEvento |
-| 2 | `alerts.ts` | ~450 | Alertas leads fríos/calientes, cumpleaños |
-| 3 | `followups.ts` | ~800 | Follow-ups, nurturing, broadcasts |
-| 4 | `leadScoring.ts` | ~550 | Scoring, señales calientes, objeciones |
+| 2 | `alerts.ts` | ~2470 | Alertas leads fríos/calientes, cumpleaños, churn crítico |
+| 3 | `followups.ts` | ~3500 | Follow-ups, nurturing, broadcasts, recovery hipotecas |
+| 4 | `leadScoring.ts` | ~800 | Scoring, señales calientes, objeciones, buyer readiness, churn risk |
 | 4 | `nurturing.ts` | ~1860 | Recuperación crédito, NPS, referidos, post-compra, cleanup flags |
 | 5 | `maintenance.ts` | ~340 | Bridges, leads estancados, aniversarios |
 | 6 | `videos.ts` | ~710 | Videos Veo 3 personalizados |
@@ -2629,7 +2662,9 @@ SARA actúa como **VENDEDORA EXPERTA**, no como asistente pasiva:
 | Briefing matutino | 8 AM | ✅ |
 | Reporte 7 PM | 7 PM | ✅ |
 | Alertas/Cumpleaños | Diario | ✅ |
-| Scoring leads | Diario | ✅ |
+| Scoring leads + churn risk | Cada 2h (8-20) | ✅ |
+| Alerta churn crítico | Cada 2h L-S (8-20) | ✅ |
+| Recovery hipotecas rechazadas | L/Mi/Vi 10am | ✅ |
 | NPS/Encuestas | Viernes 10am | ✅ |
 | Seguimiento post-entrega | Lun/Jue 10am | ✅ |
 | Satisfacción casa | Martes 11am | ✅ |
@@ -3649,3 +3684,38 @@ CREATE TABLE IF NOT EXISTS documentos_broker (
 | Error logs | ✅ Limpios (3 errores de endpoints eliminados resueltos) |
 
 **Push:** origin/main (`2d82d424` + `0738d21d`)
+
+---
+
+## Sesión 80 (2026-03-03) - Intent Tagging + Churn Prediction + Mortgage Recovery
+
+### 3 Features implementadas
+
+**Feature 1: Intent Tagging & Buyer Readiness**
+- `aiConversationService.ts`: Persiste `notes.intent_history[]` (max 20) con intent, timestamp, sentiment en cada mensaje
+- `leadScoring.ts`: `computeBuyerReadiness(intentHistory)` — pesos por intent + decay temporal 30d
+- `leadScoring.ts`: `calcularLeadScore()` integra buyer_readiness (+3 si ≥40, +1 si ≥15)
+
+**Feature 2: Churn Prediction**
+- `leadScoring.ts`: `computeChurnRisk(lead, notas)` — 5 señales: inactividad (40pts), sentimiento negativo (15pts), re-engagement agotado (20pts), buyer readiness bajo (10pts), objeciones (10pts)
+- `leadScoring.ts`: `actualizarLeadScores()` calcula churn_risk en el mismo write que score (sin doble write)
+- `alerts.ts`: `alertarChurnCritico()` — CRON cada 2h pares L-S, max 5 alertas/run, cooldown 48h
+- `followups.ts`: Escalación en paso3 re-engagement — si churn=critical, notifica vendedor antes de marcar frío
+- `index.ts`: CRON dispatch para `alertarChurnCritico`
+
+**Feature 3: Mortgage Recovery**
+- `asesorCommandsService.ts`: `notificarRechazado()` categoriza motivo (buró/ingresos/docs/deuda/otro), guarda `notes.mortgage_recovery`, mensaje personalizado por categoría
+- `followups.ts`: `recuperacionHipotecasRechazadas()` — día 7 envía alternativas, día 30 notifica reintento + alerta equipo
+- `index.ts`: CRON L/Mi/Vi 10am MX
+
+### Archivos modificados
+| Archivo | Cambio |
+|---------|--------|
+| `src/services/aiConversationService.ts` | Persistir intent_history + buyer_readiness |
+| `src/crons/leadScoring.ts` | `computeBuyerReadiness()`, `computeChurnRisk()`, integrado en scoring |
+| `src/crons/alerts.ts` | `alertarChurnCritico()` |
+| `src/crons/followups.ts` | Escalación paso3, `recuperacionHipotecasRechazadas()` |
+| `src/services/asesorCommandsService.ts` | Categorizar rechazo, mortgage_recovery, mensaje mejorado |
+| `src/index.ts` | 2 CRON dispatches + imports |
+
+**Tests:** 1107/1107 pasando (33 archivos)

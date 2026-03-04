@@ -411,8 +411,15 @@ export async function enviarBriefingMatutino(supabase: SupabaseService, meta: Me
       guardarPending: true,
       pendingKey: 'pending_briefing',
       templateOverride: {
-        name: 'briefing_matutino',
-        params: templateParams
+        name: 'resumen_vendedor',
+        params: [
+          nombreCorto,
+          `${totalAcciones}`,
+          `${citasHoy?.length || 0}`,
+          `${citasHoy?.length || 0}`,
+          'Ver briefing',
+          tipDelDia
+        ]
       },
       // TTS: Enviar briefing también como nota de voz si hay API key
       ttsConfig: options?.openaiApiKey ? {

@@ -388,14 +388,14 @@ export async function finalizarFlujoCredito(ctx: HandlerContext, lead: any, from
         `💵 Enganche: $${(leadData.enganche_disponible || 0).toLocaleString('es-MX')}\n\n` +
         `⏰ ¡Contactar pronto!`;
 
-      await ctx.twilio.sendWhatsAppMessage(
+      await ctx.meta.sendWhatsAppMessage(
         'whatsapp:+52' + result.asesor.phone.replace(/\D/g, '').slice(-10),
         notif
       );
       console.log('📤 Asesor notificado:', result.asesor.name);
     }
 
-    await ctx.twilio.sendWhatsAppMessage(from, (mortgageService as any).formatAsesorInfo(result.asesor));
+    await ctx.meta.sendWhatsAppMessage(from, (mortgageService as any).formatAsesorInfo(result.asesor));
     console.log('✅ Datos del asesor enviados al cliente');
 
   } catch (e) {
@@ -798,7 +798,7 @@ export async function crearCitaCompleta(
       env.GOOGLE_PRIVATE_KEY,
       env.GOOGLE_CALENDAR_ID
     );
-    const appointmentService = new AppointmentService(ctx.supabase, calendar, ctx.twilio);
+    const appointmentService = new AppointmentService(ctx.supabase, calendar, ctx.meta);
 
     const params: CrearCitaParams = {
       from, cleanPhone, lead, desarrollo, fecha, hora,
@@ -813,14 +813,14 @@ export async function crearCitaCompleta(
       }
       if (result.errorType === 'out_of_hours') {
         const msg = appointmentService.formatMensajeHoraInvalida(result);
-        await ctx.twilio.sendWhatsAppMessage(from, msg);
+        await ctx.meta.sendWhatsAppMessage(from, msg);
         return;
       }
       if (result.errorType === 'db_error') {
         console.error('❌ Error DB creando cita:', result.error);
         // CITA INVISIBLE FIX: Avisar al lead que hubo un problema
         try {
-          await ctx.twilio.sendWhatsAppMessage(from,
+          await ctx.meta.sendWhatsAppMessage(from,
             '⚠️ Tuve un problema técnico al agendar tu cita. Un asesor te contactará en breve para confirmarla. ¡Disculpa la molestia!');
         } catch (sendErr) { console.error('⚠️ Error enviando mensaje de error al lead:', sendErr); }
         // Alertar al dev
@@ -899,13 +899,13 @@ export async function crearCitaCompleta(
     }
 
     const confirmacion = appointmentService.formatMensajeConfirmacionCliente(result, desarrollo, fecha, hora);
-    await ctx.twilio.sendWhatsAppMessage(from, confirmacion);
+    await ctx.meta.sendWhatsAppMessage(from, confirmacion);
     console.log('✅ Confirmación de cita enviada');
 
     if (needsBirthdayQuestion && clientName) {
       await new Promise(r => setTimeout(r, 1500));
       const msgCumple = appointmentService.formatMensajeCumpleanos(clientName);
-      await ctx.twilio.sendWhatsAppMessage(from, msgCumple);
+      await ctx.meta.sendWhatsAppMessage(from, msgCumple);
       console.log('🎂 Pregunta de cumpleaños enviada');
     }
 
@@ -916,7 +916,7 @@ export async function crearCitaCompleta(
     console.error('❌ Error en crearCitaCompleta:', error);
     // CITA INVISIBLE FIX: Avisar al lead + log error
     try {
-      await ctx.twilio.sendWhatsAppMessage(from,
+      await ctx.meta.sendWhatsAppMessage(from,
         '⚠️ Tuve un problema técnico al agendar tu cita. Un asesor te contactará en breve para confirmarla. ¡Disculpa la molestia!');
     } catch (sendErr) { console.error('⚠️ Error enviando mensaje de error al lead:', sendErr); }
     try {
@@ -1034,11 +1034,11 @@ export async function crearOActualizarMortgageApplication(
 
     if (action === 'created' && asesor?.phone && asesor?.is_active !== false) {
       const msg = mortgageService.formatMensajeNuevoLead(result);
-      await ctx.twilio.sendWhatsAppMessage(asesor.phone, msg);
+      await ctx.meta.sendWhatsAppMessage(asesor.phone, msg);
       console.log('📤 Asesor notificado de NUEVO lead:', asesor.name);
     } else if (action === 'updated' && cambios.length > 0 && asesor?.phone && asesor?.is_active !== false) {
       const msg = mortgageService.formatMensajeActualizacion(result);
-      await ctx.twilio.sendWhatsAppMessage(asesor.phone, msg);
+      await ctx.meta.sendWhatsAppMessage(asesor.phone, msg);
       console.log('📤 Asesor notificado de actualización:', asesor.name);
     } else if (action === 'waiting_name') {
       console.log('⏸️ Esperando nombre real del cliente para crear mortgage');
@@ -1140,7 +1140,7 @@ export async function actualizarLead(ctx: HandlerContext, lead: any, analysis: A
   const result = await leadManagementService.actualizarLead(lead, analysis, originalMessage);
 
   if (result.vendedorReasignado?.phone && result.leadInfo) {
-    await ctx.twilio.sendWhatsAppMessage(
+    await ctx.meta.sendWhatsAppMessage(
       result.vendedorReasignado.phone,
       leadManagementService.formatMensajeVendedorReasignado(
         result.leadInfo.name,
@@ -1164,14 +1164,14 @@ export async function registrarActividad(
 
   switch (result.action) {
     case 'not_found':
-      await ctx.twilio.sendWhatsAppMessage(
+      await ctx.meta.sendWhatsAppMessage(
         from,
         leadManagementService.formatMensajeActividadNoEncontrado(result.error || nombreLead)
       );
       break;
 
     case 'multiple_found':
-      await ctx.twilio.sendWhatsAppMessage(
+      await ctx.meta.sendWhatsAppMessage(
         from,
         leadManagementService.formatMensajeActividadMultiples(result.leadsEncontrados || [])
       );
@@ -1179,7 +1179,7 @@ export async function registrarActividad(
 
     case 'registered':
       const statusCambio = tipo === 'visit' && result.lead?.status === 'scheduled';
-      await ctx.twilio.sendWhatsAppMessage(
+      await ctx.meta.sendWhatsAppMessage(
         from,
         leadManagementService.formatMensajeActividadRegistrada(
           result.tipoActividad || tipo,
@@ -1213,7 +1213,7 @@ export async function mostrarActividadesHoy(ctx: HandlerContext, from: string, v
     if (useMetaService) {
       await ctx.meta.sendWhatsAppMessage(cleanPhone, noActivityMsg);
     } else {
-      await ctx.twilio.sendWhatsAppMessage(from, noActivityMsg);
+      await ctx.meta.sendWhatsAppMessage(from, noActivityMsg);
     }
     return;
   }
@@ -1276,7 +1276,7 @@ export async function mostrarActividadesHoy(ctx: HandlerContext, from: string, v
   if (useMetaService) {
     await ctx.meta.sendWhatsAppMessage(cleanPhone, msg);
   } else {
-    await ctx.twilio.sendWhatsAppMessage(from, msg);
+    await ctx.meta.sendWhatsAppMessage(from, msg);
   }
 }
 
@@ -1291,7 +1291,7 @@ export async function mostrarHistorialLead(ctx: HandlerContext, from: string, no
   });
 
   if (!leads || leads.length === 0) {
-    await ctx.twilio.sendWhatsAppMessage(from, 'No encontre a "' + nombreLead + '"');
+    await ctx.meta.sendWhatsAppMessage(from, 'No encontre a "' + nombreLead + '"');
     return;
   }
 
@@ -1301,7 +1301,7 @@ export async function mostrarHistorialLead(ctx: HandlerContext, from: string, no
       msg += (i+1) + '. ' + l.name + ' (' + l.status + ') ' + l.phone + '\n';
     });
     msg += '\nSe mas especifico o usa el telefono.';
-    await ctx.twilio.sendWhatsAppMessage(from, msg);
+    await ctx.meta.sendWhatsAppMessage(from, msg);
     return;
   }
 
@@ -1353,7 +1353,7 @@ export async function mostrarHistorialLead(ctx: HandlerContext, from: string, no
   const creado = new Date(lead.created_at);
   msg += '\nCreado: ' + creado.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' });
 
-  await ctx.twilio.sendWhatsAppMessage(from, msg);
+  await ctx.meta.sendWhatsAppMessage(from, msg);
 }
 
 export async function crearLeadDesdeWhatsApp(ctx: HandlerContext, from: string, nombre: string, telefono: string, vendedor: any): Promise<void> {
@@ -1367,7 +1367,7 @@ export async function crearLeadDesdeWhatsApp(ctx: HandlerContext, from: string, 
     .limit(1);
 
   if (existente && existente.length > 0) {
-    await ctx.twilio.sendWhatsAppMessage(from,
+    await ctx.meta.sendWhatsAppMessage(from,
       'Ya existe: ' + existente[0].name + ' (' + existente[0].status + ')\n\nTel: ' + digits);
     return;
   }
@@ -1388,7 +1388,7 @@ export async function crearLeadDesdeWhatsApp(ctx: HandlerContext, from: string, 
 
   if (error) {
     console.error('Error creando lead:', error);
-    await ctx.twilio.sendWhatsAppMessage(from, 'Error al crear lead. Intenta de nuevo.');
+    await ctx.meta.sendWhatsAppMessage(from, 'Error al crear lead. Intenta de nuevo.');
     return;
   }
 
@@ -1420,7 +1420,7 @@ export async function crearLeadDesdeWhatsApp(ctx: HandlerContext, from: string, 
     msg += 'Escribe el nombre del desarrollo.';
   }
 
-  await ctx.twilio.sendWhatsAppMessage(from, msg);
+  await ctx.meta.sendWhatsAppMessage(from, msg);
 }
 
 export async function procesarRespuestaEncuesta(ctx: HandlerContext, phone: string, mensaje: string): Promise<string | null> {

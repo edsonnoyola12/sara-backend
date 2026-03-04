@@ -70,8 +70,8 @@ const EXPIRATION_CONFIG: Record<string, number> = {
   'notificacion': 48,
 };
 
-// Template único aprobado para reactivar ventana 24h
-const REACTIVATION_TEMPLATE = 'reactivar_equipo';
+// Template UTILITY para reactivar ventana 24h (resumen_vendedor es UTILITY, reactivar_equipo es MARKETING → bloqueado por Meta 131049)
+const REACTIVATION_TEMPLATE = 'resumen_vendedor';
 
 /**
  * Envía mensaje a un team member respetando la ventana de 24h de WhatsApp
@@ -200,10 +200,31 @@ export async function enviarMensajeTeamMember(
     }
 
     // 4. VENTANA CERRADA o ENVÍO DIRECTO FALLÓ → Enviar template + guardar pending
-    const templateName = opciones?.templateOverride?.name || REACTIVATION_TEMPLATE;
-    const templateComponents = opciones?.templateOverride
-      ? [{ type: 'body', parameters: opciones.templateOverride.params.map(p => ({ type: 'text', text: p })) }]
-      : [{ type: 'body', parameters: [{ type: 'text', text: nombreCorto }] }];
+    // FIX DEFINITIVO: Usar notificacion_cita_vendedor con datos extraídos del mensaje
+    // en vez de resumen_vendedor con datos vacíos ('-')
+    let templateName: string;
+    let templateComponents: any[];
+
+    if (opciones?.templateOverride) {
+      templateName = opciones.templateOverride.name;
+      templateComponents = [{ type: 'body', parameters: opciones.templateOverride.params.map(p => ({ type: 'text', text: p })) }];
+    } else {
+      // Extraer info útil del mensaje para el template
+      const msgPreview = mensaje.substring(0, 60).replace(/\n/g, ' ');
+      const tipoLabel = tipoMensaje === 'alerta_lead' ? '📲 Alerta de lead'
+        : tipoMensaje === 'recordatorio_cita' ? '📅 Recordatorio'
+        : tipoMensaje === 'briefing' ? '📋 Briefing'
+        : '📬 Mensaje pendiente';
+
+      templateName = 'notificacion_cita_vendedor';
+      templateComponents = [{ type: 'body', parameters: [
+        { type: 'text', text: tipoLabel },
+        { type: 'text', text: nombreCorto },
+        { type: 'text', text: 'Responde para ver detalles' },
+        { type: 'text', text: msgPreview || 'Tienes un mensaje pendiente' },
+        { type: 'text', text: 'Responde cualquier cosa para ver el mensaje completo' }
+      ] }];
+    }
 
     console.log(`   📨 Enviando template ${templateName}...`);
 
@@ -215,11 +236,18 @@ export async function enviarMensajeTeamMember(
     } catch (templateError: any) {
       console.error(`   ❌ Template ${templateName} falló: ${templateError?.message}`);
 
-      // Si falló un templateOverride, intentar el template genérico como fallback
-      if (opciones?.templateOverride && templateName !== REACTIVATION_TEMPLATE) {
+      // Si falló, intentar el template resumen_vendedor como fallback
+      if (templateName !== REACTIVATION_TEMPLATE) {
         console.log(`   🔄 Intentando fallback con template genérico ${REACTIVATION_TEMPLATE}...`);
         try {
-          const fallbackComponents = [{ type: 'body', parameters: [{ type: 'text', text: nombreCorto }] }];
+          const fallbackComponents = [{ type: 'body', parameters: [
+            { type: 'text', text: nombreCorto },
+            { type: 'text', text: '-' },
+            { type: 'text', text: '-' },
+            { type: 'text', text: '-' },
+            { type: 'text', text: '-' },
+            { type: 'text', text: 'Responde para ver tu mensaje pendiente.' }
+          ] }];
           const fallbackResult = await meta.sendTemplate(teamMember.phone, REACTIVATION_TEMPLATE, 'es_MX', fallbackComponents);
           templateWamid = fallbackResult?.messages?.[0]?.id;
           console.log(`   ✅ Fallback ${REACTIVATION_TEMPLATE} enviado a ${teamMember.name} (wamid: ${templateWamid?.substring(0, 20)}...)`);
@@ -687,13 +715,15 @@ export async function verificarDeliveryTeamMessages(
       const wamidIds = wamidsFiltrados.map(w => w.wamid);
       const { data: statusRows } = await supabase.client
         .from('message_delivery_status')
-        .select('message_id, status')
+        .select('message_id, status, error_code')
         .in('message_id', wamidIds);
 
       const statusMap = new Map<string, string>();
+      const errorCodeMap = new Map<string, string>();
       if (statusRows) {
         for (const row of statusRows) {
           statusMap.set(row.message_id, row.status);
+          if (row.error_code) errorCodeMap.set(row.message_id, row.error_code);
         }
       }
 
@@ -704,12 +734,19 @@ export async function verificarDeliveryTeamMessages(
       for (const w of wamidsFiltrados) {
         checked++;
         const status = statusMap.get(w.wamid);
+        const errorCode = errorCodeMap.get(w.wamid);
 
         if (status === 'delivered' || status === 'read') {
           delivered++;
           cleanWamids.push(w.wamid);
+        } else if (status === 'failed' && errorCode === '131049') {
+          // 131049 = Meta frequency capping (MARKETING templates bloqueados)
+          // No es un fallo real — el mensaje pending se entregará cuando respondan
+          // Limpiar wamid del tracking para no seguir reportando
+          cleanWamids.push(w.wamid);
+          console.log(`   ⚠️ [131049] Frequency capping: ${tm.name} (${w.tipo}) — pending entregará al responder`);
         } else {
-          // sent, failed, o no existe en la tabla → no entregado
+          // sent, failed (otro error), o no existe en la tabla → no entregado
           undelivered++;
           tmUndelivered++;
           detalles.push({

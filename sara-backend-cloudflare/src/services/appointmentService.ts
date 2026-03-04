@@ -189,7 +189,7 @@ export class AppointmentService {
     const propertiesArray = Array.isArray(properties) ? properties : [];
 
     // Buscar vendedor y asesor
-    const vendedor = teamMembersArray.find(t => t.id === lead.assigned_to);
+    let vendedor = teamMembersArray.find(t => t.id === lead.assigned_to);
     const asesorHipotecario = teamMembersArray.find(t =>
       t.role?.toLowerCase().includes('hipotec') ||
       t.role?.toLowerCase().includes('credito') ||
@@ -200,6 +200,17 @@ export class AppointmentService {
       t.position?.toLowerCase().includes('credito') ||
       t.name?.toLowerCase().includes('asesor')
     );
+
+    // Fallback: si no se encontró vendedor asignado, buscar cualquier vendedor activo con teléfono
+    if (!vendedor) {
+      console.log('⚠️ Vendedor no encontrado para assigned_to:', lead.assigned_to, '— buscando fallback');
+      vendedor = teamMembersArray.find(t =>
+        t.role === 'vendedor' && t.is_active !== false && t.phone
+      );
+      if (vendedor) {
+        console.log('✅ Vendedor fallback encontrado:', vendedor.name);
+      }
+    }
 
     console.log('👤 Vendedor:', vendedor?.name || 'NO', '| Asesor:', asesorHipotecario?.name || 'NO');
 

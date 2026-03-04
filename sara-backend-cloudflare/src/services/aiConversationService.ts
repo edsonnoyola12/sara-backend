@@ -17,6 +17,7 @@ import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { scoringService } from './leadScoring';
 import { PromocionesService } from './promocionesService';
 import { HORARIOS, parsearDesarrollosYModelos } from '../handlers/constants';
+import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 import { I18nService, SupportedLanguage, createI18n } from './i18nService';
 import { TTSService, createTTSService, shouldSendAsAudio } from './ttsService';
 import { getSaludoPorHora, generarContextoPersonalizado, getBotonesContextuales, getDesarrollosParaLista } from '../utils/uxHelpers';
@@ -1872,9 +1873,14 @@ RECUERDA:
         (msgLowerCallback === 'claro que si') ||
         (msgLowerCallback === 'claro que sí');
 
-      // Si quiere visitar, cerrar con pregunta de día — PERO NO sobreescribir si ya tiene confirmar_cita con fecha+hora
+      // Si quiere visitar, cerrar con pregunta de día — PERO NO sobreescribir si:
+      // - Ya tiene confirmar_cita con fecha+hora
+      // - Ya tiene cita activa (no volver a preguntar día)
+      // - Claude detectó info_credito (ej: "si quiero saber de crédito" ≠ "si quiero visitar")
       const yaEsConfirmarCita = parsed.intent === 'confirmar_cita' && parsed.extracted_data?.fecha && parsed.extracted_data?.hora;
-      if (quiereVisitar && !yaEsConfirmarCita) {
+      const esIntentCredito = parsed.intent === 'info_credito' || parsed.extracted_data?.necesita_credito;
+      const tieneCitaActiva = !!citaExistenteInfo; // citaExistenteInfo tiene la info de cita existente
+      if (quiereVisitar && !yaEsConfirmarCita && !tieneCitaActiva && !esIntentCredito) {
         console.log('🎯 Cliente quiere VISITAR - forzando cierre de cita');
         parsed.contactar_vendedor = false;
         parsed.intent = 'solicitar_cita';
@@ -3771,17 +3777,18 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                 }
 
                 // 1. ACTUALIZAR cita existente en BD (NO crear nueva)
-                // Marcar con timestamp para que webhook de Calendar NO envíe duplicado
-                await this.supabase.client
+                const { error: updateError } = await this.supabase.client
                   .from('appointments')
                   .update({
                     scheduled_date: nuevaFechaISO,
-                    scheduled_time: nuevaHoraFormateada,
-                    notes: `Reagendada de ${fechaCita} ${horaCita} → ${nuevaFechaISO} ${nuevaHoraFormateada}`,
-                    rescheduled_by_sara_at: new Date().toISOString()
+                    scheduled_time: nuevaHoraFormateada
                   })
                   .eq('id', citaActiva.id);
-                console.log('✅ Cita actualizada en BD (con marca para evitar duplicado)');
+                if (updateError) {
+                  console.error('❌ Error actualizando cita en BD:', updateError.message);
+                } else {
+                  console.log('✅ Cita actualizada en BD:', citaActiva.id, '→', nuevaFechaISO, nuevaHoraFormateada);
+                }
 
                 // 2. ACTUALIZAR evento de Google Calendar (NO eliminar)
                 const eventIdCalendar = citaActiva.google_event_vendedor_id || citaActiva.google_event_id;
@@ -3865,6 +3872,19 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                 const direccion = propDesarrollo?.address || propDesarrollo?.location || `Fraccionamiento ${desarrolloReagendar}, Zacatecas`;
                 const gpsLink = propDesarrollo?.gps_link || '';
 
+                // 4. Buscar vendedor ANTES de enviar confirmación al lead
+                const vendedorCita = teamMembers.find(t => t.id === citaActiva.vendedor_id || t.id === lead.assigned_to)
+                  || teamMembers.find(t => t.role === 'vendedor' && t.is_active !== false && t.phone);
+
+                // Construir info de contacto del vendedor
+                let infoVendedorReagendar = '';
+                if (vendedorCita?.name) {
+                  infoVendedorReagendar += `\n\n👤 *Vendedor:* ${vendedorCita.name}`;
+                  if (vendedorCita.phone) {
+                    infoVendedorReagendar += `\n📱 *Tel vendedor:* ${formatPhoneForDisplay(vendedorCita.phone)}`;
+                  }
+                }
+
                 // Mensaje diferente para llamada vs cita presencial
                 let msgLead: string;
                 if (esLlamada) {
@@ -3873,16 +3893,13 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                     ? `✅ *¡Llamada reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n\n¡Te llamamos a esa hora ${nombreLeadCorto}! 📞`
                     : `✅ *¡Llamada reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n\n¡Te llamamos a esa hora! 📞`;
                 } else {
-                  // Para citas presenciales: incluir ubicación
+                  // Para citas presenciales: incluir ubicación + vendedor
                   msgLead = nombreLeadCorto
-                    ? `✅ *¡Cita reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n🏠 *Desarrollo:* ${desarrolloReagendar}\n\n📍 *Dirección:* ${direccion}${gpsLink ? `\n🗺️ *Google Maps:* ${gpsLink}` : ''}\n\n¡Te esperamos ${nombreLeadCorto}! 🎉`
-                    : `✅ *¡Cita reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n🏠 *Desarrollo:* ${desarrolloReagendar}\n\n📍 *Dirección:* ${direccion}${gpsLink ? `\n🗺️ *Google Maps:* ${gpsLink}` : ''}\n\n¡Te esperamos! 🎉`;
+                    ? `✅ *¡Cita reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n🏠 *Desarrollo:* ${desarrolloReagendar}\n\n📍 *Dirección:* ${direccion}${gpsLink ? `\n🗺️ *Google Maps:* ${gpsLink}` : ''}${infoVendedorReagendar}\n\n¡Te esperamos ${nombreLeadCorto}! 🎉`
+                    : `✅ *¡Cita reagendada!*\n\n📅 *Fecha:* ${nuevaFecha}\n🕐 *Hora:* ${nuevaHoraFormateada}\n🏠 *Desarrollo:* ${desarrolloReagendar}\n\n📍 *Dirección:* ${direccion}${gpsLink ? `\n🗺️ *Google Maps:* ${gpsLink}` : ''}${infoVendedorReagendar}\n\n¡Te esperamos! 🎉`;
                 }
                 await this.meta.sendWhatsAppMessage(from, msgLead);
                 console.log('✅ Confirmación de reagendamiento enviada al lead');
-
-                // 4. Notificar al VENDEDOR con mensaje de REAGENDAMIENTO
-                const vendedorCita = teamMembers.find(t => t.id === citaActiva.vendedor_id || t.id === lead.assigned_to);
                 if (vendedorCita?.phone) {
                   let msgVendedor: string;
                   if (esLlamada) {
@@ -3923,9 +3940,21 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 ⚠️ *TOMA NOTA DEL CAMBIO* ⚠️`;
                   }
                   await enviarMensajeTeamMember(this.supabase, this.meta, vendedorCita, msgVendedor, {
-                    tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+                    tipoMensaje: 'alerta_lead',
+                    guardarPending: true,
+                    pendingKey: 'pending_alerta_lead',
+                    templateOverride: {
+                      name: 'notificacion_cita_vendedor',
+                      params: [
+                        esLlamada ? '📞 Llamada reagendada' : '📅 Cita reagendada',
+                        lead.name || 'Lead',
+                        `wa.me/${(lead.phone || '').replace(/\D/g, '').replace(/^521?/, '')}`,
+                        desarrolloReagendar || 'Por confirmar',
+                        `${nuevaFecha} ${nuevaHoraFormateada}`
+                      ]
+                    }
                   });
-                  console.log('✅ Notificación de REAGENDAMIENTO enviada al vendedor');
+                  console.log('✅ Notificación de REAGENDAMIENTO enviada al vendedor (con template)');
                 }
 
                 // Guardar en historial (atomic)
@@ -4493,6 +4522,10 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
       // ═══════════════════════════════════════════════════════════════
       const desarrollosOpenAI = datosExtraidos.desarrollos || [];
       const desarrolloSingleOpenAI = datosExtraidos.desarrollo;
+      const modelosSolicitados: string[] = datosExtraidos.modelos || [];
+      if (modelosSolicitados.length > 0) {
+        console.log('🏠 Modelos específicos solicitados:', modelosSolicitados.join(', '));
+      }
 
       // PRIORIDAD CORRECTA:
       // 1. Desarrollo detectado en mensaje ACTUAL (más reciente)
@@ -4574,7 +4607,11 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         }).length;
 
       // ═══ FIX: Si se van a enviar recursos, NO preguntar nombre aquí (se pregunta al final del push) ═══
-      const seEnviaranRecursos = analysis.send_video_desarrollo || desarrolloInteres;
+      // EXCEPCIÓN: Si estamos en flujo de cita sin nombre, NO contar como "se enviarán recursos"
+      // porque los recursos se bloquean hasta que se confirme la cita con nombre
+      const enFlujoCitaPidiendoNombre = analysis.intent === 'confirmar_cita' &&
+        analysis.extracted_data?.fecha && analysis.extracted_data?.hora && !tieneNombreReal;
+      const seEnviaranRecursos = !enFlujoCitaPidiendoNombre && (analysis.send_video_desarrollo || desarrolloInteres);
 
       // ═══ FIX: Si el enforcement ya agregó "¿con quién tengo el gusto?" a claudeResponse, no interceptar ═══
       const enforcementYaAgrego = claudeResponse.includes('¿con quién tengo el gusto?');
@@ -4933,6 +4970,26 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
           last_response_time: ahora,
           preferred_language: analysis.detected_language || 'es'
         };
+
+        // ═══ INTENT HISTORY + BUYER READINESS ═══
+        if (analysis.intent && analysis.intent !== 'skip_duplicate') {
+          const prevHistory: any[] = Array.isArray(notasActuales.intent_history)
+            ? notasActuales.intent_history : [];
+          const newEntry = {
+            intent: analysis.intent,
+            ts: ahora,
+            sentiment: analysis.sentiment || 'neutral'
+          };
+          updatedNotes.intent_history = [...prevHistory, newEntry].slice(-20);
+
+          // Compute buyer readiness from intent history
+          try {
+            const { computeBuyerReadiness } = await import('../crons/leadScoring');
+            updatedNotes.buyer_readiness = computeBuyerReadiness(updatedNotes.intent_history);
+          } catch (_e) {
+            // Non-critical: don't block on import failure
+          }
+        }
 
         // Guardar desarrollos que ha preguntado (acumular)
         const desarrolloActual = analysis.extracted_data?.desarrollo;
@@ -5384,16 +5441,30 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
           (!ingresoCliente || ingresoCliente === 0); // Falta al menos el ingreso
         
         // ⚠️ NO enviar recursos si Claude está preguntando algo importante (excepto si pidió recursos explícitamente)
-        const pidioRecursosExplicito = analysis.send_video_desarrollo === true ||
-          analysis.send_gps === true || analysis.send_brochure === true ||
-          analysis.send_video === true || analysis.send_matterport === true;
-        const claudeEstaPreguntando = !pidioRecursosExplicito && claudeResponse.includes('¿') && 
-          (claudeResponse.includes('ganas') || 
+        // FIX DEFINITIVO: solo es "explícito" si el lead PIDIÓ recursos con palabras,
+        // NO cuando Claude marca send_video_desarrollo por detectar interés general
+        const msgLowerExplicito = originalMessage.toLowerCase();
+        const pidioRecursosExplicito = (analysis.send_gps === true || analysis.send_brochure === true ||
+          analysis.send_video === true || analysis.send_matterport === true) ||
+          (analysis.send_video_desarrollo === true && (
+            msgLowerExplicito.includes('mándame') || msgLowerExplicito.includes('mandame') ||
+            msgLowerExplicito.includes('envíame') || msgLowerExplicito.includes('enviame') ||
+            msgLowerExplicito.includes('quiero ver') || msgLowerExplicito.includes('manda info') ||
+            msgLowerExplicito.includes('video') || msgLowerExplicito.includes('brochure') ||
+            msgLowerExplicito.includes('fotos') || msgLowerExplicito.includes('información') ||
+            msgLowerExplicito.includes('informacion') || msgLowerExplicito.includes('recorrido')
+          ));
+        const claudeEstaPreguntando = !pidioRecursosExplicito && claudeResponse.includes('¿') &&
+          (claudeResponse.includes('ganas') ||
            claudeResponse.includes('ingreso') ||
            claudeResponse.includes('enganche') ||
            claudeResponse.includes('banco') ||
            claudeResponse.includes('contacte') ||
            claudeResponse.includes('llame'));
+
+        // ⚠️ NO enviar recursos si estamos en flujo de cita (pidiendo nombre para confirmar)
+        const enFlujoCitaSinNombre = analysis.intent === 'confirmar_cita' &&
+          analysis.extracted_data?.fecha && analysis.extracted_data?.hora && !tieneNombreReal;
         
         // ╔════════════════════════════════════════════════════════════════════════╗
         // ║  CRÍTICO - NO MODIFICAR SIN CORRER TESTS: npm test                      ║
@@ -5476,6 +5547,8 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
           }
           } // Cierre del else (no es oficinas)
           // NO continuar con el bloque de recursos completos
+        } else if (enFlujoCitaSinNombre && !pidioRecursosExplicito) {
+          console.log('⏸️ Recursos en espera - flujo de cita sin nombre, se enviarán al confirmar');
         } else if (enFlujoCreditoIncompleto && !pidioRecursosExplicito) {
           console.log('⏸️ Recursos en espera - flujo de crédito en curso');
         } else if (claudeEstaPreguntando) {
@@ -5553,14 +5626,31 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                   const d = (p.development || p.development_name || '').toLowerCase();
                   return d.includes(devNorm) || devNorm.includes(d);
                 });
-                const precios = devProps
+
+                // Si el lead pidió modelos específicos, filtrar a solo esos
+                let displayProps = devProps;
+                if (modelosSolicitados.length > 0) {
+                  const filtradas = devProps.filter((p: any) => {
+                    const propName = (p.name || '').toLowerCase();
+                    return modelosSolicitados.some((m: string) =>
+                      propName.includes(m.toLowerCase()) || m.toLowerCase().includes(propName)
+                    );
+                  });
+                  if (filtradas.length > 0) {
+                    displayProps = filtradas;
+                    console.log(`🎯 Filtrado a modelos específicos: ${filtradas.map((p: any) => p.name).join(', ')}`);
+                  }
+                }
+                const esModeloEspecifico = modelosSolicitados.length > 0 && displayProps.length < devProps.length;
+
+                const precios = displayProps
                   .map((p: any) => Number(p.price_equipped || p.price || 0))
                   .filter((n: number) => n > 100000);
                 const minPrecio = precios.length > 0 ? Math.min(...precios) : 0;
-                const bedrooms = devProps.map((p: any) => Number(p.bedrooms || 0)).filter((n: number) => n > 0);
+                const bedrooms = displayProps.map((p: any) => Number(p.bedrooms || 0)).filter((n: number) => n > 0);
                 const minBed = bedrooms.length > 0 ? Math.min(...bedrooms) : 0;
                 const maxBed = bedrooms.length > 0 ? Math.max(...bedrooms) : 0;
-                const sizes = devProps.map((p: any) => Number(p.construction_size || 0)).filter((n: number) => n > 0);
+                const sizes = displayProps.map((p: any) => Number(p.construction_size || 0)).filter((n: number) => n > 0);
                 const minSize = sizes.length > 0 ? Math.min(...sizes) : 0;
                 const maxSize = sizes.length > 0 ? Math.max(...sizes) : 0;
 
@@ -5570,11 +5660,19 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
 
                 let bodyText: string;
                 if (esTerreno) {
-                  const landSizes = devProps.map((p: any) => Number(p.land_size || 0)).filter((n: number) => n > 0);
+                  const landSizes = displayProps.map((p: any) => Number(p.land_size || 0)).filter((n: number) => n > 0);
                   const precioM2 = landSizes.length > 0 && minPrecio > 0
                     ? `$${Math.round(minPrecio / Math.max(...landSizes)).toLocaleString('es-MX')}/m²`
                     : '';
                   bodyText = `*${dev}* — Citadella del Nogal\nTerrenos${precioM2 ? ` desde ${precioM2}` : ''}\nFinanciamiento disponible`;
+                } else if (esModeloEspecifico) {
+                  // Modelo específico: mostrar nombre del modelo + detalles exactos
+                  const modeloNombres = displayProps.map((p: any) => p.name).filter(Boolean).join(' / ');
+                  const precioFmt = minPrecio > 0 ? `$${(minPrecio / 1000000).toFixed(1)}M equipada` : '';
+                  const recFmt = minBed > 0 ? `${minBed} rec` : '';
+                  const sizeFmt = minSize > 0 ? `${minSize}m²` : '';
+                  const details = [recFmt, sizeFmt].filter(Boolean).join(' | ');
+                  bodyText = `*${modeloNombres}* — ${dev}\nCasa${precioFmt ? ` desde ${precioFmt}` : ''}\n${details}`;
                 } else {
                   const precioFmt = minPrecio > 0 ? `$${(minPrecio / 1000000).toFixed(1)}M equipadas` : '';
                   const recFmt = minBed > 0 ? (minBed === maxBed ? `${minBed} rec` : `${minBed} a ${maxBed} rec`) : '';
@@ -5625,7 +5723,12 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                 }
 
                 // Send image card with buttons
-                const fotoUrl = AIConversationService.FOTOS_DESARROLLO[dev] ||
+                // Si es modelo específico, usar la foto de la casa; si no, foto del desarrollo
+                const fotoModelo = esModeloEspecifico && displayProps[0]?.photo_url
+                  ? displayProps[0].photo_url
+                  : null;
+                const fotoUrl = fotoModelo ||
+                  AIConversationService.FOTOS_DESARROLLO[dev] ||
                   propiedadMatch.photo_url ||
                   'https://gruposantarita.com.mx/wp-content/uploads/2024/11/MONTE-VERDE-FACHADA-DESARROLLO-EDIT-scaled.jpg';
 
@@ -6034,7 +6137,19 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
                 `💡 Este lead mostró señales de interés fuerte.\n` +
                 `Responde *info ${lead.name?.split(' ')[0]}* para ver detalles.`;
               await enviarMensajeTeamMember(this.supabase, this.meta, vendedorAsignado, scoreMsg, {
-                tipoMensaje: 'alerta_lead', pendingKey: 'pending_alerta_lead'
+                tipoMensaje: 'alerta_lead',
+                guardarPending: true,
+                pendingKey: 'pending_alerta_lead',
+                templateOverride: {
+                  name: 'notificacion_cita_vendedor',
+                  params: [
+                    `🔥 Lead se calentó (+${scoreJump}pts)`,
+                    lead.name || 'Lead',
+                    `wa.me/${(lead.phone || '').replace(/\\D/g, '').replace(/^521?/, '')}`,
+                    lead.property_interest || 'Sin desarrollo',
+                    `Score: ${scoreAnterior} → ${nuevoScore}`
+                  ]
+                }
               });
               console.log(`🔥 ALERTA enviada a ${vendedorAsignado.name}: Lead ${lead.name} subió ${scoreJump} puntos`);
             }
@@ -8173,38 +8288,45 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
                              lead.property_interest?.toLowerCase().includes(d.toLowerCase())
                            );
     
-    // Solo bloquear si realmente se enviaron videos/matterports en el historial
-    const recursosYaEnviados = recursosEnHistorial;
-    
-    console.log('👍 ¿Recursos ya enviados?', recursosYaEnviados, 
-                '| En historial:', recursosEnHistorial, 
-                '| Mismo desarrollo:', mismoDesarrollo,
-                '| Preguntó visita:', preguntoPorVisita);
-    
+    // ═══ FIX DEFINITIVO: Verificar resources_sent_for (BD) + historial ═══
+    // Path 1 marca resources_sent_for ANTES de enviar — esta es la fuente de verdad
+    const desarrollosEnviadosBD = (lead.resources_sent_for || '').toLowerCase().split(',').map((d: string) => d.trim()).filter(Boolean);
+    const yaEnviadoEnBD = todosDesarrollos.length > 0 && todosDesarrollos.every(d =>
+      desarrollosEnviadosBD.some((sent: string) => sent.includes(d.toLowerCase()) || d.toLowerCase().includes(sent))
+    );
+    // Combinar: BD flag (fuente de verdad) + historial URLs (backup)
+    const recursosYaEnviados = yaEnviadoEnBD || recursosEnHistorial;
+
+    console.log('👍 ¿Recursos ya enviados?', recursosYaEnviados,
+                '| BD resources_sent_for:', lead.resources_sent_for || '(vacío)',
+                '| yaEnviadoEnBD:', yaEnviadoEnBD,
+                '| En historial:', recursosEnHistorial,
+                '| Mismo desarrollo:', mismoDesarrollo);
+
     // Solo enviar recursos si hay interés Y NO se enviaron antes
-    // FORZAR envío si hay modelos específicos detectados
     const tieneModelosEspecificos = todosModelos.length > 0;
-    if (tieneModelosEspecificos) {
+    if (tieneModelosEspecificos && !yaEnviadoEnBD) {
       console.log('🧠 MODELOS ESPECÍFICOS DETECTADOS:', todosModelos, '➜ FORZANDO ENVÍO DE RECURSOS');
     }
-    
+
     // ═══════════════════════════════════════════════════════════════
     // CORRECCIÓN H: También enviar recursos después de CONFIRMAR CITA
     // ═══════════════════════════════════════════════════════════════
-    const citaRecienConfirmada = analysis.intent === 'confirmar_cita' && 
-                                  analysis.extracted_data?.fecha && 
-                                  analysis.extracted_data?.hora;
-    
-    // FORZAR envío de recursos si acaba de confirmar cita (aunque se enviaron antes)
-    const debeEnviarRecursos = (analysis.send_video_desarrollo || 
+    const citaRecienConfirmada = analysis.intent === 'confirmar_cita' &&
+                                  analysis.extracted_data?.fecha &&
+                                  analysis.extracted_data?.hora &&
+                                  tieneNombre; // No enviar recursos si aún falta el nombre
+
+    // SOLO enviar si: (1) hay trigger Y (2) NO se enviaron antes, EXCEPTO cita recién confirmada
+    const debeEnviarRecursos = (analysis.send_video_desarrollo ||
                                analysis.intent === 'interes_desarrollo' ||
-                               tieneModelosEspecificos ||
-                               citaRecienConfirmada) &&  
-                               (!recursosYaEnviados || citaRecienConfirmada); // ← Forzar si es cita
-    
-    // NO enviar recursos duplicados
-    if (recursosYaEnviados && (analysis.intent === 'interes_desarrollo' || analysis.send_video_desarrollo)) {
-      console.error('⚠️ Recursos ya enviados antes, no se duplican');
+                               (tieneModelosEspecificos && !yaEnviadoEnBD) ||
+                               citaRecienConfirmada) &&
+                               (!recursosYaEnviados || citaRecienConfirmada);
+
+    // Log duplicados bloqueados
+    if (recursosYaEnviados && !citaRecienConfirmada) {
+      console.log('🛑 RECURSOS BLOQUEADOS (ya enviados) — BD:', lead.resources_sent_for, '| Historial:', recursosEnHistorial);
     }
     
     if (debeEnviarRecursos) {
@@ -8355,22 +8477,29 @@ El cliente pidió hablar con un vendedor. ¡Contáctalo pronto!`;
 
       console.log(`📊 Resumen: ${videosEnviados.size} videos, ${matterportsEnviados.size} matterports (GPS solo con cita)`);
       
-      // Marcar en el lead que ya se enviaron recursos (para evitar duplicados)
+      // ═══ FIX DEFINITIVO: Actualizar resources_sent_for en BD (igual que Path 1) ═══
       try {
-        const recursosEnviados = [];
-        if (videosEnviados.size > 0) recursosEnviados.push('video');
-        if (matterportsEnviados.size > 0) recursosEnviados.push('matterport');
-        
-        // Agregar nota al historial indicando que se enviaron recursos
-        const notaRecursos = `[SISTEMA: Se enviaron recursos (${recursosEnviados.join(', ')}) para ${todosDesarrollos.join(', ')}]`;
-        await this.supabase.client
+        const tiposEnviados = [];
+        if (videosEnviados.size > 0) tiposEnviados.push('video');
+        if (matterportsEnviados.size > 0) tiposEnviados.push('matterport');
+
+        // Merge con lo que ya estaba en BD (append, no sobrescribir)
+        const prevEnviados = (lead.resources_sent_for || '').split(',').map((d: string) => d.trim()).filter(Boolean);
+        const todosEnviadosPath2 = [...new Set([...prevEnviados, ...todosDesarrollos])].join(', ');
+
+        const { error: markError } = await this.supabase.client
           .from('leads')
-          .update({ 
+          .update({
             property_interest: todosDesarrollos[0] || desarrollo,
-            // Agregar flag de recursos enviados en metadata o similar
+            resources_sent: true,
+            resources_sent_for: todosEnviadosPath2
           })
           .eq('id', lead.id);
-        console.log('📝 Marcado: recursos ya enviados para', todosDesarrollos.join(', '));
+        if (markError) {
+          console.error('⚠️ Error marcando resources_sent_for:', markError.message);
+        } else {
+          console.log('✅ resources_sent_for actualizado (Path 2):', todosEnviadosPath2);
+        }
       } catch (e) {
         console.error('⚠️ Error marcando recursos enviados');
       }
