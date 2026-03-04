@@ -1051,8 +1051,8 @@ export class WhatsAppHandler {
           const handoffNotifMsg = `📞 *${lead.name} quiere hablar contigo*\n\n` +
             `Mensaje: "${body.substring(0, 100)}${body.length > 100 ? '...' : ''}"\n\n` +
             `💡 Responde con:\n` +
-            `• *mensaje ${lead.name.split(' ')[0]}* - Enviar mensaje vía Sara\n` +
-            `• *bridge ${lead.name.split(' ')[0]}* - Chat directo 10 min`;
+            `• *mensaje ${lead.name?.split(' ')[0] || 'Lead'}* - Enviar mensaje vía Sara\n` +
+            `• *bridge ${lead.name?.split(' ')[0] || 'Lead'}* - Chat directo 10 min`;
           await enviarMensajeTeamMember(this.supabase, this.meta, vendedorAsignado, handoffNotifMsg, {
             tipoMensaje: 'alerta_lead',
             pendingKey: 'pending_alerta_lead'
@@ -1119,7 +1119,7 @@ export class WhatsAppHandler {
       const pendingResponse = leadNotes?.pending_response_to;
       if (pendingResponse && pendingResponse.expires_at && new Date(pendingResponse.expires_at) > new Date()) {
         console.log('📨 Lead respondiendo a mensaje intermediado de:', pendingResponse.team_member_name);
-        const msgForTeamMember = `💬 *Respuesta de ${lead.name}:*\n\n"${body}"\n\n_Usa "mensaje ${lead.name.split(' ')[0]}" para responder._`;
+        const msgForTeamMember = `💬 *Respuesta de ${lead.name}:*\n\n"${body}"\n\n_Usa "mensaje ${lead.name?.split(' ')[0] || 'Lead'}" para responder._`;
         // Buscar team member para envío 24h-safe
         const { data: intermediaryTM } = await this.supabase.client
           .from('team_members')
@@ -1195,7 +1195,7 @@ export class WhatsAppHandler {
           }
         } else if (leadMsgResult.response !== undefined) {
           console.warn(`⚠️ Respuesta IA vacía para lead ${lead.name} (${cleanPhone}), enviando fallback`);
-          const fallback = `Hola${lead.name ? ' ' + lead.name.split(' ')[0] : ''}, estoy aquí para ayudarte. ¿En qué puedo asistirte?`;
+          const fallback = `Hola${lead.name ? ' ' + lead.name?.split(' ')[0] || 'Lead' : ''}, estoy aquí para ayudarte. ¿En qué puedo asistirte?`;
           await this.meta.sendWhatsAppMessage(cleanPhone, fallback);
         }
 

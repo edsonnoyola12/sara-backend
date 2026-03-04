@@ -44,7 +44,7 @@ export class OpenAIService {
       throw new Error(`OpenAI error: ${response.status} - ${JSON.stringify(errorData)}`);
     }
 
-    const data = await response.json() as any;
+    const data = await response.json().catch(() => ({})) as any;
     const content = data.choices?.[0]?.message?.content;
 
     if (!content) {
@@ -88,7 +88,7 @@ export class OpenAIService {
       throw new Error(`OpenAI error: ${response.status} - ${JSON.stringify(errorData)}`);
     }
 
-    const data = await response.json() as any;
+    const data = await response.json().catch(() => ({})) as any;
     const content = data.choices?.[0]?.message?.content;
 
     if (!content) {

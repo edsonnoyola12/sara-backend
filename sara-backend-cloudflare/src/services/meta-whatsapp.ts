@@ -1696,7 +1696,7 @@ export class MetaWhatsAppService {
     const phone = this.normalizePhone(to);
     if (!isTestPhoneAllowed(phone)) return { messages: [{ id: 'blocked' }] };
 
-    const nameParts = contact.name.split(' ');
+    const nameParts = (contact.name || 'Contacto').split(' ');
     const firstName = nameParts[0] || contact.name;
     const lastName = nameParts.slice(1).join(' ') || '';
 

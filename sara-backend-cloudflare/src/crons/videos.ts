@@ -306,7 +306,7 @@ export async function generarVideoSemanalLogros(supabase: SupabaseService, meta:
           maxCierres = count;
           const vendedor = vendedores.find(v => v.id === vendedorId);
           if (vendedor) {
-            topPerformer = { name: vendedor.name.split(' ')[0], cierres: count };
+            topPerformer = { name: vendedor.name?.split(' ')[0] || 'Vendedor', cierres: count };
           }
         }
       }

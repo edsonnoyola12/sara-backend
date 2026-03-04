@@ -248,7 +248,7 @@ export class IACoachingService {
 
     // Construir mensaje
     const primerTip = tips[0];
-    let mensaje = `👋 Hola ${metrics.name.split(' ')[0]}!\n\n${primerTip.mensaje}`;
+    let mensaje = `👋 Hola ${metrics.name?.split(' ')[0] || 'Vendedor'}!\n\n${primerTip.mensaje}`;
 
     if (primerTip.accion) {
       mensaje += `\n\n✅ *Acción:* ${primerTip.accion}`;
@@ -422,7 +422,7 @@ export class IACoachingService {
       if (lead.score && lead.score >= 80) {
         mensaje += `2️⃣ *Lead CALIENTE 🔥* - Score ${lead.score}\n`;
         mensaje += `   → Prioridad MÁXIMA - Actúa HOY\n`;
-        mensaje += `   → Escribe: *bridge ${lead.name.split(' ')[0]}*\n\n`;
+        mensaje += `   → Escribe: *bridge ${lead.name?.split(' ')[0] || 'Lead'}*\n\n`;
       } else if (lead.score && lead.score < 40) {
         mensaje += `2️⃣ *Lead FRÍO ❄️* - Score ${lead.score}\n`;
         mensaje += `   → Necesita nurturing antes de vender\n`;
@@ -433,11 +433,11 @@ export class IACoachingService {
       // Acción inmediata
       mensaje += `✅ *Acción ahora:*\n`;
       if (diasInactivo > 7) {
-        mensaje += `Escribe: *bridge ${lead.name.split(' ')[0]}* para reconectar`;
+        mensaje += `Escribe: *bridge ${lead.name?.split(' ')[0] || 'Lead'}* para reconectar`;
       } else if (lead.status === 'new') {
-        mensaje += `Escribe: *bridge ${lead.name.split(' ')[0]}* para presentarte`;
+        mensaje += `Escribe: *bridge ${lead.name?.split(' ')[0] || 'Lead'}* para presentarte`;
       } else {
-        mensaje += `Escribe: *bridge ${lead.name.split(' ')[0]}* para dar seguimiento`;
+        mensaje += `Escribe: *bridge ${lead.name?.split(' ')[0] || 'Lead'}* para dar seguimiento`;
       }
 
       return { success: true, mensaje };

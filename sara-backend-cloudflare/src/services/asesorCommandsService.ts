@@ -476,9 +476,9 @@ export class AsesorCommandsService {
 
     msg += `\n━━━━━━━━━━━━━━━━━━━━\n`;
     msg += `💡 Comandos:\n`;
-    msg += `• *DOCS ${lead.name.split(' ')[0]}* - Pedir documentos\n`;
-    msg += `• *PREAPROBADO ${lead.name.split(' ')[0]}* - Notificar aprobación\n`;
-    msg += `• *DILE ${lead.name.split(' ')[0]} que [mensaje]*`;
+    msg += `• *DOCS ${lead.name?.split(' ')[0] || 'Lead'}* - Pedir documentos\n`;
+    msg += `• *PREAPROBADO ${lead.name?.split(' ')[0] || 'Lead'}* - Notificar aprobación\n`;
+    msg += `• *DILE ${lead.name?.split(' ')[0] || 'Lead'} que [mensaje]*`;
 
     return { message: msg };
   }
@@ -516,7 +516,7 @@ export class AsesorCommandsService {
     // Sincronizar con mortgage_applications (para CRM)
     await this.syncMortgageApplication(lead, 'documents_pending', asesorId, nombreAsesor);
 
-    const nombreCorto = lead.name.split(' ')[0];
+    const nombreCorto = lead.name?.split(' ')[0] || 'Lead';
     const mensajeParaLead = `¡Hola ${nombreCorto}! 👋
 
 Tu asesor *${nombreAsesor}* está avanzando con tu trámite de crédito 🏠
@@ -582,7 +582,7 @@ Para continuar, necesitamos los siguientes documentos:
     // Sincronizar con mortgage_applications (para CRM)
     await this.syncMortgageApplication(lead, 'pre_approved', asesorId, nombreAsesor);
 
-    const nombreCorto = lead.name.split(' ')[0];
+    const nombreCorto = lead.name?.split(' ')[0] || 'Lead';
     const notes = this.safeParseNotes(lead.notes);
     const ctx = notes?.credit_flow_context;
     const banco = ctx?.banco_preferido || 'el banco';
@@ -643,7 +643,7 @@ Tu asesor *${nombreAsesor}* se pondrá en contacto contigo para los siguientes p
     // Sincronizar con mortgage_applications (para CRM)
     await this.syncMortgageApplication(lead, 'rejected', asesorId, nombreAsesor);
 
-    const nombreCorto = lead.name.split(' ')[0];
+    const nombreCorto = lead.name?.split(' ')[0] || 'Lead';
 
     // Categorizar motivo de rechazo
     const motivoLower = motivo.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -761,7 +761,7 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
       return { message: `❌ No encontré a "${query}" en tus leads.` };
     }
 
-    const nombreCorto = lead.name.split(' ')[0];
+    const nombreCorto = lead.name?.split(' ')[0] || 'Lead';
     const mensajeParaLead = `💬 *Mensaje de tu asesor ${nombreAsesor}:*\n\n"${mensaje}"\n\n_Puedes responder aquí y le haré llegar tu mensaje._`;
 
     // Guardar en notas del asesor que hay un mensaje pendiente de respuesta
@@ -1205,7 +1205,7 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
     }
 
     return {
-      message: `📞 *${lead.name}* marcado como *CONTACTADO*\n\n💡 Siguiente: *DOCS ${lead.name.split(' ')[0]}* para pedir documentos${vendedorPhone ? '\n✅ Vendedor notificado' : ''}`,
+      message: `📞 *${lead.name}* marcado como *CONTACTADO*\n\n💡 Siguiente: *DOCS ${lead.name?.split(' ')[0] || 'Lead'}* para pedir documentos${vendedorPhone ? '\n✅ Vendedor notificado' : ''}`,
       vendedorPhone,
       vendedorMessage
     };
@@ -1350,7 +1350,7 @@ Comandos rápidos:
 
         return {
           handled: true,
-          respuesta: `✅ Seleccionaste a *${selectedLead.name}*\n\n¿Qué quieres hacer?\n• STATUS ${selectedLead.name.split(' ')[0]}\n• DOCS ${selectedLead.name.split(' ')[0]}\n• DILE ${selectedLead.name.split(' ')[0]} que...`
+          respuesta: `✅ Seleccionaste a *${selectedLead.name}*\n\n¿Qué quieres hacer?\n• STATUS ${selectedLead.name?.split(' ')[0] || 'Lead'}\n• DOCS ${selectedLead.name?.split(' ')[0] || 'Lead'}\n• DILE ${selectedLead.name?.split(' ')[0] || 'Lead'} que...`
         };
       }
     }

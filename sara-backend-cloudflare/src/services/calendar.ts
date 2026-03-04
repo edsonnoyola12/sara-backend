@@ -201,7 +201,7 @@ export class CalendarService {
       throw new Error(`Google Calendar API Error: ${error}`);
     }
 
-    const result = await response.json() as any;
+    const result = await response.json().catch(() => ({})) as any;
     console.log('✅ Evento creado:', result.id);
     return result;
   }
@@ -215,7 +215,7 @@ export class CalendarService {
     console.log('📆 updateEvent:', eventId);
     console.log('📆 updateEvent BODY:', JSON.stringify(updates));
 
-    const response = await fetch(
+    const response = await this.fetchWithRetry(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(this.calendarId)}/events/${eventId}`,
       {
         method: 'PATCH',
@@ -224,7 +224,8 @@ export class CalendarService {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(updates)
-      }
+      },
+      'updateEvent'
     );
 
     if (!response.ok) {
@@ -233,7 +234,7 @@ export class CalendarService {
       throw new Error(`Google Calendar API Error: ${error}`);
     }
 
-    const result = await response.json() as any;
+    const result = await response.json().catch(() => ({})) as any;
     console.log('✅ Evento actualizado:', result.id);
     return result;
   }
@@ -246,14 +247,15 @@ export class CalendarService {
     
     console.log('📆 deleteEvent:', eventId);
 
-    const response = await fetch(
+    const response = await this.fetchWithRetry(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(this.calendarId)}/events/${eventId}`,
       {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
         }
-      }
+      },
+      'deleteEvent'
     );
 
     if (!response.ok) {
@@ -297,7 +299,7 @@ export class CalendarService {
       return [];
     }
 
-    const data = await response.json() as any;
+    const data = await response.json().catch(() => ({})) as any;
     return data.items || [];
   }
 
@@ -328,7 +330,7 @@ export class CalendarService {
       return false;
     }
     
-    const data = await response.json() as any;
+    const data = await response.json().catch(() => ({})) as any;
     const busy = data.calendars[this.calendarId]?.busy || [];
     
     return busy.length === 0; // true si está libre
@@ -359,7 +361,7 @@ export class CalendarService {
       return [];
     }
 
-    const data = await response.json() as any;
+    const data = await response.json().catch(() => ({})) as any;
     return data.items || [];
   }
 
@@ -397,7 +399,7 @@ export class CalendarService {
       throw new Error(`Calendar Watch API Error: ${error}`);
     }
 
-    const result = await response.json() as any;
+    const result = await response.json().catch(() => ({})) as any;
     console.log('✅ Webhook configurado:', result);
     return result;
   }

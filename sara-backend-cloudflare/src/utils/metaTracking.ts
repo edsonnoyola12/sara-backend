@@ -79,7 +79,7 @@ export async function createMetaWithTracking(env: any, supabase: SupabaseService
 
     if (tm) {
       // ── TEAM MEMBER → resumen_vendedor template + pending ──
-      const nombreCorto = tm.name.split(' ')[0];
+      const nombreCorto = tm.name?.split(' ')[0] || 'Equipo';
       try {
         const result = await metaSvc.sendTemplate(recipientPhone, 'resumen_vendedor', 'es_MX', [{
           type: 'body',

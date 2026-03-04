@@ -102,8 +102,8 @@ export async function handleAsesorMessage(ctx: HandlerContext, handler: any, fro
             // Pedir fecha/hora para reagendar
             await ctx.meta.sendWhatsAppMessage(from,
               `📅 *Reagendar cita de ${selectedLead.name}*\n\n` +
-              `Escribe: reagendar ${selectedLead.name.split(' ')[0]} [día] [hora]\n\n` +
-              `Ejemplo: reagendar ${selectedLead.name.split(' ')[0]} mañana 4pm`
+              `Escribe: reagendar ${selectedLead.name?.split(' ')[0] || 'Lead'} [día] [hora]\n\n` +
+              `Ejemplo: reagendar ${selectedLead.name?.split(' ')[0] || 'Lead'} mañana 4pm`
             );
             return;
           }

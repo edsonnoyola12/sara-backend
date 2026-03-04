@@ -199,7 +199,7 @@ Para darte una mejor atención, ¿me compartes tu nombre?`,
       };
     }
 
-    const nombreCorto = lead.name.split(' ')[0];
+    const nombreCorto = lead.name?.split(' ')[0] || 'Cliente';
     return {
       mensaje: `¡Hola ${nombreCorto}! 😊 Con gusto te ayudo con tu crédito hipotecario.
 

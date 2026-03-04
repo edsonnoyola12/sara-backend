@@ -112,7 +112,7 @@ export class WhatsAppTemplatesService {
         return [];
       }
 
-      const data = await response.json() as any;
+      const data = await response.json().catch(() => ({})) as any;
       const templates: WhatsAppTemplate[] = (data.data || []).map((t: any) => ({
         id: t.id,
         name: t.name,
@@ -290,7 +290,7 @@ export class WhatsAppTemplatesService {
         body: JSON.stringify(payload)
       });
 
-      const result = await response.json() as any;
+      const result = await response.json().catch(() => ({})) as any;
 
       if (response.ok) {
         // Actualizar contador de uso

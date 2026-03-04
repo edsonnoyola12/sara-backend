@@ -5339,7 +5339,7 @@ export async function vendedorCotizar(ctx: HandlerContext, handler: any, from: s
       (descuentoStr ? `${descuentoStr}\n` : '') +
       `📅 *Válida hasta:* ${vencimientoStr}\n\n` +
       `📋 Status: *Borrador*\n\n` +
-      `💡 Escribe *enviar oferta ${lead.name.split(' ')[0]}* para enviarla al cliente.`
+      `💡 Escribe *enviar oferta ${lead.name?.split(' ')[0] || 'Lead'}* para enviarla al cliente.`
     );
 
   } catch (e) {
@@ -5479,7 +5479,7 @@ export async function vendedorVerOferta(ctx: HandlerContext, handler: any, from:
       await ctx.meta.sendWhatsAppMessage(from,
         `📋 *${lead.name}* no tiene ofertas.\n\n` +
         `Para crear una escribe:\n` +
-        `*cotizar ${lead.name.split(' ')[0]} [precio]*`
+        `*cotizar ${lead.name?.split(' ')[0] || 'Lead'} [precio]*`
       );
       return;
     }
@@ -5535,7 +5535,7 @@ export async function vendedorEnviarOferta(ctx: HandlerContext, handler: any, fr
       await ctx.meta.sendWhatsAppMessage(from,
         `⚠️ *${lead.name}* no tiene ofertas pendientes de envío.\n\n` +
         `Las ofertas en borrador se envían con este comando.\n` +
-        `Si ya fue enviada, usa *oferta ${lead.name.split(' ')[0]}* para ver su status.`
+        `Si ya fue enviada, usa *oferta ${lead.name?.split(' ')[0] || 'Lead'}* para ver su status.`
       );
       return;
     }
@@ -5548,7 +5548,7 @@ export async function vendedorEnviarOferta(ctx: HandlerContext, handler: any, fr
       await ctx.meta.sendWhatsAppMessage(from,
         `⚠️ *${lead.name}* no ha escrito en las últimas 24h.\n\n` +
         `WhatsApp no permite enviar mensajes fuera de la ventana de 24h.\n\n` +
-        `Usa *contactar ${lead.name.split(' ')[0]}* para enviar un template y reactivar la conversación.`
+        `Usa *contactar ${lead.name?.split(' ')[0] || 'Lead'}* para enviar un template y reactivar la conversación.`
       );
       return;
     }
@@ -5589,8 +5589,8 @@ export async function vendedorEnviarOferta(ctx: HandlerContext, handler: any, fr
       `📤 Cotización enviada con link profesional.\n` +
       `🔗 ${cotizacionUrl}\n\n` +
       `💡 Cuando responda puedes actualizar el status:\n` +
-      `• *oferta aceptada ${lead.name.split(' ')[0]}*\n` +
-      `• *oferta rechazada ${lead.name.split(' ')[0]} [razón]*`
+      `• *oferta aceptada ${lead.name?.split(' ')[0] || 'Lead'}*\n` +
+      `• *oferta rechazada ${lead.name?.split(' ')[0] || 'Lead'} [razón]*`
     );
 
   } catch (e) {
@@ -5708,7 +5708,7 @@ export async function vendedorOfertaRechazada(ctx: HandlerContext, handler: any,
       `👤 ${lead.name}\n` +
       (razon ? `📝 Razón: ${razon}\n\n` : '\n') +
       `💡 Puedes crear una nueva oferta:\n` +
-      `*cotizar ${lead.name.split(' ')[0]} [nuevo precio]*`
+      `*cotizar ${lead.name?.split(' ')[0] || 'Lead'} [nuevo precio]*`
     );
 
   } catch (e) {
@@ -5766,7 +5766,7 @@ export async function vendedorContactarLead(ctx: HandlerContext, handler: any, f
       await ctx.meta.sendWhatsAppMessage(from,
         `✅ *${lead.name}* escribió recientemente.\n\n` +
         `Puedes iniciar chat directo:\n` +
-        `→ Escribe *bridge ${lead.name.split(' ')[0]}*`
+        `→ Escribe *bridge ${lead.name?.split(' ')[0] || 'Lead'}*`
       );
       return;
     }

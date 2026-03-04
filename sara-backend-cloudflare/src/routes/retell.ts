@@ -743,7 +743,7 @@ CASOS ESPECIALES:
 
         if (lead && lead.name && lead.name !== 'Lead Telefónico' && lead.name !== 'Lead') {
           // Lead conocido con nombre real - saludar por nombre
-          const nombre = lead.name.split(' ')[0]; // Solo primer nombre
+          const nombre = lead.name?.split(' ')[0] || 'Cliente'; // Solo primer nombre
           console.log(`📞 RETELL LOOKUP: Lead encontrado - ${lead.name} (${callerPhone})`);
 
           // Buscar desarrollo de interés: primero property_interest, luego notes

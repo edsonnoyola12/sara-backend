@@ -814,7 +814,7 @@ export default {
                     if (tmMatch && tmMatch.length > 0) {
                       // ── TEAM MEMBER → resumen_vendedor + pending ──
                       const tm = tmMatch[0];
-                      const nombreCorto = tm.name.split(' ')[0];
+                      const nombreCorto = tm.name?.split(' ')[0] || 'Equipo';
                       await meta.sendTemplate(recipientId, 'resumen_vendedor', 'es_MX', [{
                         type: 'body',
                         parameters: [

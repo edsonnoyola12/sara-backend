@@ -1829,7 +1829,7 @@ export class VendorCommandsService {
 
     if (notasArray.length === 0) {
       return `📋 *${lead.name}* no tiene notas guardadas.\n\n` +
-        `💡 Agrega una: *nota ${lead.name.split(' ')[0]} [texto]*`;
+        `💡 Agrega una: *nota ${lead.name?.split(' ')[0] || 'Lead'} [texto]*`;
     }
 
     let msg = `📋 *Notas de ${lead.name}* (${notasArray.length}):\n\n`;
