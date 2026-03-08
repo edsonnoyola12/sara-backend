@@ -10,6 +10,7 @@ import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { ClaudeService } from '../services/claude';
 import { AIConversationService } from '../services/aiConversationService';
 import { logErrorToDB } from '../crons/healthCheck';
+import { extractDevelopmentsFromText, getAllDevelopmentNames } from '../constants/developments';
 
 import type { Env, CorsResponseFn, CheckApiAuthFn } from '../types/env';
 
@@ -1774,44 +1775,21 @@ CASOS ESPECIALES:
             // Transcript puede ser string ("Agent: ...\nUser: ...") o array ([{role, content}])
             let desarrolloDelTranscript = '';
             let todosDesarrollosTranscript: string[] = [];
-            // Obtener desarrollos dinámicamente desde DB (con fallback)
-            const { data: devPropsAnalyzed } = await supabase.client
-              .from('properties')
-              .select('development, name');
-            // SOLO usar nombres de DESARROLLOS, NO modelos (Chipre, Mirlo, etc. son modelos, no desarrollos)
-            const desarrollosConocidos = devPropsAnalyzed
-              ? [...new Set(devPropsAnalyzed.map((p: any) => p.development).filter(Boolean).map((d: string) => d.toLowerCase().trim()))]
-              : ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano'];
+            // Use centralized registry — never confuses models with developments
+            const desarrollosConocidos = getAllDevelopmentNames().map(d => d.toLowerCase());
             // Sentinel values que Retell retorna cuando no detectó desarrollo — FILTRAR siempre
             const sentinelValues = ['no_mencionado', 'general', 'por definir', 'no mencionado', 'sin desarrollo', 'n/a', 'none', 'null', 'undefined', ''];
             const isSentinel = (v: string) => !v || sentinelValues.includes(v.toLowerCase().trim());
             // Normalize development name for dedup
             const normDev = (d: string) => d.toLowerCase().trim().replace(/^priv\.?\s*/, 'privada ');
             if (call.transcript) {
-              let allMessages: string[] = [];
-              if (typeof call.transcript === 'string') {
-                const lines = call.transcript.split('\n');
-                for (const line of lines) {
-                  // Check BOTH agent and user messages (SARA offers developments)
-                  const content = line.replace(/^(Agent|User):\s*/, '').trim().toLowerCase();
-                  if (content) allMessages.push(content);
-                }
-              } else if (Array.isArray(call.transcript)) {
-                for (const entry of call.transcript) {
-                  allMessages.push(entry.content.toLowerCase());
-                }
-              }
-              // Collect ALL unique developments mentioned in transcript
-              const encontrados = new Set<string>();
-              for (const msg of allMessages) {
-                for (const d of desarrollosConocidos) {
-                  if (msg.includes(d)) {
-                    encontrados.add(d.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' '));
-                  }
-                }
-              }
-              todosDesarrollosTranscript = Array.from(encontrados);
-              // Primary: last user-mentioned, or first from all
+              // Use centralized extractDevelopmentsFromText — only returns DEVELOPMENT names, never models
+              const transcriptText = typeof call.transcript === 'string'
+                ? call.transcript
+                : Array.isArray(call.transcript)
+                  ? call.transcript.map((e: any) => e.content).join(' ')
+                  : '';
+              todosDesarrollosTranscript = extractDevelopmentsFromText(transcriptText);
               desarrolloDelTranscript = todosDesarrollosTranscript[0] || '';
               if (todosDesarrollosTranscript.length > 0) {
                 console.log(`🏠 Desarrollos detectados en transcript: ${todosDesarrollosTranscript.join(', ')}`);
