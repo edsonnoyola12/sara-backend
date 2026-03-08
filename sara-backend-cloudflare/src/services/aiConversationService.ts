@@ -5533,10 +5533,14 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         }
       }
 
-      // 5.5 CAROUSEL: Enviar tarjetas deslizables si Claude lo indicó y NO hay desarrollo específico
-      // Enviar carousel si Claude lo pidió — incluso con desarrolloInteres,
-      // porque "las más lujosas" o "las más baratas" son preguntas generales
-      if (analysis.send_carousel) {
+      // 5.5 CAROUSEL: Enviar tarjetas deslizables si Claude lo indicó
+      // SKIP carousel si el lead pidió un desarrollo ESPECÍFICO y se enviarán recursos de ese desarrollo
+      // (evita redundancia: carousel genérico + recursos específicos del mismo desarrollo)
+      const esRequestEspecifico = desarrolloInteres && analysis.send_video_desarrollo === true;
+      if (analysis.send_carousel && esRequestEspecifico) {
+        console.log(`⏭️ Carousel "${analysis.send_carousel}" omitido — request específico de "${desarrolloInteres}", se enviarán recursos directos`);
+      }
+      if (analysis.send_carousel && !esRequestEspecifico) {
         console.log(`🎠 CAROUSEL: send_carousel="${analysis.send_carousel}" detectado, procesando...`);
         try {
           // Dedup: no enviar carousel si ya se envió en los últimos 5 mensajes
