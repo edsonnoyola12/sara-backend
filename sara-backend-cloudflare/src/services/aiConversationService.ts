@@ -47,7 +47,7 @@ interface AIAnalysis {
   phase?: string;
   phaseNumber?: number;
   secondary_intents?: string[];
-  send_carousel?: 'economico' | 'premium' | 'all' | 'terrenos' | 'guadalupe' | 'zacatecas';
+  send_carousel?: 'economico' | 'premium' | 'all' | 'terrenos' | 'guadalupe' | 'zacatecas' | '2_recamaras' | '3_recamaras' | 'credito';
   send_location_request?: boolean;
 }
 
@@ -732,7 +732,7 @@ ${phaseInstructions}
 ${this.getPreferenciasConocidas(lead)}
 
 🎯 TU ÚNICO OBJETIVO: **AGENDAR UNA VISITA**
-- Si pregunta sobre casas → Info BREVE + "¿Qué día te gustaría conocerlo?"
+- Si pregunta sobre casas → Presenta 2-3 opciones CON NOMBRE y PRECIO + "¿Cuál te gusta? ¿Lo visitamos?"
 - Si dice "no me interesa" → "¿Qué te detiene? Muchos pensaban igual y ahora son propietarios felices"
 - Si dice "lo voy a pensar" → "Con $20K apartado congelas precio. ¿Te guardo uno?"
 - Si dice "muy caro" → "Tenemos desde ${AIConversationService.precioMinGlobal(properties)}. ¿Cuál es tu presupuesto?"
@@ -777,10 +777,22 @@ RESPONDE BREVE + CIERRE:
 Es de los más solicitados por la vigilancia y ubicación.
 ¿Te gustaría conocerlo este fin de semana?"
 
-📌 Si dice "SÍ QUIERO VER" o "ME INTERESA":
+📌 Si dice "SÍ QUIERO VER" o "ME INTERESA" (y YA le mostraste opciones):
 CIERRA INMEDIATAMENTE:
 "¡Perfecto! ¿Qué día te gustaría visitarnos?"
 (NO preguntes más - CIERRA la cita)
+
+📌 Si pregunta por una CATEGORÍA o TIPO de casa (ej: "de lujo", "las más bonitas", "grandes", "económicas", "premium", "exclusivas", "las mejores"):
+PRIMERO PRESENTA 2-3 OPCIONES CONCRETAS con nombre, precio y diferenciador. DESPUÉS cierra con visita:
+"¡Tenemos excelentes opciones! 😊
+
+🏡 *[Desarrollo 1]* - desde $[precio] - [diferenciador principal]
+🏡 *[Desarrollo 2]* - desde $[precio] - [diferenciador principal]
+
+¿Cuál te llama más la atención? Te puedo agendar una visita este finde 😊"
+
+⚠️ NUNCA respondas solo "¿Qué día para la visita?" sin antes mostrar opciones concretas.
+⚠️ El cliente NECESITA saber QUÉ va a visitar antes de agendar.
 
 
 ${promocionesContext}${broadcastContext}${reactivacionContext}${accionesContext}
@@ -1254,8 +1266,15 @@ CRÉDITO - REGLAS:
 🚫 NUNCA preguntes proactivamente por crédito
 🚫 NUNCA ofrezcas "conectar con asesor de crédito" ni "asesor VIP"
 🚫 NUNCA preguntes banco, ingreso, enganche — eso se ve en la visita
-✅ Si pide crédito → responde útil ("Sí, aceptamos INFONAVIT, crédito bancario, etc.") + cierra con VISITA
-✅ Ejemplo: "¡Claro que aceptamos crédito! Tenemos opciones desde ${AIConversationService.precioMinGlobal(properties)}. ¿Te gustaría venir a conocer? En la visita te ayudamos con todo el trámite de crédito."
+✅ Si pide crédito GENÉRICO → responde útil ("Sí, aceptamos INFONAVIT, crédito bancario, etc.") + cierra con VISITA
+✅ Si pregunta por un BANCO ESPECÍFICO (ej: "asesórame de BBVA", "info de Banorte") → responde SOLO sobre ESE banco, NO listes todos los bancos. Datos por banco:
+  - BBVA: Convenio especial, tasa preferencial, SIN comisiones. Nómina BBVA = proceso más rápido
+  - Banorte: Convenio especial, tasa preferencial, SIN comisiones. Respuesta en 30 min con docs completos
+  - Santander: Mínimo 2 años en trabajo actual. Piden Alta IMSS/ISSSTE y constancia laboral
+  - HSBC: Antigüedad mínima 1 año en domicilio, 6 meses en empleo, edad mínima 25 años
+  - Scotiabank: Acepta trabajadores independientes con 2 años de actividad
+  - INFONAVIT/FOVISSSTE: Según tu subcuenta y salario base
+✅ Ejemplo banco específico: "¡BBVA es excelente opción! Tenemos convenio especial con tasa preferencial y sin comisiones. En tu visita te ayudamos con todo el trámite."
 ✅ Si dice "no necesito crédito" → enfócate en la casa
 ✅ Si dice "ya estoy en proceso" → felicita y agenda visita
 ✅ Si dice "ya tengo cita" → confirma y no crees otra
@@ -1487,9 +1506,14 @@ Responde SIEMPRE solo con **JSON válido**, sin texto antes ni después.
 }
 
 📋 CAROUSEL: Si el lead pregunta por opciones de casas SIN especificar un desarrollo concreto:
-- Presupuesto < $3M o pide "económico/barato" → send_carousel: "economico"
-- Presupuesto $3M+ o pide "premium/grande" → send_carousel: "premium"
-- Sin presupuesto claro, pregunta general → send_carousel: "all"
+- Presupuesto < $3M o pide "económico/barato/accesible/más baratas/costo accesible/mejor precio/buen precio" → send_carousel: "economico"
+- Presupuesto $3M+ o pide "premium/grande/lujosas/las mejores/de lujo/más bonitas/exclusivas/gama alta" → send_carousel: "premium"
+- Pregunta por número de RECÁMARAS:
+  - "casa de 2 recámaras" / "para pareja" / "2 cuartos" → send_carousel: "2_recamaras"
+  - "casa de 3 recámaras" / "familia grande" / "3 cuartos" / "casa grande" → send_carousel: "3_recamaras"
+- Pregunta por CRÉDITO/FINANCIAMIENTO sin desarrollo específico:
+  - "casas con crédito" / "infonavit" / "fovissste" / "qué puedo comprar con crédito" → send_carousel: "credito"
+- Sin presupuesto claro, pregunta general ("qué tienen", "opciones") → send_carousel: "all"
 - Pregunta por terrenos/lotes → send_carousel: "terrenos"
 - Pregunta por ZONA sin desarrollo específico:
   - "casas de guadalupe" / "casas en guadalupe" → send_carousel: "guadalupe"
@@ -2078,6 +2102,53 @@ Estas casas ya están terminadas. ¿Cuándo quieres ir a verlas? Puedo agendarte
         }
       }
 
+      // ═══ CORRECCIÓN: Query de categoría sin opciones concretas ═══
+      const pideCategoria =
+        /lujosa|lujosas|de lujo|premium|exclusiv|las mejores|m[aá]s bonit|gama alta|econ[oó]mic|barata|accesible|m[aá]s grande|las bonitas/i.test(msgLowerCallback);
+
+      if (pideCategoria && parsed.response) {
+        const respLower = parsed.response.toLowerCase();
+        // Si la respuesta NO menciona ningún desarrollo por nombre → está siendo leta
+        const mencionaDesarrollo =
+          respLower.includes('monte verde') || respLower.includes('encinos') ||
+          respLower.includes('miravalle') || respLower.includes('falco') ||
+          respLower.includes('andes') || respLower.includes('alpes') ||
+          respLower.includes('colorines') || respLower.includes('campelo') ||
+          respLower.includes('galiano');
+
+        if (!mencionaDesarrollo) {
+          console.log('⚠️ CORRIGIENDO: Query de categoría sin opciones concretas - agregando desarrollos');
+          const esPremium = /lujosa|lujosas|de lujo|premium|exclusiv|las mejores|m[aá]s bonit|gama alta|las bonitas/i.test(msgLowerCallback);
+
+          if (esPremium) {
+            parsed.response = `¡Tenemos opciones increíbles! 😍
+
+🏡 *Distrito Falco* - Desde ${AIConversationService.precioMinDesarrollo(properties, 'Distrito Falco')} - Acabados premium, las casas más amplias con hasta 3 rec + estudio
+
+🏡 *Los Encinos* - Desde ${AIConversationService.precioMinDesarrollo(properties, 'Los Encinos')} - Casa club exclusiva, modelos amplios en Colinas del Padre
+
+🏡 *Miravalle* - Desde ${AIConversationService.precioMinDesarrollo(properties, 'Miravalle')} - Casas de 3 niveles con terraza y vista panorámica
+
+Todos con vigilancia 24/7, materiales premium y plusvalía del 8-10% anual.
+
+¿Cuál te llama más la atención? Te puedo agendar una visita este fin de semana 😊`;
+          } else {
+            parsed.response = `¡Claro! Tenemos opciones accesibles 😊
+
+🏡 *Monte Verde* - Desde ${AIConversationService.precioMinDesarrollo(properties, 'Monte Verde')} - Ideal para familias, áreas verdes y juegos
+
+🏡 *Priv. Andes* - Desde ${AIConversationService.precioMinDesarrollo(properties, 'Andes')} - ¡Con ALBERCA! Zona de alta plusvalía
+
+🏡 *Alpes* - Desde ${AIConversationService.precioMinDesarrollo(properties, 'Alpes')} - Casas compactas con excelente ubicación
+
+Todos con vigilancia 24/7, sin cuotas de mantenimiento y financiamiento disponible.
+
+¿Cuál te interesa? Te agendo una visita 😊`;
+          }
+          parsed.send_carousel = esPremium ? 'premium' : 'economico';
+        }
+      }
+
       // ═══ CORRECCIÓN: Petición de NO CONTACTO ═══
       const pideNoContacto =
         msgLowerCallback.includes('no me escribas') ||
@@ -2288,8 +2359,30 @@ Nosotros te ayudamos con el trámite una vez que elijas tu casa. ¿Ya tienes alg
           !respLower.includes('te envío');
 
         if (diceNoTieneFolletos || noRespondeSobreBrochure) {
-          console.log('⚠️ CORRIGIENDO: SARA no respondió sobre folletos - SÍ tenemos');
-          parsed.response = `¡Claro que sí! 📄
+          // Detectar si el lead ya mencionó un desarrollo específico en su mensaje
+          const nombresDesarrollos = properties.map((p: any) => (p.development || p.development_name || p.name || '').toLowerCase()).filter(Boolean);
+          const uniqueDevsBrochure = [...new Set(nombresDesarrollos)];
+          let devMencionado = '';
+          for (const dev of uniqueDevsBrochure) {
+            if (dev && dev.length > 3 && msgLowerCallback.includes(dev)) {
+              const propMatch = properties.find((p: any) => (p.development || p.development_name || p.name || '').toLowerCase() === dev);
+              if (propMatch) {
+                devMencionado = propMatch.development || propMatch.development_name || propMatch.name;
+                break;
+              }
+            }
+          }
+
+          if (devMencionado) {
+            // El lead ya dijo de cuál desarrollo quiere el folleto → enviarlo directo
+            console.log(`⚠️ CORRIGIENDO: SARA no respondió sobre folletos de ${devMencionado} - enviando directo`);
+            parsed.response = `¡Claro que sí! 📄 Te envío el brochure de *${devMencionado}* con fotos, planos y precios. Aquí va 📲`;
+            parsed.send_brochure = true;
+            parsed.propiedad_sugerida = devMencionado;
+          } else {
+            // No mencionó desarrollo → preguntar cuál
+            console.log('⚠️ CORRIGIENDO: SARA no respondió sobre folletos - SÍ tenemos');
+            parsed.response = `¡Claro que sí! 📄
 
 Tengo brochures completos con fotos, planos y precios de cada desarrollo.
 
@@ -2302,7 +2395,8 @@ Tengo brochures completos con fotos, planos y precios de cada desarrollo.
 • Paseo Colorines (desde $${AIConversationService.precioMinDesarrollo(properties, 'Paseo Colorines')})
 
 Dime cuál y te lo envío ahora mismo 📲`;
-          parsed.send_brochure = true;
+            parsed.send_brochure = true;
+          }
         }
       }
 
@@ -2460,7 +2554,9 @@ Por WhatsApp te atiendo 24/7 🙌
                            respLower.includes('aquí te va la ubicación') || respLower.includes('envío ubicación');
         const prometeBrochure = respLower.includes('te envío el brochure') || respLower.includes('te envío el folleto') ||
                                 respLower.includes('te mando el brochure') || respLower.includes('envío el brochure') ||
-                                respLower.includes('te comparto el brochure') || respLower.includes('envío los planos');
+                                respLower.includes('te comparto el brochure') || respLower.includes('envío los planos') ||
+                                respLower.includes('envío el folleto') || respLower.includes('te mando el folleto') ||
+                                respLower.includes('folleto completo') || respLower.includes('brochure completo');
         const prometeRecursos = respLower.includes('te envío el video y recorrido') ||
                                 respLower.includes('te comparto información') ||
                                 respLower.includes('te envío info');
@@ -2498,12 +2594,12 @@ Por WhatsApp te atiendo 24/7 🙌
         msgLowerEnf.includes('mandame el mapa') || msgLowerEnf.includes('mándame el mapa') ||
         msgLowerEnf.includes('quiero la ubicacion') || msgLowerEnf.includes('quiero la ubicación') ||
         msgLowerEnf.includes('mandame ubicacion') || msgLowerEnf.includes('mándame ubicación');
-      const leadPideBrochure = msgLowerEnf.includes('mandame el brochure') || msgLowerEnf.includes('mándame el brochure') ||
-        msgLowerEnf.includes('quiero el brochure') || msgLowerEnf.includes('quiero el folleto') ||
-        msgLowerEnf.includes('mandame el folleto') || msgLowerEnf.includes('mándame el folleto') ||
+      const leadPideBrochure = msgLowerEnf.includes('folleto') || msgLowerEnf.includes('brochure') ||
+        msgLowerEnf.includes('catalogo') || msgLowerEnf.includes('catálogo') ||
         msgLowerEnf.includes('quiero los planos') || msgLowerEnf.includes('mandame los planos') ||
-        msgLowerEnf.includes('mándame los planos') || msgLowerEnf.includes('envíame el catálogo') ||
-        msgLowerEnf.includes('mandame el catalogo') || msgLowerEnf.includes('quiero el catalogo');
+        msgLowerEnf.includes('mándame los planos') || msgLowerEnf.includes('informacion de') ||
+        msgLowerEnf.includes('información de') || msgLowerEnf.includes('info de') ||
+        msgLowerEnf.includes('mandame info') || msgLowerEnf.includes('mándame info');
 
       if (leadPideVideo && !parsed.send_video_desarrollo) {
         console.log('🔧 ENFORCEMENT-LEAD: Lead pidió video explícitamente → activando send_video_desarrollo');
@@ -2543,6 +2639,51 @@ Por WhatsApp te atiendo 24/7 🙌
         parsed.contactar_vendedor = true;
       }
 
+      // ═══ SAFETY NET: Forzar carousel si Claude no lo activó pero el mensaje lo pide ═══
+      if (!parsed.send_carousel) {
+        const msgLowerCarousel = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const pideGuadalupe = /casas?\s+(de|en)\s+guadalupe/i.test(msgLowerCarousel);
+        const pideZacatecas = /casas?\s+(de|en)\s+(zacatecas|colinas)/i.test(msgLowerCarousel);
+        const pideTodas = /todas?\s+las?\s+casas/i.test(msgLowerCarousel)
+          || /que\s+(tienen|opciones|hay)/i.test(msgLowerCarousel);
+        const pidePremium = /lujosa|lujosas|premium|exclusiv|mas\s+bonit|mas\s+grande|gama\s+alta|de\s+lujo|las\s+mejores/i.test(msgLowerCarousel);
+        const pideEconomico = /barata|baratas|economica|economicas|mas\s+accesible|mas\s+barata|menor\s+precio|precio\s+bajo|economico|costo\s+accesible|mejor\s+precio|buen\s+precio|mas\s+economica|mas\s+economico|las\s+mas\s+baratas|accesibles/i.test(msgLowerCarousel);
+        const pideTerrenos = /terreno|lote|terrenos|lotes/i.test(msgLowerCarousel) && !msgLowerCarousel.includes('casa');
+        const pide2Rec = /2\s*rec|2\s*cuarto|2\s*habitacion|dos\s*rec|dos\s*cuarto|para\s*pareja|casa\s*chica|casas?\s*peque/i.test(msgLowerCarousel);
+        const pide3Rec = /3\s*rec|3\s*cuarto|3\s*habitacion|tres\s*rec|tres\s*cuarto|familia\s*grande|casa\s*grande|casas?\s*amplia/i.test(msgLowerCarousel);
+        const pideCredito = /credito|infonavit|fovissste|financiamiento|con\s+credito|a\s+credito|puedo\s+comprar\s+con/i.test(msgLowerCarousel)
+          && !msgLowerCarousel.match(/monte\s*verde|encinos|miravalle|colorines|andes|falco|alpes|campelo|galiano/i);
+
+        if (pideGuadalupe) {
+          parsed.send_carousel = 'guadalupe';
+          console.log('🎠 Safety net: carousel forzado a "guadalupe" por zona detectada');
+        } else if (pideZacatecas) {
+          parsed.send_carousel = 'zacatecas';
+          console.log('🎠 Safety net: carousel forzado a "zacatecas" por zona detectada');
+        } else if (pide2Rec) {
+          parsed.send_carousel = '2_recamaras';
+          console.log('🎠 Safety net: carousel forzado a "2_recamaras" por recámaras detectadas');
+        } else if (pide3Rec) {
+          parsed.send_carousel = '3_recamaras';
+          console.log('🎠 Safety net: carousel forzado a "3_recamaras" por recámaras detectadas');
+        } else if (pideCredito) {
+          parsed.send_carousel = 'credito';
+          console.log('🎠 Safety net: carousel forzado a "credito" por mención de crédito/financiamiento');
+        } else if (pidePremium) {
+          parsed.send_carousel = 'premium';
+          console.log('🎠 Safety net: carousel forzado a "premium" por palabras de lujo detectadas');
+        } else if (pideEconomico) {
+          parsed.send_carousel = 'economico';
+          console.log('🎠 Safety net: carousel forzado a "economico" por palabras de precio bajo detectadas');
+        } else if (pideTerrenos) {
+          parsed.send_carousel = 'terrenos';
+          console.log('🎠 Safety net: carousel forzado a "terrenos" por mención de terrenos/lotes');
+        } else if (pideTodas) {
+          parsed.send_carousel = 'all';
+          console.log('🎠 Safety net: carousel forzado a "all" por pregunta general');
+        }
+      }
+
       return {
         intent: parsed.intent || 'otro',
         secondary_intents: secondaryIntents,
@@ -2559,29 +2700,9 @@ Por WhatsApp te atiendo 24/7 🙌
         phase: phaseInfo.phase,
         phaseNumber: phaseInfo.phaseNumber,
         send_carousel: parsed.send_carousel || null,
-        send_location_request: parsed.send_location_request || false
+        send_location_request: parsed.send_location_request || false,
+        propiedad_sugerida: parsed.propiedad_sugerida || undefined
       };
-
-      // Safety net: si Claude no activó carousel pero el mensaje pide casas por zona
-      if (!result.send_carousel && !desarrolloInteres) {
-        const msgLowerCarousel = message.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        const pideGuadalupe = /casas?\s+(de|en)\s+guadalupe/i.test(msgLowerCarousel);
-        const pideZacatecas = /casas?\s+(de|en)\s+(zacatecas|colinas)/i.test(msgLowerCarousel);
-        const pideTodas = /todas?\s+las?\s+casas/i.test(msgLowerCarousel)
-          || /que\s+(tienen|opciones|hay)/i.test(msgLowerCarousel);
-        if (pideGuadalupe) {
-          result.send_carousel = 'guadalupe';
-          console.log('🎠 Safety net: carousel forzado a "guadalupe" por zona detectada');
-        } else if (pideZacatecas) {
-          result.send_carousel = 'zacatecas';
-          console.log('🎠 Safety net: carousel forzado a "zacatecas" por zona detectada');
-        } else if (pideTodas) {
-          result.send_carousel = 'all';
-          console.log('🎠 Safety net: carousel forzado a "all" por pregunta general');
-        }
-      }
-
-      return result;
 
     } catch (e) {
       console.error('❌ Error OpenAI:', e);
@@ -3314,7 +3435,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
     'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/11/MONTE-VERDE-FACHADA-DESARROLLO-EDIT-scaled.jpg',
     'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01-1.jpg', // Encino Verde — fachada casa 2 pisos con balcones
     'Andes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Gardenia_act.jpg', // Gardenia — fachada casa
-    'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-scaled-e1740672689199.jpg',
+    'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/BILBAO-FACHADA-scaled.jpg',
     'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01-8.jpg', // Chipre — fachada con cochera y balcón
     'Paseo Colorines': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-min-scaled-e1740520053367.jpg', // Temporal — zona Colinas del Padre
     'Alpes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg', // Dalia (Andes zone) — fachada casa económica
@@ -3345,6 +3466,18 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
     guadalupe: {
       developments: ['Andes', 'Distrito Falco', 'Alpes'],
       template: 'casas_guadalupe'
+    },
+    '2_recamaras': {
+      developments: ['Monte Verde', 'Andes', 'Alpes', 'Miravalle', 'Distrito Falco'],
+      template: 'casas_2_recamaras'
+    },
+    '3_recamaras': {
+      developments: ['Monte Verde', 'Andes', 'Los Encinos', 'Miravalle', 'Paseo Colorines', 'Distrito Falco'],
+      template: 'casas_3_recamaras'
+    },
+    credito: {
+      developments: ['Monte Verde', 'Andes', 'Alpes', 'Miravalle'],
+      template: 'casas_con_credito'
     }
   };
 
@@ -3354,19 +3487,27 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
    */
   static buildCarouselCards(
     properties: any[],
-    segment: 'economico' | 'premium' | 'terrenos' | 'zacatecas' | 'guadalupe'
+    segment: string
   ): Array<{ imageUrl: string; bodyParams: string[]; quickReplyPayload: string; quickReplyPayload2: string }> {
     const config = AIConversationService.CAROUSEL_SEGMENTS[segment];
     if (!config) return [];
+
+    // Bedroom filter for recamaras segments
+    const bedroomFilter = segment === '2_recamaras' ? 2 : segment === '3_recamaras' ? 3 : 0;
 
     const cards: Array<{ imageUrl: string; bodyParams: string[]; quickReplyPayload: string; quickReplyPayload2: string }> = [];
 
     for (const devName of config.developments) {
       // Find all properties for this development
-      const devProps = properties.filter((p: any) => {
+      let devProps = properties.filter((p: any) => {
         const name = (p.development_name || p.development || p.name || '').toLowerCase();
         return name.includes(devName.toLowerCase()) || devName.toLowerCase().includes(name);
       });
+
+      // Filter by bedrooms if this is a recamaras segment
+      if (bedroomFilter > 0) {
+        devProps = devProps.filter((p: any) => Number(p.bedrooms || 0) === bedroomFilter);
+      }
 
       if (devProps.length === 0) continue;
 
@@ -3457,6 +3598,8 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
     console.log('👍 executeAIDecision RECIBE:');
     console.log('   - properties:', Array.isArray(properties) ? `Array[${properties.length}]` : typeof properties);
     console.log('   - teamMembers:', Array.isArray(teamMembers) ? `Array[${teamMembers.length}]` : typeof teamMembers);
+    console.log('   - FLAGS: send_brochure=' + analysis.send_brochure + ' send_carousel=' + analysis.send_carousel +
+      ' send_gps=' + analysis.send_gps + ' send_video=' + analysis.send_video + ' send_video_desarrollo=' + analysis.send_video_desarrollo);
 
     // Flag para evitar doble envío cuando hora está fuera de horario
     let yaEnvioMensajeHorarioInvalido = false;
@@ -4545,6 +4688,12 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         console.log('🔄 Usando desarrollo guardado (fallback):', desarrolloInteres);
       }
 
+      // ═══ FIX: Incluir propiedad_sugerida de las correcciones (brochure, etc.) ═══
+      if (!desarrolloInteres && analysis.propiedad_sugerida) {
+        desarrolloInteres = analysis.propiedad_sugerida;
+        console.log('🔧 Usando propiedad_sugerida de correcciones:', desarrolloInteres);
+      }
+
       // ═══ PRE-DETECCIÓN: Extraer desarrollo del mensaje del lead si Claude no lo detectó ═══
       if (!desarrolloInteres && originalMessage) {
         const msgLowerPre = originalMessage.toLowerCase();
@@ -5385,19 +5534,25 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
       }
 
       // 5.5 CAROUSEL: Enviar tarjetas deslizables si Claude lo indicó y NO hay desarrollo específico
-      if (analysis.send_carousel && !desarrolloInteres) {
+      // Enviar carousel si Claude lo pidió — incluso con desarrolloInteres,
+      // porque "las más lujosas" o "las más baratas" son preguntas generales
+      if (analysis.send_carousel) {
+        console.log(`🎠 CAROUSEL: send_carousel="${analysis.send_carousel}" detectado, procesando...`);
         try {
           // Dedup: no enviar carousel si ya se envió en los últimos 5 mensajes
           const { data: leadFrescoCarousel } = await this.supabase.client
             .from('leads').select('notes').eq('id', lead.id).maybeSingle();
           const notasCarousel = (leadFrescoCarousel?.notes && typeof leadFrescoCarousel.notes === 'object')
             ? leadFrescoCarousel.notes : {};
-          const carouselSentAt = notasCarousel.carousel_sent_at;
+          // Dedup PER SEGMENT — each carousel type has its own cooldown
+          const carouselsSent = notasCarousel.carousels_sent || {};
+          const currentSegment = analysis.send_carousel as string;
+          const segmentSentAt = carouselsSent[currentSegment] || notasCarousel.carousel_sent_at;
           const msgCountSinceCarousel = (lead.conversation_history || [])
-            .filter((m: any) => m.role === 'user' && new Date(m.timestamp) > new Date(carouselSentAt || 0))
+            .filter((m: any) => m.role === 'user' && new Date(m.timestamp) > new Date(segmentSentAt || 0))
             .length;
 
-          if (!carouselSentAt || msgCountSinceCarousel >= 5) {
+          if (!segmentSentAt || msgCountSinceCarousel >= 5) {
             // For "all": send both zone carousels (zacatecas + guadalupe) — phone flow asks zone first
             // For price-based (economico/premium): send that single segment
             // For zone-based (zacatecas/guadalupe): send that single zone
@@ -5409,6 +5564,13 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               const segment = segments[si];
               const cards = AIConversationService.buildCarouselCards(properties, segment as any);
               const templateName = AIConversationService.CAROUSEL_SEGMENTS[segment]?.template;
+
+              if (cards.length === 0) {
+                console.error(`❌ CAROUSEL FAIL: buildCarouselCards("${segment}") devolvió 0 cards — verificar properties en DB para: ${AIConversationService.CAROUSEL_SEGMENTS[segment]?.developments?.join(', ')}`);
+              }
+              if (!templateName) {
+                console.error(`❌ CAROUSEL FAIL: No template name for segment "${segment}" — verificar CAROUSEL_SEGMENTS`);
+              }
 
               if (cards.length > 0 && templateName) {
                 // Body params: terrenos has none; others get dynamic min price from segment's first development
@@ -5437,12 +5599,13 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               }
             }
 
-            // Track carousel sent
+            // Track carousel sent PER SEGMENT
+            const updatedCarouselsSent = { ...carouselsSent, [currentSegment]: new Date().toISOString() };
             await this.supabase.client.from('leads').update({
-              notes: JSON.stringify({ ...notasCarousel, carousel_sent_at: new Date().toISOString() })
+              notes: JSON.stringify({ ...notasCarousel, carousel_sent_at: new Date().toISOString(), carousels_sent: updatedCarouselsSent })
             }).eq('id', lead.id);
           } else {
-            console.log('⏭️ Carousel omitido (ya enviado, solo ' + msgCountSinceCarousel + ' msgs después)');
+            console.log(`⏭️ Carousel "${currentSegment}" omitido (ya enviado, solo ${msgCountSinceCarousel} msgs después)`);
           }
         } catch (carouselError) {
           console.log('⚠️ Error enviando carousel:', carouselError);
@@ -5461,8 +5624,10 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         const tieneNombreReal = nombreCliente && nombreCliente !== 'Sin nombre' && nombreCliente !== 'amigo' && nombreCliente !== 'Cliente';
         
         // ⚠️ NO enviar recursos si está en flujo de crédito incompleto
-        const enFlujoCreditoIncompleto = datosExtraidos.necesita_credito === true && 
+        // PERO si send_carousel está activo, es consulta de catálogo, NO flujo de crédito real
+        const enFlujoCreditoIncompleto = datosExtraidos.necesita_credito === true &&
           !analysis.send_contactos && // Si ya activó send_contactos, el flujo terminó
+          !analysis.send_carousel && // Si hay carousel, es consulta de catálogo, no flujo crédito
           (!ingresoCliente || ingresoCliente === 0); // Falta al menos el ingreso
         
         // ⚠️ NO enviar recursos si Claude está preguntando algo importante (excepto si pidió recursos explícitamente)
@@ -5924,10 +6089,14 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               console.log('📄 Brochure solicitado explícitamente (recursos ya enviados, enviando brochure)');
               const devParaBrochure = desarrolloInteres || '';
               if (devParaBrochure) {
+                // FIX: Separate property lookup from brochure_urls check to avoid silent failures
                 const propBrochure = properties.find((p: any) => {
                   const nombreProp = (p.development || p.name || '').toLowerCase().trim();
-                  return (nombreProp.includes(devParaBrochure.toLowerCase()) || devParaBrochure.toLowerCase().includes(nombreProp)) && p.brochure_urls;
+                  return nombreProp.includes(devParaBrochure.toLowerCase()) || devParaBrochure.toLowerCase().includes(nombreProp);
                 });
+                if (propBrochure && !propBrochure.brochure_urls) {
+                  console.error(`⚠️ BROCHURE: Propiedad "${propBrochure.development || propBrochure.name}" encontrada pero SIN brochure_urls en DB`);
+                }
                 const brochureRaw = propBrochure?.brochure_urls;
                 const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
 
@@ -5998,6 +6167,46 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
             }
           }
         } // cierre del else (todas las condiciones cumplidas)
+      } else if (analysis.send_brochure === true) {
+        // ═══ FALLBACK: send_brochure=true pero NO hay desarrolloInteres ═══
+        // Intentar extraer de propiedad_sugerida o lead.property_interest
+        const fallbackDev = analysis.extracted_data?.desarrollo ||
+          analysis.propiedad_sugerida ||
+          lead?.property_interest || '';
+        console.log(`📄 BROCHURE FALLBACK: send_brochure=true pero desarrolloInteres vacío. Intentando con: "${fallbackDev}"`);
+        if (fallbackDev) {
+          const propFallback = properties.find((p: any) => {
+            const nombre = (p.development || p.name || '').toLowerCase().trim();
+            return nombre.includes(fallbackDev.toLowerCase()) || fallbackDev.toLowerCase().includes(nombre);
+          });
+          if (propFallback) {
+            const brochureRaw = propFallback.brochure_urls;
+            const brochureUrl = Array.isArray(brochureRaw) ? brochureRaw[0] : brochureRaw;
+            if (brochureUrl) {
+              await new Promise(r => setTimeout(r, 400));
+              const esHTML = brochureUrl.includes('.html') || brochureUrl.includes('pages.dev');
+              if (esHTML) {
+                const cleanUrl = brochureUrl.replace(/\.html$/, '');
+                await this.safeSendCTA(from, `📋 Brochure de *${fallbackDev}* — modelos, precios y planos`, 'Ver brochure 📋', cleanUrl);
+              } else {
+                try {
+                  const filename = `Brochure_${fallbackDev.replace(/\s+/g, '_')}.pdf`;
+                  await this.meta.sendWhatsAppDocument(from, brochureUrl, filename, `📋 Brochure ${fallbackDev}`);
+                } catch (docErr) {
+                  await this.meta.sendWhatsAppMessage(from, `📋 *Brochure ${fallbackDev}:*\n${brochureUrl}`);
+                }
+              }
+              console.log(`✅ Brochure enviado via FALLBACK: ${fallbackDev}`);
+              await this.guardarAccionEnHistorial(lead.id, 'Envié brochure (fallback sin desarrolloInteres)', fallbackDev);
+            } else {
+              console.error(`⚠️ BROCHURE FALLBACK: ${fallbackDev} no tiene brochure_urls en DB`);
+            }
+          } else {
+            console.error(`⚠️ BROCHURE FALLBACK: No se encontró propiedad para "${fallbackDev}"`);
+          }
+        } else {
+          console.error(`⚠️ BROCHURE FALLBACK: send_brochure=true pero no hay desarrollo en ninguna fuente (desarrolloInteres, propiedad_sugerida, property_interest)`);
+        }
       }
 
       // ═══════════════════════════════════════════════════════════════════════════
