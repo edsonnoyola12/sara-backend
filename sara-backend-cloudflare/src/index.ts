@@ -12,6 +12,10 @@ import { handleRetellRoutes } from './routes/retell';
 import { handleTestRoutes } from './routes/test';
 import { handleApiCoreRoutes } from './routes/api-core';
 import { handleApiBiRoutes } from './routes/api-bi';
+import { handleApiTasksRoutes } from './routes/api-tasks';
+import { handleApiCommunicationsRoutes } from './routes/api-communications';
+import { handleApiReportsProRoutes } from './routes/api-reports-pro';
+import { handleApiSaasRoutes } from './routes/api-saas';
 import { FollowupService } from './services/followupService';
 import { FollowupApprovalService } from './services/followupApprovalService';
 import { NotificationService } from './services/notificationService';
@@ -32,6 +36,8 @@ import { createLeadAttribution } from './services/leadAttributionService';
 import { createSLAMonitoring } from './services/slaMonitoringService';
 import { createLeadDeduplication } from './services/leadDeduplicationService';
 import { CronTracker, getObservabilityDashboard, formatObservabilityForWhatsApp } from './services/observabilityService';
+import { resolveTenantFromWebhook, resolveTenantFromRequest, resolveTenantsForCron, getDefaultTenant } from './middleware/tenant';
+import { handleAuthRoutes } from './routes/auth';
 
 // CRON modules
 import {
@@ -197,34 +203,9 @@ import {
   healthMonitorCron,
 } from './crons/healthCheck';
 
-export interface Env {
-  SUPABASE_URL: string;
-  SUPABASE_ANON_KEY: string;
-  ANTHROPIC_API_KEY: string;
-  TWILIO_ACCOUNT_SID: string;
-  TWILIO_AUTH_TOKEN: string;
-  TWILIO_PHONE_NUMBER: string;
-  GOOGLE_SERVICE_ACCOUNT_EMAIL: string;
-  GOOGLE_PRIVATE_KEY: string;
-  GOOGLE_CALENDAR_ID: string;
-  META_PHONE_NUMBER_ID: string;
-  META_ACCESS_TOKEN: string;
-  GEMINI_API_KEY: string;
-  API_SECRET?: string; // Para proteger endpoints sensibles
-  META_WEBHOOK_SECRET?: string; // Para validar firma de webhooks Meta/Facebook
-  SARA_CACHE?: KVNamespace; // Cache KV para reducir queries a DB
-  SENTRY_DSN?: string; // DSN de Sentry para error tracking
-  ENVIRONMENT?: string; // production, staging, development
-  // Email reports
-  RESEND_API_KEY?: string; // API key de Resend para enviar emails
-  REPORT_TO_EMAILS?: string; // Emails destino separados por coma
-  OPENAI_API_KEY?: string; // Para transcripción de audio (Whisper) y TTS
-  // Retell.ai - Llamadas telefónicas con IA
-  RETELL_API_KEY?: string; // API key de Retell.ai
-  RETELL_AGENT_ID?: string; // ID del agente SARA en Retell
-  RETELL_PHONE_NUMBER?: string; // Número de teléfono para llamadas salientes
-  SARA_BACKUPS?: R2Bucket; // R2 bucket para backups semanales
-}
+// Env interface — canonical definition in src/types/env.ts
+export type { Env } from './types/env';
+import type { Env } from './types/env';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CORS: Uses canonical whitelist from routes/cors.ts
@@ -286,6 +267,11 @@ async function checkRateLimit(request: Request, env: Env, requestId: string, max
   // No limitar webhooks de Meta (necesitan responder rápido)
   const url = new URL(request.url);
   if (url.pathname.startsWith('/webhook')) return null;
+
+  // No limitar test endpoints con valid api_key (admin access)
+  const queryKey = url.searchParams.get('api_key');
+  const authHeader = request.headers.get('Authorization')?.replace('Bearer ', '');
+  if ((queryKey === env.API_SECRET || authHeader === env.API_SECRET) && url.pathname.startsWith('/test-')) return null;
 
   const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
   const endpoint = url.pathname.split('?')[0];
@@ -386,6 +372,9 @@ function requiresAuth(pathname: string): boolean {
 
   // Todos los webhooks son públicos (Meta, Retell, Facebook, etc.)
   if (pathname.startsWith('/webhook')) return false;
+
+  // Auth routes handle their own authentication
+  if (pathname.startsWith('/api/auth/')) return false;
 
   // Endpoints del CRM que no requieren auth (usados por el frontend)
   const crmPublicPatterns = [
@@ -659,10 +648,24 @@ export default {
 
     const supabase = new SupabaseService(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
 
+    // Resolve tenant for API requests (Phase 1: defaults to Santa Rita)
+    if (url.pathname.startsWith('/api/')) {
+      const apiTenant = await resolveTenantFromRequest(request, supabase);
+      await supabase.setTenant(apiTenant.tenantId);
+    }
+
     const cache = new CacheService(env.SARA_CACHE);
     // ═══════════════════════════════════════════════════════════
     // API Routes - Team Members
     // ═══════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════
+    // AUTH ROUTES (no auth required — handles its own auth)
+    // ═══════════════════════════════════════════════════════════
+    if (url.pathname.startsWith('/api/auth/')) {
+      const authResp = await handleAuthRoutes(url, request, env, supabase, corsResponse);
+      if (authResp) return authResp;
+    }
+
     if (url.pathname.startsWith('/api/team-members') || url.pathname.startsWith('/api/admin/')) {
       const response = await handleTeamRoutes(request, env, supabase);
       if (response) return response;
@@ -700,7 +703,29 @@ export default {
     const apiBiResp = await handleApiBiRoutes(url, request, env, supabase, cache, corsResponse, checkApiAuth as any);
     if (apiBiResp) return apiBiResp;
 
+    // ═══════════════════════════════════════════════════════════════
+    // API TASKS ROUTES (Phase 3: tasks, tags, notes, custom fields, import/export)
+    // ═══════════════════════════════════════════════════════════════
+    const apiTasksResp = await handleApiTasksRoutes(url, request, env, supabase, corsResponse, checkApiAuth as any);
+    if (apiTasksResp) return apiTasksResp;
 
+    // ═══════════════════════════════════════════════════════════════
+    // API COMMUNICATIONS ROUTES (Phase 4: email, SMS, timeline)
+    // ═══════════════════════════════════════════════════════════════
+    const apiCommsResp = await handleApiCommunicationsRoutes(url, request, env, supabase, corsResponse, checkApiAuth as any);
+    if (apiCommsResp) return apiCommsResp;
+
+    // ═══════════════════════════════════════════════════════════════
+    // API REPORTS PRO ROUTES (Phase 5: reports, forecast, scorecard)
+    // ═══════════════════════════════════════════════════════════════
+    const apiReportsResp = await handleApiReportsProRoutes(url, request, env, supabase, corsResponse, checkApiAuth as any);
+    if (apiReportsResp) return apiReportsResp;
+
+    // ═══════════════════════════════════════════════════════════════
+    // API SAAS ROUTES (Phase 6: signup, onboarding, billing, admin)
+    // ═══════════════════════════════════════════════════════════════
+    const apiSaasResp = await handleApiSaasRoutes(url, request, env, supabase, corsResponse, checkApiAuth as any);
+    if (apiSaasResp) return apiSaasResp;
 
     // Webhook WhatsApp (Meta)
     // ═══════════════════════════════════════════════════════════
@@ -1054,7 +1079,13 @@ export default {
           const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
           const meta = await createMetaWithTracking(env, supabase);
           const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
-          const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
+
+          // Resolve tenant from webhook phone_number_id
+          const phoneNumberId = value?.metadata?.phone_number_id || env.META_PHONE_NUMBER_ID;
+          const tenant = await resolveTenantFromWebhook(phoneNumberId, supabase);
+          await supabase.setTenant(tenant.tenantId);
+
+          const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta, tenant);
 
           // ═══ REACTION ✅ al lead (fire-and-forget, después de crear meta) ═══
           if (messageId && !teamMember && meta) {
@@ -1430,7 +1461,7 @@ export default {
                   }
 
                   // Procesar el texto transcrito como si fuera un mensaje normal
-                  const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
+                  const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta, tenant);
                   await handler.handleIncomingMessage(`whatsapp:+${from}`, transcription.text, env);
 
                   console.log('✅ Audio procesado correctamente');
@@ -2710,6 +2741,11 @@ export default {
     });
 
     const supabase = new SupabaseService(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
+
+    // Set tenant for CRON (Phase 1: always Santa Rita)
+    const cronTenants = await resolveTenantsForCron(supabase);
+    const cronTenant = cronTenants[0];
+    await supabase.setTenant(cronTenant.tenantId);
 
     try {
     const meta = await createMetaWithTracking(env, supabase);

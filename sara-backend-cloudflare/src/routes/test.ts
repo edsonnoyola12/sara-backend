@@ -107,29 +107,7 @@ import {
 import { runHealthCheck, trackError, enviarAlertaSistema, healthMonitorCron } from '../crons/healthCheck';
 import { backupSemanalR2, getBackupLog } from '../crons/dashboard';
 
-interface Env {
-  SUPABASE_URL: string;
-  SUPABASE_ANON_KEY: string;
-  ANTHROPIC_API_KEY: string;
-  META_PHONE_NUMBER_ID: string;
-  META_ACCESS_TOKEN: string;
-  GOOGLE_SERVICE_ACCOUNT_EMAIL: string;
-  GOOGLE_PRIVATE_KEY: string;
-  GOOGLE_CALENDAR_ID: string;
-  API_SECRET?: string;
-  SARA_CACHE?: KVNamespace;
-  RETELL_API_KEY?: string;
-  RETELL_AGENT_ID?: string;
-  RETELL_PHONE_NUMBER?: string;
-  OPENAI_API_KEY?: string;
-  VEO_API_KEY?: string;
-  GEMINI_API_KEY?: string;
-  SARA_BACKUPS?: R2Bucket;
-  META_WHATSAPP_BUSINESS_ID?: string;
-}
-
-type CorsResponseFn = (body: string | null, status?: number, contentType?: string, request?: Request) => Response;
-type CheckApiAuthFn = (request: Request, env: Env) => Response | null;
+import type { Env, CorsResponseFn, CheckApiAuthFn } from '../types/env';
 
 export async function handleTestRoutes(
   url: URL,
@@ -1875,14 +1853,51 @@ export async function handleTestRoutes(
         if (env.SARA_CACHE) meta.setKVNamespace(env.SARA_CACHE);
         const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
 
-        // Llamar al handler de WhatsApp
-        const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
+        // ── CHECK 24H WINDOW ──
+        // If lead hasn't messaged in 24h, the handler's free-form response
+        // will be silently dropped by Meta. Send a template instead.
+        const phoneDigitsCheck = normalizedPhone.slice(-10);
+        const { data: existingLead } = await supabase.client
+          .from('leads')
+          .select('id, name, last_message_at, property_interest')
+          .ilike('phone', `%${phoneDigitsCheck}`)
+          .order('updated_at', { ascending: false })
+          .limit(1);
+
+        const lead24h = existingLead?.[0];
+        const lastMsg = lead24h?.last_message_at ? new Date(lead24h.last_message_at).getTime() : 0;
+        const ventanaAbierta = (Date.now() - lastMsg) < 24 * 60 * 60 * 1000;
+
         let handlerError: string | null = null;
-        try {
-          await handler.handleIncomingMessage(`whatsapp:+${normalizedPhone}`, msg, env);
-        } catch (hErr: any) {
-          handlerError = hErr?.message || String(hErr);
-          console.error('❌ Handler error:', handlerError);
+        let templateSent = false;
+
+        if (!ventanaAbierta) {
+          // Window closed — send seguimiento_lead template instead
+          const nombreCorto = lead24h?.name?.split(' ')[0] || name?.split(' ')[0] || 'Amigo';
+          const desarrollo = lead24h?.property_interest || 'nuestros desarrollos';
+          try {
+            await meta.sendTemplate(normalizedPhone, 'seguimiento_lead', 'es_MX', [{
+              type: 'body',
+              parameters: [
+                { type: 'text', text: nombreCorto },
+                { type: 'text', text: desarrollo }
+              ]
+            }]);
+            templateSent = true;
+            console.log(`📱 test-lead: ventana cerrada → template seguimiento_lead → ${nombreCorto}`);
+          } catch (tErr: any) {
+            handlerError = `Template error: ${tErr?.message || String(tErr)}`;
+            console.error('❌ Template send error:', handlerError);
+          }
+        } else {
+          // Window open — use normal handler (free-form AI response)
+          const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta);
+          try {
+            await handler.handleIncomingMessage(`whatsapp:+${normalizedPhone}`, msg, env);
+          } catch (hErr: any) {
+            handlerError = hErr?.message || String(hErr);
+            console.error('❌ Handler error:', handlerError);
+          }
         }
 
         // Intentar obtener datos del lead post-handler
@@ -1957,11 +1972,15 @@ export async function handleTestRoutes(
             status: cita.status,
             tipo: cita.appointment_type
           } : null,
+          ventana_24h: ventanaAbierta ? 'ABIERTA → mensaje libre con IA' : 'CERRADA → template seguimiento_lead enviado',
+          template_enviado: templateSent,
           nota: subrequestLimitHit
             ? `Mensaje procesado OK. El handler agotó los subrequests de Cloudflare — usa /debug-lead?phone=${phoneDigits} para ver el resultado.`
             : handlerError
               ? `Handler error: ${handlerError}`
-              : 'SARA procesó el mensaje y respondió por WhatsApp (si el teléfono es real)'
+              : templateSent
+                ? 'Ventana 24h cerrada. Se envió template seguimiento_lead para reactivar conversación.'
+                : 'SARA procesó el mensaje y respondió por WhatsApp con IA'
         }));
 
       } catch (e: any) {
@@ -10415,7 +10434,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       // If action=status, just query template status from Meta
       if (actionParam === 'status') {
         const namesToCheck = templateParam === 'all'
-          ? ['casas_economicas_v2', 'casas_premium_v2', 'terrenos_nogal', 'casas_guadalupe', 'casas_zacatecas']
+          ? ['casas_economicas_v2', 'casas_premium_v2', 'terrenos_nogal', 'casas_guadalupe', 'casas_zacatecas', 'casas_2_recamaras', 'casas_3_recamaras', 'casas_con_credito']
           : [templateParam];
         const statusResults: any[] = [];
         for (const tplName of namesToCheck) {
@@ -10442,7 +10461,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       // If action=delete, delete templates first
       if (actionParam === 'delete' || actionParam === 'recreate') {
         const templatesToDelete = templateParam === 'all'
-          ? ['casas_economicas', 'casas_premium', 'casas_economicas_v2', 'casas_premium_v2', 'terrenos_nogal', 'casas_guadalupe', 'casas_zacatecas']
+          ? ['casas_economicas', 'casas_premium', 'casas_economicas_v2', 'casas_premium_v2', 'terrenos_nogal', 'casas_guadalupe', 'casas_zacatecas', 'casas_2_recamaras', 'casas_3_recamaras', 'casas_con_credito']
           : [templateParam];
         const deleteResults: any[] = [];
         for (const tplName of templatesToDelete) {
@@ -10474,7 +10493,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         'Monte Verde': 'https://gruposantarita.com.mx/wp-content/uploads/2024/11/MONTE-VERDE-FACHADA-DESARROLLO-EDIT-scaled.jpg',
         'Los Encinos': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/Encinos-Amenidades-1.jpg',
         'Andes': 'https://gruposantarita.com.mx/wp-content/uploads/2022/09/Dalia_act.jpg',
-        'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2025/02/FACHADA-MIRAVALLE-DESARROLLO-edit-scaled-e1740672689199.jpg',
+        'Miravalle': 'https://gruposantarita.com.mx/wp-content/uploads/2024/10/BILBAO-FACHADA-scaled.jpg',
         'Distrito Falco': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/img01-5.jpg',
         'Paseo Colorines': 'https://gruposantarita.com.mx/wp-content/uploads/2024/11/MONTE-VERDE-FACHADA-DESARROLLO-EDIT-scaled.jpg',
         'Alpes': 'https://gruposantarita.com.mx/wp-content/uploads/2020/09/Alpes-Amenidades-1.jpg',
@@ -10603,6 +10622,45 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
             ['Miravalle - 3 recámaras en Colinas del Padre', '$3.0M'],
             ['Paseo Colorines - 3 recámaras en Colinas del Padre', '$3.0M'],
           ]
+        },
+        casas_2_recamaras: {
+          developments: ['Monte Verde', 'Andes', 'Alpes', 'Miravalle', 'Distrito Falco'],
+          bodyText: 'Casas de 2 recámaras desde {{1}} en Zacatecas y Guadalupe 🏠',
+          bodyExample: [['$1.6M']],
+          cardBody: '🏠 {{1}}\n💰 Casas de 2 rec desde {{2}} equipadas con cocina y closets',
+          cardExamples: [
+            ['Monte Verde - 2 recámaras en Colinas del Padre', '$1.6M'],
+            ['Priv. Andes - 2 recámaras en Guadalupe (con alberca)', '$1.6M'],
+            ['Alpes - 2 recámaras en Guadalupe', '$2.0M'],
+            ['Miravalle - 2 recámaras en Colinas del Padre', '$3.0M'],
+            ['Distrito Falco - 2 recámaras en Guadalupe', '$3.7M'],
+          ]
+        },
+        casas_3_recamaras: {
+          developments: ['Monte Verde', 'Andes', 'Los Encinos', 'Miravalle', 'Paseo Colorines', 'Distrito Falco'],
+          bodyText: 'Casas de 3 recámaras desde {{1}} en Zacatecas y Guadalupe 🏠',
+          bodyExample: [['$2.2M']],
+          cardBody: '🏠 {{1}}\n💰 Casas de 3 rec desde {{2}} equipadas con cocina y closets',
+          cardExamples: [
+            ['Monte Verde - 3 recámaras en Colinas del Padre', '$2.2M'],
+            ['Priv. Andes - 3 recámaras en Guadalupe (con alberca)', '$2.3M'],
+            ['Los Encinos - 3 recámaras en Colinas del Padre', '$3.0M'],
+            ['Miravalle - 3 recámaras en Colinas del Padre', '$3.5M'],
+            ['Paseo Colorines - 3 recámaras en Colinas del Padre', '$3.2M'],
+            ['Distrito Falco - 3 recámaras en Guadalupe', '$4.0M'],
+          ]
+        },
+        casas_con_credito: {
+          developments: ['Monte Verde', 'Andes', 'Alpes', 'Miravalle'],
+          bodyText: 'Casas con crédito bancario, Infonavit y Fovissste desde {{1}} 🏦',
+          bodyExample: [['$1.6M']],
+          cardBody: '🏠 {{1}}\n💰 Desde {{2}} — Crédito bancario, Infonavit y Fovissste',
+          cardExamples: [
+            ['Monte Verde - 2 a 3 rec en Colinas del Padre', '$1.6M'],
+            ['Priv. Andes - 2 a 3 rec en Guadalupe (con alberca)', '$1.6M'],
+            ['Alpes - 2 rec en Guadalupe', '$2.0M'],
+            ['Miravalle - 2 a 3 rec en Colinas del Padre', '$3.0M'],
+          ]
         }
       };
 
@@ -10723,6 +10781,7 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         economico: 'casas_economicas_v2', premium: 'casas_premium_v2', terrenos: 'terrenos_nogal',
         casas_economicas: 'casas_economicas_v2', casas_premium: 'casas_premium_v2',
         guadalupe: 'casas_guadalupe', zacatecas: 'casas_zacatecas',
+        '2_recamaras': 'casas_2_recamaras', '3_recamaras': 'casas_3_recamaras', credito: 'casas_con_credito',
       };
       const templateName = segToTemplate[segParam] || segParam;
       const phone = url.searchParams.get('phone') || '5610016226';
@@ -10772,6 +10831,9 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
         terrenos_nogal: 'terrenos',
         casas_guadalupe: 'guadalupe',
         casas_zacatecas: 'zacatecas',
+        casas_2_recamaras: '2_recamaras',
+        casas_3_recamaras: '3_recamaras',
+        casas_con_credito: 'credito',
       };
       const segment = segmentMap[templateName];
       if (!segment) {
