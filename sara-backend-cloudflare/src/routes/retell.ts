@@ -11,25 +11,7 @@ import { ClaudeService } from '../services/claude';
 import { AIConversationService } from '../services/aiConversationService';
 import { logErrorToDB } from '../crons/healthCheck';
 
-interface Env {
-  SUPABASE_URL: string;
-  SUPABASE_ANON_KEY: string;
-  ANTHROPIC_API_KEY: string;
-  META_PHONE_NUMBER_ID: string;
-  META_ACCESS_TOKEN: string;
-  GOOGLE_SERVICE_ACCOUNT_EMAIL: string;
-  GOOGLE_PRIVATE_KEY: string;
-  GOOGLE_CALENDAR_ID: string;
-  API_SECRET?: string;
-  SARA_CACHE?: KVNamespace;
-  RETELL_API_KEY?: string;
-  RETELL_AGENT_ID?: string;
-  RETELL_PHONE_NUMBER?: string;
-  OPENAI_API_KEY?: string;
-}
-
-type CorsResponseFn = (body: string | null, status?: number, contentType?: string, request?: Request) => Response;
-type CheckApiAuthFn = (request: Request, env: Env) => Response | null;
+import type { Env, CorsResponseFn, CheckApiAuthFn } from '../types/env';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DETERMINAR OUTCOME DE LLAMADA
@@ -1423,7 +1405,7 @@ CASOS ESPECIALES:
         // Obtener desarrollos válidos dinámicamente desde DB
         const { data: devProps } = await supabase.client
           .from('properties')
-          .select('development, development_name, name');
+          .select('development, name');
         const desarrollosValidos = devProps
           ? [...new Set(devProps.flatMap((p: any) => [p.development, p.development_name, p.name].filter(Boolean).map((d: string) => d.toLowerCase())))]
           : ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano', 'monte real', 'alpes'];
@@ -1795,9 +1777,10 @@ CASOS ESPECIALES:
             // Obtener desarrollos dinámicamente desde DB (con fallback)
             const { data: devPropsAnalyzed } = await supabase.client
               .from('properties')
-              .select('development, development_name, name');
+              .select('development, name');
+            // SOLO usar nombres de DESARROLLOS, NO modelos (Chipre, Mirlo, etc. son modelos, no desarrollos)
             const desarrollosConocidos = devPropsAnalyzed
-              ? [...new Set(devPropsAnalyzed.flatMap((p: any) => [p.development, p.development_name, p.name].filter(Boolean).map((d: string) => d.toLowerCase().trim())))]
+              ? [...new Set(devPropsAnalyzed.map((p: any) => p.development).filter(Boolean).map((d: string) => d.toLowerCase().trim()))]
               : ['monte verde', 'los encinos', 'miravalle', 'paseo colorines', 'andes', 'distrito falco', 'citadella', 'villa campelo', 'villa galiano'];
             // Sentinel values que Retell retorna cuando no detectó desarrollo — FILTRAR siempre
             const sentinelValues = ['no_mencionado', 'general', 'por definir', 'no mencionado', 'sin desarrollo', 'n/a', 'none', 'null', 'undefined', ''];
@@ -2341,9 +2324,23 @@ Reglas de fecha:
             // SEGUIMIENTO AUTOMÁTICO POR WHATSAPP AL LEAD
             // Enviar mensaje + brochure + GPS después de la llamada
             // RESPETA VENTANA 24H: si cerrada → usa template
-            // SOLO en call_analyzed (no call_ended) para evitar mensajes dobles
+            // Se ejecuta en call_ended O call_analyzed (el primero que llegue)
+            // KV dedup previene doble envío si ambos eventos llegan
             // ═══════════════════════════════════════════════════════════════
-            if (event === 'call_analyzed' && leadPhone && call.duration_ms && call.duration_ms > 15000) {
+            const durationMsForCheck = call.duration_ms || (durationSeconds ? durationSeconds * 1000 : 0);
+            const dedupKey = `retell_followup:${call.call_id}`;
+            let yaEnvioFollowUp = false;
+            try {
+              if (env.SARA_CACHE) {
+                const existing = await env.SARA_CACHE.get(dedupKey);
+                if (existing) {
+                  yaEnvioFollowUp = true;
+                  console.log(`⏭️ Follow-up ya enviado para call ${call.call_id} (dedup KV)`);
+                }
+              }
+            } catch (_kvErr) { /* ignore */ }
+
+            if (!yaEnvioFollowUp && leadPhone && durationMsForCheck > 15000) {
               try {
                 const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
 
@@ -2464,7 +2461,7 @@ Reglas de fecha:
                         let brochureSlug = '';
                         if (brochureRaw) {
                           const urls = Array.isArray(brochureRaw) ? brochureRaw : [brochureRaw];
-                          const htmlUrl = urls.find((u: string) => u.includes('.html') || u.includes('pages.dev'));
+                          const htmlUrl = urls.find((u: string) => u.includes('.html') || u.includes('pages.dev') || u.includes('/brochure/'));
                           if (htmlUrl) {
                             // Extraer slug: "https://sara-backend.edson-633.workers.dev/brochure/monte-verde" → "monte-verde"
                             const parts = htmlUrl.split('/');
@@ -2596,13 +2593,21 @@ Reglas de fecha:
                 debugLog.push({ t: Date.now(), step: 'carousel_decision', enviar: enviarCarousels, devs: desarrollosMencionadosFinal, duration: durationSeconds });
 
                 if (enviarCarousels) {
-                  await new Promise(resolve => setTimeout(resolve, 1500));
-                  const { data: allProps } = await supabase.client
+                  console.log(`🎠 Iniciando envío de carousels + recursos...`);
+                  await new Promise(resolve => setTimeout(resolve, 1000));
+                  const { data: allProps, error: propsError } = await supabase.client
                     .from('properties')
-                    .select('name, development, development_name, brochure_urls, gps_link, youtube_link, matterport_link, price, price_equipped, photo_url, price_min, price_max, bedrooms, area_m2, land_size');
+                    .select('name, development, brochure_urls, gps_link, youtube_link, matterport_link, price, price_equipped, photo_url, bedrooms, area_m2, land_size');
 
+                  console.log(`🎠 Properties loaded: ${allProps?.length || 0} props, error: ${propsError?.message || 'none'}`);
                   if (allProps && allProps.length > 0) {
-                    // 1. ALWAYS send carousels — they are TEMPLATES (no 24h window needed)
+                    // Determine if request is specific (1 dev) or general (multiple/none)
+                    // If specific → skip carousel, only send resources for that dev
+                    // If general → send carousel(s) + resources
+                    const esRequestEspecifico = desarrollosMencionadosFinal.length === 1;
+
+                    if (!esRequestEspecifico) {
+                    // 1. Send carousels only for GENERAL requests (multiple devs or none)
                     const segmentosEnviados = new Set<string>();
                     for (const dev of desarrollosMencionadosFinal) {
                       const seg = getCarouselSegmentForDesarrollo(dev);
@@ -2613,10 +2618,12 @@ Reglas de fecha:
                       segmentosEnviados.add('economico');
                       segmentosEnviados.add('premium');
                     }
+                    console.log(`🎠 Segmentos a enviar: [${[...segmentosEnviados].join(', ')}]`);
                     for (const seg of segmentosEnviados) {
                       try {
                         const cards = AIConversationService.buildCarouselCards(allProps, seg as any);
                         const templateName = (AIConversationService.CAROUSEL_SEGMENTS as any)[seg]?.template;
+                        console.log(`🎠 Segment "${seg}": ${cards.length} cards, template=${templateName || 'NONE'}`);
                         if (cards.length > 0 && templateName) {
                           const bodyParams = seg === 'terrenos'
                             ? []
@@ -2636,14 +2643,19 @@ Reglas de fecha:
                         debugLog.push({ t: Date.now(), step: 'carousel_error', segment: seg, error: err?.message });
                       }
                     }
+                    } else {
+                      console.log(`📋 Request específico (${desarrollosMencionadosFinal[0]}) — enviando solo recursos, sin carousel`);
+                    }
 
                     // 2. Send resources for EACH mentioned development
+                    console.log(`📋 Recursos: procesando ${desarrollosMencionadosFinal.length} desarrollos`);
                     for (const dev of desarrollosMencionadosFinal) {
                       const devNorm = dev.toLowerCase().replace('priv.', 'privada').replace('priv ', 'privada ').trim();
                       const devProps = allProps.filter((p: any) => {
                         const pName = (p.development || p.development_name || p.name || '').toLowerCase();
                         return pName.includes(devNorm) || devNorm.includes(pName);
                       });
+                      console.log(`📋 Dev "${dev}" (norm: "${devNorm}"): ${devProps.length} props encontradas`);
                       if (devProps.length > 0) {
                         await new Promise(r => setTimeout(r, 500));
                         if (ventanaAbierta) {
@@ -2664,8 +2676,11 @@ Reglas de fecha:
                 try {
                   if (call.call_id && env.SARA_CACHE) {
                     await env.SARA_CACHE.delete(`retell_send_queue:${call.call_id}`);
+                    // Mark follow-up as sent (dedup for call_ended vs call_analyzed)
+                    await env.SARA_CACHE.put(dedupKey, 'sent', { expirationTtl: 3600 });
+                    console.log(`✅ Follow-up marcado como enviado en KV (dedup 1h)`);
                   }
-                } catch (kvErr) { console.error('⚠️ KV error deleting retell_send_queue:', kvErr); }
+                } catch (kvErr) { console.error('⚠️ KV error cleanup:', kvErr); }
 
                 // Actualizar lead
                 if (lead?.id) {
@@ -2825,7 +2840,7 @@ async function enviarRecursosCTARetell(
     const raw = p.brochure_urls;
     if (!raw) return false;
     const urls = Array.isArray(raw) ? raw : [raw];
-    return urls.some((u: string) => u.includes('.html') || u.includes('pages.dev'));
+    return urls.some((u: string) => u.includes('.html') || u.includes('pages.dev') || u.includes('/brochure/'));
   });
 
   // Precio mínimo
@@ -2860,7 +2875,7 @@ async function enviarRecursosCTARetell(
   if (brochureProp) {
     const brochureRaw = brochureProp.brochure_urls;
     const urls = Array.isArray(brochureRaw) ? brochureRaw : [brochureRaw];
-    const htmlUrl = urls.find((u: string) => u.includes('.html') || u.includes('pages.dev'));
+    const htmlUrl = urls.find((u: string) => u.includes('.html') || u.includes('pages.dev') || u.includes('/brochure/'));
     if (htmlUrl) {
       await delay();
       await meta.sendCTAButton(phone, `📋 *Brochure de ${devName}*\nToda la info y precios`, 'Ver brochure', htmlUrl);
@@ -2889,7 +2904,7 @@ async function enviarRecursosTextoRetell(
     const raw = p.brochure_urls;
     if (!raw) return false;
     const urls = Array.isArray(raw) ? raw : [raw];
-    return urls.some((u: string) => u.includes('.html') || u.includes('pages.dev'));
+    return urls.some((u: string) => u.includes('.html') || u.includes('pages.dev') || u.includes('/brochure/'));
   });
 
   // Precio mínimo
@@ -2915,7 +2930,7 @@ async function enviarRecursosTextoRetell(
   if (brochureProp) {
     const brochureRaw = brochureProp.brochure_urls;
     const urls = Array.isArray(brochureRaw) ? brochureRaw : [brochureRaw];
-    const htmlUrl = urls.find((u: string) => u.includes('.html') || u.includes('pages.dev'));
+    const htmlUrl = urls.find((u: string) => u.includes('.html') || u.includes('pages.dev') || u.includes('/brochure/'));
     if (htmlUrl) {
       msg += `\n📋 Brochure: ${htmlUrl}`;
     }
