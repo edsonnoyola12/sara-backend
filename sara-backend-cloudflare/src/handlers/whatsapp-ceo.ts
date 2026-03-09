@@ -49,6 +49,49 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
     await freshNotesUpdate(ctx, ceo.id, n => { n.last_sara_interaction = new Date().toISOString(); });
 
     // ═══════════════════════════════════════════════════════════
+    // 🔗 BRIDGE RÁPIDO: CEO responde "1" ANTES de entregar pendings
+    // ═══════════════════════════════════════════════════════════
+    if (mensaje === '1' && !notasCEO?.active_bridge) {
+      const ultimoLeadBridge = notasCEO?.ultimo_lead_notificado;
+      if (ultimoLeadBridge?.lead_id && ultimoLeadBridge?.lead_name) {
+        const notifTimeBridge = ultimoLeadBridge.timestamp ? new Date(ultimoLeadBridge.timestamp).getTime() : 0;
+        const minutosDesde = (Date.now() - notifTimeBridge) / (1000 * 60);
+        if (minutosDesde <= 30) {
+          try {
+            // Entregar pending primero para contexto
+            if (notasCEO?.pending_alerta_lead?.mensaje_completo) {
+              await ctx.meta.sendWhatsAppMessage(cleanPhone, notasCEO.pending_alerta_lead.mensaje_completo);
+              await freshNotesUpdate(ctx, ceo.id, n => { delete n.pending_alerta_lead; });
+              console.log(`📬 Pending alerta_lead entregado a CEO antes de bridge`);
+            }
+            const bridgeService = new BridgeService(ctx.supabase);
+            const bridgeResult = await bridgeService.activarBridge(
+              ceo.id, ceo.name, cleanPhone,
+              ultimoLeadBridge.lead_id, ultimoLeadBridge.lead_name, ultimoLeadBridge.lead_phone
+            );
+            if (bridgeResult.success) {
+              const nombreCorto = ultimoLeadBridge.lead_name.split(' ')[0];
+              await ctx.meta.sendWhatsAppMessage(cleanPhone,
+                `🔗 *Chat directo con ${nombreCorto}* activado (6 min)\n\n` +
+                `Todo lo que escribas se le enviará directamente.\n` +
+                `*#cerrar* para terminar | *#mas* para extender`
+              );
+              try {
+                await ctx.meta.sendWhatsAppMessage(ultimoLeadBridge.lead_phone,
+                  `💬 *${ceo.name?.split(' ')[0]}* de nuestro equipo quiere hablar contigo directamente 🏠`
+                );
+              } catch (_) {}
+              console.log(`🔗 Bridge rápido CEO: ${ceo.name} → ${ultimoLeadBridge.lead_name}`);
+              return;
+            }
+          } catch (bridgeErr) {
+            console.error('⚠️ Error bridge rápido CEO:', bridgeErr);
+          }
+        }
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // PENDING MESSAGES: Usa deliverPendingMessage() que resuelve:
     // 1. Re-lee notes frescas de DB (evita sobreescribir cambios de CRONs)
     // 2. Captura wamid de Meta API (verifica delivery)
@@ -161,42 +204,6 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
     }
 
 
-    // ═══════════════════════════════════════════════════════════
-    // 🔗 BRIDGE RÁPIDO: CEO responde "1" para hablar directo con último lead notificado
-    // ═══════════════════════════════════════════════════════════
-    if (mensaje === '1' && !notasCEO?.active_bridge) {
-      const ultimoLead = notasCEO?.ultimo_lead_notificado;
-      if (ultimoLead?.lead_id && ultimoLead?.lead_name) {
-        const notifTime = ultimoLead.timestamp ? new Date(ultimoLead.timestamp).getTime() : 0;
-        const minutosDesde = (Date.now() - notifTime) / (1000 * 60);
-        if (minutosDesde <= 30) {
-          try {
-            const bridgeService = new BridgeService(ctx.supabase);
-            const bridgeResult = await bridgeService.activarBridge(
-              ceo.id, ceo.name, cleanPhone,
-              ultimoLead.lead_id, ultimoLead.lead_name, ultimoLead.lead_phone
-            );
-            if (bridgeResult.success) {
-              const nombreCorto = ultimoLead.lead_name.split(' ')[0];
-              await ctx.meta.sendWhatsAppMessage(cleanPhone,
-                `🔗 *Chat directo con ${nombreCorto}* activado (6 min)\n\n` +
-                `Todo lo que escribas se le enviará directamente.\n` +
-                `*#cerrar* para terminar | *#mas* para extender`
-              );
-              try {
-                await ctx.meta.sendWhatsAppMessage(ultimoLead.lead_phone,
-                  `💬 *${ceo.name?.split(' ')[0]}* de nuestro equipo quiere hablar contigo directamente 🏠`
-                );
-              } catch (_) {}
-              console.log(`🔗 Bridge rápido CEO: ${ceo.name} → ${ultimoLead.lead_name}`);
-              return;
-            }
-          } catch (bridgeErr) {
-            console.error('⚠️ Error bridge rápido CEO:', bridgeErr);
-          }
-        }
-      }
-    }
 
     // ╔════════════════════════════════════════════════════════════════════════╗
     // ║  CRÍTICO - NO MODIFICAR SIN CORRER TESTS: npm test                      ║

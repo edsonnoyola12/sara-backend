@@ -190,6 +190,54 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
   await freshNotesUpdate(ctx, vendedor.id, n => { n.last_sara_interaction = new Date().toISOString(); });
 
   // ═══════════════════════════════════════════════════════════
+  // 🔗 BRIDGE RÁPIDO: Vendedor responde "1" ANTES de entregar pendings
+  // (pendings hacen return; y nunca llegaría al bridge check posterior)
+  // ═══════════════════════════════════════════════════════════
+  if (mensaje === '1') {
+    const ultimoLeadBridge = notasVendedor?.ultimo_lead_notificado;
+    if (ultimoLeadBridge?.lead_id && ultimoLeadBridge?.lead_name) {
+      const notifTimeBridge = ultimoLeadBridge.timestamp ? new Date(ultimoLeadBridge.timestamp).getTime() : 0;
+      const minutosDesde = (Date.now() - notifTimeBridge) / (1000 * 60);
+      if (minutosDesde <= 30) {
+        try {
+          // Entregar pending primero para que vendedor vea el contexto
+          if (notasVendedor?.pending_alerta_lead?.mensaje_completo) {
+            await ctx.meta.sendWhatsAppMessage(from, notasVendedor.pending_alerta_lead.mensaje_completo);
+            await freshNotesUpdate(ctx, vendedor.id, n => { delete n.pending_alerta_lead; });
+            console.log(`📬 Pending alerta_lead entregado antes de bridge`);
+          }
+          const bridgeService = new BridgeService(ctx.supabase);
+          const bridgeResult = await bridgeService.activarBridge(
+            vendedor.id, vendedor.name, from,
+            ultimoLeadBridge.lead_id, ultimoLeadBridge.lead_name, ultimoLeadBridge.lead_phone
+          );
+          if (bridgeResult.success) {
+            const nombreCorto = ultimoLeadBridge.lead_name.split(' ')[0];
+            await ctx.meta.sendWhatsAppMessage(from,
+              `🔗 *Chat directo con ${nombreCorto}* activado (6 min)\n\n` +
+              `Todo lo que escribas se le enviará directamente.\n` +
+              `*#cerrar* para terminar | *#mas* para extender`
+            );
+            try {
+              await ctx.meta.sendWhatsAppMessage(ultimoLeadBridge.lead_phone,
+                `💬 *${vendedor.name?.split(' ')[0]}* de nuestro equipo quiere hablar contigo directamente 🏠`
+              );
+            } catch (_) {}
+            console.log(`🔗 Bridge rápido activado: ${vendedor.name} → ${ultimoLeadBridge.lead_name}`);
+            return;
+          } else {
+            await ctx.meta.sendWhatsAppMessage(from, bridgeResult.error || '⚠️ No se pudo activar el chat directo.');
+            return;
+          }
+        } catch (bridgeErr) {
+          console.error('⚠️ Error bridge rápido:', bridgeErr);
+          // Fall through to pending delivery
+        }
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // PENDING MESSAGES: Entrega TODOS los pending acumulados (no solo el primero)
   // Usa deliverPendingMessage() que resuelve:
   // 1. Re-lee notes frescas de DB (evita sobreescribir cambios de CRONs)
@@ -526,47 +574,7 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
     }
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // 🔗 BRIDGE RÁPIDO: Vendedor responde "1" para hablar directo con último lead notificado
-  // ═══════════════════════════════════════════════════════════
-  if (mensaje === '1') {
-    const ultimoLead = notasVendedor?.ultimo_lead_notificado;
-    if (ultimoLead?.lead_id && ultimoLead?.lead_name) {
-      // Solo válido por 30 minutos
-      const notifTime = ultimoLead.timestamp ? new Date(ultimoLead.timestamp).getTime() : 0;
-      const minutosDesde = (Date.now() - notifTime) / (1000 * 60);
-      if (minutosDesde <= 30) {
-        try {
-          const bridgeService = new BridgeService(ctx.supabase);
-          const bridgeResult = await bridgeService.activarBridge(
-            vendedor.id, vendedor.name, from,
-            ultimoLead.lead_id, ultimoLead.lead_name, ultimoLead.lead_phone
-          );
-          if (bridgeResult.success) {
-            const nombreCorto = ultimoLead.lead_name.split(' ')[0];
-            await ctx.meta.sendWhatsAppMessage(from,
-              `🔗 *Chat directo con ${nombreCorto}* activado (6 min)\n\n` +
-              `Todo lo que escribas se le enviará directamente.\n` +
-              `*#cerrar* para terminar | *#mas* para extender`
-            );
-            // Notificar al lead
-            try {
-              await ctx.meta.sendWhatsAppMessage(ultimoLead.lead_phone,
-                `💬 *${vendedor.name?.split(' ')[0]}* de nuestro equipo quiere hablar contigo directamente 🏠`
-              );
-            } catch (_) {}
-            console.log(`🔗 Bridge rápido activado: ${vendedor.name} → ${ultimoLead.lead_name}`);
-            return;
-          } else {
-            await ctx.meta.sendWhatsAppMessage(from, bridgeResult.error || '⚠️ No se pudo activar el chat directo.');
-            return;
-          }
-        } catch (bridgeErr) {
-          console.error('⚠️ Error bridge rápido:', bridgeErr);
-        }
-      }
-    }
-  }
+  // Bridge rápido "1" ya se maneja ANTES de pending delivery (línea ~193)
 
   // ═══════════════════════════════════════════════════════════
   // 🎓 ONBOARDING - Tutorial para vendedores nuevos
