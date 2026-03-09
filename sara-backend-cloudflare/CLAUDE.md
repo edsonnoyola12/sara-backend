@@ -1,6 +1,6 @@
 # SARA CRM - Referencia para Claude Code
 
-> Última actualización: 2026-03-08 (Sesión 86)
+> Última actualización: 2026-03-08 (Sesión 87)
 > Historial detallado de cambios: `docs/CHANGELOG.md`
 
 ---
@@ -175,7 +175,7 @@ Pending se verifican PRIMERO en handlers de vendedor y CEO, ANTES de cualquier o
 Feature flag: `retell_enabled` en KV (controlable via `/api/flags`). Todos los CRONs y el comando manual lo respetan.
 **Retry automático:** Si nadie contesta → reintento en 3h (intento 1) o mañana 10am (intento 2). Max 2 reintentos.
 **Dashboard:** CEO comando `llamadas` → métricas mensuales (outcomes, sentimiento, conversión, top vendedores).
-**Cadencia inteligente:** Secuencia multi-paso WhatsApp + llamada IA (3 tipos: lead_nuevo, lead_frio, post_visita). Flag: `cadencia_inteligente`.
+**Cadencia inteligente:** Secuencia multi-paso WhatsApp + llamada IA (6 tipos: lead_nuevo, lead_frio, post_visita, no_show, negociacion_estancada, apartado_sin_cierre). Flag: `cadencia_inteligente`. Se detiene automáticamente si: lead responde WA, lead contesta llamada (exitosa/no interesado), o cadencia completa.
 
 ### 6. Flujos Post-Compra (CRONs automáticos)
 
