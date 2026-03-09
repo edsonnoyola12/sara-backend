@@ -1,6 +1,6 @@
 # SARA CRM - Referencia para Claude Code
 
-> Última actualización: 2026-03-03 (Sesión 80b)
+> Última actualización: 2026-03-08 (Sesión 86)
 > Historial detallado de cambios: `docs/CHANGELOG.md`
 
 ---
@@ -29,7 +29,7 @@
 # 1. Lee la documentación completa
 cat SARA_COMANDOS.md | head -500
 
-# 2. Verifica tests (OBLIGATORIO - 1107+ tests, 33 archivos)
+# 2. Verifica tests (OBLIGATORIO - 1684+ tests, 42 archivos)
 npm test
 
 # 3. Si falla algún test, NO hagas cambios
@@ -78,7 +78,7 @@ npm test
 | `src/crons/dashboard.ts` | Status, analytics, health, backup |
 | `src/crons/healthCheck.ts` | Health monitor, error digest, observability |
 
-### Servicios (89+ total)
+### Servicios (97+ total)
 
 Servicios de inteligencia de negocio en `src/services/`:
 `pipelineService`, `financingCalculatorService`, `propertyComparatorService`, `closeProbabilityService`, `visitManagementService`, `offerTrackingService`, `smartAlertsService`, `marketIntelligenceService`, `customerValueService`, `referralService`, `cotizacionService`, `developmentFunnelService`, `observabilityService`, `pdfReportService`, `webhookService`, `cacheService`, `retellService`, `ttsService`, `surveyService`, `messageQueueService`, `retryQueueService`
@@ -129,6 +129,10 @@ Status aliases: `visit_scheduled`→`scheduled`, `negotiating`→`negotiation`, 
 
 ### 2. Bridge (Chat Directo)
 CEO/Vendedor: `bridge [nombre]` → 6 min → `#cerrar` / `#mas`
+**Bridge rápido:** Vendedor/CEO responde `1` dentro de 30 min de notificación de lead → activa bridge automáticamente
+
+### 2b. Notificación Combinada al Vendedor
+Cuando un lead escribe → `whatsapp.ts` guarda `ultimo_lead_notificado` en notes del vendedor → `aiConversationService.ts` envía UNA notificación combinada (mensaje lead + respuesta SARA + opción bridge "1") via `enviarMensajeTeamMember` con `pending_alerta_lead`. Elimina race condition de notas.
 
 ### 3. Crédito Hipotecario
 Lead pregunta crédito → SARA califica → Asigna asesor + notifica vendedor original + asesor via `enviarMensajeTeamMember`. AMBOS reciben recordatorios 24h y 2h.
@@ -259,7 +263,7 @@ sara-backend-cloudflare/
 │   ├── index.ts              # Router principal (~3.6K líneas)
 │   ├── handlers/             # WhatsApp handlers por rol (7 archivos)
 │   ├── crons/                # Módulos CRON (10 archivos)
-│   ├── services/             # 89+ servicios
+│   ├── services/             # 97+ servicios
 │   ├── routes/               # API routes (api-core, api-bi, retell, test)
 │   ├── utils/                # Helpers (teamMessaging, safeHelpers, uxHelpers)
 │   └── tests/                # 32 archivos de test
@@ -337,8 +341,8 @@ npx wrangler deploy      # Re-deploy
 
 | Métrica | Valor |
 |---------|-------|
-| Tests | 1107 (33 archivos) |
-| Servicios | 89+ |
+| Tests | 1684 (42 archivos) |
+| Servicios | 97+ |
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 32+ |
 | Templates WA | 6 (3 equipo + 3 carousel) |
