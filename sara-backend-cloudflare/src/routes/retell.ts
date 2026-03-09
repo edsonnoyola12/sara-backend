@@ -1881,10 +1881,16 @@ CASOS ESPECIALES:
                       // Retry 1: en 3 horas
                       retryAfter = new Date(ahora.getTime() + 3 * 60 * 60 * 1000).toISOString();
                     } else {
-                      // Retry 2: mañana 10am MX (UTC-6 = 16:00 UTC)
+                      // Retry 2: mañana a hora óptima del lead (smart scheduling)
+                      const horasAct = retryNotes.horas_actividad as number[] | undefined;
+                      let horaRetry = 10; // default 10am MX
+                      if (horasAct && horasAct.length >= 3) {
+                        const sorted = [...horasAct].sort((a, b) => a - b);
+                        horaRetry = Math.max(8, Math.min(19, sorted[Math.floor(sorted.length / 2)]));
+                      }
                       const manana = new Date(ahora);
                       manana.setDate(manana.getDate() + 1);
-                      manana.setUTCHours(16, 0, 0, 0); // 10am MX
+                      manana.setUTCHours(horaRetry + 6, 0, 0, 0); // hora MX + 6 = UTC
                       retryAfter = manana.toISOString();
                     }
 
@@ -2364,58 +2370,100 @@ Reglas de fecha:
                 const desarrolloInteres = isSentinel(desarrolloInteresRaw) ? '' : desarrolloInteresRaw;
 
                 if (ventanaAbierta) {
-                  // VENTANA ABIERTA → enviar mensajes directos
-                  const primerNombre = lead?.name ? ' ' + lead.name.split(' ')[0] : '';
-                  let mensajeFollowUp = `¡Hola${primerNombre}! 👋\n\n`;
-                  if (isInbound) {
-                    mensajeFollowUp += `Soy Sara de Grupo Santa Rita. ¡Gracias por llamarnos! `;
-                  } else {
-                    mensajeFollowUp += `Soy Sara de Grupo Santa Rita. Gracias por la llamada. `;
-                  }
-                  // Use ALL developments from transcript, not just one
+                  // VENTANA ABIERTA → enviar mensaje personalizado con Claude
+                  const primerNombre = lead?.name ? lead.name.split(' ')[0] : '';
+
+                  // Collect ALL developments mentioned
                   const desarrollosMencionados = todosDesarrollosTranscript.length > 0
                     ? [...todosDesarrollosTranscript]
                     : (desarrolloInteres ? [desarrolloInteres] : []);
 
                   // Merge in developments from KV queue (saved by enviar_info_whatsapp tool during call)
-                  // VALIDATE against known developments to avoid "Zacatecas" etc.
                   try {
                     if (call.call_id && env.SARA_CACHE) {
                       const kvQueueRaw = await env.SARA_CACHE.get(`retell_send_queue:${call.call_id}`);
                       if (kvQueueRaw) {
                         const kvDevs: string[] = JSON.parse(kvQueueRaw);
                         for (const kvDev of kvDevs) {
-                          if (isSentinel(kvDev)) continue; // Skip sentinel values
-                          // Double-check: only merge if it matches a known development
+                          if (isSentinel(kvDev)) continue;
                           const kvDevNorm = normDev(kvDev);
                           const esConocido = desarrollosConocidos.some(d => kvDevNorm.includes(d) || d.includes(kvDevNorm));
-                          // Dedup with normalized comparison
                           const yaExiste = desarrollosMencionados.some((d: string) => normDev(d) === kvDevNorm);
                           if (esConocido && !yaExiste) {
                             desarrollosMencionados.push(kvDev);
-                          } else if (!esConocido) {
-                            console.log(`⚠️ KV queue: "${kvDev}" filtrado (no es desarrollo conocido)`);
                           }
                         }
-                        // NOTE: Do NOT delete KV here — the outside block reads it too
-                        console.log(`📋 KV queue merged for greeting: total: ${desarrollosMencionados.join(', ')}`);
                       }
                     }
                   } catch (kvMergeErr) { /* ignore KV errors */ }
 
-                  // Filter sentinels from greeting list
                   const devsParaGreeting = desarrollosMencionados.filter((d: string) => !isSentinel(d));
-                  if (devsParaGreeting.length > 1) {
-                    // Proper Spanish: "A, B y C" instead of "A y B y C"
-                    const last = devsParaGreeting.pop()!;
-                    mensajeFollowUp += `Me da gusto que te interesen *${devsParaGreeting.join('*, *')}* y *${last}*. `;
-                  } else if (devsParaGreeting.length === 1) {
-                    mensajeFollowUp += `Me da gusto que te interese *${devsParaGreeting[0]}*. `;
-                  }
-                  mensajeFollowUp += `\n\nTe comparto información por aquí para que la revises con calma. `;
-                  mensajeFollowUp += `Si tienes cualquier duda, aquí estoy para ayudarte. 🏠`;
 
-                  debugLog.push({ t: Date.now(), step: 'sending_whatsapp', desarrollos: desarrollosMencionados, ventana: 'abierta' });
+                  // Generate personalized follow-up with Claude based on call transcript
+                  let mensajeFollowUp = '';
+                  try {
+                    const resumenLlamada = call.call_analysis?.summary || '';
+                    const sentimiento = call.call_analysis?.user_sentiment || 'Neutral';
+                    const callOutcomeWA = determinarOutcome(call);
+
+                    // Build transcript snippet (last 5 exchanges max, ~500 chars)
+                    let snippetTranscript = '';
+                    if (call.transcript) {
+                      const entries = Array.isArray(call.transcript) ? call.transcript : [];
+                      const lastExchanges = entries.slice(-10);
+                      snippetTranscript = lastExchanges.map((e: any) => `${e.role === 'agent' ? 'SARA' : 'Lead'}: ${e.content}`).join('\n').substring(0, 600);
+                    }
+
+                    const claudeFollowUp = new ClaudeService(env.ANTHROPIC_API_KEY);
+                    const followUpPrompt = `Genera un mensaje de WhatsApp de seguimiento post-llamada telefónica. Eres SARA de Grupo Santa Rita (inmobiliaria en Zacatecas, México).
+
+DATOS DE LA LLAMADA:
+- Nombre del lead: ${primerNombre || 'cliente'}
+- Dirección: ${isInbound ? 'El lead NOS llamó' : 'Nosotros LE llamamos'}
+- Resultado: ${callOutcomeWA}
+- Sentimiento: ${sentimiento}
+- Desarrollos mencionados: ${devsParaGreeting.join(', ') || 'ninguno específico'}
+- Resumen: ${resumenLlamada || 'No disponible'}
+
+ÚLTIMOS INTERCAMBIOS:
+${snippetTranscript || 'No disponible'}
+
+REGLAS ESTRICTAS:
+1. Máximo 3 oraciones cortas. Tono cálido, natural, mexicano
+2. Usa "tú" no "usted"
+3. Menciona algo ESPECÍFICO de la conversación (no genérico)
+4. Si se habló de un desarrollo, menciónalo por nombre
+5. Si quedaron dudas específicas, refiérelas
+6. Termina con oferta de ayuda natural
+7. NO uses "Estimado/a", NO seas corporativo
+8. Usa máximo 1-2 emojis
+9. NO incluyas "Soy Sara de Grupo Santa Rita" (ya saben quién es)
+10. Si el outcome es not_interested, sé breve y respetuoso: "Gracias por tu tiempo, cualquier cosa aquí estamos"
+11. Empieza con "¡Hola ${primerNombre || ''}!" o similar
+
+Responde SOLO con el mensaje, sin comillas ni formato adicional.`;
+
+                    mensajeFollowUp = await claudeFollowUp.chat([{ role: 'user', content: followUpPrompt }]);
+                    // Sanitize: remove any markdown quotes or extra formatting
+                    mensajeFollowUp = mensajeFollowUp.replace(/^["'`]+|["'`]+$/g, '').trim();
+                    console.log(`🤖 Follow-up personalizado generado (${mensajeFollowUp.length} chars)`);
+                  } catch (aiErr: any) {
+                    console.log(`⚠️ Claude follow-up falló, usando fallback: ${aiErr.message}`);
+                    // Fallback to original template
+                    mensajeFollowUp = `¡Hola${primerNombre ? ' ' + primerNombre : ''}! 👋\n\n`;
+                    mensajeFollowUp += isInbound
+                      ? `Soy Sara de Grupo Santa Rita. ¡Gracias por llamarnos! `
+                      : `Soy Sara de Grupo Santa Rita. Gracias por la llamada. `;
+                    if (devsParaGreeting.length > 1) {
+                      const last = devsParaGreeting.pop()!;
+                      mensajeFollowUp += `Me da gusto que te interesen *${devsParaGreeting.join('*, *')}* y *${last}*. `;
+                    } else if (devsParaGreeting.length === 1) {
+                      mensajeFollowUp += `Me da gusto que te interese *${devsParaGreeting[0]}*. `;
+                    }
+                    mensajeFollowUp += `\n\nTe comparto información por aquí para que la revises con calma. Si tienes cualquier duda, aquí estoy para ayudarte. 🏠`;
+                  }
+
+                  debugLog.push({ t: Date.now(), step: 'sending_whatsapp', desarrollos: desarrollosMencionados, ventana: 'abierta', ai_generated: true });
                   await meta.sendWhatsAppMessage(leadPhone, mensajeFollowUp);
                   debugLog.push({ t: Date.now(), step: 'whatsapp_sent_ok' });
                   console.log(`📱 WhatsApp directo enviado a ${leadPhone}`);
@@ -2792,6 +2840,57 @@ Reglas de fecha:
         } catch (kvErr) { /* ignore */ }
         try { await logErrorToDB(supabase, 'retell_webhook_error', error?.message || String(error), { severity: 'critical', source: 'retell.ts', stack: error?.stack?.substring(0, 1000), context: { url: url.pathname } }); } catch {}
         return new Response('OK', { status: 200 });
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // API: Motivos Retell (CRUD dinámico sin deploy)
+    // GET /api/retell-motivos?api_key=XXX → lista todos los motivos
+    // PUT /api/retell-motivos?api_key=XXX → { motivo, instrucciones } actualiza uno
+    // DELETE /api/retell-motivos?api_key=XXX&motivo=X → reset a default
+    // ═══════════════════════════════════════════════════════════════
+    if (url.pathname === '/api/retell-motivos' && request.method === 'GET') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+      try {
+        const { getAllMotivos } = await import('../services/retellService');
+        const motivos = await getAllMotivos(env.SARA_CACHE);
+        return corsResponse(JSON.stringify({ ok: true, motivos }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
+      }
+    }
+
+    if (url.pathname === '/api/retell-motivos' && request.method === 'PUT') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+      try {
+        const body = await request.json() as any;
+        const { motivo, instrucciones } = body;
+        if (!motivo || !instrucciones) {
+          return corsResponse(JSON.stringify({ ok: false, error: 'motivo e instrucciones son requeridos' }), 400);
+        }
+        await env.SARA_CACHE.put(`retell_motivo:${motivo}`, instrucciones, { expirationTtl: 86400 * 365 });
+        console.log(`✏️ Motivo Retell "${motivo}" actualizado en KV (${instrucciones.length} chars)`);
+        return corsResponse(JSON.stringify({ ok: true, motivo, updated: true }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
+      }
+    }
+
+    if (url.pathname === '/api/retell-motivos' && request.method === 'DELETE') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+      try {
+        const motivo = url.searchParams.get('motivo');
+        if (!motivo) {
+          return corsResponse(JSON.stringify({ ok: false, error: 'motivo query param requerido' }), 400);
+        }
+        await env.SARA_CACHE.delete(`retell_motivo:${motivo}`);
+        console.log(`🗑️ Motivo Retell "${motivo}" reseteado a default (KV override eliminado)`);
+        return corsResponse(JSON.stringify({ ok: true, motivo, reset_to_default: true }));
+      } catch (e: any) {
+        return corsResponse(JSON.stringify({ ok: false, error: e.message }), 500);
       }
     }
 

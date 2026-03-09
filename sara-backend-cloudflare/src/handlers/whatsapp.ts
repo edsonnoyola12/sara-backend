@@ -431,6 +431,30 @@ export class WhatsAppHandler {
       }
 
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // TRACKEAR HORA DE ACTIVIDAD DEL LEAD (para smart scheduling)
+      // Guarda la hora MX del último mensaje para ajustar llamadas
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      if (lead?.id) {
+        try {
+          const { getMexicoNow } = await import('./whatsapp-utils');
+          const mxNow = getMexicoNow();
+          const horaMx = mxNow.getHours();
+          // Re-read fresh notes
+          const { data: horaLead } = await this.supabase.client
+            .from('leads').select('notes').eq('id', lead.id).single();
+          if (horaLead) {
+            const hn = typeof horaLead.notes === 'object' ? (horaLead.notes || {}) : {};
+            const horas: number[] = (hn as any).horas_actividad || [];
+            horas.push(horaMx);
+            // Keep last 10 data points
+            if (horas.length > 10) horas.splice(0, horas.length - 10);
+            (hn as any).horas_actividad = horas;
+            await this.supabase.client.from('leads').update({ notes: hn }).eq('id', lead.id);
+          }
+        } catch (_) { /* non-critical */ }
+      }
+
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
       // 📲 NOTIFICACIÓN EN TIEMPO REAL AL VENDEDOR (lead respondió)
       // Solo si: tiene vendedor asignado, no es mensaje corto/automatizado
       // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

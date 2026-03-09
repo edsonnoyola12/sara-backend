@@ -2471,7 +2471,8 @@ export async function llamadasSeguimientoPostVisita(
           leadPhone: lead.phone,
           vendorId: lead.assigned_to,
           desarrolloInteres: desarrolloInteres,
-          motivo: 'seguimiento'
+          motivo: 'seguimiento',
+          kvCache: env.SARA_CACHE
         });
 
         if (result.success) {
@@ -2599,7 +2600,8 @@ export async function llamadasReactivacionLeadsFrios(
           leadPhone: lead.phone,
           vendorId: lead.assigned_to,
           desarrolloInteres: lead.property_interest || (notes as any).desarrollo_interes || '',
-          motivo: 'seguimiento'
+          motivo: 'seguimiento',
+          kvCache: env.SARA_CACHE
         });
 
         if (result.success) {
@@ -2708,7 +2710,8 @@ export async function llamadasRecordatorioCita(
           vendorId: cita.vendedor_id,
           desarrolloInteres: cita.property_name || '',
           motivo: 'recordatorio_cita',
-          notas: `Cita mañana a las ${cita.scheduled_time}`
+          notas: `Cita mañana a las ${cita.scheduled_time}`,
+          kvCache: env.SARA_CACHE
         });
 
         if (result.success) {
@@ -2853,7 +2856,8 @@ export async function llamadasEscalamiento48h(
           vendorId: lead.assigned_to,
           desarrolloInteres: desarrolloInteres,
           motivo: 'seguimiento',
-          notas: 'Escalamiento 48h - lead no respondió WhatsApp'
+          notas: 'Escalamiento 48h - lead no respondió WhatsApp',
+          kvCache: env.SARA_CACHE
         });
 
         if (result.success) {
@@ -2991,7 +2995,8 @@ export async function reintentarLlamadasSinRespuesta(
           leadPhone: lead.phone,
           vendorId: lead.assigned_to,
           desarrolloInteres,
-          motivo
+          motivo,
+          kvCache: env.SARA_CACHE
         });
 
         if (result.success) {
@@ -3116,7 +3121,20 @@ const CADENCIAS: Record<TipoCadencia, PasoCadencia[]> = {
   ],
 };
 
-function computeProximaAccion(tipo: TipoCadencia, pasoActual: number, inicioISO: string): string | null {
+/**
+ * Calcula la hora óptima para contactar al lead basado en su historial de actividad.
+ * Usa la mediana de horas_actividad clamped a business hours (8-19 MX).
+ * Si no hay datos, usa el default del paso.
+ */
+function getHoraOptima(horasActividad: number[] | undefined, defaultHora: number): number {
+  if (!horasActividad || horasActividad.length < 3) return defaultHora; // need min 3 data points
+  const sorted = [...horasActividad].sort((a, b) => a - b);
+  const mediana = sorted[Math.floor(sorted.length / 2)];
+  // Clamp to business hours: 8am - 7pm MX
+  return Math.max(8, Math.min(19, mediana));
+}
+
+function computeProximaAccion(tipo: TipoCadencia, pasoActual: number, inicioISO: string, horasActividad?: number[]): string | null {
   const pasos = CADENCIAS[tipo];
   if (pasoActual >= pasos.length) return null; // Cadencia completada
 
@@ -3124,8 +3142,14 @@ function computeProximaAccion(tipo: TipoCadencia, pasoActual: number, inicioISO:
   const inicio = new Date(inicioISO);
   const target = new Date(inicio);
   target.setDate(target.getDate() + paso.dia);
-  // Hora MX = UTC-6 → target UTC hour = paso.hora + 6
-  target.setUTCHours(paso.hora + 6, 0, 0, 0);
+
+  // Smart scheduling: usar hora de actividad del lead para llamadas, default para WA
+  const hora = paso.accion === 'llamada'
+    ? getHoraOptima(horasActividad, paso.hora)
+    : paso.hora;
+
+  // Hora MX = UTC-6 → target UTC hour = hora + 6
+  target.setUTCHours(hora + 6, 0, 0, 0);
 
   return target.toISOString();
 }
@@ -3174,7 +3198,7 @@ export async function activarCadenciasAutomaticas(
       if ((notes as any).do_not_contact || (notes as any).no_contactar) continue;
 
       const inicioISO = ahora.toISOString();
-      const proxima = computeProximaAccion('lead_nuevo', 0, inicioISO);
+      const proxima = computeProximaAccion('lead_nuevo', 0, inicioISO, (notes as any).horas_actividad);
       if (!proxima) continue;
 
       (notes as any).cadencia = {
@@ -3207,7 +3231,7 @@ export async function activarCadenciasAutomaticas(
       if ((notes as any).do_not_contact || (notes as any).no_contactar) continue;
 
       const inicioISO = ahora.toISOString();
-      const proxima = computeProximaAccion('lead_frio', 0, inicioISO);
+      const proxima = computeProximaAccion('lead_frio', 0, inicioISO, (notes as any).horas_actividad);
       if (!proxima) continue;
 
       (notes as any).cadencia = {
@@ -3240,7 +3264,7 @@ export async function activarCadenciasAutomaticas(
       if ((notes as any).do_not_contact || (notes as any).no_contactar) continue;
 
       const inicioISO = ahora.toISOString();
-      const proxima = computeProximaAccion('post_visita', 0, inicioISO);
+      const proxima = computeProximaAccion('post_visita', 0, inicioISO, (notes as any).horas_actividad);
       if (!proxima) continue;
 
       (notes as any).cadencia = {
@@ -3283,7 +3307,7 @@ export async function activarCadenciasAutomaticas(
       if (!citasPasadas || citasPasadas.length === 0) continue;
 
       const inicioISO = ahora.toISOString();
-      const proxima = computeProximaAccion('no_show', 0, inicioISO);
+      const proxima = computeProximaAccion('no_show', 0, inicioISO, (notes as any).horas_actividad);
       if (!proxima) continue;
 
       (notes as any).cadencia = {
@@ -3313,7 +3337,7 @@ export async function activarCadenciasAutomaticas(
       if ((notes as any).do_not_contact || (notes as any).no_contactar) continue;
 
       const inicioISO = ahora.toISOString();
-      const proxima = computeProximaAccion('negociacion_estancada', 0, inicioISO);
+      const proxima = computeProximaAccion('negociacion_estancada', 0, inicioISO, (notes as any).horas_actividad);
       if (!proxima) continue;
 
       (notes as any).cadencia = {
@@ -3341,7 +3365,7 @@ export async function activarCadenciasAutomaticas(
       if ((notes as any).do_not_contact || (notes as any).no_contactar) continue;
 
       const inicioISO = ahora.toISOString();
-      const proxima = computeProximaAccion('apartado_sin_cierre', 0, inicioISO);
+      const proxima = computeProximaAccion('apartado_sin_cierre', 0, inicioISO, (notes as any).horas_actividad);
       if (!proxima) continue;
 
       (notes as any).cadencia = {
@@ -3466,7 +3490,8 @@ export async function ejecutarCadenciasInteligentes(
 
         // Mark-before-send: avanzar paso_actual ANTES de ejecutar
         const nextPasoIdx = pasoIdx + 1;
-        const proximaAccion = computeProximaAccion(tipo, nextPasoIdx, cadencia.inicio);
+        const horasActividad = (notes as any).horas_actividad as number[] | undefined;
+        const proximaAccion = computeProximaAccion(tipo, nextPasoIdx, cadencia.inicio, horasActividad);
 
         (notes as any).cadencia = {
           ...cadencia,
@@ -3531,7 +3556,8 @@ export async function ejecutarCadenciasInteligentes(
             leadPhone: lead.phone,
             vendorId: lead.assigned_to,
             desarrolloInteres,
-            motivo: paso.motivo || 'seguimiento'
+            motivo: paso.motivo || 'seguimiento',
+            kvCache: env.SARA_CACHE
           });
 
           if (result.success) {
