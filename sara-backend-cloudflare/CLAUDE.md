@@ -1,6 +1,6 @@
 # SARA CRM - Referencia para Claude Code
 
-> Última actualización: 2026-03-08 (Sesión 87)
+> Última actualización: 2026-03-08 (Sesión 88)
 > Historial detallado de cambios: `docs/CHANGELOG.md`
 
 ---
@@ -170,10 +170,12 @@ Pending se verifican PRIMERO en handlers de vendedor y CEO, ANTES de cualquier o
 **Al equipo:** Si ventana cerrada y mensaje CRÍTICO → llamar inmediatamente. NORMAL → template, llamar después de 2h.
 **Entrantes:** Llamadas al +524923860066 → SARA contesta, reconoce lead por teléfono.
 
-14+ motivos context-aware con instrucciones específicas por tipo de llamada.
+14+ motivos context-aware con instrucciones específicas por tipo de llamada. **Motivos dinámicos:** KV key `retell_motivo:{motivo}` override sin deploy. CRUD API: `GET/PUT/DELETE /api/retell-motivos`.
 9 herramientas in-call (buscar info, agendar/cancelar/cambiar cita, enviar WhatsApp, crédito, presupuesto).
 Feature flag: `retell_enabled` en KV (controlable via `/api/flags`). Todos los CRONs y el comando manual lo respetan.
-**Retry automático:** Si nadie contesta → reintento en 3h (intento 1) o mañana 10am (intento 2). Max 2 reintentos.
+**Retry automático:** Si nadie contesta → reintento en 3h (intento 1) o mañana a hora óptima del lead (intento 2). Max 2 reintentos.
+**Smart scheduling:** `notes.horas_actividad[]` trackea horas MX de mensajes del lead (últimas 10). Llamadas de cadencia/retry usan mediana clamped a 8am-7pm MX.
+**Post-call WA personalizado:** Claude genera follow-up basado en transcript, outcome y temas discutidos. Fallback a template si falla.
 **Dashboard:** CEO comando `llamadas` → métricas mensuales (outcomes, sentimiento, conversión, top vendedores).
 **Cadencia inteligente:** Secuencia multi-paso WhatsApp + llamada IA (6 tipos: lead_nuevo, lead_frio, post_visita, no_show, negociacion_estancada, apartado_sin_cierre). Flag: `cadencia_inteligente`. Se detiene automáticamente si: lead responde WA, lead contesta llamada (exitosa/no interesado), o cadencia completa.
 
