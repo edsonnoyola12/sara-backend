@@ -3704,7 +3704,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         if (citaActiva?.assigned_to) {
           const { data: vendedor } = await this.supabase.client
             .from('team_members')
-            .select('id, name, phone')
+            .select('id, name, phone, notes')
             .eq('id', citaActiva.assigned_to)
             .limit(1);
           vendedorCita = vendedor && vendedor.length > 0 ? vendedor[0] : null;
@@ -6382,7 +6382,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
           try {
             const { data: vendedorAsignado } = await this.supabase.client
               .from('team_members')
-              .select('id, name, phone')
+              .select('id, name, phone, notes')
               .eq('id', lead.assigned_to)
               .single();
 
@@ -6772,7 +6772,7 @@ Lo mejor es que vengas a conocer las casas y en la visita te ayudamos con todo e
       try {
         const { data: asesorData } = await this.supabase.client
           .from('team_members')
-          .select('id, name, phone')
+          .select('id, name, phone, notes')
           .eq('role', 'asesor')
           .eq('active', true)
           .limit(1);

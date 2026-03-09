@@ -120,8 +120,17 @@ export async function enviarMensajeTeamMember(
   const prioridad = opciones?.prioridad || PRIORITY_CONFIG[tipoMensaje] || 'bajo';
 
   try {
-    // 1. Obtener notas actuales
-    const notasActuales = safeJsonParse(teamMember.notes);
+    // 1. Obtener notas actuales — SIEMPRE re-leer de DB para evitar stale/missing notes
+    let notasActuales: any;
+    if (teamMember.notes !== undefined && teamMember.notes !== null) {
+      notasActuales = safeJsonParse(teamMember.notes);
+    } else {
+      // notes not included in select — re-read from DB
+      const { data: freshTm } = await supabase.client
+        .from('team_members').select('notes').eq('id', teamMember.id).single();
+      notasActuales = safeJsonParse(freshTm?.notes);
+      console.log(`   ⚠️ enviarMensajeTeamMember: notes was missing, re-read from DB (keys: ${Object.keys(notasActuales).join(',')})`);
+    }
 
     // 2. Verificar ventana 24h
     const lastInteraction = notasActuales.last_sara_interaction;
