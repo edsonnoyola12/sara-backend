@@ -165,7 +165,7 @@ export async function enviarMensajeTeamMember(
             { wamid, sent_at: new Date().toISOString(), tipo: tipoMensaje }
           ];
           const { error: wamidError } = await supabase.client.from('team_members').update({
-            notes: JSON.stringify(notasActuales)
+            notes: notasActuales
           }).eq('id', teamMember.id);
           if (wamidError) {
             console.error(`   ⚠️ Error guardando wamid en notes:`, wamidError);
@@ -357,7 +357,7 @@ async function guardarMensajePending(
 
   const { error: pendingError } = await supabase.client
     .from('team_members')
-    .update({ notes: JSON.stringify(nuevasNotas) })
+    .update({ notes: nuevasNotas })
     .eq('id', teamMemberId);
 
   if (pendingError) {
