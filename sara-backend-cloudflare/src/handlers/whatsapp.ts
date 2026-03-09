@@ -447,7 +447,12 @@ export class WhatsAppHandler {
               .single();
 
             if (vendedorAsignado?.phone) {
-              const vendedorNotes = typeof vendedorAsignado.notes === 'object' ? vendedorAsignado.notes : {};
+              let vendedorNotes: any = {};
+              if (typeof vendedorAsignado.notes === 'object' && vendedorAsignado.notes !== null) {
+                vendedorNotes = vendedorAsignado.notes;
+              } else if (typeof vendedorAsignado.notes === 'string') {
+                try { vendedorNotes = JSON.parse(vendedorAsignado.notes); } catch { vendedorNotes = {}; }
+              }
               const notificacionesActivas = vendedorNotes.notificaciones_lead_responde !== false;
               const ultimaNotif = vendedorNotes.ultima_notif_lead_responde;
               const hace5min = Date.now() - 5 * 60 * 1000;
