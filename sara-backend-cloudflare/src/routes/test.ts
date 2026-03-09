@@ -4157,6 +4157,62 @@ Mensaje: ${mensaje}`;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // TEST CALENDAR — Crear evento de prueba y verificar que funciona
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-calendar') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+      const results: any = {};
+
+      // 1. Test: list upcoming events
+      try {
+        const now = new Date();
+        const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const events = await calendar.getEvents(now.toISOString(), nextWeek.toISOString(), 5);
+        results.list = { ok: true, count: events.length, events: events.map((e: any) => ({ summary: e.summary, start: e.start?.dateTime, id: e.id })) };
+      } catch (e: any) {
+        results.list = { ok: false, error: e.message };
+      }
+
+      // 2. Test: create a test event (tomorrow 10am-11am Mexico time)
+      const action = url.searchParams.get('action');
+      if (action === 'create') {
+        try {
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          const startStr = `${tomorrow.toISOString().split('T')[0]}T10:00:00-06:00`;
+          const endStr = `${tomorrow.toISOString().split('T')[0]}T11:00:00-06:00`;
+          const event = await calendar.createEvent({
+            summary: '🧪 TEST SARA — Cita de prueba (borrar)',
+            description: 'Evento de prueba creado por /test-calendar. Puedes borrarlo.',
+            start: { dateTime: startStr, timeZone: 'America/Mexico_City' },
+            end: { dateTime: endStr, timeZone: 'America/Mexico_City' },
+          });
+          results.create = { ok: true, eventId: event.id, link: event.htmlLink };
+        } catch (e: any) {
+          results.create = { ok: false, error: e.message };
+        }
+      }
+
+      // 3. Test: delete a test event
+      if (action === 'delete') {
+        const eventId = url.searchParams.get('event_id');
+        if (eventId) {
+          try {
+            await calendar.deleteEvent(eventId);
+            results.delete = { ok: true, deleted: eventId };
+          } catch (e: any) {
+            results.delete = { ok: false, error: e.message };
+          }
+        }
+      }
+
+      return corsResponse(JSON.stringify(results, null, 2));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // CHECKLIST PRE-VUELO — Verificación de columna vertebral de SARA
     // Like a pilot's pre-flight checklist: verifies REAL production systems
     // ═══════════════════════════════════════════════════════════════════════
@@ -4299,7 +4355,20 @@ Mensaje: ${mensaje}`;
         return { ok: true, detail: `Agente "${agent.agent_name || env.RETELL_AGENT_ID}" activo` };
       });
 
-      // ── 10. Brochures: all developments have properties with prices in DB ──
+      // ── 10. Google Calendar: can list events ──
+      await runCheck('Google Calendar: API funciona', async () => {
+        try {
+          const cal = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+          const now = new Date();
+          const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+          const events = await cal.getEvents(now.toISOString(), nextWeek.toISOString(), 5);
+          return { ok: true, detail: `API OK, ${events.length} eventos próxima semana` };
+        } catch (e: any) {
+          return { ok: false, detail: `Calendar error: ${e.message}` };
+        }
+      });
+
+      // ── 11. Brochures: all developments have properties with prices in DB ──
       await runCheck('Brochures: Datos por desarrollo', async () => {
         const expectedDevs = ['Monte Verde', 'Andes', 'Distrito Falco', 'Los Encinos', 'Miravalle', 'Paseo Colorines', 'Alpes'];
         const { data: allProps } = await supabase.client
