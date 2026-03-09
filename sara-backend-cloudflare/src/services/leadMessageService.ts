@@ -1090,6 +1090,18 @@ export class LeadMessageService {
         at: new Date().toISOString()
       };
 
+      // Si respondió a un mensaje de cadencia, DETENER la cadencia
+      if (tipoMensaje.startsWith('cadencia_') && newNotes.cadencia?.activa) {
+        console.log(`🛑 Cadencia ${newNotes.cadencia.tipo} detenida: lead ${lead.name} respondió con solicitud`);
+        newNotes.cadencia = {
+          ...newNotes.cadencia,
+          activa: false,
+          motivo_fin: 'lead_respondio',
+          respondio_en_paso: newNotes.cadencia.paso_actual,
+          respondio_at: new Date().toISOString()
+        };
+      }
+
       // Pasar a la IA pero con contexto de que es un lead reactivado
       return {
         action: 'continue_to_ai',
@@ -1514,6 +1526,19 @@ export class LeadMessageService {
       response: body.substring(0, 200),
       responded_at: new Date().toISOString()
     };
+
+    // Si respondió a un mensaje de cadencia, DETENER la cadencia
+    // El lead ya está activo — no tiene sentido seguir con pasos automáticos
+    if (tipoMensaje.startsWith('cadencia_') && newNotes.cadencia?.activa) {
+      console.log(`🛑 Cadencia ${newNotes.cadencia.tipo} detenida: lead ${lead.name} respondió`);
+      newNotes.cadencia = {
+        ...newNotes.cadencia,
+        activa: false,
+        motivo_fin: 'lead_respondio',
+        respondio_en_paso: newNotes.cadencia.paso_actual,
+        respondio_at: new Date().toISOString()
+      };
+    }
 
     return {
       action: 'handled',

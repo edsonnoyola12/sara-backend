@@ -1840,6 +1840,21 @@ CASOS ESPECIALES:
                 console.log(`🏠 Actualizado property_interest: ${desarrolloFinal}`);
               }
 
+              // ═══ DETENER CADENCIA SI LA LLAMADA CONECTÓ ═══
+              // Si el lead habló (exitosa o no interesado), la cadencia cumplió su propósito
+              const callOutcomeForCadencia = determinarOutcome(call);
+              if (['successful', 'not_interested'].includes(callOutcomeForCadencia) && notesObj.cadencia?.activa) {
+                const motivoFin = callOutcomeForCadencia === 'not_interested' ? 'no_interesado_llamada' : 'llamada_exitosa';
+                notesObj.cadencia = {
+                  ...notesObj.cadencia,
+                  activa: false,
+                  motivo_fin: motivoFin,
+                  respondio_en_paso: notesObj.cadencia.paso_actual,
+                  respondio_at: new Date().toISOString()
+                };
+                console.log(`🛑 Cadencia ${notesObj.cadencia.tipo} detenida: ${motivoFin} (lead ${lead.name})`);
+              }
+
               await supabase.client.from('leads').update(updateData).eq('id', lead.id);
               console.log(`📝 Nota de llamada agregada a lead ${lead.id}`);
 

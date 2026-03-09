@@ -9868,7 +9868,23 @@ _¡Éxito en ${mesesM[mesActualM]}!_ 🚀`;
       const { error } = await supabase.client.from('properties').update({ [field]: value }).eq('id', propId);
       if (error) return corsResponse(JSON.stringify({ error: error.message }), 500);
       const { data: updated } = await supabase.client.from('properties').select('name, ' + field).eq('id', propId).single();
-      return corsResponse(JSON.stringify({ ok: true, updated }));
+
+      // Si se actualizó precio, re-sync Retell automáticamente
+      let retellSync: any = null;
+      if ((field === 'price' || field === 'price_equipped') && env.RETELL_API_KEY) {
+        try {
+          const syncResp = await fetch(
+            `https://sara-backend.edson-633.workers.dev/configure-retell-tools?api_key=${env.API_SECRET}`
+          );
+          retellSync = { ok: syncResp.ok, status: syncResp.status };
+          console.log(`🤖 Retell auto-sync after price update: ${syncResp.ok ? '✅' : '❌'}`);
+        } catch (e: any) {
+          retellSync = { ok: false, error: e.message };
+          console.error('⚠️ Retell auto-sync failed:', e.message);
+        }
+      }
+
+      return corsResponse(JSON.stringify({ ok: true, updated, retell_sync: retellSync }));
     }
 
     // ═══════════════════════════════════════════════════════════════

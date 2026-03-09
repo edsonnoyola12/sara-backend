@@ -3058,7 +3058,7 @@ export async function reintentarLlamadasSinRespuesta(
 // CADENCIA INTELIGENTE - Secuencia multi-paso WhatsApp + Llamada IA
 // ═══════════════════════════════════════════════════════════════════════════
 
-type TipoCadencia = 'lead_nuevo' | 'lead_frio' | 'post_visita';
+type TipoCadencia = 'lead_nuevo' | 'lead_frio' | 'post_visita' | 'no_show' | 'negociacion_estancada' | 'apartado_sin_cierre';
 
 interface PasoCadencia {
   dia: number;        // días desde inicio de cadencia
@@ -3096,6 +3096,23 @@ const CADENCIAS: Record<TipoCadencia, PasoCadencia[]> = {
     { dia: 3, hora: 10, accion: 'llamada', motivo: 'encuesta', plantilla: 'Llamada de encuesta post-visita' },
     { dia: 5, hora: 16, accion: 'whatsapp', plantilla: '¡Hola {nombre}! Si te interesa, puedo prepararte una cotización personalizada con las mejores opciones de financiamiento. ¿Te gustaría? 📊' },
     { dia: 7, hora: 10, accion: 'llamada', motivo: 'seguimiento', plantilla: 'Llamada de seguimiento' },
+  ],
+  no_show: [
+    { dia: 0, hora: 16, accion: 'whatsapp', plantilla: '¡Hola {nombre}! Notamos que no pudiste asistir a tu cita. ¿Todo bien? Si quieres, podemos reagendar para otro día que te funcione mejor. 📅' },
+    { dia: 1, hora: 10, accion: 'llamada', motivo: 'seguimiento', plantilla: 'Llamada de seguimiento por no-show' },
+    { dia: 3, hora: 16, accion: 'whatsapp', plantilla: '¡Hola {nombre}! Las casas que ibas a conocer siguen disponibles. ¿Te gustaría reagendar tu visita? Estamos a tus tiempos. 🏡' },
+  ],
+  negociacion_estancada: [
+    { dia: 0, hora: 10, accion: 'whatsapp', plantilla: '¡Hola {nombre}! ¿Cómo vas con tu decisión? Si tienes alguna duda sobre financiamiento, precios o el proceso, con gusto te apoyo. 🏠' },
+    { dia: 2, hora: 10, accion: 'llamada', motivo: 'seguimiento', plantilla: 'Llamada de seguimiento negociación' },
+    { dia: 5, hora: 16, accion: 'whatsapp', plantilla: '¡Hola {nombre}! Te comento que los precios pueden ajustarse pronto. Si necesitas que te prepare una cotización actualizada o quieres platicar con tu asesor, avísame. 📋' },
+    { dia: 7, hora: 10, accion: 'llamada', motivo: 'seguimiento', plantilla: 'Llamada de cierre negociación' },
+  ],
+  apartado_sin_cierre: [
+    { dia: 0, hora: 10, accion: 'whatsapp', plantilla: '¡Hola {nombre}! Ya tienes tu casa apartada — ¡excelente decisión! 🎉 ¿Necesitas apoyo con el proceso de crédito o documentación para avanzar al cierre?' },
+    { dia: 3, hora: 10, accion: 'llamada', motivo: 'seguimiento', plantilla: 'Llamada seguimiento apartado' },
+    { dia: 7, hora: 16, accion: 'whatsapp', plantilla: '¡Hola {nombre}! Tu apartado sigue vigente. Si tienes dudas sobre los siguientes pasos o el crédito, estoy para ayudarte. ¿En qué te puedo apoyar? 📝' },
+    { dia: 10, hora: 10, accion: 'llamada', motivo: 'seguimiento', plantilla: 'Llamada urgente cierre apartado' },
   ],
 };
 
@@ -3237,6 +3254,104 @@ export async function activarCadenciasAutomaticas(
       await supabase.client.from('leads').update({ notes }).eq('id', lead.id);
       activadas++;
       console.log(`🎯 Cadencia post_visita activada para ${lead.name}`);
+    }
+
+    // ── NO SHOW: scheduled con cita pasada no completada ──
+    const hace1d = new Date(ahora.getTime() - 1 * 24 * 60 * 60 * 1000);
+    const hace14d = new Date(ahora.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+    const { data: leadsScheduled } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, status')
+      .eq('status', 'scheduled')
+      .lt('updated_at', hace1d.toISOString())
+      .gt('updated_at', hace14d.toISOString())
+      .limit(30);
+
+    for (const lead of (leadsScheduled || []).slice(0, 10)) {
+      const notes = typeof lead.notes === 'object' ? (lead.notes || {}) : {};
+      if ((notes as any).cadencia?.activa) continue;
+      if ((notes as any).do_not_contact || (notes as any).no_contactar) continue;
+      // Verificar que tiene cita pasada (no futura)
+      const { data: citasPasadas } = await supabase.client
+        .from('appointments')
+        .select('id')
+        .eq('lead_id', lead.id)
+        .lt('scheduled_date', ahora.toISOString().split('T')[0])
+        .in('status', ['scheduled', 'confirmed', 'no_show'])
+        .limit(1);
+      if (!citasPasadas || citasPasadas.length === 0) continue;
+
+      const inicioISO = ahora.toISOString();
+      const proxima = computeProximaAccion('no_show', 0, inicioISO);
+      if (!proxima) continue;
+
+      (notes as any).cadencia = {
+        activa: true, tipo: 'no_show', paso_actual: 0,
+        inicio: inicioISO, proxima_accion: proxima
+      } as CadenciaState;
+
+      await supabase.client.from('leads').update({ notes }).eq('id', lead.id);
+      activadas++;
+      console.log(`🎯 Cadencia no_show activada para ${lead.name}`);
+    }
+
+    // ── NEGOCIACIÓN ESTANCADA: negotiation, 5+ días sin update ──
+    const hace5d = new Date(ahora.getTime() - 5 * 24 * 60 * 60 * 1000);
+
+    const { data: leadsNegociacion } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, status')
+      .eq('status', 'negotiation')
+      .lt('updated_at', hace5d.toISOString())
+      .gt('updated_at', hace30d.toISOString())
+      .limit(30);
+
+    for (const lead of (leadsNegociacion || []).slice(0, 10)) {
+      const notes = typeof lead.notes === 'object' ? (lead.notes || {}) : {};
+      if ((notes as any).cadencia?.activa) continue;
+      if ((notes as any).do_not_contact || (notes as any).no_contactar) continue;
+
+      const inicioISO = ahora.toISOString();
+      const proxima = computeProximaAccion('negociacion_estancada', 0, inicioISO);
+      if (!proxima) continue;
+
+      (notes as any).cadencia = {
+        activa: true, tipo: 'negociacion_estancada', paso_actual: 0,
+        inicio: inicioISO, proxima_accion: proxima
+      } as CadenciaState;
+
+      await supabase.client.from('leads').update({ notes }).eq('id', lead.id);
+      activadas++;
+      console.log(`🎯 Cadencia negociacion_estancada activada para ${lead.name}`);
+    }
+
+    // ── APARTADO SIN CIERRE: reserved, 7+ días sin avance ──
+    const { data: leadsApartado } = await supabase.client
+      .from('leads')
+      .select('id, name, phone, notes, status')
+      .eq('status', 'reserved')
+      .lt('updated_at', hace7d.toISOString())
+      .gt('updated_at', hace30d.toISOString())
+      .limit(30);
+
+    for (const lead of (leadsApartado || []).slice(0, 10)) {
+      const notes = typeof lead.notes === 'object' ? (lead.notes || {}) : {};
+      if ((notes as any).cadencia?.activa) continue;
+      if ((notes as any).do_not_contact || (notes as any).no_contactar) continue;
+
+      const inicioISO = ahora.toISOString();
+      const proxima = computeProximaAccion('apartado_sin_cierre', 0, inicioISO);
+      if (!proxima) continue;
+
+      (notes as any).cadencia = {
+        activa: true, tipo: 'apartado_sin_cierre', paso_actual: 0,
+        inicio: inicioISO, proxima_accion: proxima
+      } as CadenciaState;
+
+      await supabase.client.from('leads').update({ notes }).eq('id', lead.id);
+      activadas++;
+      console.log(`🎯 Cadencia apartado_sin_cierre activada para ${lead.name}`);
     }
 
     console.log(`🎯 Cadencias activadas: ${activadas} total`);

@@ -414,10 +414,15 @@ export class WhatsAppHandler {
           if (freshCadLead) {
             const cadNotes = typeof freshCadLead.notes === 'object' ? (freshCadLead.notes || {}) : {};
             if ((cadNotes as any).cadencia?.activa) {
-              (cadNotes as any).cadencia.activa = false;
-              (cadNotes as any).cadencia.motivo_fin = 'lead_respondio';
+              (cadNotes as any).cadencia = {
+                ...(cadNotes as any).cadencia,
+                activa: false,
+                motivo_fin: 'lead_respondio',
+                respondio_en_paso: (cadNotes as any).cadencia.paso_actual,
+                respondio_at: new Date().toISOString()
+              };
               await this.supabase.client.from('leads').update({ notes: cadNotes }).eq('id', lead.id);
-              console.log(`🎵 Cadencia desactivada para ${lead.name} - lead respondió`);
+              console.log(`🎵 Cadencia ${(cadNotes as any).cadencia.tipo} detenida paso ${(cadNotes as any).cadencia.respondio_en_paso}: ${lead.name} respondió`);
             }
           }
         } catch (cadErr) {
