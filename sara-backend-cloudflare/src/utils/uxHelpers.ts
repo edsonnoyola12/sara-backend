@@ -201,7 +201,7 @@ export function getDesarrollosParaLista(): Array<{
       title: '💰 Económicos (desde $1.5M)',
       rows: [
         { id: 'dev_monteverde', title: 'Monte Verde', description: 'Colinas del Padre • 2-3 rec' },
-        { id: 'dev_andes', title: 'Priv. Andes', description: 'Guadalupe • ALBERCA • 2-3 rec' }
+        { id: 'dev_andes', title: 'Priv. Andes', description: 'Guadalupe • 2-3 rec' }
       ]
     },
     {

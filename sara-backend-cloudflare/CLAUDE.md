@@ -1,6 +1,6 @@
 # SARA CRM - Referencia para Claude Code
 
-> Última actualización: 2026-03-08 (Sesión 88)
+> Última actualización: 2026-03-09 (Sesión 89)
 > Historial detallado de cambios: `docs/CHANGELOG.md`
 
 ---
@@ -29,7 +29,7 @@
 # 1. Lee la documentación completa
 cat SARA_COMANDOS.md | head -500
 
-# 2. Verifica tests (OBLIGATORIO - 1684+ tests, 42 archivos)
+# 2. Verifica tests (OBLIGATORIO - 1685+ tests, 42 archivos)
 npm test
 
 # 3. Si falla algún test, NO hagas cambios
@@ -113,7 +113,7 @@ Oscar (CEO) tiene fallback a todos los roles: CEO → Asesor → Vendedor → Ma
 | **Citadella del Nogal (Guadalupe)** | Villa Campelo, Villa Galiano | TERRENOS |
 
 **Sinónimos:** "Citadella del Nogal" / "El Nogal" = Villa Campelo + Villa Galiano
-**Alberca:** SOLO Priv. Andes tiene alberca
+**Alberca:** NINGÚN desarrollo tiene alberca (corregido sesión 89)
 **Precios:** 100% dinámicos desde DB (`properties` table). 0 precios hardcodeados.
 **Tabla `properties`** NO tiene columna `active`. Todas se consideran activas.
 
@@ -312,6 +312,8 @@ npx wrangler tail --format=pretty           # Logs en tiempo real
 | `/test-retell-e2e?api_key=Y` | E2E Retell (25 tests) |
 | `/test-resilience-e2e?api_key=Y` | E2E Resilience (12 tests) |
 | `/test-carousel?phone=X&segment=Y&api_key=Z` | Carousel template |
+| `/checklist?api_key=Z` | Pre-flight checklist (13 checks: DB, precios, WA, Retell, IA, KV) |
+| `/run-price-increase?api_key=Z&force=1` | Forzar incremento mensual +0.5% |
 | `/run-health-monitor?api_key=Z` | Forzar health monitor |
 | `/run-backup?api_key=Z` | Forzar backup R2 |
 | `/api/leads`, `/api/team-members`, `/api/properties`, `/api/appointments` | APIs CRM (auth) |
@@ -343,15 +345,18 @@ npx wrangler deploy      # Re-deploy
 
 | Métrica | Valor |
 |---------|-------|
-| Tests | 1684 (42 archivos) |
+| Tests | 1685 (42 archivos) |
 | Servicios | 97+ |
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 32+ |
 | Templates WA | 6 (3 equipo + 3 carousel) |
 | Propiedades | 32 (9 desarrollos) |
-| Precios | 100% dinámicos (0 hardcoded) |
+| Precios | 100% dinámicos (0 hardcoded), +0.5%/mes automático día 1 12am, watchdog 8am |
 | WhatsApp UX | CTA buttons, reactions, contact cards |
 | Retell.ai | ACTIVADO — 9 tools, inbound +524923860066, flag unificado KV |
 | Inteligencia | Intent tagging, buyer readiness scoring, churn prediction, mortgage recovery |
+| Checklist | `/checklist` — 13 verificaciones producción (DB, precios, WA, Retell, IA, KV, fact validator) |
+| Watchdogs | Mensual (día 1 8am: retry precios), Semanal (lunes 7am: health check completo) → WhatsApp alert |
+| Alberca | NINGÚN desarrollo tiene alberca (fact validator corrige automáticamente) |
 | Resilience | Retry queue (backoff exponencial), mark-before-send, cache invalidation, AI fallback, KV dedup, fetch timeouts, atomic writes, error persistence, double-booking prevention, CRON overlap dedup |
 | Integraciones | Meta/WhatsApp ✅, Supabase ✅, Cloudflare ✅, Google Calendar ✅, Veo 3 ✅, Retell ✅ |

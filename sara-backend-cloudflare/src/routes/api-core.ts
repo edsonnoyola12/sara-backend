@@ -61,8 +61,7 @@ const DEV_CONFIG: Record<string, DevConfig> = {
     primaryColor: '#2d5a27',
     tagline: 'TU NUEVO HOGAR EN GUADALUPE',
     location: 'Vialidad Siglo XXI, Guadalupe, Zac.',
-    badge: '🏊 CON ALBERCA',
-    poiHtml: '<div class="poi-grid"><div><h4>🛒 Comercio</h4><ul><li>🏪 Walmart Siglo XXI - 5 min</li><li>🏬 Plaza Bicentenario - 10 min</li><li>🍽️ Restaurantes y cafés</li></ul></div><div><h4>🏥 Salud</h4><ul><li>🏥 Hospital General - 15 min</li><li>💊 Farmacias - 3 min</li></ul></div><div><h4>🎓 Educación</h4><ul><li>📚 Escuelas - 5 min</li><li>🏫 UAZ - 15 min</li></ul></div><div><h4>🏊 Deporte</h4><ul><li>🏊 ALBERCA del fraccionamiento</li><li>🌳 Áreas verdes</li></ul></div></div>'
+    poiHtml: '<div class="poi-grid"><div><h4>🛒 Comercio</h4><ul><li>🏬 Plaza Bicentenario - 10 min</li><li>🍽️ Restaurantes y cafés</li></ul></div><div><h4>🏥 Salud</h4><ul><li>🏥 Hospital General - 15 min</li><li>💊 Farmacias - 3 min</li></ul></div><div><h4>🎓 Educación</h4><ul><li>📚 Escuelas - 5 min</li><li>🏫 UAZ - 15 min</li></ul></div><div><h4>🌳 Entorno</h4><ul><li>🌳 Áreas verdes</li><li>🏡 Zona residencial</li></ul></div></div>'
   },
   'distrito-falco': {
     primaryColor: '#0f3460',
@@ -99,7 +98,7 @@ const DEV_CONFIG: Record<string, DevConfig> = {
     primaryColor: '#2d5a27',
     tagline: 'TU NUEVO HOGAR EN GUADALUPE',
     location: 'Vialidad Siglo XXI, Guadalupe, Zac.',
-    poiHtml: '<div class="poi-grid"><div><h4>🛒 Comercio</h4><ul><li>🏪 Walmart Siglo XXI - 5 min</li><li>🏬 Plaza Bicentenario - 10 min</li><li>🍽️ Restaurantes y cafés</li></ul></div><div><h4>🏥 Salud</h4><ul><li>🏥 Hospital General - 15 min</li><li>💊 Farmacias - 3 min</li></ul></div><div><h4>🎓 Educación</h4><ul><li>📚 Escuelas - 5 min</li><li>🏫 UAZ - 15 min</li></ul></div><div><h4>🎡 Entretenimiento</h4><ul><li>🌳 Áreas verdes</li><li>🍽️ Zona de restaurantes</li></ul></div></div>'
+    poiHtml: '<div class="poi-grid"><div><h4>🛒 Comercio</h4><ul><li>🏬 Plaza Bicentenario - 10 min</li><li>🍽️ Restaurantes y cafés</li></ul></div><div><h4>🏥 Salud</h4><ul><li>🏥 Hospital General - 15 min</li><li>💊 Farmacias - 3 min</li></ul></div><div><h4>🎓 Educación</h4><ul><li>📚 Escuelas - 5 min</li><li>🏫 UAZ - 15 min</li></ul></div><div><h4>🎡 Entretenimiento</h4><ul><li>🌳 Áreas verdes</li><li>🍽️ Zona de restaurantes</li></ul></div></div>'
   },
   'citadella-del-nogal': {
     primaryColor: '#5d4037',

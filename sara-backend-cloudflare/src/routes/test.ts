@@ -106,6 +106,7 @@ import {
 
 import { runHealthCheck, trackError, enviarAlertaSistema, healthMonitorCron } from '../crons/healthCheck';
 import { backupSemanalR2, getBackupLog } from '../crons/dashboard';
+import { aplicarPreciosProgramados } from '../crons/reports';
 
 import type { Env, CorsResponseFn, CheckApiAuthFn } from '../types/env';
 
@@ -4153,6 +4154,245 @@ Mensaje: ${mensaje}`;
         conversations: { rows: result.conversations.rows, size_kb: Math.round(result.conversations.bytes / 1024) },
         leads: { rows: result.leads.rows, size_kb: Math.round(result.leads.bytes / 1024) }
       }, null, 2));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CHECKLIST PRE-VUELO — Verificación de columna vertebral de SARA
+    // Like a pilot's pre-flight checklist: verifies REAL production systems
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === '/checklist') {
+      const startTime = Date.now();
+      type CheckResult = { name: string; status: '✅' | '❌' | '⚠️'; detail: string; ms?: number };
+      const checks: CheckResult[] = [];
+
+      const runCheck = async (name: string, fn: () => Promise<{ ok: boolean; warn?: boolean; detail: string }>) => {
+        const t0 = Date.now();
+        try {
+          const result = await fn();
+          checks.push({
+            name,
+            status: result.ok ? '✅' : result.warn ? '⚠️' : '❌',
+            detail: result.detail,
+            ms: Date.now() - t0
+          });
+        } catch (e: any) {
+          checks.push({ name, status: '❌', detail: `EXCEPTION: ${e.message}`, ms: Date.now() - t0 });
+        }
+      };
+
+      // ── 1. DB: Properties table readable with correct columns ──
+      await runCheck('DB: Properties (SELECT columns)', async () => {
+        const { data, error } = await supabase.client
+          .from('properties')
+          .select('id, name, development, price, price_equipped')
+          .limit(1);
+        if (error) return { ok: false, detail: `SELECT failed: ${error.message} — CRON de precios NO funcionará` };
+        return { ok: true, detail: `OK — columns id,name,development,price,price_equipped exist` };
+      });
+
+      // ── 2. DB: All CASAS properties have valid prices (terrenos excluded) ──
+      await runCheck('DB: Precios válidos (casas, price > 0)', async () => {
+        const { data, error } = await supabase.client
+          .from('properties')
+          .select('id, name, development, price, price_equipped');
+        if (error) return { ok: false, detail: `SELECT failed: ${error.message}` };
+        // Terrenos (Citadella del Nogal) don't have price/price_equipped — they use price per m²
+        const casas = (data || []).filter((p: any) => !p.name?.toLowerCase().includes('terreno') && p.development !== 'Citadella del Nogal');
+        const broken = casas.filter((p: any) => !p.price || p.price <= 0 || !p.price_equipped || p.price_equipped <= 0);
+        if (broken.length > 0) {
+          return { ok: false, detail: `${broken.length} casas sin precio: ${broken.map((p: any) => p.name).join(', ')}` };
+        }
+        return { ok: true, detail: `${casas.length} casas con precios válidos (${(data || []).length - casas.length} terrenos excluidos)` };
+      });
+
+      // ── 3. DB: Price sanity (no property under $500K or over $20M) ──
+      await runCheck('DB: Precios en rango razonable ($500K-$20M)', async () => {
+        const { data } = await supabase.client
+          .from('properties')
+          .select('name, price, price_equipped');
+        const outliers = (data || []).filter((p: any) =>
+          (p.price && (p.price < 500000 || p.price > 20000000)) ||
+          (p.price_equipped && (p.price_equipped < 500000 || p.price_equipped > 20000000))
+        );
+        if (outliers.length > 0) {
+          return { ok: false, detail: `Precios fuera de rango: ${outliers.map((p: any) => `${p.name}=$${p.price}`).join(', ')}` };
+        }
+        return { ok: true, detail: `Todos en rango $500K-$20M` };
+      });
+
+      // ── 4. DB: Team members activos ──
+      await runCheck('DB: Team members activos', async () => {
+        const { data, error } = await supabase.client
+          .from('team_members')
+          .select('id, name, role, active')
+          .eq('active', true);
+        if (error) return { ok: false, detail: `SELECT failed: ${error.message}` };
+        if (!data || data.length === 0) return { ok: false, detail: 'No hay team members activos!' };
+        const roles = [...new Set(data.map((t: any) => t.role))];
+        return { ok: true, detail: `${data.length} activos, roles: ${roles.join(', ')}` };
+      });
+
+      // ── 5. DB: Leads table readable ──
+      await runCheck('DB: Leads table', async () => {
+        const { count, error } = await supabase.client
+          .from('leads')
+          .select('id', { count: 'exact', head: true });
+        if (error) return { ok: false, detail: `SELECT failed: ${error.message}` };
+        return { ok: true, detail: `${count} leads en DB` };
+      });
+
+      // ── 6. KV Cache: read/write ──
+      await runCheck('KV Cache: read/write', async () => {
+        if (!env.SARA_CACHE) return { ok: false, detail: 'SARA_CACHE KV not bound' };
+        const testKey = `checklist_test_${Date.now()}`;
+        await env.SARA_CACHE.put(testKey, 'ok', { expirationTtl: 60 });
+        const val = await env.SARA_CACHE.get(testKey);
+        await env.SARA_CACHE.delete(testKey);
+        if (val !== 'ok') return { ok: false, detail: `KV write/read mismatch: got ${val}` };
+        return { ok: true, detail: 'Put + Get + Delete OK' };
+      });
+
+      // ── 7. KV: Price increase idempotency key status ──
+      await runCheck('CRON: Idempotencia precio mensual', async () => {
+        if (!env.SARA_CACHE) return { ok: false, detail: 'No KV' };
+        const now = new Date();
+        const mesKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const kvVal = await env.SARA_CACHE.get(`price_increase_${mesKey}`);
+        const dayOfMonth = parseInt(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Mexico_City', day: 'numeric' }).format(now));
+        if (dayOfMonth >= 2 && !kvVal) {
+          return { ok: false, warn: true, detail: `Mes ${mesKey}, día ${dayOfMonth} — KV key NO existe. ¿No corrió el CRON el día 1?` };
+        }
+        if (dayOfMonth === 1 && !kvVal) {
+          return { ok: true, detail: `Mes ${mesKey}, día 1 — pendiente de ejecutar hoy` };
+        }
+        return { ok: true, detail: `Mes ${mesKey} — ${kvVal ? 'Ya aplicado ✓' : 'Pendiente (día 1)'}` };
+      });
+
+      // ── 8. Meta WhatsApp API: token válido ──
+      await runCheck('WhatsApp: Meta API token', async () => {
+        if (!env.META_ACCESS_TOKEN || !env.META_PHONE_NUMBER_ID) {
+          return { ok: false, detail: 'META_ACCESS_TOKEN o META_PHONE_NUMBER_ID no configurado' };
+        }
+        const resp = await fetch(`https://graph.facebook.com/v21.0/${env.META_PHONE_NUMBER_ID}`, {
+          headers: { Authorization: `Bearer ${env.META_ACCESS_TOKEN}` }
+        });
+        if (!resp.ok) {
+          const body = await resp.text();
+          if (body.includes('OAuthException') || resp.status === 401) {
+            return { ok: false, detail: `TOKEN EXPIRADO — status ${resp.status}` };
+          }
+          return { ok: false, detail: `Meta API error: ${resp.status}` };
+        }
+        return { ok: true, detail: 'Token válido, API responde' };
+      });
+
+      // ── 9. Retell: agente configurado ──
+      await runCheck('Retell: Agente IA', async () => {
+        if (!env.RETELL_API_KEY || !env.RETELL_AGENT_ID) {
+          return { ok: false, warn: true, detail: 'RETELL_API_KEY o RETELL_AGENT_ID no configurado' };
+        }
+        const resp = await fetch(`https://api.retellai.com/get-agent/${env.RETELL_AGENT_ID}`, {
+          headers: { Authorization: `Bearer ${env.RETELL_API_KEY}` }
+        });
+        if (!resp.ok) return { ok: false, detail: `Retell API error: ${resp.status}` };
+        const agent = await resp.json() as any;
+        return { ok: true, detail: `Agente "${agent.agent_name || env.RETELL_AGENT_ID}" activo` };
+      });
+
+      // ── 10. Brochures: all developments have properties with prices in DB ──
+      await runCheck('Brochures: Datos por desarrollo', async () => {
+        const expectedDevs = ['Monte Verde', 'Andes', 'Distrito Falco', 'Los Encinos', 'Miravalle', 'Paseo Colorines', 'Alpes'];
+        const { data: allProps } = await supabase.client
+          .from('properties')
+          .select('name, development, price, price_equipped');
+        if (!allProps) return { ok: false, detail: 'No se pudieron leer propiedades' };
+        const failures: string[] = [];
+        for (const dev of expectedDevs) {
+          const props = allProps.filter((p: any) => p.development === dev);
+          if (props.length === 0) { failures.push(`${dev}: 0 propiedades`); continue; }
+          const sinPrecio = props.filter((p: any) => !p.price_equipped || p.price_equipped <= 0);
+          if (sinPrecio.length > 0) failures.push(`${dev}: ${sinPrecio.length} sin precio`);
+        }
+        if (failures.length > 0) return { ok: false, detail: failures.join('; ') };
+        return { ok: true, detail: `${expectedDevs.length} desarrollos OK con propiedades y precios` };
+      });
+
+      // ── 11. AI: SARA responde sin errores ──
+      await runCheck('IA: SARA responde', async () => {
+        try {
+          const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
+          const meta2 = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+          const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
+          const aiService = new AIConversationService(supabase, null as any, meta2, calendar, claude, env);
+          const { data: properties } = await supabase.client.from('properties').select('*');
+          const testLead = { id: 'checklist-test', name: 'Test Checklist', phone: '0000000000', status: 'new', notes: {}, resources_sent_for: null, conversation_history: [] };
+          const analysis = await aiService.analyzeWithAI('Hola, quiero información de casas', testLead as any, properties || []);
+          if (!analysis?.response || analysis.response.length < 10) return { ok: false, detail: `Respuesta vacía o muy corta` };
+          return { ok: true, detail: `Responde OK (${analysis.response.length} chars)` };
+        } catch (e: any) {
+          if (e.message?.includes('api_key') || e.message?.includes('401')) {
+            return { ok: false, detail: `ANTHROPIC_API_KEY inválida: ${e.message}` };
+          }
+          return { ok: false, detail: `Error IA: ${e.message}` };
+        }
+      });
+
+      // ── 12. Fact Validator: no claims alberca ──
+      await runCheck('Fact Validator: Alberca correction', async () => {
+        try {
+          const { validateFacts } = await import('../services/factValidator');
+          const testResponse = 'Andes tiene alberca y es genial para tu familia';
+          const result = validateFacts(testResponse);
+          if (result.response.toLowerCase().includes('tiene alberca')) {
+            return { ok: false, detail: `Fact validator NO corrigió claim de alberca: "${result.response}"` };
+          }
+          if (result.corrections.length === 0) {
+            return { ok: false, detail: 'Fact validator no detectó el error de alberca' };
+          }
+          return { ok: true, detail: `Corrige alberca OK (${result.corrections.length} corrección(es))` };
+        } catch (e: any) {
+          return { ok: false, detail: `Error factValidator: ${e.message}` };
+        }
+      });
+
+      // ── 13. Environment: variables críticas ──
+      await runCheck('Env: Variables críticas', async () => {
+        const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'META_ACCESS_TOKEN', 'META_PHONE_NUMBER_ID', 'ANTHROPIC_API_KEY', 'API_SECRET'];
+        const missing = required.filter(k => !(env as any)[k]);
+        if (missing.length > 0) return { ok: false, detail: `Faltan: ${missing.join(', ')}` };
+        return { ok: true, detail: `${required.length} variables OK` };
+      });
+
+      // ── RESULTS ──
+      const failed = checks.filter(c => c.status === '❌');
+      const warned = checks.filter(c => c.status === '⚠️');
+      const passed = checks.filter(c => c.status === '✅');
+
+      const summary = {
+        timestamp: new Date().toISOString(),
+        verdict: failed.length === 0 ? (warned.length === 0 ? '🟢 ALL CLEAR' : '🟡 WARNINGS') : '🔴 FAILED',
+        summary: `${passed.length}/${checks.length} passed, ${warned.length} warnings, ${failed.length} failed`,
+        duration_ms: Date.now() - startTime,
+        checks: checks.map(c => ({ [`${c.status} ${c.name}`]: c.detail, ms: c.ms })),
+        ...(failed.length > 0 ? { CRITICAL_FAILURES: failed.map(f => `${f.name}: ${f.detail}`) } : {}),
+        ...(warned.length > 0 ? { WARNINGS: warned.map(w => `${w.name}: ${w.detail}`) } : {})
+      };
+
+      return corsResponse(JSON.stringify(summary, null, 2));
+    }
+
+    if (url.pathname === '/run-price-increase') {
+      console.log('💰 Forzando incremento de precios...');
+      const force = url.searchParams.get('force') === '1';
+      if (force && env.SARA_CACHE) {
+        // Clear idempotency key to force re-run
+        const mesKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+        await env.SARA_CACHE.delete(`price_increase_${mesKey}`);
+        console.log('🔄 Idempotency key cleared (force mode)');
+      }
+      const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+      await aplicarPreciosProgramados(supabase, meta, env);
+      return corsResponse(JSON.stringify({ message: 'Incremento de precios ejecutado (+0.5%)' }));
     }
 
     if (url.pathname === '/test-objecion') {

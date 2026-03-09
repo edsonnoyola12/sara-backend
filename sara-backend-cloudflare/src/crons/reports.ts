@@ -2595,31 +2595,51 @@ export async function aplicarPreciosProgramados(supabase: SupabaseService, meta:
     const mesKey = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
     const idempotencyKey = `precio_aplicado_${mesKey}`;
 
-    // ── IDEMPOTENCY CHECK ──
+    // ── IDEMPOTENCY CHECK (KV primary, DB fallback) ──
     // Si ya se aplicó este mes, no volver a aplicar (previene doble incremento si CRON corre 2 veces)
-    const { data: yaAplicado } = await supabase.client
-      .from('system_config')
-      .select('value')
-      .eq('key', idempotencyKey)
-      .maybeSingle();
-
-    if (yaAplicado) {
-      console.log(`⏭️ Precios ya aplicados para ${mesKey}, saltando`);
-      return;
+    const kvIdempKey = `price_increase_${mesKey}`;
+    if (env?.SARA_CACHE) {
+      const kvCheck = await env.SARA_CACHE.get(kvIdempKey);
+      if (kvCheck) {
+        console.log(`⏭️ Precios ya aplicados para ${mesKey} (KV), saltando`);
+        return;
+      }
+    }
+    try {
+      const { data: yaAplicado } = await supabase.client
+        .from('system_config')
+        .select('value')
+        .eq('key', idempotencyKey)
+        .maybeSingle();
+      if (yaAplicado) {
+        console.log(`⏭️ Precios ya aplicados para ${mesKey} (DB), saltando`);
+        return;
+      }
+    } catch (_) {
+      // system_config table may not exist — KV check above is primary
     }
 
     // ── MARCAR ANTES DE APLICAR (mark-before-send pattern) ──
-    await supabase.client
-      .from('system_config')
-      .upsert({ key: idempotencyKey, value: new Date().toISOString() }, { onConflict: 'key' });
+    if (env?.SARA_CACHE) {
+      await env.SARA_CACHE.put(kvIdempKey, new Date().toISOString(), { expirationTtl: 86400 * 45 }); // 45 days
+    }
+    try {
+      await supabase.client
+        .from('system_config')
+        .upsert({ key: idempotencyKey, value: new Date().toISOString() }, { onConflict: 'key' });
+    } catch (_) {
+      // system_config table may not exist — KV is primary
+    }
 
-    // Obtener TODAS las propiedades con TODOS los campos de precio (incluye price_min, price_max)
+    // Obtener TODAS las propiedades con campos de precio existentes
     const { data: propiedades, error } = await supabase.client
       .from('properties')
-      .select('id, name, development, price, price_equipped, price_from, price_to, price_min, price_max');
+      .select('id, name, development, price, price_equipped');
 
     if (error || !propiedades || propiedades.length === 0) {
       console.error('⚠️ Error obteniendo propiedades:', error?.message);
+      // Clear KV idempotency so it can retry next time
+      if (env?.SARA_CACHE) await env.SARA_CACHE.delete(kvIdempKey);
       return;
     }
 
@@ -2632,34 +2652,22 @@ export async function aplicarPreciosProgramados(supabase: SupabaseService, meta:
 
     for (const prop of propiedades) {
       try {
-        // Obtener precios actuales (incluye price_min y price_max)
         const precioAnterior = Number(prop.price) || 0;
         const precioEquipadoAnterior = Number(prop.price_equipped) || 0;
-        const precioFromAnterior = Number(prop.price_from) || 0;
-        const precioToAnterior = Number(prop.price_to) || 0;
-        const precioMinAnterior = Number(prop.price_min) || 0;
-        const precioMaxAnterior = Number(prop.price_max) || 0;
 
         // Calcular nuevos precios (redondear a enteros)
         const nuevoPrecio = precioAnterior > 0 ? Math.round(precioAnterior * (1 + INCREMENTO_MENSUAL)) : null;
         const nuevoPrecioEquipado = precioEquipadoAnterior > 0 ? Math.round(precioEquipadoAnterior * (1 + INCREMENTO_MENSUAL)) : null;
-        const nuevoPrecioFrom = precioFromAnterior > 0 ? Math.round(precioFromAnterior * (1 + INCREMENTO_MENSUAL)) : null;
-        const nuevoPrecioTo = precioToAnterior > 0 ? Math.round(precioToAnterior * (1 + INCREMENTO_MENSUAL)) : null;
-        const nuevoPrecioMin = precioMinAnterior > 0 ? Math.round(precioMinAnterior * (1 + INCREMENTO_MENSUAL)) : null;
-        const nuevoPrecioMax = precioMaxAnterior > 0 ? Math.round(precioMaxAnterior * (1 + INCREMENTO_MENSUAL)) : null;
 
-        // Actualizar TODOS los campos de precio en DB (incluye price_min, price_max)
+        // Actualizar campos de precio en DB
+        const updateData: Record<string, any> = {};
+        if (nuevoPrecio !== null) updateData.price = nuevoPrecio;
+        if (nuevoPrecioEquipado !== null) updateData.price_equipped = nuevoPrecioEquipado;
+        if (Object.keys(updateData).length === 0) continue;
+
         const { error: updateError } = await supabase.client
           .from('properties')
-          .update({
-            price: nuevoPrecio,
-            price_equipped: nuevoPrecioEquipado,
-            price_from: nuevoPrecioFrom,
-            price_to: nuevoPrecioTo,
-            price_min: nuevoPrecioMin,
-            price_max: nuevoPrecioMax,
-            updated_at: new Date().toISOString()
-          })
+          .update(updateData)
           .eq('id', prop.id);
 
         if (updateError) {
@@ -2671,8 +2679,8 @@ export async function aplicarPreciosProgramados(supabase: SupabaseService, meta:
         }
 
         // Guardar para resumen (solo primeros 3 por desarrollo)
-        const precioMostrar = precioAnterior || precioFromAnterior;
-        const nuevoPrecioMostrar = nuevoPrecio || nuevoPrecioFrom;
+        const precioMostrar = precioAnterior;
+        const nuevoPrecioMostrar = nuevoPrecio;
         if (precioMostrar && !resumen.some(r => r.includes(prop.development))) {
           resumen.push(`• ${prop.development}: ${prop.name} $${(precioMostrar/1000000).toFixed(2)}M → $${(nuevoPrecioMostrar!/1000000).toFixed(2)}M`);
         }

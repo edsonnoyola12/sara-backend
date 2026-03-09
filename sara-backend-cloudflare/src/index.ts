@@ -2758,12 +2758,14 @@ export default {
       hour: 'numeric',
       minute: 'numeric',
       weekday: 'short',
+      day: 'numeric',
       hour12: false
     });
     const mexicoParts = mexicoFormatter.formatToParts(now);
     const mexicoHour = parseInt(mexicoParts.find(p => p.type === 'hour')?.value || '0');
     const mexicoMinute = parseInt(mexicoParts.find(p => p.type === 'minute')?.value || '0');
     const mexicoWeekday = mexicoParts.find(p => p.type === 'weekday')?.value || '';
+    const mexicoDayOfMonth = parseInt(mexicoParts.find(p => p.type === 'day')?.value || '0');
 
     // Mapear día de la semana (Mon=1, Tue=2, ..., Sun=0)
     const dayMap: Record<string, number> = { 'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6 };
@@ -3413,6 +3415,82 @@ export default {
       await safeCron('enviarReporteSemanalMarketing', () => enviarReporteSemanalMarketing(supabase, meta));
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // 7am LUNES: WATCHDOG SEMANAL — verificación automática de columna vertebral
+    // Revisa: DB, precios, WhatsApp token, Retell, KV, IA, fact validator
+    // ═══════════════════════════════════════════════════════════════
+    if (mexicoHour === 7 && isFirstRunOfHour && dayOfWeek === 1) {
+      await safeCron('watchdogSemanal', async () => {
+        const checks: string[] = [];
+        const failures: string[] = [];
+
+        // 1. DB properties readable with correct columns
+        try {
+          const { data, error } = await supabase.client
+            .from('properties')
+            .select('id, name, development, price, price_equipped')
+            .limit(1);
+          if (error) failures.push(`DB columns: ${error.message}`);
+          else checks.push('DB columns OK');
+        } catch (e: any) { failures.push(`DB: ${e.message}`); }
+
+        // 2. All casas have valid prices
+        try {
+          const { data } = await supabase.client
+            .from('properties')
+            .select('name, development, price, price_equipped');
+          const casas = (data || []).filter((p: any) => p.development !== 'Citadella del Nogal');
+          const broken = casas.filter((p: any) => !p.price || p.price <= 0 || !p.price_equipped || p.price_equipped <= 0);
+          if (broken.length > 0) failures.push(`${broken.length} casas sin precio: ${broken.map((p: any) => p.name).join(', ')}`);
+          else checks.push(`${casas.length} precios OK`);
+          // Sanity range
+          const outliers = casas.filter((p: any) => p.price < 500000 || p.price > 20000000);
+          if (outliers.length > 0) failures.push(`Precios fuera rango: ${outliers.map((p: any) => `${p.name}=$${p.price}`).join(', ')}`);
+        } catch (e: any) { failures.push(`Precios: ${e.message}`); }
+
+        // 3. WhatsApp token
+        try {
+          const resp = await fetch(`https://graph.facebook.com/v21.0/${env.META_PHONE_NUMBER_ID}`, {
+            headers: { Authorization: `Bearer ${env.META_ACCESS_TOKEN}` }
+          });
+          if (!resp.ok) failures.push(`WhatsApp token: HTTP ${resp.status}`);
+          else checks.push('WA token OK');
+        } catch (e: any) { failures.push(`WA: ${e.message}`); }
+
+        // 4. KV
+        try {
+          if (env.SARA_CACHE) {
+            const tk = `watchdog_${Date.now()}`;
+            await env.SARA_CACHE.put(tk, 'ok', { expirationTtl: 60 });
+            const v = await env.SARA_CACHE.get(tk);
+            await env.SARA_CACHE.delete(tk);
+            if (v === 'ok') checks.push('KV OK');
+            else failures.push('KV read/write mismatch');
+          }
+        } catch (e: any) { failures.push(`KV: ${e.message}`); }
+
+        // 5. Retell
+        try {
+          if (env.RETELL_API_KEY && env.RETELL_AGENT_ID) {
+            const resp = await fetch(`https://api.retellai.com/get-agent/${env.RETELL_AGENT_ID}`, {
+              headers: { Authorization: `Bearer ${env.RETELL_API_KEY}` }
+            });
+            if (!resp.ok) failures.push(`Retell: HTTP ${resp.status}`);
+            else checks.push('Retell OK');
+          }
+        } catch (e: any) { failures.push(`Retell: ${e.message}`); }
+
+        // Report
+        if (failures.length > 0) {
+          const msg = `🚨 *WATCHDOG SEMANAL — ${failures.length} FALLAS*\n\n❌ ${failures.join('\n❌ ')}\n\n✅ ${checks.join(', ')}\n\nEjecutar checklist completo:\nhttps://sara-backend.edson-633.workers.dev/checklist?api_key=...`;
+          try { await meta.sendWhatsAppMessage('5210016226', msg); } catch (_) {}
+          console.error('🚨 WATCHDOG SEMANAL:', failures);
+        } else {
+          console.log(`✅ WATCHDOG SEMANAL: ${checks.length} checks OK`);
+        }
+      });
+    }
+
     // 10am MARTES: Coaching automático personalizado a vendedores
     if (mexicoHour === 10 && isFirstRunOfHour && dayOfWeek === 2) {
       await safeCron('coachingEquipo', async () => {
@@ -3422,28 +3500,62 @@ export default {
     }
 
     // 8am DÍA 1 DE CADA MES: Reporte mensual CEO/Admin
-    if (mexicoHour === 8 && isFirstRunOfHour && now.getUTCDate() === 1) {
+    if (mexicoHour === 8 && isFirstRunOfHour && mexicoDayOfMonth === 1) {
       await safeCron('enviarReporteMensualCEO', () => enviarReporteMensualCEO(supabase, meta));
     }
 
     // 9am DÍA 1 DE CADA MES: Reporte mensual individual a vendedores
-    if (mexicoHour === 9 && isFirstRunOfHour && now.getUTCDate() === 1) {
+    if (mexicoHour === 9 && isFirstRunOfHour && mexicoDayOfMonth === 1) {
       await safeCron('enviarReporteMensualVendedores', () => enviarReporteMensualVendedores(supabase, meta));
     }
 
     // 9am DÍA 1 DE CADA MES: Reporte mensual individual a asesores hipotecarios
-    if (mexicoHour === 9 && isFirstRunOfHour && now.getUTCDate() === 1) {
+    if (mexicoHour === 9 && isFirstRunOfHour && mexicoDayOfMonth === 1) {
       await safeCron('enviarReporteMensualAsesores', () => enviarReporteMensualAsesores(supabase, meta));
     }
 
     // 9am DÍA 1 DE CADA MES: Reporte mensual marketing
-    if (mexicoHour === 9 && isFirstRunOfHour && now.getUTCDate() === 1) {
+    if (mexicoHour === 9 && isFirstRunOfHour && mexicoDayOfMonth === 1) {
       await safeCron('enviarReporteMensualMarketing', () => enviarReporteMensualMarketing(supabase, meta));
     }
 
     // 12:01am DÍA 1 DE CADA MES: Aplicar nuevos precios programados
-    if (mexicoHour === 0 && isFirstRunOfHour && now.getUTCDate() === 1) {
+    if (mexicoHour === 0 && isFirstRunOfHour && mexicoDayOfMonth === 1) {
       await safeCron('aplicarPreciosProgramados', () => aplicarPreciosProgramados(supabase, meta, env));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 8am DÍA 1 DE CADA MES: WATCHDOG — si el incremento de 12am falló, reintenta ahora
+    // ═══════════════════════════════════════════════════════════════
+    if (mexicoHour === 8 && isFirstRunOfHour && mexicoDayOfMonth === 1) {
+      await safeCron('watchdogPrecios', async () => {
+        const mesKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const kvKey = `price_increase_${mesKey}`;
+        const yaAplicado = env.SARA_CACHE ? await env.SARA_CACHE.get(kvKey) : null;
+
+        if (!yaAplicado) {
+          console.error(`🚨 WATCHDOG: Incremento de precios NO se aplicó para ${mesKey}!`);
+          // Alertar al dev por WhatsApp
+          try {
+            await meta.sendWhatsAppMessage('5210016226', `🚨 *ALERTA CRÍTICA*\n\nEl incremento mensual de precios (+0.5%) NO se aplicó para ${mesKey}.\n\nIntentando ejecutar ahora...`);
+          } catch (_) {}
+          // Intentar ejecutarlo ahora
+          try {
+            await aplicarPreciosProgramados(supabase, meta, env);
+            console.log('✅ WATCHDOG: Incremento aplicado en retry');
+            try {
+              await meta.sendWhatsAppMessage('5210016226', `✅ Incremento de precios ${mesKey} aplicado exitosamente por el watchdog.`);
+            } catch (_) {}
+          } catch (e: any) {
+            console.error('❌ WATCHDOG: Retry falló:', e.message);
+            try {
+              await meta.sendWhatsAppMessage('5210016226', `❌ WATCHDOG FALLÓ: ${e.message}\n\nEjecutar manualmente:\nhttps://sara-backend.edson-633.workers.dev/run-price-increase?force=1&api_key=...`);
+            } catch (_) {}
+          }
+        } else {
+          console.log(`✅ WATCHDOG: Precios ${mesKey} OK (aplicado: ${yaAplicado})`);
+        }
+      });
     }
 
     // ═══════════════════════════════════════════════════════════════

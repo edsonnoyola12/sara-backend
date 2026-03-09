@@ -757,7 +757,7 @@ Si el mensaje del cliente NO ES CLARO, NO ADIVINES. Pregunta para aclarar:
 | "La que me dijeron" | Inventar | "¿Recuerdas qué desarrollo te mencionaron?" |
 | "Algo económico" | Dar cualquier opción | "¿Cuál sería tu presupuesto ideal? Tenemos desde ${AIConversationService.precioMinGlobal(properties)}" |
 | "Por allá" | Adivinar ubicación | "¿Te refieres a la zona de Colinas del Padre o de Guadalupe?" |
-| "El que tiene alberca" | Decir que no hay | "¡Priv. Andes tiene alberca! ¿Es el que buscas?" |
+| "El que tiene alberca" | Decir que sí hay | "Por el momento ninguno de nuestros desarrollos cuenta con alberca, pero tenemos excelentes amenidades. ¿Qué zona te interesa?" |
 
 ⚠️ REGLA: Si tienes <70% de certeza de lo que pide → PREGUNTA
 Es mejor preguntar y quedar bien que adivinar y quedar mal
@@ -926,19 +926,12 @@ Si preguntan "¿tienen casas en renta?" → Responder:
 **Los Encinos:** Área de juegos, áreas verdes, CCTV, vigilancia 24/7, acceso controlado, pet-friendly
 **Miravalle:** Áreas verdes, CCTV, vigilancia 24/7, acceso controlado, pet-friendly
 **Distrito Falco:** Área de juegos, áreas verdes, CCTV, vigilancia 24/7, acceso controlado (NO mascotas)
-**Priv. Andes:** ALBERCA, área de juegos, áreas verdes, CCTV, vigilancia 24/7, acceso controlado, pet-friendly
+**Priv. Andes:** Área de juegos, áreas verdes, CCTV, vigilancia 24/7, acceso controlado, pet-friendly
 
-⚠️ ALBERCA - CRÍTICO ⚠️
-🏊 SOLO **Priv. Andes** tiene ALBERCA
-🚫 Distrito Falco NO tiene alberca (solo áreas verdes y juegos)
-🚫 Monte Verde NO tiene alberca
-🚫 Los Encinos NO tiene alberca
-🚫 Miravalle NO tiene alberca
-
+⚠️ ALBERCA - NINGÚN DESARROLLO TIENE ⚠️
+🚫 Ninguno de nuestros desarrollos cuenta con alberca actualmente
 📝 Si preguntan por alberca, responde:
-"¡Sí tenemos! Priv. Andes es nuestro único desarrollo con ALBERCA 🏊
-Casas desde ${AIConversationService.precioExactoModelo(properties, 'Laurel')} (Laurel) hasta ${AIConversationService.precioExactoModelo(properties, 'Lavanda')} (Lavanda).
-¿Te gustaría visitarlo este fin de semana?"
+"Por el momento ninguno de nuestros desarrollos cuenta con alberca, pero tenemos excelentes amenidades como áreas verdes, juegos infantiles, vigilancia 24/7 y más. ¿Qué zona te interesa?"
 
 
 ⚠️ CITADELLA DEL NOGAL / EL NOGAL - CRÍTICO ⚠️
@@ -1051,17 +1044,15 @@ Las más espaciosas:
 
 | Desarrollo | Amenidades principales |
 |------------|------------------------|
-| **Andes** | ALBERCA, gym, asadores, salón de eventos, vigilancia 24/7 |
+| **Andes** | Área de juegos, áreas verdes, vigilancia 24/7, acceso controlado |
 | **Distrito Falco** | Acabados premium, domótica opcional, paneles solares opcionales |
 | **Los Encinos** | Casa club, áreas verdes amplias, acceso controlado |
 | **Miravalle** | Parque central, ciclovía, áreas deportivas |
 | **Monte Verde** | Parque infantil, áreas verdes, caseta de vigilancia |
 | **Paseo Colorines** | NUEVO, zona de alta plusvalía, vigilancia |
 
-Si preguntan por alberca específicamente:
-"¡Sí tenemos! Privada Andes es nuestro único desarrollo con ALBERCA 🏊
-También incluye gym, asadores y salón de eventos.
-Casas desde ${AIConversationService.precioMinDesarrollo(properties, 'Andes')}. ¿Te gustaría conocerlo?"
+Si preguntan por alberca:
+"Por el momento ninguno de nuestros desarrollos cuenta con alberca, pero tenemos excelentes amenidades como áreas verdes, juegos infantiles, vigilancia 24/7 y más. ¿Qué zona te interesa?"
 
 
 📊 COMPARATIVA RÁPIDA (cuando pidan comparar)
@@ -1079,7 +1070,6 @@ Si el cliente quiere comparar desarrollos:
 - 3 rec + estudio/amplias: Distrito Falco (Chipre, Mirlo), Miravalle (Bilbao 7M)
 
 **POR AMENIDADES:**
-- Con alberca: SOLO Andes
 - Casa club: Los Encinos
 - Acabados premium: Distrito Falco
 
@@ -1091,7 +1081,7 @@ Respuesta de comparativa:
 "Te ayudo a comparar 😊 ¿Qué es más importante para ti?
 1. Precio - tengo desde ${AIConversationService.precioMinGlobal(properties)}
 2. Espacio - casas de 2 o 3 recámaras
-3. Amenidades - solo Andes tiene alberca
+3. Amenidades - cada desarrollo tiene lo suyo
 4. Ubicación - Colinas del Padre o Guadalupe
 
 Dime y te doy la mejor opción para ti."
@@ -1149,7 +1139,7 @@ Te presento nuestros desarrollos más solicitados:
 
 🏡 *Distrito Falco* - desde [PRECIO] - Premium con los mejores acabados, zona de alta plusvalía
 
-🏡 *Andes* - desde [PRECIO] - ¡CON ALBERCA! Excelente precio-calidad
+🏡 *Andes* - desde [PRECIO] - Excelente precio-calidad en Guadalupe
 
 Todos con financiamiento y sin cuotas de mantenimiento 💪
 
@@ -2121,7 +2111,7 @@ Todos con vigilancia 24/7, materiales premium y plusvalía del 8-10% anual.
 
 🏡 *Monte Verde* - Desde ${AIConversationService.precioMinDesarrollo(properties, 'Monte Verde')} - Ideal para familias, áreas verdes y juegos
 
-🏡 *Priv. Andes* - Desde ${AIConversationService.precioMinDesarrollo(properties, 'Andes')} - ¡Con ALBERCA! Zona de alta plusvalía
+🏡 *Priv. Andes* - Desde ${AIConversationService.precioMinDesarrollo(properties, 'Andes')} - Excelente precio-calidad en Guadalupe
 
 🏡 *Alpes* - Desde ${AIConversationService.precioMinDesarrollo(properties, 'Alpes')} - Casas compactas con excelente ubicación
 
@@ -2182,7 +2172,7 @@ Todos con vigilancia 24/7, sin cuotas de mantenimiento y financiamiento disponib
         }
       }
 
-      // ═══ CORRECCIÓN: Alberca - SOLO Andes tiene ═══
+      // ═══ CORRECCIÓN: Alberca - NINGÚN desarrollo tiene ═══
       const preguntaPorAlberca =
         msgLowerCallback.includes('alberca') ||
         msgLowerCallback.includes('piscina') ||
@@ -2190,49 +2180,21 @@ Todos con vigilancia 24/7, sin cuotas de mantenimiento y financiamiento disponib
 
       if (preguntaPorAlberca && parsed.response) {
         const respLower = parsed.response.toLowerCase();
-        // Si dice que Distrito Falco, Miravalle u otro tiene alberca (FALSO)
-        const diceAlbercaFalco = respLower.includes('falco') && respLower.includes('alberca');
-        const diceAlbercaMiravalle = respLower.includes('miravalle') && respLower.includes('alberca');
-        // Detectar cuando dice que Andes NO tiene alberca (FALSO - SÍ tiene)
-        const diceAndesNoTieneAlberca = respLower.includes('andes') && (
-          respLower.includes('no cuenta con alberca') ||
-          respLower.includes('no tiene alberca') ||
-          respLower.includes('no incluye alberca') ||
-          respLower.includes('sin alberca') ||
-          respLower.includes('alberca personal') ||
-          respLower.includes('instalar una alberca')
-        );
-        // Detectar TODAS las formas de decir que no hay alberca
-        const diceNoTienenAlberca =
-          respLower.includes('no incluyen alberca') ||
-          respLower.includes('no tienen alberca') ||
-          respLower.includes('no tenemos casas con alberca') ||
-          respLower.includes('no manejamos casas con alberca') ||
-          respLower.includes('no contamos con alberca') ||
-          respLower.includes('ninguno tiene alberca') ||
-          respLower.includes('no hay alberca') ||
-          respLower.includes('instalar una alberca') ||
-          respLower.includes('futura alberca') ||
-          respLower.includes('actualmente no tenemos') ||
-          (respLower.includes('alberca') && !respLower.includes('andes') && !respLower.includes('sí tenemos'));
+        // Si dice que CUALQUIER desarrollo tiene alberca (FALSO - ninguno tiene)
+        const diceQueHayAlberca =
+          respLower.includes('tiene alberca') ||
+          respLower.includes('con alberca') ||
+          respLower.includes('tiene piscina') ||
+          respLower.includes('con piscina') ||
+          (respLower.includes('sí tenemos') && respLower.includes('alberca'));
 
-        // NUEVO: Si pregunta por alberca pero la respuesta NO menciona alberca/piscina/Andes
-        const noRespondeSobreAlberca =
-          !respLower.includes('alberca') &&
-          !respLower.includes('piscina') &&
-          !respLower.includes('andes');
+        if (diceQueHayAlberca) {
+          console.log('⚠️ CORRIGIENDO: Ningún desarrollo tiene alberca');
+          parsed.response = `Por el momento ninguno de nuestros desarrollos cuenta con alberca, pero tenemos excelentes amenidades como áreas verdes, juegos infantiles, vigilancia 24/7 y acceso controlado.
 
-        if (diceAlbercaFalco || diceAlbercaMiravalle || diceNoTienenAlberca || diceAndesNoTieneAlberca || noRespondeSobreAlberca) {
-          console.log('⚠️ CORRIGIENDO: Info incorrecta de alberca - SOLO Andes tiene');
-          parsed.response = `¡Sí tenemos desarrollo con alberca! 🏊
+Tenemos opciones desde ${AIConversationService.precioMinGlobal(properties)} en zonas de alta plusvalía.
 
-**Priv. Andes** es nuestro único fraccionamiento con ALBERCA:
-• Laurel - ${AIConversationService.precioExactoModelo(properties, 'Laurel')} (2 rec)
-• Lavanda - ${AIConversationService.precioExactoModelo(properties, 'Lavanda')} (3 rec, vestidor)
-
-Además tiene vigilancia 24/7, áreas verdes y es pet-friendly 🐕
-
-¿Te gustaría visitarlo este fin de semana?`;
+¿Qué zona te interesa más, Colinas del Padre o Guadalupe?`;
         }
       }
 

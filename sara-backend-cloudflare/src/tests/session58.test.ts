@@ -201,8 +201,9 @@ describe('SESSION 58: SARA PROMPT - Data Accuracy', () => {
     expect(SARA_PROMPT).toContain('Calandria');
   });
 
-  it('Andes should be marked with ALBERCA', () => {
-    expect(SARA_PROMPT).toContain('ANDES (Guadalupe) - ALBERCA');
+  it('Andes should be listed (no alberca)', () => {
+    expect(SARA_PROMPT).toContain('ANDES (Guadalupe)');
+    expect(SARA_PROMPT).not.toContain('ANDES (Guadalupe) - ALBERCA');
   });
 
   it('Paseo Colorines should be listed', () => {
@@ -619,20 +620,10 @@ describe('SESSION 58: Cross-Consistency', () => {
     }
   });
 
-  it('SARA_PROMPT should mention ALBERCA only for Andes', () => {
-    const lines = SARA_PROMPT.split('\n');
-    for (const line of lines) {
-      if (line.includes('ALBERCA') && !line.includes('ANDES')) {
-        // Only Andes line should contain ALBERCA
-        // This is acceptable for the header line
-        if (!line.includes('Andes') && !line.includes('andes')) {
-          // If it says ALBERCA but not Andes, it might be a reference in suggestion logic
-          // That's OK as long as it's not claiming another development has pool
-        }
-      }
-    }
-    // Verify Andes is explicitly marked with ALBERCA
-    expect(SARA_PROMPT).toContain('ANDES (Guadalupe) - ALBERCA');
+  it('SARA_PROMPT should NOT claim any development has ALBERCA', () => {
+    // No development has alberca anymore
+    expect(SARA_PROMPT).not.toContain('- ALBERCA');
+    expect(SARA_PROMPT).not.toContain('CON ALBERCA');
   });
 
   it('no development should be listed as having 4 bedrooms in any source', () => {

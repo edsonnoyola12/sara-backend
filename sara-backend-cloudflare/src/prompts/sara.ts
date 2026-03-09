@@ -7,7 +7,7 @@ MONTE VERDE (Colinas del Padre, Zacatecas) - Entrada:
 - Eucalipto: 2 rec, $2.0M equipada, 88.9m²
 - Olivo: 3 rec, $2.2M equipada, 109.4m²
 - Fresno: 3 rec, $2.6M equipada, 104.8m²
-- Fresno 2: 3 rec, $2.8M equipada, 115.6m² (con vestidor)
+- Fresno 2: 3 rec, $2.9M equipada, 115.6m² (con vestidor)
 
 LOS ENCINOS (Colinas del Padre, Zacatecas) - Residencial:
 - Encino Blanco: 3 rec, $3.0M equipada, 166.8m², 2 pisos
@@ -18,7 +18,7 @@ LOS ENCINOS (Colinas del Padre, Zacatecas) - Residencial:
 
 DISTRITO FALCO (Guadalupe) - Premium:
 - Proyecto Especial: 3 rec, $3.7M equipada, 139.2m²
-- Chipre Light: 3 rec, $4.0M equipada, 165.2m²
+- Chipre Light: 3 rec, $4.1M equipada, 165.2m²
 - Colibrí Light: 3 rec, $4.1M equipada, 165.1m²
 - Colibrí: 3 rec, $4.8M equipada, 209.7m²
 - Chipre: 3 rec, $5.1M equipada, 224.1m²
@@ -26,25 +26,25 @@ DISTRITO FALCO (Guadalupe) - Premium:
 - Calandria: 3 rec, $5.4M equipada, 166.4m²
 
 MIRAVALLE (Colinas del Padre, Zacatecas):
-- Departamento 6m: 2 rec, $3.0M equipada, 132.8m²
-- Departamento 7m: 2 rec, $3.5M equipada, 152.6m²
+- Departamento 6m: 2 rec, $3.1M equipada, 132.8m²
+- Departamento 7m: 2 rec, $3.6M equipada, 152.6m²
 - Vizcaya: 3 rec, $3.5M equipada, 210.9m²
 - Bilbao 7M: 3 rec, $4.1M equipada, 242.9m²
 - Casa Habitación 6m: 3 rec, $3.8M equipada, 200.2m²
 - Casa Habitación 7m: 3 rec, $4.4M equipada, 232.5m²
 
-PRIV. ANDES (Guadalupe) - ALBERCA:
+PRIV. ANDES (Guadalupe):
 - Laurel: 2 rec, $1.6M equipada, 59.5m²
 - Dalia: 2 rec, $2.1M equipada, 89.2m²
 - Gardenia: 3 rec, $2.3M equipada, 110.1m²
-- Lavanda: 3 rec, $2.8M equipada, 115m²
+- Lavanda: 3 rec, $2.9M equipada, 115m²
 
 ALPES (Guadalupe):
 - Dalia Alpes: 2 rec, $2.1M equipada, 89.2m²
 
 PASEO COLORINES (Colinas del Padre, Zacatecas):
 - Prototipo 6M: 3 rec, $3.2M equipada, 168.9m²
-- Prototipo 7M: 3 rec + estudio, $3.7M equipada, 206.4m²
+- Prototipo 7M: 3 rec + estudio, $3.8M equipada, 206.4m²
 
 CITADELLA DEL NOGAL (Guadalupe) - TERRENOS:
 - Villa Campelo: $8,500-$9,500/m² contado
