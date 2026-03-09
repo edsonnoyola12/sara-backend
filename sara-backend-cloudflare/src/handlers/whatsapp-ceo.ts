@@ -77,9 +77,20 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
                 `*#cerrar* para terminar | *#mas* para extender`
               );
               try {
+                const ceoNombre = ceo.name || 'Tu asesor';
                 await ctx.meta.sendWhatsAppMessage(ultimoLeadBridge.lead_phone,
-                  `💬 *${ceo.name?.split(' ')[0]}* de nuestro equipo quiere hablar contigo directamente 🏠`
+                  `💬 *${ceoNombre}* de Grupo Santa Rita quiere hablar contigo directamente 🏠\n\n` +
+                  `Es tu asesor asignado y te ayudará personalmente con lo que necesites.`
                 );
+                try {
+                  await ctx.meta.sendContactCard(ultimoLeadBridge.lead_phone, {
+                    name: ceoNombre,
+                    phone: ceo.phone || cleanPhone,
+                    company: 'Grupo Santa Rita'
+                  });
+                } catch (_vcard) {
+                  console.log('⚠️ vCard no enviada (no crítico)');
+                }
               } catch (_) {}
               console.log(`🔗 Bridge rápido CEO: ${ceo.name} → ${ultimoLeadBridge.lead_name}`);
               return;

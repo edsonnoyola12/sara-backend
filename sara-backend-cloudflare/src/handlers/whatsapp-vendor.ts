@@ -219,9 +219,21 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
               `*#cerrar* para terminar | *#mas* para extender`
             );
             try {
+              const vendedorNombre = vendedor.name || 'Tu asesor';
               await ctx.meta.sendWhatsAppMessage(ultimoLeadBridge.lead_phone,
-                `💬 *${vendedor.name?.split(' ')[0]}* de nuestro equipo quiere hablar contigo directamente 🏠`
+                `💬 *${vendedorNombre}* de Grupo Santa Rita quiere hablar contigo directamente 🏠\n\n` +
+                `Es tu asesor asignado y te ayudará personalmente con lo que necesites.`
               );
+              // Enviar vCard del vendedor para que el lead tenga su contacto
+              try {
+                await ctx.meta.sendContactCard(ultimoLeadBridge.lead_phone, {
+                  name: vendedorNombre,
+                  phone: vendedor.phone || from,
+                  company: 'Grupo Santa Rita'
+                });
+              } catch (_vcard) {
+                console.log('⚠️ vCard no enviada (no crítico)');
+              }
             } catch (_) {}
             console.log(`🔗 Bridge rápido activado: ${vendedor.name} → ${ultimoLeadBridge.lead_name}`);
             return;
