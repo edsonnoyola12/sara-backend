@@ -13,26 +13,7 @@ import { getAvailableVendor } from '../services/leadManagementService';
 import { logErrorToDB, enviarDigestoErroresDiario } from '../crons/healthCheck';
 import { isAllowedCrmOrigin, parsePagination, paginatedResponse, validateRequired, validatePhone, validateDateISO, validateLeadStatus, validateSource } from './cors';
 
-interface Env {
-  SUPABASE_URL: string;
-  SUPABASE_ANON_KEY: string;
-  ANTHROPIC_API_KEY: string;
-  META_PHONE_NUMBER_ID: string;
-  META_ACCESS_TOKEN: string;
-  GOOGLE_SERVICE_ACCOUNT_EMAIL: string;
-  GOOGLE_PRIVATE_KEY: string;
-  GOOGLE_CALENDAR_ID: string;
-  API_SECRET?: string;
-  SARA_CACHE?: KVNamespace;
-  RETELL_API_KEY?: string;
-  RETELL_AGENT_ID?: string;
-  RETELL_PHONE_NUMBER?: string;
-  OPENAI_API_KEY?: string;
-  VEO_API_KEY?: string;
-}
-
-type CorsResponseFn = (body: string | null, status?: number, contentType?: string, request?: Request) => Response;
-type CheckApiAuthFn = (request: Request, env: Env) => Response | null;
+import type { Env, CorsResponseFn, CheckApiAuthFn } from '../types/env';
 
 // CORS whitelist imported from ./cors.ts (single source of truth)
 
@@ -119,6 +100,13 @@ const DEV_CONFIG: Record<string, DevConfig> = {
     tagline: 'TU NUEVO HOGAR EN GUADALUPE',
     location: 'Vialidad Siglo XXI, Guadalupe, Zac.',
     poiHtml: '<div class="poi-grid"><div><h4>🛒 Comercio</h4><ul><li>🏪 Walmart Siglo XXI - 5 min</li><li>🏬 Plaza Bicentenario - 10 min</li><li>🍽️ Restaurantes y cafés</li></ul></div><div><h4>🏥 Salud</h4><ul><li>🏥 Hospital General - 15 min</li><li>💊 Farmacias - 3 min</li></ul></div><div><h4>🎓 Educación</h4><ul><li>📚 Escuelas - 5 min</li><li>🏫 UAZ - 15 min</li></ul></div><div><h4>🎡 Entretenimiento</h4><ul><li>🌳 Áreas verdes</li><li>🍽️ Zona de restaurantes</li></ul></div></div>'
+  },
+  'citadella-del-nogal': {
+    primaryColor: '#5d4037',
+    tagline: 'TERRENOS RESIDENCIALES EN GUADALUPE',
+    location: 'Guadalupe, Zacatecas',
+    badge: '🌳 TERRENOS — Villa Campelo & Villa Galiano',
+    poiHtml: '<div class="poi-grid"><div><h4>🛒 Comercio</h4><ul><li>🏪 Centro Comercial Guadalupe - 10 min</li><li>🏬 Plaza del Sol - 15 min</li><li>🍽️ Restaurantes - 10 min</li></ul></div><div><h4>🏥 Salud</h4><ul><li>🏥 Hospital IMSS - 15 min</li><li>💊 Farmacias - 5 min</li></ul></div><div><h4>🎓 Educación</h4><ul><li>📚 Escuelas - 10 min</li><li>🏫 UAZ - 20 min</li></ul></div><div><h4>🌳 Entorno</h4><ul><li>🌳 Zona residencial tranquila</li><li>🏡 Terrenos amplios</li></ul></div></div>'
   }
 };
 
@@ -129,6 +117,11 @@ const SLUG_ALIASES: Record<string, string> = {
   'los_encinos': 'los-encinos',
   'paseo_colorines': 'paseo-colorines',
   'monte_real': 'monte-real',
+  'citadella_del_nogal': 'citadella-del-nogal',
+  'citadella': 'citadella-del-nogal',
+  'nogal': 'citadella-del-nogal',
+  'el-nogal': 'citadella-del-nogal',
+  'el_nogal': 'citadella-del-nogal',
 };
 
 function generateBrochureHTML(devSlug: string, devConfig: DevConfig, properties: any[]): string {
@@ -360,15 +353,33 @@ export async function handleApiCoreRoutes(
           'paseo-colorines': 'Paseo Colorines',
           'monte-real': 'Monte Real',
           'alpes': 'Alpes',
+          'citadella-del-nogal': 'Citadella del Nogal',
         };
         const devName = devNameMap[slug] || slug;
 
+        // Multi-development lookup (e.g., Citadella del Nogal = Villa Campelo + Villa Galiano)
+        const multiDevMap: Record<string, string[]> = {
+          'citadella-del-nogal': ['Villa Campelo', 'Villa Galiano'],
+        };
+
         // Fetch properties from DB
-        const { data: properties } = await supabase.client
-          .from('properties')
-          .select('name, development, bedrooms, bathrooms, area_m2, floors, land_size, price, price_equipped, photo_url, youtube_link, matterport_link, gps_link, sales_phrase, ideal_client, includes, has_vestidor, has_study, has_roof_garden')
-          .ilike('development', `%${devName}%`)
-          .order('price_equipped', { ascending: true });
+        let properties: any[] | null;
+        if (multiDevMap[slug]) {
+          const devNames = multiDevMap[slug];
+          const { data } = await supabase.client
+            .from('properties')
+            .select('name, development, bedrooms, bathrooms, area_m2, floors, land_size, price, price_equipped, photo_url, youtube_link, matterport_link, gps_link, sales_phrase, ideal_client, includes, has_vestidor, has_study, has_roof_garden')
+            .or(devNames.map(d => `development.ilike.%${d}%`).join(','))
+            .order('price_equipped', { ascending: true });
+          properties = data;
+        } else {
+          const { data } = await supabase.client
+            .from('properties')
+            .select('name, development, bedrooms, bathrooms, area_m2, floors, land_size, price, price_equipped, photo_url, youtube_link, matterport_link, gps_link, sales_phrase, ideal_client, includes, has_vestidor, has_study, has_roof_garden')
+            .ilike('development', `%${devName}%`)
+            .order('price_equipped', { ascending: true });
+          properties = data;
+        }
 
         const html = generateBrochureHTML(slug, config, properties || []);
         return new Response(html, {

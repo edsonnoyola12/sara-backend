@@ -527,6 +527,48 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
   }
 
   // ═══════════════════════════════════════════════════════════
+  // 🔗 BRIDGE RÁPIDO: Vendedor responde "1" para hablar directo con último lead notificado
+  // ═══════════════════════════════════════════════════════════
+  if (mensaje === '1') {
+    const ultimoLead = notasVendedor?.ultimo_lead_notificado;
+    if (ultimoLead?.lead_id && ultimoLead?.lead_name) {
+      // Solo válido por 30 minutos
+      const notifTime = ultimoLead.timestamp ? new Date(ultimoLead.timestamp).getTime() : 0;
+      const minutosDesde = (Date.now() - notifTime) / (1000 * 60);
+      if (minutosDesde <= 30) {
+        try {
+          const bridgeService = new BridgeService(ctx.supabase);
+          const bridgeResult = await bridgeService.activarBridge(
+            vendedor.id, vendedor.name, from,
+            ultimoLead.lead_id, ultimoLead.lead_name, ultimoLead.lead_phone
+          );
+          if (bridgeResult.success) {
+            const nombreCorto = ultimoLead.lead_name.split(' ')[0];
+            await ctx.meta.sendWhatsAppMessage(from,
+              `🔗 *Chat directo con ${nombreCorto}* activado (6 min)\n\n` +
+              `Todo lo que escribas se le enviará directamente.\n` +
+              `*#cerrar* para terminar | *#mas* para extender`
+            );
+            // Notificar al lead
+            try {
+              await ctx.meta.sendWhatsAppMessage(ultimoLead.lead_phone,
+                `💬 *${vendedor.name?.split(' ')[0]}* de nuestro equipo quiere hablar contigo directamente 🏠`
+              );
+            } catch (_) {}
+            console.log(`🔗 Bridge rápido activado: ${vendedor.name} → ${ultimoLead.lead_name}`);
+            return;
+          } else {
+            await ctx.meta.sendWhatsAppMessage(from, bridgeResult.error || '⚠️ No se pudo activar el chat directo.');
+            return;
+          }
+        } catch (bridgeErr) {
+          console.error('⚠️ Error bridge rápido:', bridgeErr);
+        }
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // 🎓 ONBOARDING - Tutorial para vendedores nuevos
   // Solo mostrar si NO es un comando conocido y NO hay bridge/pending activo
   // ═══════════════════════════════════════════════════════════

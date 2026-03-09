@@ -13,21 +13,8 @@ import { BroadcastQueueService } from './broadcastQueueService';
 import { AppointmentService } from './appointmentService';
 import { TwilioService } from './twilio';
 
-export interface Env {
-  SUPABASE_URL: string;
-  SUPABASE_ANON_KEY: string;
-  ANTHROPIC_API_KEY: string;
-  TWILIO_ACCOUNT_SID: string;
-  TWILIO_AUTH_TOKEN: string;
-  TWILIO_PHONE_NUMBER: string;
-  GOOGLE_SERVICE_ACCOUNT_EMAIL: string;
-  GOOGLE_PRIVATE_KEY: string;
-  GOOGLE_CALENDAR_ID: string;
-  META_PHONE_NUMBER_ID: string;
-  META_ACCESS_TOKEN: string;
-  GEMINI_API_KEY?: string;
-  OPENAI_API_KEY?: string;
-}
+export type { Env } from '../types/env';
+import type { Env } from '../types/env';
 
 /**
  * ServiceFactory - Crea y cachea instancias de servicios

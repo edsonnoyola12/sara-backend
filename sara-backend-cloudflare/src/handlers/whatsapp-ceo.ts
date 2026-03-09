@@ -160,6 +160,44 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
       }
     }
 
+
+    // ═══════════════════════════════════════════════════════════
+    // 🔗 BRIDGE RÁPIDO: CEO responde "1" para hablar directo con último lead notificado
+    // ═══════════════════════════════════════════════════════════
+    if (mensaje === '1' && !notasCEO?.active_bridge) {
+      const ultimoLead = notasCEO?.ultimo_lead_notificado;
+      if (ultimoLead?.lead_id && ultimoLead?.lead_name) {
+        const notifTime = ultimoLead.timestamp ? new Date(ultimoLead.timestamp).getTime() : 0;
+        const minutosDesde = (Date.now() - notifTime) / (1000 * 60);
+        if (minutosDesde <= 30) {
+          try {
+            const bridgeService = new BridgeService(ctx.supabase);
+            const bridgeResult = await bridgeService.activarBridge(
+              ceo.id, ceo.name, cleanPhone,
+              ultimoLead.lead_id, ultimoLead.lead_name, ultimoLead.lead_phone
+            );
+            if (bridgeResult.success) {
+              const nombreCorto = ultimoLead.lead_name.split(' ')[0];
+              await ctx.meta.sendWhatsAppMessage(cleanPhone,
+                `🔗 *Chat directo con ${nombreCorto}* activado (6 min)\n\n` +
+                `Todo lo que escribas se le enviará directamente.\n` +
+                `*#cerrar* para terminar | *#mas* para extender`
+              );
+              try {
+                await ctx.meta.sendWhatsAppMessage(ultimoLead.lead_phone,
+                  `💬 *${ceo.name?.split(' ')[0]}* de nuestro equipo quiere hablar contigo directamente 🏠`
+                );
+              } catch (_) {}
+              console.log(`🔗 Bridge rápido CEO: ${ceo.name} → ${ultimoLead.lead_name}`);
+              return;
+            }
+          } catch (bridgeErr) {
+            console.error('⚠️ Error bridge rápido CEO:', bridgeErr);
+          }
+        }
+      }
+    }
+
     // ╔════════════════════════════════════════════════════════════════════════╗
     // ║  CRÍTICO - NO MODIFICAR SIN CORRER TESTS: npm test                      ║
     // ║  Test file: src/tests/conversationLogic.test.ts                         ║

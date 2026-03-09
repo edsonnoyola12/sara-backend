@@ -22,6 +22,7 @@ import { I18nService, SupportedLanguage, createI18n } from './i18nService';
 import { TTSService, createTTSService, shouldSendAsAudio } from './ttsService';
 import { getSaludoPorHora, generarContextoPersonalizado, getBotonesContextuales, getDesarrollosParaLista } from '../utils/uxHelpers';
 import { sanitizeForPrompt } from '../utils/safeHelpers';
+import { validateFacts } from './factValidator';
 
 // Interfaces
 interface AIAnalysis {
@@ -1872,6 +1873,20 @@ RECUERDA:
       }
 
       // ━━━━━━━━━━━━━━━
+      // FACT VALIDATION — Surgical correction of wrong facts BEFORE business logic
+      // Fixes: alberca attribution, renta claims, mascotas exceptions, tasas %,
+      //        locales comerciales, Nogal denial, horarios, identity
+      // ━━━━━━━━━━━━━━━
+      if (parsed.response) {
+        const developmentCtx = parsed.extracted_data?.desarrollo || parsed.extracted_data?.desarrollos?.[0] || undefined;
+        const { response: validatedResponse, corrections } = validateFacts(parsed.response, { developmentMentioned: developmentCtx });
+        if (corrections.length > 0) {
+          parsed.response = validatedResponse;
+          console.log(`🔬 FactValidator: ${corrections.length} correction(s) applied: ${corrections.join(', ')}`);
+        }
+      }
+
+      // ━━━━━━━━━━━━━━━
       // REGLA CRÍTICA: Si quiere VISITAR → NO pasar a vendedor, CERRAR CITA
       // ━━━━━━━━━━━━━━━
       const quiereVisitar =
@@ -2027,32 +2042,10 @@ Si algún familiar o amigo busca casa en el futuro, con gusto lo atiendo. ¡Te d
         }
       }
 
-      // ━━━━━━━━━━━━━━━
-      // CORRECCIÓN: Preguntan por RENTA → Solo vendemos
-      // ━━━━━━━━━━━━━━━
-      const preguntaPorRenta =
-        msgLowerCallback.includes('renta') ||
-        msgLowerCallback.includes('rentar') ||
-        msgLowerCallback.includes('alquiler') ||
-        msgLowerCallback.includes('arrendar');
+      // RENTA override removed — handled by FactValidator (correctRenta)
 
-      if (preguntaPorRenta && parsed.response) {
-        const respLower = parsed.response.toLowerCase();
-        // Si Claude dice que SÍ tienen renta (incorrecto)
-        if (respLower.includes('si, tenemos') || respLower.includes('sí, tenemos') ||
-            respLower.includes('tenemos opciones para rentar') || respLower.includes('casas en renta')) {
-          console.log('⚠️ CORRIGIENDO: Claude dijo que tenemos renta - SOLO VENDEMOS');
-          parsed.response = `En Santa Rita solo vendemos casas, no manejamos rentas 🏠
-
-Pero te cuento algo: con las opciones de crédito actuales, la mensualidad puede ser MUY similar a una renta, ¡y al final la casa es TUYA!
-
-¿Te gustaría que te muestre cómo funciona? Tenemos casas desde ${AIConversationService.precioMinGlobal(properties)} con mensualidades accesibles.`;
-        }
-      }
-
-      // ━━━━━━━━━━━━━━━
-      // CORRECCIÓN: Pide persona real → Ofrecer humano, NO fingir
-      // ━━━━━━━━━━━━━━━
+      // IDENTITY override removed — handled by FactValidator (correctIdentity)
+      // But still set contactar_vendedor if they ask for a human
       const pidePersonaReal =
         msgLowerCallback.includes('persona real') ||
         msgLowerCallback.includes('eres robot') ||
@@ -2060,17 +2053,8 @@ Pero te cuento algo: con las opciones de crédito actuales, la mensualidad puede
         msgLowerCallback.includes('eres humano') ||
         msgLowerCallback.includes('hablar con alguien');
 
-      if (pidePersonaReal && parsed.response) {
-        const respLower = parsed.response.toLowerCase();
-        // Si Claude dice que es "asesora real" o "persona real" (incorrecto)
-        if (respLower.includes('asesora real') || respLower.includes('persona real') ||
-            respLower.includes('soy una persona') || respLower.includes('no soy robot')) {
-          console.log('⚠️ CORRIGIENDO: Claude fingió ser humano - somos IA');
-          parsed.response = `Soy SARA, asistente virtual de Grupo Santa Rita 🤖
-
-Pero con gusto te conecto con uno de nuestros vendedores. Para que te contacten, ¿me compartes tu nombre?`;
-          parsed.contactar_vendedor = true;
-        }
+      if (pidePersonaReal) {
+        parsed.contactar_vendedor = true;
       }
 
       // ━━━━━━━━━━━━━━━
@@ -2298,36 +2282,7 @@ Si quieres, te muestro cómo funciona sin compromiso.`;
         }
       }
 
-      // ═══ CORRECCIÓN: TASAS DE INTERÉS - NO inventar números ═══
-      const preguntaTasaInteres =
-        msgLowerCallback.includes('tasa de') ||
-        msgLowerCallback.includes('tasa ') ||
-        msgLowerCallback.includes('interes') ||
-        msgLowerCallback.includes('interés') ||
-        msgLowerCallback.includes('porcentaje') ||
-        (msgLowerCallback.includes(' cat ') || msgLowerCallback.includes(' cat') || msgLowerCallback.startsWith('cat '));
-
-      if (preguntaTasaInteres && parsed.response) {
-        const respLower = parsed.response.toLowerCase();
-        // Detectar si SARA inventa tasas específicas (cualquier número + %)
-        const inventaTasas = /\d+\.?\d*\s*%/.test(parsed.response) ||
-          respLower.includes('entre 8') || respLower.includes('entre 9') ||
-          respLower.includes('entre 10') || respLower.includes('entre 11') ||
-          respLower.includes('8.5%') || respLower.includes('9%') ||
-          respLower.includes('10%') || respLower.includes('11%') ||
-          respLower.includes('tasa actual') || respLower.includes('tasas actuales');
-
-        if (inventaTasas) {
-          console.log('⚠️ CORRIGIENDO: SARA inventó tasas de interés');
-          parsed.response = `¡Buena pregunta! 💰
-
-Las tasas de interés varían según el banco y tu perfil crediticio. Te recomiendo consultar directamente con:
-• INFONAVIT/FOVISSSTE - si tienes subcuenta
-• Banorte, BBVA, Santander, HSBC - créditos tradicionales
-
-Nosotros te ayudamos con el trámite una vez que elijas tu casa. ¿Ya tienes algún desarrollo en mente que te gustaría conocer? 🏠`;
-        }
-      }
+      // TASAS DE INTERÉS override removed — handled by FactValidator (correctTasas)
 
       // ═══ CORRECCIÓN: BROCHURE/FOLLETO/PLANOS - SÍ tenemos ═══
       const pideBrochure =
@@ -2419,26 +2374,7 @@ Dime cuál y te lo envío ahora mismo 📲`;
         }
       }
 
-      // ═══ CORRECCIÓN: Preguntas sobre LOCAL COMERCIAL ═══
-      const preguntaLocalComercial =
-        msgLowerCallback.includes('local comercial') ||
-        msgLowerCallback.includes('local para negocio') ||
-        msgLowerCallback.includes('locales') ||
-        msgLowerCallback.includes('para negocio');
-
-      if (preguntaLocalComercial && parsed.response) {
-        const respLower = parsed.response.toLowerCase();
-        // Si Claude dice que sí tenemos locales comerciales (incorrecto)
-        if (respLower.includes('sí tenemos locales') || respLower.includes('tenemos opciones de locales') ||
-            respLower.includes('local comercial desde')) {
-          console.log('⚠️ CORRIGIENDO: Claude dijo que tenemos locales - SOLO CASAS');
-          parsed.response = `En Grupo Santa Rita nos especializamos en casas habitación, no manejamos locales comerciales 🏠
-
-Pero si buscas casa para tu familia, tenemos excelentes opciones desde ${AIConversationService.precioMinGlobal(properties)} en zonas con muy buena plusvalía.
-
-¿Te interesa que te cuente sobre nuestros desarrollos?`;
-        }
-      }
+      // LOCALES COMERCIALES override removed — handled by FactValidator (correctLocalesComerciales)
 
       // ═══ CORRECCIÓN: Menciona competencia - NO criticar ═══
       const mencionaCompetencia =
@@ -5003,6 +4939,60 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         await this.enviarRespuestaConAudioOpcional(from, respuestaLimpia, leadNotesConId);
         console.log('✅ Respuesta de Claude enviada (sin pregunta de crédito)');
 
+        // ═══ NOTIFICAR VENDEDOR: Notificación COMBINADA (lead + respuesta SARA) ═══
+        // Una sola llamada a enviarMensajeTeamMember para evitar race condition en notes
+        try {
+          if (lead.assigned_to) {
+            const { data: vendedorParaCtx } = await this.supabase.client
+              .from('team_members')
+              .select('id, name, phone, notes')
+              .eq('id', lead.assigned_to)
+              .single();
+            if (vendedorParaCtx?.phone) {
+              // Parse notes (handle both object and string from JSON.stringify)
+              let vendedorNotesCtx: any = {};
+              if (typeof vendedorParaCtx.notes === 'object' && vendedorParaCtx.notes !== null) {
+                vendedorNotesCtx = vendedorParaCtx.notes;
+              } else if (typeof vendedorParaCtx.notes === 'string') {
+                try { vendedorNotesCtx = JSON.parse(vendedorParaCtx.notes); } catch { vendedorNotesCtx = {}; }
+              }
+              // Solo enviar si whatsapp.ts marcó este lead como ultimo_lead_notificado
+              const ultimoNotif = vendedorNotesCtx.ultimo_lead_notificado;
+              if (ultimoNotif && ultimoNotif.lead_id === lead.id) {
+                const previewSara = respuestaLimpia.substring(0, 300) + (respuestaLimpia.length > 300 ? '...' : '');
+                const previewLead = originalMessage.substring(0, 100) + (originalMessage.length > 100 ? '...' : '');
+                const nombreCorto = lead.name?.split(' ')[0] || 'Lead';
+
+                const ctxMsg =
+                  `📲 *${nombreCorto} respondió:*\n"${previewLead}"\n\n` +
+                  `🤖 *SARA respondió:*\n${previewSara}\n\n` +
+                  `━━━━━━━━━━━━━━━━━━━━\n` +
+                  `Responde *1* para hablar directo con ${nombreCorto}`;
+
+                // UNA sola llamada — ventana abierta → directo, cerrada → template + pending_alerta_lead
+                const notifResult = await enviarMensajeTeamMember(this.supabase, this.meta, vendedorParaCtx, ctxMsg, {
+                  tipoMensaje: 'alerta_lead',
+                  guardarPending: true,
+                  pendingKey: 'pending_alerta_lead',
+                  templateOverride: {
+                    name: 'notificacion_cita_vendedor',
+                    params: [
+                      '📲 Lead respondió',
+                      nombreCorto,
+                      `wa.me/${(lead.phone || from).replace(/\D/g, '').replace(/^521?/, '')}`,
+                      lead.property_interest || 'Sin desarrollo',
+                      `"${originalMessage.substring(0, 40)}${originalMessage.length > 40 ? '...' : ''}"`
+                    ]
+                  }
+                });
+                console.log(`📲 Notificación combinada enviada a vendedor ${vendedorParaCtx.name} (${notifResult.method}) — ${nombreCorto} ↔ SARA`);
+              }
+            }
+          }
+        } catch (ctxErr) {
+          console.warn('⚠️ Error enviando notificación combinada a vendedor:', ctxErr);
+        }
+
         // ═══ OPCIONES CONTEXTUALES (Lista desplegable con 4 opciones) ═══
         try {
           // Solo skip si SARA está activamente agendando (pidiendo día/hora exacta)
@@ -5027,62 +5017,93 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
               m.role === 'assistant' && (m.content?.includes('¿Qué te gustaría hacer?') || m.content?.includes('Ver opciones'))
             );
 
+            // ═══ COMPARATIVA BANCARIA — runs independently of options menu ═══
+            if (analysis.intent === 'info_credito' && lead.property_interest) {
+              const yaEnvioComparativa = historial.slice(-6).some((m: any) =>
+                m.role === 'assistant' && m.content?.includes('OPCIONES:') && m.content?.includes('Mensualidad:')
+              );
+              const msgLowerCredito = originalMessage.toLowerCase();
+              const bancosConocidos = ['bbva', 'banorte', 'santander', 'hsbc', 'scotiabank', 'infonavit', 'fovissste'];
+              const bancoMencionado = bancosConocidos.find(b => msgLowerCredito.includes(b));
+
+              console.log(`💰 Comparativa check: property_interest=${lead.property_interest}, bancoMencionado=${bancoMencionado}, yaEnvioComparativa=${yaEnvioComparativa}`);
+              // Si mencionó banco específico → SIEMPRE enviar (es una pregunta nueva)
+              // Si NO mencionó banco → solo enviar si no se ha enviado antes
+              if (bancoMencionado || !yaEnvioComparativa) {
+                try {
+                  const devInterest = lead.property_interest;
+                  const prop = properties.find((p: any) => {
+                    const devName = (p.development_name || p.development || p.name || '').toLowerCase();
+                    return devName && devInterest.toLowerCase().includes(devName);
+                  });
+                  console.log(`💰 Property lookup: devInterest=${devInterest}, found=${!!prop}, price=${prop?.price_equipped || prop?.price || 'N/A'}`);
+                  if (prop && (prop.price_equipped || prop.price)) {
+                    const { FinancingCalculatorService } = await import('./financingCalculatorService');
+                    const finCalc = new FinancingCalculatorService(this.supabase);
+                    const comparison = finCalc.compareBanks({
+                      property_price: prop.price_equipped || prop.price,
+                      down_payment_percent: 10,
+                      term_years: 20
+                    });
+
+                    // Si mencionó banco(s) específico(s), filtrar solo esos
+                    if (bancoMencionado) {
+                      const bancosMencionados = bancosConocidos.filter(b => msgLowerCredito.includes(b));
+                      const bankNameMap: Record<string, string> = {
+                        'bbva': 'BBVA México', 'banorte': 'Banorte', 'santander': 'Santander',
+                        'hsbc': 'HSBC', 'scotiabank': 'Scotiabank', 'infonavit': 'INFONAVIT', 'fovissste': 'FOVISSSTE'
+                      };
+                      const nombresCompletos = bancosMencionados.map(b => bankNameMap[b] || b);
+                      comparison.banks = comparison.banks.filter(b =>
+                        nombresCompletos.some(n => b.bank.toLowerCase().includes(n.toLowerCase()) || n.toLowerCase().includes(b.bank.toLowerCase()))
+                      );
+                      console.log(`💰 Comparativa filtrada a: ${bancosMencionados.join(', ')} → ${comparison.banks.length} banco(s)`);
+                    }
+
+                    let comparisonText: string;
+                    if (bancoMencionado && comparison.banks.length === 1) {
+                      comparisonText = finCalc.formatSingleBankForWhatsApp(comparison.banks[0]);
+                    } else {
+                      comparisonText = finCalc.formatComparisonForWhatsApp(comparison);
+                    }
+                    if (comparisonText) {
+                      await this.meta.sendWhatsAppMessage(from, comparisonText);
+                      console.log(`💰 Comparativa enviada para ${devInterest}${bancoMencionado ? ' (solo ' + bancoMencionado + ')' : ' (todos)'}`);
+                    }
+                  }
+                } catch (finErr) {
+                  console.warn('⚠️ Error calculando financiamiento:', finErr);
+                }
+              } else {
+                console.log('💰 Comparativa omitida — ya enviada previamente');
+              }
+            }
+
             if (!yaTieneOpciones) {
               let opciones: Array<{ id: string; title: string; description?: string }>;
               let menuBody: string;
 
               // Credit-specific options when lead asks about financing
               if (analysis.intent === 'info_credito') {
-                // ═══ FIX: No reenviar comparativa si ya se envió, y detectar banco específico ═══
-                const yaEnvioComparativa = historial.slice(-6).some((m: any) =>
+                const msgLowerCredito2 = originalMessage.toLowerCase();
+                const bancosConocidos2 = ['bbva', 'banorte', 'santander', 'hsbc', 'scotiabank', 'infonavit', 'fovissste'];
+                const bancoMencionado2 = bancosConocidos2.find(b => msgLowerCredito2.includes(b));
+                const yaEnvioComparativa2 = (lead.conversation_history || []).slice(-6).some((m: any) =>
                   m.role === 'assistant' && m.content?.includes('OPCIONES:') && m.content?.includes('Mensualidad:')
                 );
-                const msgLowerCredito = originalMessage.toLowerCase();
-                const bancosConocidos = ['bbva', 'banorte', 'santander', 'hsbc', 'scotiabank', 'infonavit', 'fovissste'];
-                const bancoMencionado = bancosConocidos.find(b => msgLowerCredito.includes(b));
 
-                if (lead.property_interest && !yaEnvioComparativa && !bancoMencionado) {
-                  try {
-                    const devInterest = lead.property_interest;
-                    const prop = properties.find((p: any) => {
-                      const devName = (p.development_name || p.development || p.name || '').toLowerCase();
-                      return devName && devInterest.toLowerCase().includes(devName);
-                    });
-                    if (prop && (prop.price_equipped || prop.price)) {
-                      const { FinancingCalculatorService } = await import('./financingCalculatorService');
-                      const finCalc = new FinancingCalculatorService(this.supabase);
-                      const comparison = finCalc.compareBanks({
-                        property_price: prop.price_equipped || prop.price,
-                        down_payment_percent: 10,
-                        term_years: 20
-                      });
-                      const comparisonText = finCalc.formatComparisonForWhatsApp(comparison);
-                      if (comparisonText) {
-                        await this.meta.sendWhatsAppMessage(from, comparisonText);
-                        console.log('💰 Comparativa de bancos enviada para', devInterest);
-                      }
-                    }
-                  } catch (finErr) {
-                    console.warn('⚠️ Error calculando financiamiento:', finErr);
-                  }
-                } else if (yaEnvioComparativa || bancoMencionado) {
-                  console.log(`💰 Comparativa omitida — ${bancoMencionado ? 'banco específico: ' + bancoMencionado : 'ya enviada previamente'}`);
-                }
-
-                // ═══ FIX: Si el lead ya mencionó un banco específico o ya eligió tipo, NO preguntar de nuevo ═══
-                const yaEligioTipo = bancoMencionado || yaEnvioComparativa ||
-                  msgLowerCredito.includes('bancario') || msgLowerCredito.includes('infonavit') ||
-                  msgLowerCredito.includes('fovissste') || msgLowerCredito.includes('cofinavit');
+                const yaEligioTipo = bancoMencionado2 || yaEnvioComparativa2 ||
+                  msgLowerCredito2.includes('bancario') || msgLowerCredito2.includes('infonavit') ||
+                  msgLowerCredito2.includes('fovissste') || msgLowerCredito2.includes('cofinavit');
 
                 if (yaEligioTipo) {
-                  // Ya sabe qué quiere — ofrecer siguiente paso
                   opciones = [
                     { id: 'btn_conectar_asesor', title: '👤 Hablar con asesor', description: 'Te conectamos con un especialista' },
                     { id: 'btn_simular_credito', title: '🧮 Simular mi crédito', description: 'Calcular con mis datos reales' },
                     { id: 'btn_docs_necesarios', title: '📋 Documentos', description: 'Qué necesito para tramitar' }
                   ];
                   menuBody = '¿Cómo quieres continuar?';
-                  console.log(`💰 Menú crédito: siguiente paso (lead ya eligió${bancoMencionado ? ' ' + bancoMencionado.toUpperCase() : ''})`);
+                  console.log(`💰 Menú crédito: siguiente paso (lead ya eligió${bancoMencionado2 ? ' ' + bancoMencionado2.toUpperCase() : ''})`);
                 } else {
                   opciones = [
                     { id: 'btn_credito_infonavit', title: '🏛️ INFONAVIT', description: 'Crédito con subcuenta INFONAVIT' },

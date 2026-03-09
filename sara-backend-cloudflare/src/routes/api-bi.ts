@@ -39,33 +39,7 @@ import { buildCotizacionFromOffer, generateCotizacionHTML } from '../services/co
 import { DevelopmentFunnelService } from '../services/developmentFunnelService';
 import { ReferralService } from '../services/referralService';
 
-interface Env {
-  SUPABASE_URL: string;
-  SUPABASE_ANON_KEY: string;
-  ANTHROPIC_API_KEY: string;
-  META_PHONE_NUMBER_ID: string;
-  META_ACCESS_TOKEN: string;
-  GOOGLE_SERVICE_ACCOUNT_EMAIL: string;
-  GOOGLE_PRIVATE_KEY: string;
-  GOOGLE_CALENDAR_ID: string;
-  API_SECRET?: string;
-  SARA_CACHE?: KVNamespace;
-  RESEND_API_KEY?: string;
-  REPORT_TO_EMAILS?: string;
-  OPENAI_API_KEY?: string;
-  RETELL_API_KEY?: string;
-  RETELL_AGENT_ID?: string;
-  RETELL_PHONE_NUMBER?: string;
-  VEO_API_KEY?: string;
-  GEMINI_API_KEY?: string;
-  HEYGEN_API_KEY?: string;
-  META_WHATSAPP_BUSINESS_ID?: string;
-  SENTRY_DSN?: string;
-  ENVIRONMENT?: string;
-}
-
-type CorsResponseFn = (body: string | null, status?: number, contentType?: string, request?: Request) => Response;
-type CheckApiAuthFn = (request: Request, env: Env) => Response | null;
+import type { Env, CorsResponseFn, CheckApiAuthFn } from '../types/env';
 
 export async function handleApiBiRoutes(
   url: URL,

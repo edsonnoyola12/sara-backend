@@ -174,11 +174,29 @@ export class TTSService {
     clean = clean.replace(/\brec\b/gi, 'recámaras');
 
     // Convertir precios a texto legible (millones, miles)
-    // Formato: $1,500,000 o $1.5M o $3,700,000
+    // Orden importa: patrones más específicos primero
+
+    // "$1.5 millones", "$2 millones" → palabras
+    clean = clean.replace(/\$\s*([\d,]+(?:\.\d+)?)\s*millones?\b/gi, (_, num) => {
+      const millones = parseFloat(num.replace(/,/g, ''));
+      return this.numeroAPalabras(millones * 1000000) + ' pesos';
+    });
+    // "$1.5M", "$2M" → palabras
     clean = clean.replace(/\$\s*([\d,]+(?:\.\d+)?)\s*M\b/gi, (_, num) => {
       const millones = parseFloat(num.replace(/,/g, ''));
       return this.numeroAPalabras(millones * 1000000) + ' pesos';
     });
+    // "$45 mil", "$200 mil" → palabras (common Spanish format)
+    clean = clean.replace(/\$\s*([\d,]+(?:\.\d+)?)\s*mil\b/gi, (_, num) => {
+      const miles = parseFloat(num.replace(/,/g, ''));
+      return this.numeroAPalabras(miles * 1000) + ' pesos';
+    });
+    // "$45K", "$200K" → palabras
+    clean = clean.replace(/\$\s*([\d,]+(?:\.\d+)?)\s*K\b/gi, (_, num) => {
+      const miles = parseFloat(num.replace(/,/g, ''));
+      return this.numeroAPalabras(miles * 1000) + ' pesos';
+    });
+    // Generic: "$1,500,000", "$45,000" → palabras
     clean = clean.replace(/\$\s*([\d,]+)/g, (_, num) => {
       const valor = parseInt(num.replace(/,/g, ''), 10);
       return this.numeroAPalabras(valor) + ' pesos';
