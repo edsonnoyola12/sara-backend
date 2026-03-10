@@ -8,6 +8,7 @@ import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { BroadcastQueueService } from '../services/broadcastQueueService';
 import { logEvento } from './briefings';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
+import { enviarMensajeLead } from '../utils/leadMessaging';
 import { safeJsonParse } from '../utils/safeHelpers';
 import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 import { logErrorToDB } from './healthCheck';
@@ -419,7 +420,7 @@ export async function enviarRecordatoriosPromociones(supabase: SupabaseService, 
       // Obtener leads del segmento (LIMIT 500 para evitar timeout en CRON)
       const { data: leads } = await supabase.client
         .from('leads')
-        .select('id, name, phone, lead_score, score, status, property_interest')
+        .select('id, name, phone, lead_score, score, status, property_interest, last_message_at, notes')
         .limit(500);
 
       if (!leads) continue;
@@ -458,7 +459,13 @@ export async function enviarRecordatoriosPromociones(supabase: SupabaseService, 
             .replace(/{desarrollo}/gi, lead.property_interest || 'nuestros desarrollos');
 
           const phone = lead.phone.startsWith('52') ? lead.phone : '52' + lead.phone;
-          await meta.sendWhatsAppMessage(phone, mensaje);
+          const resultado = await enviarMensajeLead(supabase, meta, {
+            id: lead.id, phone, name: lead.name, notes: lead.notes, last_message_at: lead.last_message_at
+          }, mensaje, {
+            pendingContext: { tipo: 'remarketing' }
+          });
+
+          if (resultado.method === 'skipped') continue;
 
           // Log
           await supabase.client.from('promotion_logs').insert({
@@ -1567,7 +1574,7 @@ export async function seguimientoPostVenta(supabase: SupabaseService, meta: Meta
     // Buscar leads con status 'sold'
     const { data: clientes, error } = await supabase.client
       .from('leads')
-      .select('id, name, phone, notes, updated_at, assigned_to')
+      .select('id, name, phone, notes, updated_at, assigned_to, last_message_at')
       .eq('status', 'sold')
       .not('phone', 'is', null);
 
@@ -1678,21 +1685,21 @@ export async function seguimientoPostVenta(supabase: SupabaseService, meta: Meta
         etapaNueva = 3;
       }
 
-      // Enviar mensaje si corresponde (post-venta leads have closed 24h window — use template fallback)
+      // Enviar mensaje si corresponde (post-venta leads have closed 24h window — use enviarMensajeLead wrapper)
       if (mensaje) {
         try {
-          // Try free-form first, fall back to template if 24h window is closed
-          try {
-            await meta.sendWhatsAppMessage(cliente.phone, mensaje);
-          } catch (windowErr: any) {
-            // 24h window likely closed — use seguimiento_lead template
-            console.log(`   ⚠️ Free-form failed for post-venta (24h window), using template: ${windowErr?.message?.substring(0, 80)}`);
-            const templateComponents = [
-              { type: 'body', parameters: [{ type: 'text', text: nombreCliente }] }
-            ];
-            await meta.sendTemplate(cliente.phone, 'seguimiento_lead', 'es_MX', templateComponents);
-          }
-          console.log(`   ✅ Post-venta etapa ${etapaNueva} enviado a ${cliente.name || cliente.phone}`);
+          const templateComponents = [
+            { type: 'body', parameters: [{ type: 'text', text: nombreCliente }] }
+          ];
+          const resultado = await enviarMensajeLead(supabase, meta, {
+            id: cliente.id, phone: cliente.phone, name: cliente.name, notes: cliente.notes, last_message_at: cliente.last_message_at
+          }, mensaje, {
+            templateComponents,
+            pendingContext: { tipo: 'postventa' }
+          });
+
+          if (resultado.method === 'skipped') continue;
+          console.log(`   ✅ Post-venta etapa ${etapaNueva} enviado a ${cliente.name || cliente.phone} (method: ${resultado.method})`);
 
           // Actualizar notas del cliente + guardar contexto para respuesta
           const nuevasNotas = {
@@ -1762,7 +1769,7 @@ export async function enviarFelicitacionesCumple(supabase: SupabaseService, meta
     // Buscar leads cuyo cumpleaños sea hoy (formato: YYYY-MM-DD o MM-DD)
     const { data: leadsCumple } = await supabase.client
       .from('leads')
-      .select('id, name, phone, birthday, notes, assigned_to')
+      .select('id, name, phone, birthday, notes, assigned_to, last_message_at')
       .or(`birthday.ilike.%-${fechaHoy},birthday.ilike.${fechaHoy}%`)
       .not('phone', 'is', null)
       .not('status', 'in', '("lost","fallen")');
@@ -1789,7 +1796,6 @@ export async function enviarFelicitacionesCumple(supabase: SupabaseService, meta
       const nombreCorto = lead.name?.split(' ')[0] || '';
 
       try {
-        // Intentar usar template feliz_cumple
         const templateComponents = [
           {
             type: 'body',
@@ -1799,28 +1805,31 @@ export async function enviarFelicitacionesCumple(supabase: SupabaseService, meta
           }
         ];
 
-        await meta.sendTemplate(lead.phone, 'feliz_cumple', 'es_MX', templateComponents);
-        console.log(`🎂 Felicitación (template) enviada a ${lead.name}`);
+        const mensajeCumple = `🎂 ¡Feliz cumpleaños ${nombreCorto}! 🎉\n\n` +
+          `Todo el equipo te desea un día increíble.\n\n` +
+          `Gracias por ser parte de nuestra familia. 🏠💙`;
 
-        // Marcar como felicitado + pending_auto_response
+        const resultado = await enviarMensajeLead(supabase, meta, {
+          id: lead.id, phone: lead.phone, name: lead.name, notes: lead.notes, last_message_at: lead.last_message_at
+        }, mensajeCumple, {
+          templateName: 'feliz_cumple',
+          templateComponents,
+          pendingContext: { tipo: 'cumpleanos' }
+        });
+
+        if (resultado.method === 'skipped') continue;
+
+        console.log(`🎂 Felicitación enviada a ${lead.name} (method: ${resultado.method})`);
+
+        // Marcar como felicitado
         const notasActuales = lead.notes || {};
         const nuevasNotas = typeof notasActuales === 'object'
           ? {
               ...notasActuales,
-              [`cumple_felicitado_${añoActual}`]: true,
-              pending_auto_response: {
-                type: 'cumpleanos',
-                sent_at: new Date().toISOString(),
-                vendedor_id: lead.assigned_to
-              }
+              [`cumple_felicitado_${añoActual}`]: true
             }
           : {
-              [`cumple_felicitado_${añoActual}`]: true,
-              pending_auto_response: {
-                type: 'cumpleanos',
-                sent_at: new Date().toISOString(),
-                vendedor_id: lead.assigned_to
-              }
+              [`cumple_felicitado_${añoActual}`]: true
             };
 
         await supabase.client
@@ -1830,48 +1839,8 @@ export async function enviarFelicitacionesCumple(supabase: SupabaseService, meta
 
         enviados++;
 
-      } catch (templateErr) {
-        console.error(`⚠️ Template feliz_cumple no disponible para ${lead.name}, usando fallback...`);
-
-        // Fallback: mensaje regular (solo si estamos dentro de 24hrs)
-        try {
-          const mensajeFallback = `🎂 ¡Feliz cumpleaños ${nombreCorto}! 🎉\n\n` +
-            `Todo el equipo te desea un día increíble.\n\n` +
-            `Gracias por ser parte de nuestra familia. 🏠💙`;
-
-          await meta.sendWhatsAppMessage(lead.phone, mensajeFallback);
-          console.log(`🎂 Felicitación (fallback) enviada a ${lead.name}`);
-
-          // Marcar como felicitado + pending_auto_response
-          const notasActuales = lead.notes || {};
-          const nuevasNotas = typeof notasActuales === 'object'
-            ? {
-                ...notasActuales,
-                [`cumple_felicitado_${añoActual}`]: true,
-                pending_auto_response: {
-                  type: 'cumpleanos',
-                  sent_at: new Date().toISOString(),
-                  vendedor_id: lead.assigned_to
-                }
-              }
-            : {
-                [`cumple_felicitado_${añoActual}`]: true,
-                pending_auto_response: {
-                  type: 'cumpleanos',
-                  sent_at: new Date().toISOString(),
-                  vendedor_id: lead.assigned_to
-                }
-              };
-
-          await supabase.client
-            .from('leads')
-            .update({ notes: nuevasNotas })
-            .eq('id', lead.id);
-
-          enviados++;
-        } catch (fallbackErr) {
-          console.error(`❌ No se pudo enviar felicitación a ${lead.name}:`, fallbackErr);
-        }
+      } catch (err) {
+        console.error(`❌ No se pudo enviar felicitación a ${lead.name}:`, err);
       }
     }
 
@@ -1967,7 +1936,7 @@ export async function seguimientoCredito(supabase: SupabaseService, meta: MetaWh
     // 3. No han tenido actividad en 5+ días
     const { data: leads } = await supabase.client
       .from('leads')
-      .select('id, name, phone, notes, property_interest, updated_at, needs_mortgage')
+      .select('id, name, phone, notes, property_interest, updated_at, needs_mortgage, last_message_at, assigned_to')
       .eq('needs_mortgage', true)
       .not('status', 'in', '("lost","fallen","cold","closed","paused")')
       .lt('updated_at', hace5dias.toISOString())
@@ -2021,7 +1990,6 @@ export async function seguimientoCredito(supabase: SupabaseService, meta: MetaWh
       const desarrollo = lead.property_interest || 'tu casa ideal';
 
       try {
-        // Usar template info_credito
         const templateComponents = [
           {
             type: 'body',
@@ -2032,22 +2000,33 @@ export async function seguimientoCredito(supabase: SupabaseService, meta: MetaWh
           }
         ];
 
-        await meta.sendTemplate(lead.phone, 'info_credito', 'es_MX', templateComponents);
-        console.log(`🏦 Seguimiento crédito (template) enviado a ${lead.name}`);
+        const mensajeCredito = `🏦 ¡Hola ${nombreCorto}!\n\n` +
+          `Te comparto información sobre crédito hipotecario para *${desarrollo}*:\n\n` +
+          `✅ Hasta 20 años de plazo\n` +
+          `✅ Tasa competitiva\n` +
+          `✅ Varios bancos disponibles\n\n` +
+          `¿Te gustaría que un asesor te contacte? Responde *Sí*.`;
 
-        // Marcar como enviado + setear pending_auto_response
+        const resultado = await enviarMensajeLead(supabase, meta, {
+          id: lead.id, phone: lead.phone, name: lead.name, notes: notas, last_message_at: lead.last_message_at
+        }, mensajeCredito, {
+          templateName: 'info_credito',
+          templateComponents,
+          pendingContext: { tipo: 'seguimiento_credito' }
+        });
+
+        if (resultado.method === 'skipped') continue;
+
+        console.log(`🏦 Seguimiento crédito enviado a ${lead.name} (method: ${resultado.method})`);
+
+        // Marcar como enviado
         await supabase.client
           .from('leads')
           .update({
             notes: {
               ...notas,
               credito_seguimiento_sent: hoyStr,
-              ultimo_seguimiento_credito: ahora.toISOString(),
-              pending_auto_response: {
-                type: 'seguimiento_credito',
-                sent_at: ahora.toISOString(),
-                vendedor_id: lead.assigned_to
-              }
+              ultimo_seguimiento_credito: ahora.toISOString()
             }
           })
           .eq('id', lead.id);
@@ -2057,42 +2036,14 @@ export async function seguimientoCredito(supabase: SupabaseService, meta: MetaWh
           type: 'system',
           lead_id: lead.id,
           activity_type: 'seguimiento_credito',
-          notes: 'Template info_credito enviado automáticamente',
+          notes: `Seguimiento crédito enviado (${resultado.method})`,
           created_at: ahora.toISOString()
         }]);
 
         enviados++;
 
-      } catch (templateErr) {
-        console.error(`⚠️ Template info_credito no disponible para ${lead.name}, usando fallback...`);
-
-        // Fallback: mensaje regular (solo funcionará si hay ventana de 24hrs abierta)
-        try {
-          const mensajeFallback = `🏦 ¡Hola ${nombreCorto}!\n\n` +
-            `Te comparto información sobre crédito hipotecario para *${desarrollo}*:\n\n` +
-            `✅ Hasta 20 años de plazo\n` +
-            `✅ Tasa competitiva\n` +
-            `✅ Varios bancos disponibles\n\n` +
-            `¿Te gustaría que un asesor te contacte? Responde *Sí*.`;
-
-          await meta.sendWhatsAppMessage(lead.phone, mensajeFallback);
-          console.log(`🏦 Seguimiento crédito (fallback) enviado a ${lead.name}`);
-
-          await supabase.client
-            .from('leads')
-            .update({
-              notes: {
-                ...notas,
-                credito_seguimiento_sent: hoyStr,
-                ultimo_seguimiento_credito: ahora.toISOString()
-              }
-            })
-            .eq('id', lead.id);
-
-          enviados++;
-        } catch (fallbackErr) {
-          console.error(`❌ No se pudo enviar seguimiento crédito a ${lead.name}:`, fallbackErr);
-        }
+      } catch (err) {
+        console.error(`❌ Error enviando seguimiento crédito a ${lead.name}:`, err);
       }
     }
 
@@ -2276,10 +2227,16 @@ export async function followUp24hLeadsNuevos(supabase: SupabaseService, meta: Me
           });
           console.log(`📤 Follow-up pendiente creado para ${lead.name}, vendedor ${vendedor.name} notificado`);
         } else {
-          // Sin vendedor asignado, enviar directo
-          await meta.sendWhatsAppMessage(phoneLimpio, mensaje);
-          await registrarMensajeAutomatico(supabase, lead.id);
-          console.log(`⏰ Follow-up 24h enviado directo a ${lead.name} (sin vendedor asignado)`);
+          // Sin vendedor asignado, enviar via wrapper
+          const resultado = await enviarMensajeLead(supabase, meta, {
+            id: lead.id, phone: phoneLimpio, name: lead.name, notes: notasActuales, last_message_at: (lead as any).last_message_at
+          }, mensaje, {
+            pendingContext: { tipo: 'followup_inactivo' }
+          });
+          if (resultado.method !== 'skipped') {
+            await registrarMensajeAutomatico(supabase, lead.id);
+          }
+          console.log(`⏰ Follow-up 24h enviado a ${lead.name} (sin vendedor, method: ${resultado.method})`);
         }
 
         enviados++;
@@ -2312,7 +2269,7 @@ export async function reminderDocumentosCredito(supabase: SupabaseService, meta:
     // Buscar leads que llevan 3+ días con documentos solicitados
     const { data: leads } = await supabase.client
       .from('leads')
-      .select('id, name, phone, notes, property_interest, credit_status, team_members:assigned_to(name, phone)')
+      .select('id, name, phone, notes, property_interest, credit_status, last_message_at, team_members:assigned_to(name, phone)')
       .eq('credit_status', 'docs_requested')
       .lt('updated_at', hace3dias.toISOString())
       .not('phone', 'is', null)
@@ -2355,16 +2312,14 @@ export async function reminderDocumentosCredito(supabase: SupabaseService, meta:
         `¿Necesitas ayuda con algo? Estoy aquí para apoyarte. 🏡`;
 
       try {
-        // Try free-form first, fall back to template if 24h window closed
-        try {
-          await meta.sendWhatsAppMessage(phoneLimpio, mensaje);
-        } catch (windowErr: any) {
-          console.log(`   ⚠️ Docs reminder free-form failed (24h window), using template`);
-          const templateComponents = [
-            { type: 'body', parameters: [{ type: 'text', text: nombre }] }
-          ];
-          await meta.sendTemplate(phoneLimpio, 'seguimiento_lead', 'es_MX', templateComponents);
-        }
+        const resultado = await enviarMensajeLead(supabase, meta, {
+          id: lead.id, phone: phoneLimpio, name: lead.name, notes: notas, last_message_at: lead.last_message_at
+        }, mensaje, {
+          pendingContext: { tipo: 'seguimiento_credito' }
+        });
+
+        if (resultado.method === 'skipped') continue;
+        console.log(`📋 Docs reminder enviado a ${lead.name} (method: ${resultado.method})`);
 
         // Actualizar notas (fresh read to avoid JSONB race)
         const { data: freshLead } = await supabase.client
@@ -3447,7 +3402,7 @@ export async function ejecutarCadenciasInteligentes(
     // Buscar leads con cadencia activa
     const { data: allLeads } = await supabase.client
       .from('leads')
-      .select('id, name, phone, notes, assigned_to, property_interest, status')
+      .select('id, name, phone, notes, assigned_to, property_interest, status, last_message_at')
       .not('notes->cadencia', 'is', null);
 
     if (!allLeads || allLeads.length === 0) {
@@ -3551,25 +3506,17 @@ export async function ejecutarCadenciasInteligentes(
           }
 
           const mensaje = paso.plantilla.replace(/\{nombre\}/g, lead.name?.split(' ')[0] || 'Hola');
-          await meta.sendWhatsAppMessage(lead.phone, mensaje);
+          const resultado = await enviarMensajeLead(supabase, meta, {
+            id: lead.id, phone: lead.phone, name: lead.name, notes, last_message_at: lead.last_message_at
+          }, mensaje, {
+            pendingContext: { tipo: `cadencia_${tipo}`, paso: pasoIdx + 1, context: paso.plantilla.substring(0, 100) }
+          });
+
+          if (resultado.method === 'skipped') continue;
           await registrarMensajeAutomatico(supabase, lead.id);
 
-          // Guardar pending_auto_response para capturar respuesta con contexto
-          const { data: latestLead } = await supabase.client
-            .from('leads').select('notes').eq('id', lead.id).single();
-          if (latestLead) {
-            const updNotes = typeof latestLead.notes === 'object' ? (latestLead.notes || {}) : {};
-            (updNotes as any).pending_auto_response = {
-              type: `cadencia_${tipo}`,
-              sent_at: ahoraISO,
-              paso: pasoIdx + 1,
-              context: paso.plantilla.substring(0, 100)
-            };
-            await supabase.client.from('leads').update({ notes: updNotes }).eq('id', lead.id);
-          }
-
           ejecutados++;
-          console.log(`🎵 Cadencia ${tipo} paso ${pasoIdx + 1}: WhatsApp a ${lead.name}`);
+          console.log(`🎵 Cadencia ${tipo} paso ${pasoIdx + 1}: WhatsApp a ${lead.name} (method: ${resultado.method})`);
 
         } else if (paso.accion === 'llamada') {
           if (!retellEnabled || !retellConfigured) {

@@ -1250,6 +1250,8 @@ export class VendorCommandsService {
     'visit_scheduled': 'scheduled',
     'negotiating': 'negotiation',
     'sold': 'closed',
+    'credit_flow': 'contacted',
+    'credit_qualified': 'contacted',
   };
 
   private readonly STAGE_LABELS: Record<string, string> = {
@@ -1266,6 +1268,8 @@ export class VendorCommandsService {
     'visit_scheduled': '📅 CITA AGENDADA',
     'negotiating': '💰 NEGOCIANDO',
     'sold': '✅ VENDIDO',
+    'credit_flow': '🏦 EN FLUJO CRÉDITO',
+    'credit_qualified': '🏦 CALIFICADO CRÉDITO',
   };
 
   getFunnelStageLabel(stage: string): string {

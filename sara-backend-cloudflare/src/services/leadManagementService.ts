@@ -23,11 +23,12 @@ export interface TeamMemberAvailability {
 }
 
 export function getAvailableVendor(vendedores: TeamMemberAvailability[]): TeamMemberAvailability | null {
-  const now = new Date();
-  const today = now.toISOString().split('T')[0];
-  const currentDay = now.getDay();
-  const currentHour = now.getHours();
-  const currentMinute = now.getMinutes();
+  // Usar hora de México (UTC-6) para verificar disponibilidad
+  const mexicoNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+  const today = mexicoNow.toISOString().split('T')[0];
+  const currentDay = mexicoNow.getDay();
+  const currentHour = mexicoNow.getHours();
+  const currentMinute = mexicoNow.getMinutes();
   const currentTimeMinutes = currentHour * 60 + currentMinute;
 
   const activos = vendedores.filter(v => v.active && v.role === 'vendedor');

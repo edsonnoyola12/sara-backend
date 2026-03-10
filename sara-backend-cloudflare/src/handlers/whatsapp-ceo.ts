@@ -103,115 +103,86 @@ export async function handleCEOMessage(ctx: HandlerContext, handler: any, from: 
     }
 
     // ═══════════════════════════════════════════════════════════
-    // PENDING MESSAGES: Usa deliverPendingMessage() que resuelve:
+    // PENDING MESSAGES: Entrega TODOS los pending acumulados (no solo el primero)
+    // Usa deliverPendingMessage() que resuelve:
     // 1. Re-lee notes frescas de DB (evita sobreescribir cambios de CRONs)
     // 2. Captura wamid de Meta API (verifica delivery)
     // 3. Verifica errores de Supabase .update() (no falla silenciosamente)
     // ═══════════════════════════════════════════════════════════
+    let pendingDelivered = 0;
 
-    // PENDING BRIEFING - Usa expiración configurable (18h)
-    const pendingBriefingCEO = notasCEO?.pending_briefing;
-    if (pendingBriefingCEO?.sent_at && pendingBriefingCEO?.mensaje_completo) {
-      if (!isPendingExpired(pendingBriefingCEO, 'briefing')) {
-        console.log(`📋 [PENDING] CEO ${nombreCEO} respondió template - enviando briefing`);
-        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_briefing', pendingBriefingCEO.mensaje_completo, 'last_briefing_context');
-        return;
-      }
-    }
+    // Orden de prioridad: alerta_lead (máxima) → briefing → recap → reportes → video → audio → mensaje
+    const pendingChecks: Array<{
+      key: string;
+      data: any;
+      tipo: string;
+      contextKey?: string;
+      label: string;
+      isSpecial?: 'audio' | 'video';
+    }> = [
+      { key: 'pending_alerta_lead', data: notasCEO?.pending_alerta_lead, tipo: 'notificacion', label: '🔥 alerta de lead' },
+      { key: 'pending_briefing', data: notasCEO?.pending_briefing, tipo: 'briefing', contextKey: 'last_briefing_context', label: 'briefing' },
+      { key: 'pending_recap', data: notasCEO?.pending_recap, tipo: 'recap', contextKey: 'last_recap_context', label: 'recap' },
+      { key: 'pending_reporte_diario', data: notasCEO?.pending_reporte_diario, tipo: 'reporte_diario', contextKey: 'last_reporte_diario_context', label: 'reporte diario' },
+      { key: 'pending_reporte_semanal', data: notasCEO?.pending_reporte_semanal, tipo: 'resumen_semanal', contextKey: 'last_reporte_semanal_context', label: 'reporte semanal' },
+      { key: 'pending_resumen_semanal', data: notasCEO?.pending_resumen_semanal, tipo: 'resumen_semanal', contextKey: 'last_resumen_semanal_context', label: 'resumen semanal' },
+      { key: 'pending_video_semanal', data: notasCEO?.pending_video_semanal, tipo: 'video', label: 'video semanal', isSpecial: 'video' },
+      { key: 'pending_audio', data: notasCEO?.pending_audio, tipo: 'audio', label: 'audio TTS', isSpecial: 'audio' },
+      { key: 'pending_mensaje', data: notasCEO?.pending_mensaje, tipo: 'notificacion', label: 'mensaje pendiente' },
+    ];
 
-    // PENDING RECAP - Usa expiración configurable (18h)
-    const pendingRecapCEO = notasCEO?.pending_recap;
-    if (pendingRecapCEO?.sent_at && pendingRecapCEO?.mensaje_completo) {
-      if (!isPendingExpired(pendingRecapCEO, 'recap')) {
-        console.log(`📋 [PENDING] CEO ${nombreCEO} respondió template - enviando recap`);
-        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_recap', pendingRecapCEO.mensaje_completo, 'last_recap_context');
-        return;
-      }
-    }
-
-    // PENDING REPORTE DIARIO - Usa expiración configurable (24h)
-    const pendingReporteDiarioCEO = notasCEO?.pending_reporte_diario;
-    if (pendingReporteDiarioCEO?.sent_at && pendingReporteDiarioCEO?.mensaje_completo) {
-      if (!isPendingExpired(pendingReporteDiarioCEO, 'reporte_diario')) {
-        console.log(`📊 [PENDING] CEO ${nombreCEO} respondió template - enviando reporte diario`);
-        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_reporte_diario', pendingReporteDiarioCEO.mensaje_completo, 'last_reporte_diario_context');
-        return;
-      }
-    }
-
-    // PENDING REPORTE SEMANAL - Usa expiración configurable (72h)
-    const pendingReporteSemanalCEO = notasCEO?.pending_reporte_semanal;
-    if (pendingReporteSemanalCEO?.sent_at && pendingReporteSemanalCEO?.mensaje_completo) {
-      if (!isPendingExpired(pendingReporteSemanalCEO, 'resumen_semanal')) {
-        console.log(`📊 [PENDING] CEO ${nombreCEO} respondió template - enviando reporte semanal`);
-        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_reporte_semanal', pendingReporteSemanalCEO.mensaje_completo, 'last_reporte_semanal_context');
-        return;
-      }
-    }
-
-    // PENDING RESUMEN SEMANAL (recap semanal - sábado) - Usa expiración configurable (72h)
-    const pendingResumenSemanalCEO = notasCEO?.pending_resumen_semanal;
-    if (pendingResumenSemanalCEO?.sent_at && pendingResumenSemanalCEO?.mensaje_completo) {
-      if (!isPendingExpired(pendingResumenSemanalCEO, 'resumen_semanal')) {
-        console.log(`📋 [PENDING] CEO ${nombreCEO} respondió template - enviando resumen semanal`);
-        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_resumen_semanal', pendingResumenSemanalCEO.mensaje_completo, 'last_resumen_semanal_context');
-        return;
-      }
-    }
-
-    // PENDING VIDEO SEMANAL (resumen semanal de logros)
-    const pendingVideoSemanalCEO = notasCEO?.pending_video_semanal;
-    if (pendingVideoSemanalCEO?.sent_at && pendingVideoSemanalCEO?.mensaje_completo) {
-      const horasDesde = (Date.now() - new Date(pendingVideoSemanalCEO.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesde <= 24) {
-        console.log(`🎬 [PENDING PRIORITY] CEO ${nombreCEO} respondió template - enviando resumen semanal de logros`);
-        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_video_semanal', pendingVideoSemanalCEO.mensaje_completo);
-        return;
-      }
-    }
-
-    // PENDING AUDIO (TTS) - Enviar nota de voz pendiente
-    const pendingAudioCEO = notasCEO?.pending_audio;
-    if (pendingAudioCEO?.sent_at && pendingAudioCEO?.texto) {
-      const horasDesdeAudio = (Date.now() - new Date(pendingAudioCEO.sent_at).getTime()) / (1000 * 60 * 60);
-      if (horasDesdeAudio <= 24 && ctx.env?.OPENAI_API_KEY) {
-        console.log(`🔊 [PENDING] CEO ${nombreCEO} respondió template - enviando audio TTS`);
-        try {
-          const { createTTSService } = await import('../services/ttsService');
-          const tts = createTTSService(ctx.env.OPENAI_API_KEY);
-          const audioResult = await tts.generateAudio(pendingAudioCEO.texto);
-          if (audioResult.success && audioResult.audioBuffer) {
-            await ctx.meta.sendVoiceMessage(cleanPhone, audioResult.audioBuffer, audioResult.mimeType || 'audio/ogg');
-            console.log(`✅ Audio TTS entregado a CEO (${audioResult.audioBuffer.byteLength} bytes)`);
+    for (const pc of pendingChecks) {
+      try {
+        // Audio special case
+        if (pc.isSpecial === 'audio' && pc.data?.sent_at && pc.data?.texto) {
+          const horasDesde = (Date.now() - new Date(pc.data.sent_at).getTime()) / (1000 * 60 * 60);
+          if (horasDesde <= 24 && ctx.env?.OPENAI_API_KEY) {
+            console.log(`🔊 [PENDING] CEO ${nombreCEO} - enviando ${pc.label}`);
+            try {
+              const { createTTSService } = await import('../services/ttsService');
+              const tts = createTTSService(ctx.env.OPENAI_API_KEY);
+              const audioResult = await tts.generateAudio(pc.data.texto);
+              if (audioResult.success && audioResult.audioBuffer) {
+                await ctx.meta.sendVoiceMessage(cleanPhone, audioResult.audioBuffer, audioResult.mimeType || 'audio/ogg');
+                console.log(`✅ Audio TTS entregado a CEO (${audioResult.audioBuffer.byteLength} bytes)`);
+              }
+            } catch (ttsErr) {
+              console.error('⚠️ Error generando audio TTS:', ttsErr);
+            }
+            await deliverPendingMessage(ctx, ceo.id, cleanPhone, pc.key, '__ALREADY_SENT__');
+            pendingDelivered++;
           }
-        } catch (ttsErr) {
-          console.error('⚠️ Error generando audio TTS:', ttsErr);
+          continue;
         }
 
-        // Audio uses deliverPendingMessage for cleanup (fresh re-read + error check)
-        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_audio', '__ALREADY_SENT__');
-        return;
+        // Video special case (24h expiration)
+        if (pc.isSpecial === 'video' && pc.data?.sent_at && pc.data?.mensaje_completo) {
+          const horasDesde = (Date.now() - new Date(pc.data.sent_at).getTime()) / (1000 * 60 * 60);
+          if (horasDesde <= 24) {
+            console.log(`🎬 [PENDING] CEO ${nombreCEO} - enviando ${pc.label}`);
+            await deliverPendingMessage(ctx, ceo.id, cleanPhone, pc.key, pc.data.mensaje_completo);
+            pendingDelivered++;
+          }
+          continue;
+        }
+
+        // Standard pending messages
+        if (pc.data?.sent_at && pc.data?.mensaje_completo) {
+          if (!isPendingExpired(pc.data, pc.tipo)) {
+            console.log(`📬 [PENDING] CEO ${nombreCEO} - enviando ${pc.label}`);
+            await deliverPendingMessage(ctx, ceo.id, cleanPhone, pc.key, pc.data.mensaje_completo, pc.contextKey);
+            pendingDelivered++;
+          }
+        }
+      } catch (pendingErr) {
+        console.error(`⚠️ Error entregando ${pc.key} a CEO ${nombreCEO}:`, pendingErr);
+        // Continuar con el siguiente pending, no perder los demás
       }
     }
 
-    // PENDING MENSAJE GENÉRICO CEO (notificaciones de citas, alertas, etc.)
-    const pendingMensajeCEO = notasCEO?.pending_mensaje;
-    if (pendingMensajeCEO?.sent_at && pendingMensajeCEO?.mensaje_completo) {
-      if (!isPendingExpired(pendingMensajeCEO, 'notificacion')) {
-        console.log(`📬 [PENDING] CEO ${nombreCEO} respondió template - enviando mensaje pendiente`);
-        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_mensaje', pendingMensajeCEO.mensaje_completo);
-        return;
-      }
-    }
-
-    // PENDING ALERTA LEAD CEO (alertas prioritarias)
-    const pendingAlertaLeadCEO = notasCEO?.pending_alerta_lead;
-    if (pendingAlertaLeadCEO?.sent_at && pendingAlertaLeadCEO?.mensaje_completo) {
-      if (!isPendingExpired(pendingAlertaLeadCEO, 'notificacion')) {
-        console.log(`🔥 [PENDING] CEO ${nombreCEO} respondió template - enviando alerta de lead`);
-        await deliverPendingMessage(ctx, ceo.id, cleanPhone, 'pending_alerta_lead', pendingAlertaLeadCEO.mensaje_completo);
-        return;
-      }
+    if (pendingDelivered > 0) {
+      console.log(`✅ ${pendingDelivered} pending(s) entregados a CEO ${nombreCEO}`);
+      return;
     }
 
 

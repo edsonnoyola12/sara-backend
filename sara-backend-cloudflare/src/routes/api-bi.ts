@@ -39,7 +39,25 @@ import { buildCotizacionFromOffer, generateCotizacionHTML } from '../services/co
 import { DevelopmentFunnelService } from '../services/developmentFunnelService';
 import { ReferralService } from '../services/referralService';
 
+import { isAllowedCrmOrigin } from './cors';
 import type { Env, CorsResponseFn, CheckApiAuthFn } from '../types/env';
+
+/**
+ * Check auth for sensitive data endpoints.
+ * Allows: API key auth OR request from whitelisted CRM origin.
+ */
+function checkSensitiveAuth(request: Request, env: Env, corsResponse: CorsResponseFn, checkApiAuth: CheckApiAuthFn): Response | null {
+  const apiAuthResult = checkApiAuth(request, env);
+  if (!apiAuthResult) return null; // API key valid
+
+  const origin = request.headers.get('Origin');
+  if (isAllowedCrmOrigin(origin)) return null;
+
+  return corsResponse(JSON.stringify({
+    error: 'No autorizado',
+    hint: 'Incluye header Authorization: Bearer <API_SECRET> o accede desde el CRM'
+  }), 401);
+}
 
 export async function handleApiBiRoutes(
   url: URL,
@@ -55,6 +73,9 @@ export async function handleApiBiRoutes(
     // API Routes - Dashboard
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/api/dashboard/kpis' && request.method === 'GET') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       // OPTIMIZADO: Solo seleccionar campo 'status' en lugar de '*'
       const { data: leads } = await supabase.client.from('leads').select('status');
       const kpis = {
@@ -72,6 +93,9 @@ export async function handleApiBiRoutes(
     // API Routes - Métricas de Conversación
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/api/metrics/conversation' && request.method === 'GET') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const dias = parseInt(url.searchParams.get('days') || '7');
       const fechaInicio = new Date();
       fechaInicio.setDate(fechaInicio.getDate() - dias);
@@ -214,6 +238,9 @@ export async function handleApiBiRoutes(
     // GET /api/metrics/quality - Reporte de calidad de respuestas SARA
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     if (url.pathname === '/api/metrics/quality' && request.method === 'GET') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const dias = parseInt(url.searchParams.get('days') || '7');
       const fechaInicio = new Date();
       fechaInicio.setDate(fechaInicio.getDate() - dias);
@@ -2354,11 +2381,8 @@ CREATE INDEX idx_mds_updated ON message_delivery_status(updated_at);`
     // OBSERVABILITY DASHBOARD - CRONs, errors, health, business metrics
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/observability') {
-      const authErr = checkApiAuth(request, env);
-      if (authErr) {
-        const origin = request.headers.get('Origin');
-        if (!isAllowedCrmOrigin(origin)) return authErr;
-      }
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
       try {
         const dashboard = await getObservabilityDashboard(supabase);
         return corsResponse(JSON.stringify(dashboard, null, 2), 200, 'application/json', request);
@@ -2371,11 +2395,8 @@ CREATE INDEX idx_mds_updated ON message_delivery_status(updated_at);`
     // DEVELOPMENT FUNNEL - Per-development conversion metrics
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/development-funnel') {
-      const authErr = checkApiAuth(request, env);
-      if (authErr) {
-        const origin = request.headers.get('Origin');
-        if (!isAllowedCrmOrigin(origin)) return authErr;
-      }
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
 
       const development = url.searchParams.get('development');
       const days = parseInt(url.searchParams.get('days') || '90');
@@ -3007,7 +3028,9 @@ ${problemasRecientes.slice(-10).reverse().map(p => `<tr><td>${p.lead}</td><td st
     // PIPELINE - Sales Pipeline Intelligence
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/pipeline' || url.pathname.startsWith('/api/pipeline/')) {
-      // Auth removed - CRM accesses these endpoints directly
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const pipelineService = new PipelineService(supabase);
 
       // GET /api/pipeline - Full pipeline summary

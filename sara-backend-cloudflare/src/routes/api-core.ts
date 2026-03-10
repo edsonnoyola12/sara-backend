@@ -398,6 +398,9 @@ export async function handleApiCoreRoutes(
     }
 
     if (url.pathname === "/api/diagnostico" && request.method === "GET") {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const ahora = new Date();
       const hoyMexico = new Date(ahora.getTime() - 6 * 60 * 60 * 1000);
       const hoyStr = hoyMexico.toISOString().split('T')[0];
@@ -453,6 +456,9 @@ export async function handleApiCoreRoutes(
     // API - Crear Evento
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/api/events' && request.method === 'POST') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const body = await request.json() as any;
 
       const reqErr = validateRequired(body, ['name', 'event_date']);
@@ -478,6 +484,9 @@ export async function handleApiCoreRoutes(
 
     // API - Obtener Eventos
     if (url.pathname === '/api/events' && request.method === 'GET') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const { data, error } = await supabase.client.from('events').select('*').order('event_date', { ascending: false });
       if (error) return corsResponse(JSON.stringify({ error: error.message }), 400);
       return corsResponse(JSON.stringify(data));
@@ -487,6 +496,9 @@ export async function handleApiCoreRoutes(
     // API - Enviar Invitaciones a Eventos
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/api/events/invite' && request.method === 'POST') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
       const body = await request.json() as { event_id: string, segment: string, send_image: boolean, send_video: boolean, send_pdf: boolean };
 
@@ -689,6 +701,9 @@ Responde *SI* para confirmar tu asistencia.`;
     // API: Recalcular scores de todos los leads según su status
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/api/recalculate-scores' && request.method === 'POST') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       try {
         // Score base por status del funnel
         const SCORE_BY_STATUS: Record<string, number> = {
@@ -776,6 +791,9 @@ Responde *SI* para confirmar tu asistencia.`;
     }
 
     if (url.pathname.match(/^\/api\/leads\/[^\/]+$/) && request.method === 'GET') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const id = url.pathname.split('/').pop();
       const { data } = await supabase.client
         .from('leads')
@@ -786,6 +804,9 @@ Responde *SI* para confirmar tu asistencia.`;
     }
 
     if (url.pathname.match(/^\/api\/leads\/[^\/]+$/) && request.method === 'PUT') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const id = url.pathname.split('/').pop();
       const rawBody = await request.json() as any;
 
@@ -1018,6 +1039,9 @@ ${asesor.phone ? `📱 *Tel:* ${asesor.phone}` : ''}
     // API: Crear Lead con Round-Robin + Notificaciones Completas
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/leads' && request.method === 'POST') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const body = await request.json() as any;
 
       // Validate required fields
@@ -1379,6 +1403,9 @@ ${gpsLink ? '📍 Ubicación: ' + gpsLink : ''}
     
     // Cancelar cita (y eliminar de Google Calendar)
     if (url.pathname.match(/^\/api\/appointments\/[^/]+\/cancel$/) && request.method === 'POST') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const id = url.pathname.split('/')[3];
       const body = await request.json() as any;
       
@@ -1514,6 +1541,9 @@ Cancelada por: ${body.cancelled_by || 'CRM'}`;
     // Notificar cambio/cancelación de cita (usado por coordinadores)
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/appointments/notify-change' && request.method === 'POST') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const body = await request.json() as any;
 
       const reqErrNotify = validateRequired(body, ['action', 'lead_name']);
@@ -1631,6 +1661,9 @@ Para reagendar, contáctanos. ¡Estamos para servirte! 🏠`;
     // Notificar nota de coordinador al vendedor
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/leads/notify-note' && request.method === 'POST') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const body = await request.json() as any;
 
       const reqErrNote = validateRequired(body, ['lead_name', 'nota', 'vendedor_phone']);
@@ -1669,6 +1702,9 @@ ${body.nota}
     // Notificar reasignación de lead al nuevo vendedor
     // ═══════════════════════════════════════════════════════════════
     if (url.pathname === '/api/leads/notify-reassign' && request.method === 'POST') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const body = await request.json() as any;
 
       const reqErrReassign = validateRequired(body, ['lead_name', 'vendedor_phone', 'vendedor_name']);
@@ -1718,6 +1754,9 @@ ${body.nota || 'Sin nota'}
 
     // Listar citas (para el CRM)
     if (url.pathname === '/api/appointments' && request.method === 'GET') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const startDate = url.searchParams.get('start_date');
       const endDate = url.searchParams.get('end_date');
       const vendorId = url.searchParams.get('vendor_id');
@@ -1754,6 +1793,9 @@ ${body.nota || 'Sin nota'}
 
     // Crear nueva cita
     if (url.pathname === '/api/appointments' && request.method === 'POST') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const body = await request.json() as any;
 
       // Validate required fields
@@ -1932,6 +1974,9 @@ Creada desde CRM`;
 
     // Actualizar/Reagendar cita
     if (url.pathname.match(/^\/api\/appointments\/[^/]+$/) && request.method === 'PUT') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const id = url.pathname.split('/')[3];
       const body = await request.json() as any;
 
@@ -2259,6 +2304,9 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
     // API Routes - Properties
     // ═══════════════════════════════════════════════════════════
     if (url.pathname === '/api/properties' && request.method === 'GET') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const { data } = await supabase.client
         .from('properties')
         .select('*')
@@ -2267,6 +2315,9 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
     }
 
     if (url.pathname.startsWith('/api/properties/') && request.method === 'GET') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const id = url.pathname.split('/')[3];
       const { data } = await supabase.client
         .from('properties')
@@ -2277,6 +2328,9 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
     }
 
     if (url.pathname === '/api/properties' && request.method === 'POST') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const body = await request.json() as any;
 
       const reqErrProp = validateRequired(body, ['name']);
@@ -2297,6 +2351,9 @@ ${body.status_notes ? '📝 *Notas:* ' + body.status_notes : ''}
     }
 
     if (url.pathname.startsWith('/api/properties/') && request.method === 'PUT') {
+      const authErr = checkSensitiveAuth(request, env, corsResponse, checkApiAuth);
+      if (authErr) return authErr;
+
       const id = url.pathname.split('/')[3];
       const rawBody = await request.json() as any;
 

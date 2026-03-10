@@ -7,6 +7,7 @@ import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { puedeEnviarMensajeAutomatico, registrarMensajeAutomatico } from './followups';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
+import { enviarMensajeLead } from '../utils/leadMessaging';
 import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 import { logErrorToDB } from './healthCheck';
 
@@ -68,7 +69,7 @@ export async function recuperarAbandonosCredito(supabase: SupabaseService, meta:
     // 4. No han recibido recuperación en los últimos 14 días
     const { data: allLeads } = await supabase.client
       .from('leads')
-      .select('id, name, phone, status, notes, property_interest, updated_at, assigned_to')
+      .select('id, name, phone, status, notes, property_interest, updated_at, assigned_to, last_message_at')
       .not('notes', 'is', null)
       .not('phone', 'is', null)
       .not('status', 'in', '("credit_qualified","pre_approved","approved","sold","closed","delivered","lost","fallen","paused")')
@@ -154,9 +155,15 @@ Si te interesa retomar, solo responde "quiero crédito" 🏡`;
       }
 
       try {
-        await meta.sendWhatsAppMessage(lead.phone, mensajePersonalizado);
+        const resultado = await enviarMensajeLead(supabase, meta, {
+          id: lead.id, phone: lead.phone, name: lead.name, notes: notas, last_message_at: lead.last_message_at
+        }, mensajePersonalizado, {
+          pendingContext: { tipo: 'seguimiento_credito' }
+        });
+
+        if (resultado.method === 'skipped') continue;
         enviados++;
-        console.log(`🏦 Recuperación crédito enviada a: ${lead.name} (etapa: ${etapa})`);
+        console.log(`🏦 Recuperación crédito enviada a: ${lead.name} (etapa: ${etapa}, method: ${resultado.method})`);
 
         // Actualizar notas
         const notasActualizadas = {
@@ -229,7 +236,7 @@ export async function followUpPostVisita(supabase: SupabaseService, meta: MetaWh
     // 4. No han recibido follow-up post-visita recientemente
     const { data: leads } = await supabase.client
       .from('leads')
-      .select('id, name, phone, status, notes, property_interest, updated_at, assigned_to')
+      .select('id, name, phone, status, notes, property_interest, updated_at, assigned_to, last_message_at')
       .eq('status', 'visited')
       .lt('updated_at', hace2dias.toISOString())
       .gt('updated_at', hace14dias.toISOString())
@@ -282,9 +289,15 @@ export async function followUpPostVisita(supabase: SupabaseService, meta: MetaWh
       const mensaje = generarMensajePostVisita(nombre, desarrollo, diasDesdeVisita, vendorRating);
 
       try {
-        await meta.sendWhatsAppMessage(lead.phone, mensaje);
+        const resultado = await enviarMensajeLead(supabase, meta, {
+          id: lead.id, phone: lead.phone, name: lead.name, notes: notas, last_message_at: lead.last_message_at
+        }, mensaje, {
+          pendingContext: { tipo: 'postventa' }
+        });
+
+        if (resultado.method === 'skipped') continue;
         enviados++;
-        console.log(`📍 Follow-up post-visita enviado a: ${lead.name} (${diasDesdeVisita} días desde visita)`);
+        console.log(`📍 Follow-up post-visita enviado a: ${lead.name} (${diasDesdeVisita} días desde visita, method: ${resultado.method})`);
 
         // Actualizar notas
         const notasActualizadas = {
@@ -546,7 +559,7 @@ export async function nurturingEducativo(supabase: SupabaseService, meta: MetaWh
     // 4. NO son team_members
     const { data: leads } = await supabase.client
       .from('leads')
-      .select('id, name, phone, status, notes, property_interest, needs_mortgage, updated_at')
+      .select('id, name, phone, status, notes, property_interest, needs_mortgage, updated_at, last_message_at')
       .in('status', ['new', 'contacted', 'qualified', 'appointment_scheduled'])
       .gt('updated_at', hace60dias.toISOString())
       .not('phone', 'is', null)
@@ -623,8 +636,6 @@ export async function nurturingEducativo(supabase: SupabaseService, meta: MetaWh
       }
 
       try {
-        // Usar template para que llegue aunque no hayan escrito en 24h
-        // Template seguimiento_lead: "¡Hola {{1}}! 👋 Hace unos días platicamos sobre *{{2}}*..."
         const templateComponents = [
           {
             type: 'body',
@@ -635,13 +646,21 @@ export async function nurturingEducativo(supabase: SupabaseService, meta: MetaWh
           }
         ];
 
-        await meta.sendTemplate(lead.phone, 'seguimiento_lead', 'es_MX', templateComponents);
+        const resultado = await enviarMensajeLead(supabase, meta, {
+          id: lead.id, phone: lead.phone, name: lead.name, notes: notas, last_message_at: lead.last_message_at
+        }, contenidoSeleccionado.mensaje, {
+          templateName: 'seguimiento_lead',
+          templateComponents,
+          pendingContext: { tipo: 'remarketing' }
+        });
+
+        if (resultado.method === 'skipped') continue;
 
         // Registrar mensaje automático enviado
         await registrarMensajeAutomatico(supabase, lead.id);
 
         enviados++;
-        console.log(`📚 Nurturing (template) enviado a ${lead.name}: ${contenidoSeleccionado.id}`);
+        console.log(`📚 Nurturing enviado a ${lead.name}: ${contenidoSeleccionado.id} (method: ${resultado.method})`);
 
         // Actualizar notas
         const notasActualizadas = {
@@ -690,7 +709,7 @@ export async function solicitarReferidos(supabase: SupabaseService, meta: MetaWh
     // 3. No se les ha pedido referidos recientemente
     const { data: clientes } = await supabase.client
       .from('leads')
-      .select('id, name, phone, status, notes, property_interest, status_changed_at, assigned_to')
+      .select('id, name, phone, status, notes, property_interest, status_changed_at, assigned_to, last_message_at')
       .in('status', ['sold', 'closed', 'delivered'])
       .lt('status_changed_at', hace30dias.toISOString())
       .gt('status_changed_at', hace90dias.toISOString())
@@ -755,9 +774,15 @@ Solo responde con el nombre y teléfono de quien creas que le interese, y yo me 
 ¡Gracias por confiar en nosotros! ⭐`;
 
       try {
-        await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+        const resultado = await enviarMensajeLead(supabase, meta, {
+          id: cliente.id, phone: cliente.phone, name: cliente.name, notes: notas, last_message_at: cliente.last_message_at
+        }, mensaje, {
+          pendingContext: { tipo: 'referidos' }
+        });
+
+        if (resultado.method === 'skipped') continue;
         enviados++;
-        console.log(`🤝 Solicitud de referidos enviada a: ${cliente.name} (${diasDesdeCompra} días desde compra)`);
+        console.log(`🤝 Solicitud de referidos enviada a: ${cliente.name} (${diasDesdeCompra} días desde compra, method: ${resultado.method})`);
 
         // Actualizar notas
         const notasActualizadas = {
@@ -766,12 +791,7 @@ Solo responde con el nombre y teléfono de quien creas que le interese, y yo me 
           historial_pedidos_referidos: [
             ...((notas as any)?.historial_pedidos_referidos || []).slice(-4),
             { fecha: hoyStr, dias_desde_compra: diasDesdeCompra }
-          ],
-          pending_auto_response: {
-            type: 'referidos',
-            sent_at: new Date().toISOString(),
-            vendedor_id: cliente.assigned_to
-          }
+          ]
         };
 
         await supabase.client
@@ -831,7 +851,7 @@ export async function enviarEncuestaNPS(supabase: SupabaseService, meta: MetaWha
     // 3. No han recibido encuesta NPS
     const { data: clientes } = await supabase.client
       .from('leads')
-      .select('id, name, phone, status, notes, property_interest, status_changed_at')
+      .select('id, name, phone, status, notes, property_interest, status_changed_at, last_message_at')
       .in('status', ['visited', 'sold', 'closed', 'delivered'])
       .lt('status_changed_at', hace7dias.toISOString())
       .gt('status_changed_at', hace30dias.toISOString())
@@ -907,12 +927,7 @@ Tu respuesta nos ayuda a mejorar 🙏`;
           surveys_sent: [
             ...((notas.surveys_sent || []).slice(-9)),
             { type: 'nps', sent_at: ahora }
-          ],
-          pending_auto_response: {
-            type: 'nps',
-            sent_at: ahora,
-            vendedor_id: (cliente as any).assigned_to
-          }
+          ]
         };
 
         await supabase.client
@@ -920,21 +935,26 @@ Tu respuesta nos ayuda a mejorar 🙏`;
           .update({ notes: notasActualizadas })
           .eq('id', cliente.id);
 
-        // Ahora sí enviar
-        const resultado_envio = await meta.sendWhatsAppMessage(cliente.phone, mensaje);
-        const wamid = resultado_envio?.messages?.[0]?.id;
+        // Ahora sí enviar via wrapper
+        const resultado_envio = await enviarMensajeLead(supabase, meta, {
+          id: cliente.id, phone: cliente.phone, name: cliente.name, notes: notasActualizadas, last_message_at: cliente.last_message_at
+        }, mensaje, {
+          pendingContext: { tipo: 'nps' }
+        });
+
+        if (resultado_envio.method === 'skipped') continue;
 
         // Guardar wamid si se obtuvo
-        if (wamid) {
-          const notasConWamid = { ...notasActualizadas, survey_wamid: wamid };
-          notasConWamid.surveys_sent[notasConWamid.surveys_sent.length - 1].wamid = wamid;
+        if (resultado_envio.messageId) {
+          const notasConWamid = { ...notasActualizadas, survey_wamid: resultado_envio.messageId };
+          notasConWamid.surveys_sent[notasConWamid.surveys_sent.length - 1].wamid = resultado_envio.messageId;
           await supabase.client.from('leads').update({ notes: notasConWamid }).eq('id', cliente.id);
         }
 
         enviados++;
         resultado.enviados = enviados;
-        resultado.detalles.push(`✅ Enviado a ${cliente.name} (${cliente.phone}) - ${cliente.status}${wamid ? ` wamid:${wamid.slice(-8)}` : ''}`);
-        console.log(`📊 Encuesta NPS enviada a: ${cliente.name} (${cliente.status})${wamid ? ` wamid:${wamid.slice(-8)}` : ''}`);
+        resultado.detalles.push(`✅ Enviado a ${cliente.name} (${cliente.phone}) - ${cliente.status} (${resultado_envio.method})${resultado_envio.messageId ? ` wamid:${resultado_envio.messageId.slice(-8)}` : ''}`);
+        console.log(`📊 Encuesta NPS enviada a: ${cliente.name} (${cliente.status}, method: ${resultado_envio.method})${resultado_envio.messageId ? ` wamid:${resultado_envio.messageId.slice(-8)}` : ''}`);
 
         await new Promise(r => setTimeout(r, 2000));
 
@@ -1079,7 +1099,7 @@ export async function seguimientoPostEntrega(supabase: SupabaseService, meta: Me
     // 2. No han recibido seguimiento post-entrega
     const { data: clientes } = await supabase.client
       .from('leads')
-      .select('id, name, phone, status, notes, property_interest, status_changed_at, assigned_to')
+      .select('id, name, phone, status, notes, property_interest, status_changed_at, assigned_to, last_message_at')
       .eq('status', 'delivered')
       .lt('status_changed_at', hace3dias.toISOString())
       .gt('status_changed_at', hace7dias.toISOString())
@@ -1139,12 +1159,7 @@ Si hay algo pendiente o algún detalle por resolver, responde y te ayudamos de i
           surveys_sent: [
             ...((notas.surveys_sent || []).slice(-9)),
             { type: 'post_entrega', sent_at: ahora }
-          ],
-          pending_auto_response: {
-            type: 'post_entrega',
-            sent_at: ahora,
-            vendedor_id: cliente.assigned_to
-          }
+          ]
         };
 
         await supabase.client
@@ -1152,18 +1167,23 @@ Si hay algo pendiente o algún detalle por resolver, responde y te ayudamos de i
           .update({ notes: notasActualizadas })
           .eq('id', cliente.id);
 
-        // Ahora sí enviar
-        const resultado_envio = await meta.sendWhatsAppMessage(cliente.phone, mensaje);
-        const wamid = resultado_envio?.messages?.[0]?.id;
+        // Ahora sí enviar via wrapper
+        const resultado_envio = await enviarMensajeLead(supabase, meta, {
+          id: cliente.id, phone: cliente.phone, name: cliente.name, notes: notasActualizadas, last_message_at: cliente.last_message_at
+        }, mensaje, {
+          pendingContext: { tipo: 'post_entrega' }
+        });
 
-        if (wamid) {
-          const notasConWamid = { ...notasActualizadas, survey_wamid: wamid };
-          notasConWamid.surveys_sent[notasConWamid.surveys_sent.length - 1].wamid = wamid;
+        if (resultado_envio.method === 'skipped') continue;
+
+        if (resultado_envio.messageId) {
+          const notasConWamid = { ...notasActualizadas, survey_wamid: resultado_envio.messageId };
+          notasConWamid.surveys_sent[notasConWamid.surveys_sent.length - 1].wamid = resultado_envio.messageId;
           await supabase.client.from('leads').update({ notes: notasConWamid }).eq('id', cliente.id);
         }
 
         enviados++;
-        console.log(`🔑 Seguimiento post-entrega enviado a: ${cliente.name}${wamid ? ` wamid:${wamid.slice(-8)}` : ''}`);
+        console.log(`🔑 Seguimiento post-entrega enviado a: ${cliente.name} (method: ${resultado_envio.method})${resultado_envio.messageId ? ` wamid:${resultado_envio.messageId.slice(-8)}` : ''}`);
 
         // Notificar al vendedor (via enviarMensajeTeamMember para respetar ventana 24h)
         if (cliente.assigned_to) {
@@ -1307,7 +1327,7 @@ export async function encuestaSatisfaccionCasa(supabase: SupabaseService, meta: 
     // 2. No han recibido encuesta de satisfacción
     const { data: clientes } = await supabase.client
       .from('leads')
-      .select('id, name, phone, status, notes, property_interest, status_changed_at, assigned_to')
+      .select('id, name, phone, status, notes, property_interest, status_changed_at, assigned_to, last_message_at')
       .eq('status', 'delivered')
       .lt('status_changed_at', hace3meses.toISOString())
       .gt('status_changed_at', hace6meses.toISOString())
@@ -1374,12 +1394,7 @@ Tu opinión nos ayuda a mejorar 🙏`;
           surveys_sent: [
             ...((notas.surveys_sent || []).slice(-9)),
             { type: 'satisfaccion_casa', sent_at: ahora }
-          ],
-          pending_auto_response: {
-            type: 'satisfaccion_casa',
-            sent_at: ahora,
-            vendedor_id: cliente.assigned_to
-          }
+          ]
         };
 
         await supabase.client
@@ -1387,18 +1402,23 @@ Tu opinión nos ayuda a mejorar 🙏`;
           .update({ notes: notasActualizadas })
           .eq('id', cliente.id);
 
-        // Ahora sí enviar
-        const resultado_envio = await meta.sendWhatsAppMessage(cliente.phone, mensaje);
-        const wamid = resultado_envio?.messages?.[0]?.id;
+        // Ahora sí enviar via wrapper
+        const resultado_envio = await enviarMensajeLead(supabase, meta, {
+          id: cliente.id, phone: cliente.phone, name: cliente.name, notes: notasActualizadas, last_message_at: cliente.last_message_at
+        }, mensaje, {
+          pendingContext: { tipo: 'satisfaccion_casa' }
+        });
 
-        if (wamid) {
-          const notasConWamid = { ...notasActualizadas, survey_wamid: wamid };
-          notasConWamid.surveys_sent[notasConWamid.surveys_sent.length - 1].wamid = wamid;
+        if (resultado_envio.method === 'skipped') continue;
+
+        if (resultado_envio.messageId) {
+          const notasConWamid = { ...notasActualizadas, survey_wamid: resultado_envio.messageId };
+          notasConWamid.surveys_sent[notasConWamid.surveys_sent.length - 1].wamid = resultado_envio.messageId;
           await supabase.client.from('leads').update({ notes: notasConWamid }).eq('id', cliente.id);
         }
 
         enviados++;
-        console.log(`🏡 Encuesta de satisfacción enviada a: ${cliente.name} (${mesesDesdeEntrega} meses)${wamid ? ` wamid:${wamid.slice(-8)}` : ''}`);
+        console.log(`🏡 Encuesta de satisfacción enviada a: ${cliente.name} (${mesesDesdeEntrega} meses, method: ${resultado_envio.method})${resultado_envio.messageId ? ` wamid:${resultado_envio.messageId.slice(-8)}` : ''}`);
 
         await new Promise(r => setTimeout(r, 2000));
 
@@ -1571,7 +1591,7 @@ export async function checkInMantenimiento(supabase: SupabaseService, meta: Meta
     // 2. No han recibido check-in de mantenimiento este año
     const { data: clientes } = await supabase.client
       .from('leads')
-      .select('id, name, phone, status, notes, property_interest, status_changed_at, assigned_to')
+      .select('id, name, phone, status, notes, property_interest, status_changed_at, assigned_to, last_message_at')
       .eq('status', 'delivered')
       .lt('status_changed_at', hace11meses.toISOString())
       .gt('status_changed_at', hace13meses.toISOString())
@@ -1644,12 +1664,7 @@ Responde *SÍ* si todo está bien o *AYUDA* si necesitas contactos de proveedore
           surveys_sent: [
             ...((notas.surveys_sent || []).slice(-9)),
             { type: 'mantenimiento', sent_at: ahora }
-          ],
-          pending_auto_response: {
-            type: 'mantenimiento',
-            sent_at: ahora,
-            vendedor_id: cliente.assigned_to
-          }
+          ]
         };
 
         await supabase.client
@@ -1657,18 +1672,23 @@ Responde *SÍ* si todo está bien o *AYUDA* si necesitas contactos de proveedore
           .update({ notes: notasActualizadas })
           .eq('id', cliente.id);
 
-        // Ahora sí enviar
-        const resultado_envio = await meta.sendWhatsAppMessage(cliente.phone, mensaje);
-        const wamid = resultado_envio?.messages?.[0]?.id;
+        // Ahora sí enviar via wrapper
+        const resultado_envio = await enviarMensajeLead(supabase, meta, {
+          id: cliente.id, phone: cliente.phone, name: cliente.name, notes: notasActualizadas, last_message_at: cliente.last_message_at
+        }, mensaje, {
+          pendingContext: { tipo: 'mantenimiento' }
+        });
 
-        if (wamid) {
-          const notasConWamid = { ...notasActualizadas, survey_wamid: wamid };
-          notasConWamid.surveys_sent[notasConWamid.surveys_sent.length - 1].wamid = wamid;
+        if (resultado_envio.method === 'skipped') continue;
+
+        if (resultado_envio.messageId) {
+          const notasConWamid = { ...notasActualizadas, survey_wamid: resultado_envio.messageId };
+          notasConWamid.surveys_sent[notasConWamid.surveys_sent.length - 1].wamid = resultado_envio.messageId;
           await supabase.client.from('leads').update({ notes: notasConWamid }).eq('id', cliente.id);
         }
 
         enviados++;
-        console.log(`🔧 Check-in de mantenimiento enviado a: ${cliente.name} (${añosDesdeEntrega} años)${wamid ? ` wamid:${wamid.slice(-8)}` : ''}`);
+        console.log(`🔧 Check-in de mantenimiento enviado a: ${cliente.name} (${añosDesdeEntrega} años, method: ${resultado_envio.method})${resultado_envio.messageId ? ` wamid:${resultado_envio.messageId.slice(-8)}` : ''}`);
 
         await new Promise(r => setTimeout(r, 2000));
 
@@ -1799,7 +1819,7 @@ export async function checkIn60Dias(supabase: SupabaseService, meta: MetaWhatsAp
     // Leads con purchase_date entre 55-65 días atrás
     const { data: clientes } = await supabase.client
       .from('leads')
-      .select('id, name, phone, status, notes, property_interest, purchase_date, assigned_to')
+      .select('id, name, phone, status, notes, property_interest, purchase_date, assigned_to, last_message_at')
       .eq('status', 'sold')
       .not('phone', 'is', null)
       .not('purchase_date', 'is', null)
@@ -1841,30 +1861,33 @@ Han pasado 2 meses desde tu compra en *${desarrollo}* y queríamos saber cómo v
 Estamos aquí para lo que necesites 😊`;
 
       try {
-        if (puedeEnviarMensajeAutomatico(supabase, cliente.id)) {
-          await meta.sendWhatsAppMessage(cliente.phone!, mensaje);
-          registrarMensajeAutomatico(supabase, cliente.id);
-          enviados++;
-
-          // Marcar como enviado
+        if (await puedeEnviarMensajeAutomatico(supabase, cliente.id)) {
           const notas = typeof cliente.notes === 'object' ? cliente.notes : {};
-          await supabase.client
-            .from('leads')
-            .update({
-              notes: {
-                ...notas,
-                checkin_60d_sent: true,
-                checkin_60d_date: ahora.toISOString(),
-                pending_auto_response: {
-                  type: 'checkin_60d',
-                  sent_at: ahora.toISOString(),
-                  vendedor_id: cliente.assigned_to
-                }
-              }
-            })
-            .eq('id', cliente.id);
 
-          console.log(`📅 Check-in 60 días enviado a: ${cliente.name}`);
+          const resultado = await enviarMensajeLead(supabase, meta, {
+            id: cliente.id, phone: cliente.phone!, name: cliente.name, notes: notas, last_message_at: cliente.last_message_at
+          }, mensaje, {
+            pendingContext: { tipo: 'checkin_60d' }
+          });
+
+          if (resultado.method !== 'skipped') {
+            await registrarMensajeAutomatico(supabase, cliente.id);
+            enviados++;
+
+            // Marcar como enviado
+            await supabase.client
+              .from('leads')
+              .update({
+                notes: {
+                  ...notas,
+                  checkin_60d_sent: true,
+                  checkin_60d_date: ahora.toISOString()
+                }
+              })
+              .eq('id', cliente.id);
+
+            console.log(`📅 Check-in 60 días enviado a: ${cliente.name} (method: ${resultado.method})`);
+          }
         }
       } catch (e) {
         console.error(`Error enviando check-in 60d a ${cliente.name}:`, e);
