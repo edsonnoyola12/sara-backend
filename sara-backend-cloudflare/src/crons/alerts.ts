@@ -23,6 +23,7 @@ import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 import { CalendarService } from '../services/calendar';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
+import { enviarMensajeLead } from '../utils/leadMessaging';
 import { logErrorToDB } from './healthCheck';
 
 // ═══════════════════════════════════════════════════════════════
@@ -1372,23 +1373,17 @@ export async function remarketingLeadsFrios(supabase: SupabaseService, meta: Met
         .replace('{nombre}', lead.name?.split(' ')[0] || '');
 
       try {
-        await meta.sendWhatsAppMessage(lead.phone, mensaje);
+        await enviarMensajeLead(supabase, meta, {
+          id: lead.id, phone: lead.phone, name: lead.name,
+          notes: lead.notes, last_message_at: lead.last_message_at
+        }, mensaje, { pendingContext: { tipo: 'remarketing' } });
 
-        // Marcar como enviado + pending_auto_response
-        const notesActuales = typeof lead.notes === 'object' && lead.notes ? lead.notes : {};
+        // Marcar como enviado
         await supabase.client
           .from('leads')
           .update({
             remarketing_sent: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            notes: {
-              ...notesActuales,
-              pending_auto_response: {
-                type: 'remarketing',
-                sent_at: new Date().toISOString(),
-                vendedor_id: lead.assigned_to
-              }
-            }
+            updated_at: new Date().toISOString()
           })
           .eq('id', lead.id);
 
@@ -1428,7 +1423,7 @@ export async function followUpLeadsInactivos(supabase: SupabaseService, meta: Me
     // Buscar leads contactados pero sin respuesta en 3-30 días
     const { data: leadsInactivos, error } = await supabase.client
       .from('leads')
-      .select('id, name, phone, status, notes, assigned_to, updated_at')
+      .select('id, name, phone, status, notes, assigned_to, updated_at, last_message_at')
       .in('status', ['new', 'contacted', 'appointment_scheduled'])
       .lt('updated_at', hace3dias.toISOString())
       .gt('updated_at', hace30dias.toISOString())
@@ -1483,21 +1478,19 @@ export async function followUpLeadsInactivos(supabase: SupabaseService, meta: Me
         .replace('{nombre}', nombre);
 
       try {
-        await meta.sendWhatsAppMessage(lead.phone, mensaje);
+        await enviarMensajeLead(supabase, meta, {
+          id: lead.id, phone: lead.phone, name: lead.name,
+          notes: lead.notes, last_message_at: lead.last_message_at
+        }, mensaje, { pendingContext: { tipo: 'followup_inactivo' } });
 
-        // Marcar en notes
+        // Marcar last_auto_followup + last_interaction
         const notesActuales = typeof lead.notes === 'object' && lead.notes ? lead.notes : {};
         await supabase.client
           .from('leads')
           .update({
             notes: {
               ...notesActuales,
-              last_auto_followup: ahora.toISOString(),
-              pending_auto_response: {
-                type: 'followup_inactivo',
-                sent_at: ahora.toISOString(),
-                vendedor_id: lead.assigned_to
-              }
+              last_auto_followup: ahora.toISOString()
             },
             last_interaction: ahora.toISOString()
           })
@@ -1573,7 +1566,7 @@ export async function recordatoriosPagoApartado(supabase: SupabaseService, meta:
     // Buscar leads en status "reserved" con datos de apartado
     const { data: leadsReservados, error } = await supabase.client
       .from('leads')
-      .select('id, name, phone, status, notes, assigned_to')
+      .select('id, name, phone, status, notes, assigned_to, last_message_at')
       .eq('status', 'reserved')
       .not('notes', 'is', null);
 
@@ -1684,7 +1677,10 @@ export async function recordatoriosPagoApartado(supabase: SupabaseService, meta:
         try {
           // Enviar al cliente
           if (lead.phone && mensajeCliente) {
-            await meta.sendWhatsAppMessage(lead.phone, mensajeCliente);
+            await enviarMensajeLead(supabase, meta, {
+              id: lead.id, phone: lead.phone, name: lead.name,
+              notes: lead.notes, last_message_at: lead.last_message_at
+            }, mensajeCliente, { pendingContext: { tipo: 'recordatorio_pago' } });
             console.log(`📤 Recordatorio ${tipoRecordatorio} enviado a ${lead.name}`);
           }
 
@@ -1700,6 +1696,7 @@ export async function recordatoriosPagoApartado(supabase: SupabaseService, meta:
                                tipoRecordatorio === '1dia' ? 2 :
                                tipoRecordatorio === 'hoy' ? 3 : 4;
 
+          // Update apartado counter (pending_auto_response handled by enviarMensajeLead)
           await supabase.client
             .from('leads')
             .update({
@@ -1709,12 +1706,6 @@ export async function recordatoriosPagoApartado(supabase: SupabaseService, meta:
                   ...apartado,
                   recordatorios_enviados: nuevoContador,
                   ultimo_recordatorio: hoyStr
-                },
-                pending_auto_response: {
-                  type: 'recordatorio_pago',
-                  sent_at: ahora.toISOString(),
-                  vendedor_id: lead.assigned_to,
-                  tipo_recordatorio: tipoRecordatorio
                 }
               }
             })
@@ -1803,11 +1794,14 @@ export async function reactivarLeadsPerdidos(supabase: SupabaseService, meta: Me
       const mensaje = mensajeBase.replace('{nombre}', nombre);
 
       try {
-        await meta.sendWhatsAppMessage(lead.phone, mensaje);
+        await enviarMensajeLead(supabase, meta, {
+          id: lead.id, phone: lead.phone, name: lead.name,
+          notes: lead.notes, last_message_at: lead.last_message_at
+        }, mensaje, { pendingContext: { tipo: 'remarketing' } });
 
-        const notasObj = safeJsonParse(lead.notes);
-        notasObj.ultima_reactivacion = ahora.toISOString().split('T')[0];
-        notasObj.reactivaciones_count = (notasObj.reactivaciones_count || 0) + 1;
+        const notasObj = typeof lead.notes === 'object' && lead.notes ? lead.notes : {};
+        (notasObj as any).ultima_reactivacion = ahora.toISOString().split('T')[0];
+        (notasObj as any).reactivaciones_count = ((notasObj as any).reactivaciones_count || 0) + 1;
 
         await supabase.client
           .from('leads')
@@ -1889,7 +1883,7 @@ export async function felicitarCumpleañosLeads(supabase: SupabaseService, meta:
     // Buscar leads con birthday
     const { data: leadsConBirthday, error } = await supabase.client
       .from('leads')
-      .select('id, name, phone, birthday, status, assigned_to, birthday_message_sent_year')
+      .select('id, name, phone, birthday, status, assigned_to, birthday_message_sent_year, last_message_at, notes')
       .not('birthday', 'is', null)
       .not('phone', 'is', null)
       .not('status', 'in', '("lost","fallen")');
@@ -1960,20 +1954,18 @@ export async function procesarCumpleañosLeads(
       .replace('{nombre}', nombre);
 
     try {
-      await meta.sendWhatsAppMessage(lead.phone, mensaje);
+      await enviarMensajeLead(supabase, meta, {
+        id: lead.id, phone: lead.phone, name: lead.name,
+        notes: lead.notes, last_message_at: lead.last_message_at
+      }, mensaje, { pendingContext: { tipo: 'cumpleanos' } });
 
-      // Marcar en notes
+      // Marcar en notes (pending_auto_response handled by enviarMensajeLead)
       const notesObj = typeof notes === 'object' ? notes : {};
-      const pendingAutoResponse = {
-        type: 'cumpleanos',
-        sent_at: new Date().toISOString(),
-        vendedor_id: lead.assigned_to
-      };
       await supabase.client
         .from('leads')
         .update({
           notes: typeof notes === 'object'
-            ? { ...notesObj, [`cumpleanos_${fechaHoy}`]: true, pending_auto_response: pendingAutoResponse }
+            ? { ...notesObj, [`cumpleanos_${fechaHoy}`]: true }
             : notes + `\n[Cumpleaños ${fechaHoy}] Felicitación enviada`
         })
         .eq('id', lead.id);

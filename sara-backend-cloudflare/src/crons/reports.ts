@@ -12,6 +12,7 @@
 import { SupabaseService } from '../services/supabase';
 import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { enviarMensajeTeamMember, EnviarMensajeTeamResult } from '../utils/teamMessaging';
+import { enviarMensajeLead } from '../utils/leadMessaging';
 import { parseNotasSafe, formatVendorFeedback } from '../handlers/whatsapp-utils';
 import { logErrorToDB, enviarAlertaSistema } from './healthCheck';
 
@@ -1117,7 +1118,7 @@ export async function enviarEncuestasPostCita(supabase: SupabaseService, meta: M
     // Buscar citas completadas de hoy
     const { data: citasCompletadas, error: errorCitas } = await supabase.client
       .from('appointments')
-      .select('*, leads(id, name, phone), team_members:vendedor_id(id, name)')
+      .select('*, leads(id, name, phone, notes, last_message_at), team_members:vendedor_id(id, name)')
       .eq('status', 'completed')
       .eq('scheduled_date', hoyMexico);
 
@@ -1187,7 +1188,10 @@ _Responde con el número_
 Tu opinión nos ayuda a mejorar 🙏`;
 
       try {
-        await meta.sendWhatsAppMessage(lead.phone, mensaje);
+        await enviarMensajeLead(supabase, meta, {
+          id: lead.id, phone: lead.phone, name: lead.name,
+          notes: lead.notes, last_message_at: lead.last_message_at
+        }, mensaje, { pendingContext: { tipo: 'nps' } });
 
         // Registrar encuesta enviada (esto evita duplicados al verificar en surveys)
         await supabase.client.from('surveys').insert({
@@ -1263,7 +1267,10 @@ _Responde con un número del 0 al 10_
 ¡Gracias por confiar en nosotros! 🙏`;
 
       try {
-        await meta.sendWhatsAppMessage(lead.phone, mensaje);
+        await enviarMensajeLead(supabase, meta, {
+          id: lead.id, phone: lead.phone, name: lead.name,
+          notes: lead.notes, last_message_at: lead.last_message_at
+        }, mensaje, { pendingContext: { tipo: 'nps' } });
 
         await supabase.client.from('surveys').insert({
           lead_id: lead.id,

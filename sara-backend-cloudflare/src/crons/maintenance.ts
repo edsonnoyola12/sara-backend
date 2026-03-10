@@ -9,6 +9,7 @@ import { registrarMensajeAutomatico } from './followups';
 import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 import { logErrorToDB } from './healthCheck';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
+import { enviarMensajeLead } from '../utils/leadMessaging';
 
 // ═══════════════════════════════════════════════════════════
 // VERIFICAR BRIDGES POR EXPIRAR
@@ -87,7 +88,7 @@ export async function procesarFollowupsPendientes(supabase: SupabaseService, met
     // Buscar leads con pending_followup que ya expiraron
     const { data: leads } = await supabase.client
       .from('leads')
-      .select('id, name, phone, notes, assigned_to, team_members:assigned_to(name)')
+      .select('id, name, phone, notes, assigned_to, last_message_at, team_members:assigned_to(name)')
       .not('notes->pending_followup', 'is', null);
 
     if (!leads || leads.length === 0) {
@@ -123,7 +124,10 @@ export async function procesarFollowupsPendientes(supabase: SupabaseService, met
           continue;
         }
 
-        await meta.sendWhatsAppMessage(phoneLimpio, pending.mensaje);
+        await enviarMensajeLead(supabase, meta, {
+          id: lead.id, phone: phoneLimpio, name: lead.name,
+          notes: lead.notes, last_message_at: lead.last_message_at
+        }, pending.mensaje, { pendingContext: { tipo: 'followup_inactivo' } });
 
         // Registrar mensaje automático
         await registrarMensajeAutomatico(supabase, lead.id);
@@ -405,21 +409,18 @@ Esperamos que sigas disfrutando tu casa y creando recuerdos increíbles. ¡Graci
       }
 
       try {
-        await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+        await enviarMensajeLead(supabase, meta, {
+          id: cliente.id, phone: cliente.phone, name: cliente.name,
+          notes: cliente.notes, last_message_at: cliente.last_message_at
+        }, mensaje, { pendingContext: { tipo: 'aniversario' } });
         felicitados++;
         console.log(`🏠 Aniversario ${años} año(s) felicitado: ${cliente.name}`);
 
-        // Marcar como felicitado + guardar contexto para respuesta
+        // Marcar como felicitado (pending_auto_response handled by enviarMensajeLead)
         const notesActuales = typeof cliente.notes === 'object' ? cliente.notes : {};
-        const pendingAutoResponse = {
-          type: 'aniversario',
-          sent_at: new Date().toISOString(),
-          vendedor_id: cliente.assigned_to,
-          años: años
-        };
         await supabase.client.from('leads').update({
           notes: typeof notesActuales === 'object'
-            ? { ...notesActuales, [`Aniversario ${añoActual}`]: true, pending_auto_response: pendingAutoResponse }
+            ? { ...notesActuales, [`Aniversario ${añoActual}`]: true }
             : `${notesActuales}\n[Aniversario ${añoActual}] Felicitado`
         }).eq('id', cliente.id);
 

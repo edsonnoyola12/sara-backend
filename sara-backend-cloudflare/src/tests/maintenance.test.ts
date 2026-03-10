@@ -313,6 +313,7 @@ describe('maintenance.ts', () => {
                 lead_phone: '5610016226',
               },
             },
+            last_message_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(), // 1h ago (within 24h window)
           },
         ],
         error: null,
@@ -726,6 +727,7 @@ describe('maintenance.ts', () => {
         property_interest: 'Monte Verde',
         notes: {},
         assigned_to: 'v1',
+        last_message_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(), // 1h ago (within 24h window)
       };
 
       let fromCallCount = 0;
