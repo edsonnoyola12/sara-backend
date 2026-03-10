@@ -360,49 +360,86 @@ export async function enviarDigestoErroresDiario(
       return;
     }
 
-    if (!errors || errors.length === 0) {
-      console.log('📊 No errors in last 24h, skipping digest');
-      return;
-    }
+    // Also get today's key metrics for the status report
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const todayStr = todayStart.toISOString();
 
-    // Group by type and severity
-    const byType: Record<string, number> = {};
-    const bySeverity: Record<string, number> = { critical: 0, error: 0, warning: 0 };
-    const bySource: Record<string, number> = {};
+    const [leadsResult, citasResult, msgsResult] = await Promise.all([
+      supabase.client.from('leads').select('id', { count: 'exact', head: true }).gte('created_at', todayStr),
+      supabase.client.from('appointments').select('id', { count: 'exact', head: true }).gte('created_at', todayStr),
+      supabase.client.from('ai_responses').select('id', { count: 'exact', head: true }).gte('created_at', todayStr),
+    ]);
 
-    for (const err of errors) {
-      byType[err.error_type] = (byType[err.error_type] || 0) + 1;
-      bySeverity[err.severity] = (bySeverity[err.severity] || 0) + 1;
-      const shortSource = err.source?.split(':').pop() || 'unknown';
-      bySource[shortSource] = (bySource[shortSource] || 0) + 1;
-    }
+    const leadsHoy = leadsResult.count || 0;
+    const citasHoy = citasResult.count || 0;
+    const msgsHoy = msgsResult.count || 0;
 
-    let mensaje = `📊 *RESUMEN ERRORES DIARIO*\n_Últimas 24 horas_\n\n`;
-    mensaje += `*Total:* ${errors.length} errores\n`;
+    const errorCount = errors?.length || 0;
 
-    if (bySeverity.critical > 0) mensaje += `🔴 Críticos: ${bySeverity.critical}\n`;
-    if (bySeverity.error > 0) mensaje += `🟠 Errores: ${bySeverity.error}\n`;
-    if (bySeverity.warning > 0) mensaje += `🟡 Warnings: ${bySeverity.warning}\n`;
+    // Build the daily status message (always send — even with 0 errors)
+    let mensaje = `📊 *REPORTE DIARIO SARA*\n\n`;
 
-    mensaje += `\n*Por tipo:*\n`;
-    for (const [type, count] of Object.entries(byType).sort((a, b) => b[1] - a[1])) {
-      mensaje += `• ${type}: ${count}\n`;
-    }
+    // Key metrics first
+    mensaje += `*Actividad hoy:*\n`;
+    mensaje += `👤 Leads nuevos: ${leadsHoy}\n`;
+    mensaje += `📅 Citas creadas: ${citasHoy}\n`;
+    mensaje += `💬 Mensajes IA: ${msgsHoy}\n\n`;
 
-    const topSources = Object.entries(bySource).sort((a, b) => b[1] - a[1]).slice(0, 3);
-    if (topSources.length > 0) {
-      mensaje += `\n*Top fuentes:*\n`;
-      for (const [source, count] of topSources) {
-        mensaje += `• ${source}: ${count}\n`;
+    if (errorCount === 0) {
+      mensaje += `✅ *0 errores en 24h* — Sistema estable\n`;
+    } else {
+      // Group by type and severity
+      const byType: Record<string, number> = {};
+      const bySeverity: Record<string, number> = { critical: 0, error: 0, warning: 0 };
+      const bySource: Record<string, number> = {};
+
+      for (const err of errors!) {
+        byType[err.error_type] = (byType[err.error_type] || 0) + 1;
+        bySeverity[err.severity] = (bySeverity[err.severity] || 0) + 1;
+        const shortSource = err.source?.split(':').pop() || 'unknown';
+        bySource[shortSource] = (bySource[shortSource] || 0) + 1;
+      }
+
+      mensaje += `*Errores (${errorCount}):*\n`;
+      if (bySeverity.critical > 0) mensaje += `🔴 Críticos: ${bySeverity.critical}\n`;
+      if (bySeverity.error > 0) mensaje += `🟠 Errores: ${bySeverity.error}\n`;
+      if (bySeverity.warning > 0) mensaje += `🟡 Warnings: ${bySeverity.warning}\n`;
+
+      const topSources = Object.entries(bySource).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      if (topSources.length > 0) {
+        mensaje += `\n*Top fuentes:*\n`;
+        for (const [source, count] of topSources) {
+          mensaje += `• ${source}: ${count}\n`;
+        }
       }
     }
 
-    mensaje += `\n_Ver detalle en CRM_`;
+    mensaje += `\n_Reporte automático SARA_`;
 
-    await meta.sendWhatsAppMessage(OWNER_PHONE, mensaje);
-    console.log(`📊 Error digest sent to Dev (Edson): ${errors.length} errors`);
+    // Send to Edson (dev)
+    await meta.sendWhatsAppMessage(DEFAULT_DEV_PHONE, mensaje);
+    console.log(`📊 Daily status sent to Edson: ${errorCount} errors, ${leadsHoy} leads`);
+
+    // Send to Oscar (CEO) — always, so he knows the system is alive
+    try {
+      await meta.sendWhatsAppMessage(CEO_PHONE, mensaje);
+      console.log(`📊 Daily status sent to Oscar (CEO)`);
+    } catch (ceoErr) {
+      // If CEO window closed, use template
+      try {
+        const resumen = errorCount === 0
+          ? `Sistema estable. ${leadsHoy} leads, ${citasHoy} citas, ${msgsHoy} msgs IA. 0 errores.`
+          : `${leadsHoy} leads, ${citasHoy} citas. ${errorCount} errores (${(errors || []).filter((e: any) => e.severity === 'critical').length} críticos).`;
+        await meta.sendTemplate(CEO_PHONE, 'alerta_sistema', 'es_MX', [
+          { type: 'body', parameters: [{ type: 'text', text: `REPORTE DIARIO: ${resumen}` }] }
+        ], true);
+      } catch (tplErr) {
+        console.warn('⚠️ Could not send daily status to CEO:', tplErr);
+      }
+    }
   } catch (e) {
-    console.error('Error sending error digest:', e);
+    console.error('Error sending daily status:', e);
   }
 }
 
@@ -411,6 +448,7 @@ export async function enviarDigestoErroresDiario(
 // ═══════════════════════════════════════════════════════════════════════════
 
 const DEFAULT_DEV_PHONE = '5610016226'; // Fallback if env.DEV_PHONE not set
+const CEO_PHONE = '5214922019052'; // Oscar — gets critical alerts
 
 /**
  * Envía alerta de sistema a Edson vía template (no requiere ventana 24h).
@@ -824,5 +862,205 @@ export async function getLastAIResponses(
     return msg;
   } catch (e) {
     return '❌ Error consultando respuestas de IA.';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MORNING PIPELINE PROBE - Synthetic test at 8:05 AM daily
+// Verifies the ENTIRE lead pipeline is working (not just connectivity)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function morningPipelineProbe(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  env: { SARA_CACHE?: KVNamespace; ANTHROPIC_API_KEY?: string; META_PHONE_NUMBER_ID?: string; META_ACCESS_TOKEN?: string }
+): Promise<void> {
+  const startTime = Date.now();
+  const checks: { name: string; ok: boolean; detail: string; ms: number }[] = [];
+
+  const runCheck = async (name: string, fn: () => Promise<string>) => {
+    const t0 = Date.now();
+    try {
+      const detail = await fn();
+      checks.push({ name, ok: true, detail, ms: Date.now() - t0 });
+    } catch (e: any) {
+      checks.push({ name, ok: false, detail: e?.message || String(e), ms: Date.now() - t0 });
+    }
+  };
+
+  // 1. DB: Can we read leads?
+  await runCheck('DB Leads', async () => {
+    const { count, error } = await supabase.client.from('leads').select('id', { count: 'exact', head: true });
+    if (error) throw new Error(error.message);
+    return `${count} leads en DB`;
+  });
+
+  // 2. DB: Can we read team_members?
+  await runCheck('DB Team', async () => {
+    const { data, error } = await supabase.client.from('team_members').select('id, name').eq('active', true);
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) throw new Error('0 team members activos');
+    return `${data.length} activos`;
+  });
+
+  // 3. DB: Can we write? (create and delete a test lead)
+  await runCheck('DB Write', async () => {
+    const testPhone = `probe_${Date.now()}`;
+    const { data, error: insertErr } = await supabase.client
+      .from('leads')
+      .insert({ phone: testPhone, status: 'new', score: 0, name: 'PROBE_TEST' })
+      .select('id')
+      .single();
+    if (insertErr) throw new Error(`Insert: ${insertErr.message}`);
+    // Clean up
+    if (data?.id) {
+      await supabase.client.from('leads').delete().eq('id', data.id);
+    }
+    return 'Insert+Delete OK';
+  });
+
+  // 4. KV: Can we read/write?
+  await runCheck('KV Cache', async () => {
+    if (!env.SARA_CACHE) throw new Error('KV not available');
+    const testKey = `probe_test_${Date.now()}`;
+    await env.SARA_CACHE.put(testKey, 'ok', { expirationTtl: 60 });
+    const val = await env.SARA_CACHE.get(testKey);
+    if (val !== 'ok') throw new Error('KV read mismatch');
+    await env.SARA_CACHE.delete(testKey);
+    return 'Read/Write OK';
+  });
+
+  // 5. Meta API: Is our token valid?
+  await runCheck('Meta API', async () => {
+    const resp = await fetch(
+      `https://graph.facebook.com/v21.0/${env.META_PHONE_NUMBER_ID}?fields=verified_name,quality_rating`,
+      { headers: { Authorization: `Bearer ${env.META_ACCESS_TOKEN}` } }
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data: any = await resp.json();
+    return `${data.verified_name || 'OK'} (quality: ${data.quality_rating || 'N/A'})`;
+  });
+
+  // 6. Properties: Are prices sane?
+  await runCheck('Precios', async () => {
+    const { data, error } = await supabase.client.from('properties').select('name, price').gt('price', 0);
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) throw new Error('0 propiedades con precio');
+    const minPrice = Math.min(...data.map(p => p.price));
+    const maxPrice = Math.max(...data.map(p => p.price));
+    if (minPrice < 100000) throw new Error(`Precio sospechoso: $${minPrice}`);
+    return `${data.length} propiedades ($${(minPrice/1e6).toFixed(1)}M - $${(maxPrice/1e6).toFixed(1)}M)`;
+  });
+
+  // 7. Recent errors check
+  await runCheck('Errores 1h', async () => {
+    const hace1h = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabase.client
+      .from('error_logs')
+      .select('severity')
+      .gte('created_at', hace1h);
+    if (error) throw new Error(error.message);
+    const criticals = (data || []).filter(e => e.severity === 'critical').length;
+    if (criticals > 3) throw new Error(`${criticals} errores críticos en última hora`);
+    return `${data?.length || 0} errores (${criticals} críticos)`;
+  });
+
+  // 8. Stuck pending messages (team members with pending > 2h old)
+  await runCheck('Pending msgs', async () => {
+    const hace2h = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const { data } = await supabase.client
+      .from('team_members')
+      .select('name, notes')
+      .eq('active', true);
+    let stuck = 0;
+    for (const tm of (data || [])) {
+      const notes = typeof tm.notes === 'object' ? tm.notes : {};
+      for (const key of Object.keys(notes as any)) {
+        if (key.startsWith('pending_') && (notes as any)[key]?.sent_at) {
+          if ((notes as any)[key].sent_at < hace2h) stuck++;
+        }
+      }
+    }
+    if (stuck > 5) throw new Error(`${stuck} mensajes pending > 2h`);
+    return stuck > 0 ? `${stuck} pending (< 2h OK)` : '0 stuck';
+  });
+
+  // Build result
+  const totalMs = Date.now() - startTime;
+  const failed = checks.filter(c => !c.ok);
+  const allOk = failed.length === 0;
+
+  // Build the status message
+  let mensaje = allOk
+    ? `✅ *SARA PIPELINE OK* (${totalMs}ms)\n\n`
+    : `🚨 *SARA PIPELINE PROBLEMAS* (${failed.length} fallas)\n\n`;
+
+  for (const c of checks) {
+    mensaje += `${c.ok ? '✅' : '❌'} ${c.name}: ${c.detail} (${c.ms}ms)\n`;
+  }
+
+  mensaje += `\n_Probe automático ${new Date().toLocaleTimeString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' })}_`;
+
+  // Always send to Edson
+  try {
+    await meta.sendWhatsAppMessage(DEFAULT_DEV_PHONE, mensaje);
+  } catch {
+    try {
+      await meta.sendTemplate(DEFAULT_DEV_PHONE, 'alerta_sistema', 'es_MX', [
+        { type: 'body', parameters: [{ type: 'text', text: allOk ? 'Pipeline OK' : `PROBLEMAS: ${failed.map(f => f.name).join(', ')}` }] }
+      ], true);
+    } catch { /* last resort failed */ }
+  }
+
+  // Alert CEO only if something failed
+  if (!allOk) {
+    const alertMsg = `🚨 SARA tiene problemas:\n${failed.map(f => `❌ ${f.name}: ${f.detail}`).join('\n')}`;
+    await enviarAlertaSistema(meta, alertMsg, env, 'pipeline_probe_alert');
+    // Also directly to Oscar
+    try {
+      await meta.sendTemplate(CEO_PHONE, 'alerta_sistema', 'es_MX', [
+        { type: 'body', parameters: [{ type: 'text', text: alertMsg.substring(0, 1000) }] }
+      ], true);
+    } catch { /* template might fail */ }
+  }
+
+  console.log(`🔍 Pipeline probe: ${allOk ? 'ALL OK' : `${failed.length} FAILED`} (${totalMs}ms)`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REAL-TIME CRITICAL ERROR ALERT - Call from main error handler
+// Sends immediate WhatsApp to CEO+Dev when critical errors spike
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function alertOnCriticalError(
+  supabase: SupabaseService,
+  meta: MetaWhatsAppService,
+  env: { SARA_CACHE?: KVNamespace },
+  errorType: string,
+  errorMessage: string,
+  source: string
+): Promise<void> {
+  try {
+    // Only alert on truly critical errors (not warnings)
+    if (!env.SARA_CACHE) return;
+
+    // Increment error counter for this hour
+    const hourKey = `error_count:${new Date().toISOString().slice(0, 13)}`;
+    const currentStr = await env.SARA_CACHE.get(hourKey);
+    const current = currentStr ? parseInt(currentStr) : 0;
+    await env.SARA_CACHE.put(hourKey, String(current + 1), { expirationTtl: 7200 });
+
+    // Alert if error rate exceeds threshold (>5 errors in 1 hour)
+    if (current + 1 >= 5) {
+      const dedupKey = `error_rate_alert:${new Date().toISOString().slice(0, 13)}`;
+      const alreadySent = await env.SARA_CACHE.get(dedupKey);
+      if (!alreadySent) {
+        await env.SARA_CACHE.put(dedupKey, '1', { expirationTtl: 3600 });
+        const alertMsg = `🚨 *TASA DE ERRORES ALTA*\n\n${current + 1} errores en la última hora\nÚltimo: ${errorType} en ${source}\n${errorMessage.substring(0, 200)}`;
+        await enviarAlertaSistema(meta, alertMsg, env, 'error_rate_spike');
+      }
+    }
+  } catch {
+    // Never let error alerting itself cause errors
   }
 }

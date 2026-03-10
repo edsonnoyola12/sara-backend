@@ -201,6 +201,8 @@ import {
   enviarDigestoErroresDiario,
   enviarAlertaSistema,
   healthMonitorCron,
+  morningPipelineProbe,
+  alertOnCriticalError,
 } from './crons/healthCheck';
 
 // Env interface — canonical definition in src/types/env.ts
@@ -2072,13 +2074,14 @@ export default {
           }
         }
 
-        // Persist to error_logs
+        // Persist to error_logs + real-time alerting
         ctx.waitUntil(logErrorToDB(supabase, 'webhook_error', error instanceof Error ? error.message : String(error), {
           severity: 'critical',
           source: 'webhook:meta',
           stack: error instanceof Error ? error.stack : undefined,
           context: { from: from || 'unknown', messageId: messageId || 'unknown' }
         }));
+        ctx.waitUntil(alertOnCriticalError(supabase, meta, env, 'webhook_error', error instanceof Error ? error.message : String(error), 'webhook:meta'));
 
         return new Response('OK', { status: 200 });
       }
@@ -3405,6 +3408,21 @@ export default {
       }
     }
 
+    // 8:05 AM DIARIO: Pipeline probe — verificación completa del sistema
+    if (mexicoHour === 8 && mexicoMinute >= 4 && mexicoMinute <= 6) {
+      try {
+        const probeKey = `pipeline_probe:${new Date().toISOString().split('T')[0]}`;
+        const alreadyRan = env.SARA_CACHE ? await env.SARA_CACHE.get(probeKey) : null;
+        if (!alreadyRan) {
+          if (env.SARA_CACHE) await env.SARA_CACHE.put(probeKey, '1', { expirationTtl: 86400 });
+          console.log('🔍 Running morning pipeline probe...');
+          await morningPipelineProbe(supabase, meta, env);
+        }
+      } catch (probeErr) {
+        console.error('⚠️ Pipeline probe error:', probeErr);
+      }
+    }
+
     // 8am L-V: Briefing matutino (solo primer ejecucion de la hora)
     console.log(`\n╔═══════════════════════════════════════════════════════════════════╗`);
     console.log(`║  📋 BRIEFING MATUTINO - VERIFICACIÓN                              ║`);
@@ -4239,6 +4257,8 @@ export default {
           stack: error instanceof Error ? error.stack : undefined,
           context: { cron: event.cron, tenant: cronTenant.tenantId, scheduled_time: new Date(event.scheduledTime).toISOString() }
         });
+        // Real-time error rate alerting
+        await alertOnCriticalError(supabase, meta, env, 'cron_error', error instanceof Error ? error.message : String(error), `cron:${event.cron}`);
       } catch (logErr) { console.error('⚠️ CRON error logging to DB failed:', logErr); }
 
       // Continue to next tenant instead of crashing
