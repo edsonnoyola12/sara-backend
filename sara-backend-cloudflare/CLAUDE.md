@@ -1,6 +1,6 @@
 # SARA CRM - Referencia para Claude Code
 
-> Última actualización: 2026-03-10 (Sesión 93b)
+> Última actualización: 2026-03-10 (Sesión 93c)
 > Historial detallado de cambios: `docs/CHANGELOG.md`
 
 ---
@@ -83,8 +83,12 @@ npm test
 Servicios de inteligencia de negocio en `src/services/`:
 `pipelineService`, `financingCalculatorService`, `propertyComparatorService`, `closeProbabilityService`, `visitManagementService`, `offerTrackingService`, `smartAlertsService`, `marketIntelligenceService`, `customerValueService`, `referralService`, `cotizacionService`, `developmentFunnelService`, `observabilityService`, `pdfReportService`, `webhookService`, `cacheService`, `retellService`, `ttsService`, `surveyService`, `messageQueueService`, `retryQueueService`
 
+Servicios nuevos (sesión 93):
+`slotSchedulingService` (citas con slots interactivos), `autoEscalationService` (reasignación 5min/escalación 15min), `priceAnchoringService` (anclaje de precio en IA), `emailTemplatesService` (emails transaccionales), `visitPrepBriefService` (brief pre-visita), `objectionPlaybookService` (playbook objeciones 6 tipos), `locationService` (sugerencias por ubicación), `spouseEngagementService` (engagement cónyuge), `competitorService` (comparación competencia), `funnelVelocityService` (velocidad funnel), `documentCollectionService` (tracking docs hipotecarios), `revenueAttributionService` (atribución ingresos)
+
 Utilidades clave:
 - `src/utils/teamMessaging.ts` — Sistema híbrido mensajes + llamadas + templateOverride
+- `src/utils/leadMessaging.ts` — enviarMensajeLead con ventana 24h + template fallback + pending
 - `src/utils/safeHelpers.ts` — safeJsonParse, safeSupabaseWrite, sanitizeForPrompt
 
 ---
@@ -354,15 +358,15 @@ npx wrangler deploy      # Re-deploy
 | Métrica | Valor |
 |---------|-------|
 | Tests | 1686 (42 archivos) |
-| Servicios | 97+ |
+| Servicios | 109+ (12 nuevos sesión 93) |
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 32+ |
 | Templates WA | 6 (3 equipo + 3 carousel) |
 | Propiedades | 32 (9 desarrollos) |
 | Precios | 100% dinámicos (0 hardcoded), +0.5%/mes automático día 1 12am, watchdog 8am |
-| WhatsApp UX | CTA buttons, reactions, contact cards |
+| WhatsApp UX | CTA buttons, reactions, contact cards, interactive lists (slot scheduling) |
 | Retell.ai | ACTIVADO — 9 tools, inbound +524923860066, flag unificado KV |
-| Inteligencia | Intent tagging, buyer readiness scoring, churn prediction, mortgage recovery |
+| Inteligencia | Intent tagging, buyer readiness, churn prediction, mortgage recovery, price anchoring, competitor detection, spouse intent, funnel velocity, revenue attribution |
 | Checklist | `/checklist` — 15 verificaciones producción (DB, precios, WA, Retell, IA, KV, multi-tenant, SaaS tables) |
 | Monitoring | Pipeline probe 8:05AM diario (8 checks sintéticos), reporte diario 7PM (Edson+Oscar), alerta real-time >5 err/h, health monitor cada 5min, watchdogs mensual+semanal |
 | Alberca | NINGÚN desarrollo tiene alberca (fact validator + 5 hardcoded mentions removed session 91) |
@@ -376,5 +380,17 @@ npx wrangler deploy      # Re-deploy
 | Modularización | Middleware en `src/utils/middleware.ts`, lead messaging en `src/utils/leadMessaging.ts` |
 | Timezone | `getAvailableVendor()` usa hora México (no UTC) para asignación de vendedores |
 | CEO Pendings | Entrega TODOS los pendings de golpe (loop pattern, igual que vendedor) |
-| Integraciones | Meta/WhatsApp ✅, Supabase ✅, Cloudflare ✅, Google Calendar ✅, Veo 3 ✅, Retell ✅ |
-| Última verificación | 2026-03-10: Health 7/7, Checklist 15/15, Resilience 12/12, Calendar ✅, AI 11/11 ✅, Vendor 6/6 ✅, CEO 6/6 ✅ |
+| Auto-Escalación | Reasigna lead a otro vendedor si no responde en 5min, escala a CEO en 15min. Speed-to-lead tracking. CRON cada 2min L-S 9-19h |
+| Slot Scheduling | Citas con WhatsApp interactive list — muestra horarios disponibles de Calendar, lead tapa = cita confirmada |
+| Objection Playbook | 6 tipos de objeciones (precio/ubicacion/pareja/credito/tiempo/tamano), secuencia 3 pasos automática. Comando vendedor: `objecion [lead] [tipo]` |
+| Visit Prep Brief | 30 min antes de cita, vendedor recibe brief: score, historial, objeciones, tips de venta personalizados |
+| Price Anchoring | Mensualidad, comparación vs renta, plusvalía, urgencia — inyectado automáticamente en IA cuando se habla de precio |
+| Competitor Engine | Detecta mención de competidores, genera comparación automática. Contexto inyectado en prompt IA |
+| Spouse Engagement | Detecta "consultar con mi pareja", ofrece enviar paquete informativo al cónyuge |
+| Location Suggestions | Lead comparte ubicación → SARA sugiere desarrollos más cercanos con distancia y tiempo |
+| Funnel Velocity | Tracking de transiciones, velocidad por etapa, bottlenecks. CEO comando: `velocidad` |
+| Revenue Attribution | Atribución de ingresos por canal/campaña. CEO comando: `atribucion` / `roas` |
+| Document Tracking | Checklist hipotecario, detección automática de docs por foto/PDF, progreso visual, notifica asesor al completar |
+| Email Templates | 5 templates transaccionales: brochure, cita, recibo, docs, bienvenida (Resend API) |
+| Integraciones | Meta/WhatsApp ✅, Supabase ✅, Cloudflare ✅, Google Calendar ✅, Veo 3 ✅, Retell ✅, Resend ✅ |
+| Última verificación | 2026-03-10: Health 7/7, Checklist 15/15, Resilience 12/12, Calendar ✅, AI 22/23 ✅, Vendor 11/11 ✅, CEO 15/15 ✅ |
