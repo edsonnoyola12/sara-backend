@@ -39,6 +39,7 @@ import { createLeadDeduplication } from './services/leadDeduplicationService';
 import { CronTracker, getObservabilityDashboard, formatObservabilityForWhatsApp } from './services/observabilityService';
 import { resolveTenantFromWebhook, resolveTenantFromRequest, resolveTenantsForCron, getDefaultTenant } from './middleware/tenant';
 import { handleAuthRoutes } from './routes/auth';
+import { MonthlyEmailReportService } from './services/monthlyEmailReportService';
 
 // CRON modules
 import {
@@ -2436,6 +2437,8 @@ export default {
           '/run-referidos',
           '/run-nps',
           '/run-health-monitor',
+          '/test-monthly-email-report?preview=1',
+          '/test-monthly-email-report?type=weekly&preview=1',
           '/health',
           '/backup',
           '/ab-results'
@@ -3282,6 +3285,14 @@ export default {
       await safeCron('enviarReporteSemanalCEO', () => enviarReporteSemanalCEO(supabase, meta));
     }
 
+    // 8am LUNES: Digest semanal por EMAIL (HTML)
+    if (mexicoHour === 8 && isFirstRunOfHour && dayOfWeek === 1) {
+      await safeCron('enviarDigestSemanalEmail', async () => {
+        const emailReportService = new MonthlyEmailReportService(supabase, env);
+        await emailReportService.sendWeeklyDigest();
+      });
+    }
+
     // 9am LUNES: Reporte semanal individual a vendedores
     if (mexicoHour === 9 && isFirstRunOfHour && dayOfWeek === 1) {
       await safeCron('enviarReporteSemanalVendedores', () => enviarReporteSemanalVendedores(supabase, meta));
@@ -3384,6 +3395,14 @@ export default {
     // 8am DÍA 1 DE CADA MES: Reporte mensual CEO/Admin
     if (mexicoHour === 8 && isFirstRunOfHour && mexicoDayOfMonth === 1) {
       await safeCron('enviarReporteMensualCEO', () => enviarReporteMensualCEO(supabase, meta));
+    }
+
+    // 8am DÍA 1 DE CADA MES: Reporte mensual ejecutivo por EMAIL (HTML profesional)
+    if (mexicoHour === 8 && isFirstRunOfHour && mexicoDayOfMonth === 1) {
+      await safeCron('enviarReporteMensualEmail', async () => {
+        const emailReportService = new MonthlyEmailReportService(supabase, env);
+        await emailReportService.sendMonthlyReport();
+      });
     }
 
     // 9am DÍA 1 DE CADA MES: Reporte mensual individual a vendedores

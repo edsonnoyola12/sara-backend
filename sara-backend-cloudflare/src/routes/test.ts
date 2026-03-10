@@ -29,6 +29,7 @@ import { enviarMensajeTeamMember, isPendingExpired, getPendingMessages, verifica
 import { activarCadenciasAutomaticas, ejecutarCadenciasInteligentes } from '../crons/followups';
 import { parseFechaEspanol, getMexicoNow } from '../handlers/dateParser';
 import { findLeadByName } from '../handlers/whatsapp-utils';
+import { MonthlyEmailReportService } from '../services/monthlyEmailReportService';
 
 // CRON imports
 import {
@@ -4154,6 +4155,39 @@ Mensaje: ${mensaje}`;
         conversations: { rows: result.conversations.rows, size_kb: Math.round(result.conversations.bytes / 1024) },
         leads: { rows: result.leads.rows, size_kb: Math.round(result.leads.bytes / 1024) }
       }, null, 2));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // TEST MONTHLY EMAIL REPORT — Genera y envia reporte mensual por email
+    // GET /test-monthly-email-report?api_key=XXX&preview=1 (preview=1 solo genera HTML)
+    // ═══════════════════════════════════════════════════════════════════════
+    if (url.pathname === '/test-monthly-email-report') {
+      const authError = checkApiAuth(request, env);
+      if (authError) return authError;
+
+      const preview = url.searchParams.get('preview') === '1';
+      const type = url.searchParams.get('type') || 'monthly'; // 'monthly' or 'weekly'
+
+      const emailReportService = new MonthlyEmailReportService(supabase, env);
+
+      if (type === 'weekly') {
+        if (preview) {
+          const digest = await emailReportService.generateWeeklyDigestData();
+          const { subject, html } = emailReportService.generateWeeklyDigestHTML(digest);
+          return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+        }
+        await emailReportService.sendWeeklyDigest();
+        return corsResponse(JSON.stringify({ message: 'Weekly email digest sent' }));
+      }
+
+      if (preview) {
+        const report = await emailReportService.generateMonthlyReport();
+        const { subject, html } = emailReportService.generateEmailHTML(report);
+        return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      }
+
+      await emailReportService.sendMonthlyReport();
+      return corsResponse(JSON.stringify({ message: 'Monthly email report sent' }));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
