@@ -4,6 +4,7 @@ import { AppointmentSchedulingService } from '../services/appointmentSchedulingS
 import { MortgageService } from '../services/mortgageService';
 import { IACoachingService } from '../services/iaCoachingService';
 import { VentasService } from '../services/ventasService';
+import { RevenueAttributionService } from '../services/revenueAttributionService';
 import { OfferTrackingService, CreateOfferParams, OfferStatus } from '../services/offerTrackingService';
 import { FollowupService } from '../services/followupService';
 import { BridgeService } from '../services/bridgeService';
@@ -14,6 +15,9 @@ import { safeJsonParse } from '../utils/safeHelpers';
 import { formatVendorFeedback } from './whatsapp-utils';
 import { createSLAMonitoring } from '../services/slaMonitoringService';
 import { ReferralService } from '../services/referralService';
+import { ObjectionPlaybookService } from '../services/objectionPlaybookService';
+import { AutoEscalationService } from '../services/autoEscalationService';
+import { FunnelVelocityService } from '../services/funnelVelocityService';
 
 // ═══════════════════════════════════════════════════════════
 // Helper: Notificar lead de cita con fallback a template si ventana 24h cerrada
@@ -235,6 +239,9 @@ export async function handleVendedorMessage(ctx: HandlerContext, handler: any, f
                 console.log('⚠️ vCard no enviada (no crítico)');
               }
             } catch (_) {}
+            // Record speed-to-lead: vendedor responded via bridge "1"
+            const escalationService = new AutoEscalationService(ctx.supabase, ctx.meta, ctx.env?.SARA_CACHE);
+            await escalationService.recordVendorResponse(ultimoLeadBridge.lead_id, vendedor.id).catch(e => console.error('Speed-to-lead tracking error:', e));
             console.log(`🔗 Bridge rápido activado: ${vendedor.name} → ${ultimoLeadBridge.lead_name}`);
             return;
           } else {
@@ -2330,6 +2337,9 @@ export async function routeVendorCommand(ctx: HandlerContext, handler: any,
     case 'vendedorContactarLead':
       await vendedorContactarLead(ctx, handler, from, params.nombreLead, vendedor, nombreVendedor);
       break;
+    case 'vendedorObjecionPlaybook':
+      await vendedorObjecionPlaybook(ctx, handler, from, params.nombreLead, params.tipoObjecion, vendedor, nombreVendedor);
+      break;
 
     // ━━━ OFERTAS / COTIZACIONES ━━━
     case 'vendedorCotizar':
@@ -2606,6 +2616,9 @@ export async function vendedorMoverEtapa(ctx: HandlerContext, handler: any, from
     await ctx.twilio.sendWhatsAppMessage(from,
       `✅ *${result.lead!.name}* movido a ${etapaLabel}`
     );
+    // Track funnel velocity
+    const velocityService = new FunnelVelocityService(ctx.supabase);
+    await velocityService.recordTransition(result.lead!.id, result.lead!.status, result.newStatus!, 'vendedor_command').catch(e => console.error('Velocity tracking error:', e));
     return;
   }
 
@@ -2625,6 +2638,9 @@ export async function vendedorMoverEtapa(ctx: HandlerContext, handler: any, from
     await ctx.twilio.sendWhatsAppMessage(from,
       `✅ *${result.lead!.name}* movido a ${etapaLabel}`
     );
+    // Track funnel velocity
+    const velocityServiceLegacy = new FunnelVelocityService(ctx.supabase);
+    await velocityServiceLegacy.recordTransition(result.lead!.id, result.lead!.status, result.newStatus!, 'vendedor_command').catch(e => console.error('Velocity tracking error:', e));
     return;
   }
 
@@ -2879,6 +2895,12 @@ export async function vendedorCambiarEtapaConNombre(ctx: HandlerContext, handler
       console.error('⚠️ Error programando follow-ups:', e);
     }
 
+    // Track funnel velocity
+    if (result.oldStatus) {
+      const velocityService = new FunnelVelocityService(ctx.supabase);
+      await velocityService.recordTransition(lead.id, result.oldStatus, nuevaEtapa, 'vendedor_command').catch(e => console.error('Velocity tracking error:', e));
+    }
+
     const mensaje = vendorService.formatCambioEtapa(lead.name, etapaTexto);
     await ctx.twilio.sendWhatsAppMessage(from, mensaje);
   } catch (error) {
@@ -2921,6 +2943,12 @@ export async function vendedorCambiarEtapa(ctx: HandlerContext, handler: any, fr
       const followupService = new FollowupService(ctx.supabase);
       await followupService.programarFollowups(lead.id, lead.phone || '', lead.name, 'Por definir', 'status_change', nuevaEtapa);
     } catch (e) { console.error('⚠️ Error follow-ups:', e); }
+
+    // Track funnel velocity
+    if (result.oldStatus) {
+      const velocityService = new FunnelVelocityService(ctx.supabase);
+      await velocityService.recordTransition(lead.id, result.oldStatus, nuevaEtapa, 'vendedor_command').catch(e => console.error('Velocity tracking error:', e));
+    }
 
     let respuesta = vendorService.formatCambioEtapa(lead.name, etapaTexto);
 
@@ -3282,6 +3310,15 @@ export async function vendedorRegistrarApartado(ctx: HandlerContext, handler: an
     // Enviar confirmación al vendedor
     await ctx.twilio.sendWhatsAppMessage(from, ventasService.formatApartadoExito(result));
 
+    // Atribuir ingreso al canal de origen
+    if (result.lead?.id) {
+      const apartadoDealAmount = result.lead?.notes?.deal_amount || result.lead?.notes?.budget || 0;
+      if (apartadoDealAmount > 0) {
+        const attrService = new RevenueAttributionService(ctx.supabase);
+        await attrService.attributeRevenue(result.lead.id, apartadoDealAmount).catch(e => console.error('Attribution error:', e));
+      }
+    }
+
     // Enviar felicitación al cliente
     if (result.lead?.phone) {
       const clientePhone = result.lead.phone.replace(/[^0-9]/g, '');
@@ -3313,6 +3350,13 @@ export async function vendedorCerrarVenta(ctx: HandlerContext, handler: any, fro
   }
 
   await ctx.twilio.sendWhatsAppMessage(from, ventasService.formatCerrarVentaExito(result.lead!, nombre));
+
+  // Atribuir ingreso al canal de origen
+  const dealAmount = result.lead?.notes?.deal_amount || result.lead?.notes?.budget || 0;
+  if (dealAmount > 0) {
+    const attrService = new RevenueAttributionService(ctx.supabase);
+    await attrService.attributeRevenue(result.lead!.id, dealAmount).catch(e => console.error('Attribution error:', e));
+  }
 
   // Enviar celebración al CLIENTE
   const leadVenta = result.lead!;
@@ -5873,6 +5917,87 @@ export async function vendedorContactarLead(ctx: HandlerContext, handler: any, f
     await ctx.meta.sendWhatsAppMessage(from, '❌ Error al contactar lead.');
   }
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// OBJECIÓN PLAYBOOK - Activar secuencia de seguimiento por objeción
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+export async function vendedorObjecionPlaybook(ctx: HandlerContext, handler: any, from: string, nombreLead: string, tipoObjecion: string, vendedor: any, nombreVendedor: string): Promise<void> {
+  try {
+    console.log(`🎯 vendedorObjecionPlaybook: ${nombreVendedor} activa playbook "${tipoObjecion}" para ${nombreLead}`);
+
+    const playbookService = new ObjectionPlaybookService();
+
+    // Validate type
+    const tiposValidos = playbookService.getSupportedTypes();
+    if (!tiposValidos.includes(tipoObjecion)) {
+      await ctx.meta.sendWhatsAppMessage(from,
+        `❌ Tipo de objeción no válido: *${tipoObjecion}*\n\n` +
+        `Tipos disponibles: ${tiposValidos.join(', ')}\n\n` +
+        `Ejemplo: *objecion Juan precio*`
+      );
+      return;
+    }
+
+    // Find lead by name
+    const leads = await findLeadByName(ctx.supabase, nombreLead, {
+      select: 'id, name, phone, status, property_interest, notes', limit: 5
+    });
+    const filteredLeads = leads.filter((l: any) => !['lost', 'dnc', 'closed', 'delivered'].includes(l.status));
+
+    if (!filteredLeads || filteredLeads.length === 0) {
+      await ctx.meta.sendWhatsAppMessage(from,
+        `❌ No encontré ningún lead activo con nombre *${nombreLead}*.\n\n` +
+        `Escribe *mis leads* para ver tu cartera.`
+      );
+      return;
+    }
+
+    if (filteredLeads.length > 1) {
+      let msg = `🔍 Encontré ${filteredLeads.length} leads:\n\n`;
+      filteredLeads.forEach((l: any, i: number) => {
+        msg += `${i + 1}. *${l.name}* (${l.status})\n`;
+      });
+      msg += `\n_Sé más específico con el nombre_`;
+      await ctx.meta.sendWhatsAppMessage(from, msg);
+      return;
+    }
+
+    const lead = filteredLeads[0];
+
+    // Check if playbook already active
+    const notas = safeJsonParse(lead.notes);
+    if (notas.objection_playbook && !notas.objection_playbook.completed) {
+      await ctx.meta.sendWhatsAppMessage(from,
+        `⚠️ *${lead.name}* ya tiene un playbook activo de tipo *${notas.objection_playbook.type}*.\n\n` +
+        `Paso actual: ${(notas.objection_playbook.current_step || 0) + 1}/3\n` +
+        `El playbook anterior debe completarse primero.`
+      );
+      return;
+    }
+
+    // Activate playbook
+    await playbookService.activatePlaybook(ctx.supabase, lead.id, tipoObjecion, vendedor.id);
+
+    const tipoLabel: Record<string, string> = {
+      precio: '💰 Precio', ubicacion: '📍 Ubicación', pareja: '💑 Consultar pareja',
+      credito: '🏦 Crédito', tiempo: '⏰ No es buen momento', tamano: '📐 Tamaño'
+    };
+
+    await ctx.meta.sendWhatsAppMessage(from,
+      `✅ *Playbook activado*\n\n` +
+      `👤 Lead: *${lead.name}*\n` +
+      `🎯 Objeción: ${tipoLabel[tipoObjecion] || tipoObjecion}\n` +
+      `📅 3 mensajes en los próximos 5 días\n\n` +
+      `SARA enviará mensajes personalizados automáticamente para resolver la objeción.\n` +
+      `Si el lead avanza de status, el playbook se detiene.`
+    );
+
+  } catch (e) {
+    console.error('Error en vendedorObjecionPlaybook:', e);
+    await ctx.meta.sendWhatsAppMessage(from, '❌ Error al activar playbook de objeción.');
+  }
+}
+
 export async function vendedorBuscarPorTelefono(ctx: HandlerContext, handler: any, from: string, telefono: string, vendedor: any): Promise<void> {
   try {
     const vendorService: any = new VendorCommandsService(ctx.supabase);

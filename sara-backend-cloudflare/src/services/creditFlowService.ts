@@ -701,6 +701,16 @@ Atendemos de Lunes a Viernes 9am-6pm y Sábados 9am-2pm 😊`,
               } catch (logErr) { console.error('⚠️ logErrorToDB failed (mortgage_insert_failed):', logErr); }
             } else {
               console.log(`📊 Mortgage application creada para lead ${leadId}`);
+
+              // Initialize document collection checklist
+              try {
+                const { DocumentCollectionService } = await import('./documentCollectionService');
+                const docService = new DocumentCollectionService(this.supabase);
+                await docService.initializeChecklist(leadId);
+                console.log(`📋 Document checklist initialized for lead ${leadId}`);
+              } catch (docErr) {
+                console.error('⚠️ Doc checklist init error:', docErr);
+              }
             }
           }
 

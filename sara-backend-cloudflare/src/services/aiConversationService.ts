@@ -23,6 +23,10 @@ import { TTSService, createTTSService, shouldSendAsAudio } from './ttsService';
 import { getSaludoPorHora, generarContextoPersonalizado, getBotonesContextuales, getDesarrollosParaLista } from '../utils/uxHelpers';
 import { sanitizeForPrompt } from '../utils/safeHelpers';
 import { validateFacts } from './factValidator';
+import { PriceAnchoringService } from './priceAnchoringService';
+import { CompetitorService } from './competitorService';
+import { SpouseEngagementService } from './spouseEngagementService';
+import { SlotSchedulingService } from './slotSchedulingService';
 
 // Interfaces
 interface AIAnalysis {
@@ -604,6 +608,30 @@ export class AIConversationService {
       console.error('⚠️ Error consultando promociones:', e);
     }
 
+    // ═══ PRICE ANCHORING CONTEXT ═══
+    let anchoringContext = '';
+    try {
+      const anchoringService = new PriceAnchoringService();
+      anchoringContext = anchoringService.getAnchoringContext(properties);
+      if (anchoringContext) {
+        console.log('💰 Price anchoring context included in prompt:', anchoringContext.length, 'chars');
+      }
+    } catch (e) {
+      console.error('⚠️ Error generating anchoring context:', e);
+    }
+
+    // ═══ COMPETITOR CONTEXT ═══
+    let competitorContext = '';
+    try {
+      const competitorService = new CompetitorService();
+      competitorContext = competitorService.getCompetitorContext();
+      if (competitorContext) {
+        console.log('🏢 Competitor context included in prompt:', competitorContext.length, 'chars');
+      }
+    } catch (e) {
+      console.error('⚠️ Error generating competitor context:', e);
+    }
+
     // Contexto de broadcast si existe
     let broadcastContext = '';
     if (lead.broadcast_context) {
@@ -796,7 +824,7 @@ PRIMERO PRESENTA 2-3 OPCIONES CONCRETAS con nombre, precio y diferenciador. DESP
 ⚠️ El cliente NECESITA saber QUÉ va a visitar antes de agendar.
 
 
-${promocionesContext}${broadcastContext}${reactivacionContext}${accionesContext}
+${promocionesContext}${broadcastContext}${reactivacionContext}${accionesContext}${anchoringContext ? '\n' + anchoringContext + '\n' : ''}${competitorContext ? '\n' + competitorContext + '\n' : ''}
 Eres SARA de Grupo Santa Rita, Zacatecas. 50+ años construyendo hogares.
 
 🌐 IDIOMA: ${detectedLang === 'en' ? 'INGLÉS' : 'ESPAÑOL'}
@@ -1874,6 +1902,56 @@ RECUERDA:
           parsed.response = validatedResponse;
           console.log(`🔬 FactValidator: ${corrections.length} correction(s) applied: ${corrections.join(', ')}`);
         }
+      }
+
+      // ━━━━━━━━━━━━━━━
+      // COMPETITOR DETECTION — Append comparison if competitor mentioned
+      // ━━━━━━━━━━━━━━━
+      try {
+        const competitorServicePost = new CompetitorService();
+        const detectedCompetitor = competitorServicePost.detectCompetitor(message);
+        if (detectedCompetitor) {
+          const comparison = competitorServicePost.generateComparison(
+            detectedCompetitor,
+            parsed.extracted_data?.desarrollo || lead.property_interest,
+            properties
+          );
+          // Append comparison context to AI response
+          if (parsed.response && comparison) {
+            parsed.response += '\n\n' + comparison;
+          }
+          console.log(`🏢 Competitor detected: ${detectedCompetitor.name}`);
+        }
+      } catch (e) {
+        console.error('⚠️ Error in competitor detection:', e);
+      }
+
+      // ━━━━━━━━━━━━━━━
+      // SPOUSE INTENT DETECTION — Detect and flag spouse consultation intent
+      // ━━━━━━━━━━━━━━━
+      try {
+        const spouseService = new SpouseEngagementService();
+        if (spouseService.detectSpouseIntent(message)) {
+          console.log(`👫 Spouse intent detected for lead ${lead.id}`);
+          // Flag in extracted_data for downstream processing
+          if (!parsed.extracted_data) parsed.extracted_data = {};
+          parsed.extracted_data.spouse_intent_detected = true;
+          // Update lead notes with spouse intent flag
+          const currentNotes = typeof lead.notes === 'object' ? lead.notes : {};
+          const updatedNotes = {
+            ...currentNotes,
+            spouse_intent_detected: true,
+            spouse_intent_at: new Date().toISOString(),
+            pending_spouse_phone: true,
+          };
+          await this.supabase.client
+            .from('leads')
+            .update({ notes: updatedNotes })
+            .eq('id', lead.id);
+          console.log(`👫 Spouse intent flags saved to lead notes`);
+        }
+      } catch (e) {
+        console.error('⚠️ Error in spouse intent detection:', e);
       }
 
       // ━━━━━━━━━━━━━━━
@@ -4894,9 +4972,45 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
       if (yaRespondioRecientemente) {
         console.log('⏭️ RATE LIMIT: Ya se envió respuesta hace <5s, saltando envío (contexto guardado)');
       } else if (!interceptoCita) {
+        // ═══ SLOT SCHEDULING: Si intent es solicitar_cita, ofrecer horarios disponibles ═══
+        let slotListSent = false;
+        if (analysis.intent === 'solicitar_cita' || analysis.intent === 'agendar_cita') {
+          try {
+            const slotService = new SlotSchedulingService();
+            const slots = await slotService.getAvailableSlots(this.calendar, 3);
+            if (slots.length > 0) {
+              const cleanPhone = from.replace('whatsapp:+', '').replace(/\D/g, '');
+              const listData = slotService.formatSlotsForWhatsAppList(slots);
+              await this.meta.sendWhatsAppList(
+                cleanPhone,
+                listData.headerText,
+                listData.bodyText,
+                listData.buttonText,
+                listData.sections,
+                'Grupo Santa Rita'
+              );
+              // Mark that we're waiting for slot selection
+              const freshNotes = typeof lead.notes === 'string' ? JSON.parse(lead.notes || '{}') : (lead.notes || {});
+              await this.supabase.client.from('leads').update({
+                notes: { ...freshNotes, pending_slot_selection: true }
+              }).eq('id', lead.id);
+              slotListSent = true;
+              console.log(`📅 Slot list enviada a ${lead.name || cleanPhone} (${slots.length} slots)`);
+            }
+          } catch (slotErr) {
+            console.error('Slot scheduling error:', slotErr);
+            // Fall back to regular text response
+          }
+        }
+
         // Enviar respuesta de texto + audio opcional si el lead prefiere audio
         const leadNotesConId = { ...leadNotesActuales, lead_id: lead.id };
-        await this.enviarRespuestaConAudioOpcional(from, respuestaLimpia, leadNotesConId);
+        if (!slotListSent) {
+          await this.enviarRespuestaConAudioOpcional(from, respuestaLimpia, leadNotesConId);
+        } else {
+          // Still send the text response as context before the list
+          await this.enviarRespuestaConAudioOpcional(from, respuestaLimpia, leadNotesConId);
+        }
         console.log('✅ Respuesta de Claude enviada (sin pregunta de crédito)');
 
         // ═══ NOTIFICAR VENDEDOR: Notificación COMBINADA (lead + respuesta SARA) ═══

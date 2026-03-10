@@ -12,6 +12,7 @@ import { enviarMensajeLead } from '../utils/leadMessaging';
 import { safeJsonParse } from '../utils/safeHelpers';
 import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
 import { logErrorToDB } from './healthCheck';
+import { ObjectionPlaybookService } from '../services/objectionPlaybookService';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LÍMITE DE MENSAJES AUTOMÁTICOS POR DÍA
@@ -3581,5 +3582,57 @@ export async function ejecutarCadenciasInteligentes(
   } catch (e) {
     console.error('Error en ejecutarCadenciasInteligentes:', e);
     await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'ejecutarCadenciasInteligentes', stack: (e as Error).stack }).catch(() => {});
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EJECUTAR PLAYBOOKS DE OBJECIONES - CRON cada 2 min
+// Procesa pasos pendientes de playbooks de objeciones activados por vendedores
+// ═══════════════════════════════════════════════════════════════════════════
+export async function ejecutarPlaybooksObjeciones(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('🎯 Verificando playbooks de objeciones pendientes...');
+
+    const playbookService = new ObjectionPlaybookService();
+    const leadIds = await playbookService.getLeadsWithPendingSteps(supabase);
+
+    if (leadIds.length === 0) return;
+
+    console.log(`🎯 ${leadIds.length} leads con playbooks pendientes`);
+    let enviados = 0;
+
+    for (const leadId of leadIds.slice(0, 10)) { // max 10 per run
+      try {
+        // Check daily message limit
+        const puedeEnviar = await puedeEnviarMensajeAutomatico(supabase, leadId);
+        if (!puedeEnviar) continue;
+
+        const result = await playbookService.getNextStep(supabase, leadId);
+        if (!result) continue;
+
+        // Send message to lead (24h-safe via enviarMensajeLead)
+        await enviarMensajeLead(supabase, meta, result.lead, result.step.message, {
+          pendingContext: { tipo: result.step.tipo }
+        });
+
+        // Advance to next step
+        await playbookService.advanceStep(supabase, leadId);
+
+        // Register automatic message
+        await registrarMensajeAutomatico(supabase, leadId);
+
+        enviados++;
+        console.log(`🎯 Playbook step enviado a ${result.lead.name} (${result.step.tipo})`);
+      } catch (e) {
+        console.error(`❌ Playbook error for lead ${leadId}:`, e);
+      }
+    }
+
+    if (enviados > 0) {
+      console.log(`🎯 ${enviados} pasos de playbook ejecutados`);
+    }
+  } catch (e) {
+    console.error('Error en ejecutarPlaybooksObjeciones:', e);
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'ejecutarPlaybooksObjeciones', stack: (e as Error).stack }).catch(() => {});
   }
 }

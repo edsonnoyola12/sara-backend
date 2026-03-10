@@ -1678,6 +1678,68 @@ export class MetaWhatsAppService {
     return data;
   }
 
+  // ═══ INTERACTIVE LIST ═══
+  async sendWhatsAppList(
+    to: string,
+    headerText: string,
+    bodyText: string,
+    buttonText: string,
+    sections: Array<{
+      title: string;
+      rows: Array<{ id: string; title: string; description?: string }>;
+    }>,
+    footerText?: string
+  ): Promise<any> {
+    const phone = this.normalizePhone(to);
+    if (!isTestPhoneAllowed(phone)) return { messages: [{ id: 'blocked' }] };
+
+    const interactive: any = {
+      type: 'list',
+      body: { text: bodyText },
+      action: {
+        button: buttonText,
+        sections
+      }
+    };
+    if (headerText) interactive.header = { type: 'text', text: headerText };
+    if (footerText) interactive.footer = { text: footerText };
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'interactive',
+      interactive
+    };
+
+    const response = await this._fetchWithCallback(`https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${this.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }, `sendList:${phone}`, {
+      recipientPhone: phone, messageType: 'interactive_list', payload: { headerText, bodyText, buttonText, sections: sections.length }
+    });
+
+    const data = await response.json() as any;
+    if (!response.ok) {
+      if (data.error?.code === 131047 && this.windowClosedCallback) {
+        console.warn(`⚠️ 131047 en List para ${phone}, template fallback...`);
+        return this.windowClosedCallback({ recipientPhone: phone, originalMessage: bodyText.substring(0, 500), meta: this });
+      }
+      console.error('❌ Error List:', JSON.stringify(data));
+      throw new Error(data.error?.message || 'Error enviando List');
+    }
+
+    const messageId = data.messages?.[0]?.id;
+    if (messageId) {
+      await this.track({
+        messageId, recipientPhone: phone, messageType: 'interactive',
+        categoria: 'list', contenido: `${buttonText} (${sections.reduce((sum: number, s: any) => sum + s.rows.length, 0)} rows)`
+      });
+    }
+    return data;
+  }
+
   // ═══ REACTION ═══
   async sendReaction(to: string, messageId: string, emoji: string): Promise<any> {
     const phone = this.normalizePhone(to);

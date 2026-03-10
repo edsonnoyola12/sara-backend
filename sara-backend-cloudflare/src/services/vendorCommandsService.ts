@@ -730,6 +730,18 @@ export class VendorCommandsService {
       };
     }
 
+    // ═══ OBJECIÓN ═══
+    // Formato: "objecion Juan precio", "objeción María ubicación", "objecion Pedro crédito"
+    const objMatch = msg.match(/^objeci[oó]n\s+(.+?)\s+(precio|ubicaci[oó]n|pareja|cr[eé]dito|tiempo|tama[nñ]o|otro)$/i);
+    if (objMatch) {
+      const tipoNormalized = objMatch[2].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return {
+        matched: true,
+        handlerName: 'vendedorObjecionPlaybook',
+        handlerParams: { nombreLead: objMatch[1].trim(), tipoObjecion: tipoNormalized }
+      };
+    }
+
     return { matched: false };
   }
 

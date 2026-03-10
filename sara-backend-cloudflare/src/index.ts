@@ -26,6 +26,7 @@ import { VendorCommandsService } from './services/vendorCommandsService';
 import { initSentry } from './services/sentryService';
 import { AudioTranscriptionService, createAudioTranscription, isAudioMessage, extractAudioInfo } from './services/audioTranscriptionService';
 import { AIConversationService } from './services/aiConversationService';
+import { LocationService } from './services/locationService';
 import { getAvailableVendor, TeamMemberAvailability } from './services/leadManagementService';
 import { createTTSTrackingService } from './services/ttsTrackingService';
 import { createMessageTrackingService } from './services/messageTrackingService';
@@ -105,7 +106,9 @@ import {
   felicitarCumpleañosEquipo,
   alertaCitaNoConfirmada,
   alertarLeadsEstancados,
-  alertarChurnCritico
+  alertarChurnCritico,
+  enviarBriefsPreVisita,
+  autoEscalationCheck
 } from './crons/alerts';
 
 // Follow-ups y Nurturing
@@ -132,7 +135,8 @@ import {
   reintentarLlamadasSinRespuesta,
   activarCadenciasAutomaticas,
   ejecutarCadenciasInteligentes,
-  recuperacionHipotecasRechazadas
+  recuperacionHipotecasRechazadas,
+  ejecutarPlaybooksObjeciones
 } from './crons/followups';
 
 // Lead Scoring y Objeciones
@@ -1003,8 +1007,55 @@ export default {
                       }
                     } catch (brokerErr) {
                       console.warn('⚠️ Error en BrokerHipotecarioService:', brokerErr);
-                      // Fall through to desperfecto handler
+                      // Fall through to document collection / desperfecto handler
                     }
+                  }
+
+                  // ═══ DOCUMENT COLLECTION - Detectar documentos de crédito por caption/filename ═══
+                  try {
+                    const { DocumentCollectionService } = await import('./services/documentCollectionService');
+                    const docService = new DocumentCollectionService(supabase);
+                    const checklist = await docService.getChecklistStatus(lead.id);
+
+                    if (checklist && checklist.missing.length > 0) {
+                      const docCaption = message.image?.caption || message.document?.caption || message.document?.filename || '';
+                      const docFilename = message.document?.filename || '';
+                      const docMimeType = message.image?.mime_type || message.document?.mime_type || '';
+                      const docType = docService.detectDocumentType(docCaption, docFilename, docMimeType);
+
+                      if (docType) {
+                        const docMediaId = message.image?.id || message.document?.id;
+                        const updated = await docService.markDocumentReceived(lead.id, docType, docMediaId);
+                        const { MORTGAGE_DOCUMENTS } = await import('./services/documentCollectionService');
+                        const docName = MORTGAGE_DOCUMENTS.find((d: any) => d.id === docType)?.name || docType;
+
+                        await meta.sendWhatsAppMessage(from, `✅ Recibí tu *${docName}*. Progreso: ${updated.completionPct}%`);
+
+                        if (updated.missing.length === 0) {
+                          await meta.sendWhatsAppMessage(from, '🎉 ¡Documentos completos! Tu asesor los revisará pronto.');
+
+                          // Notify asesor
+                          const leadNotesDoc = safeJsonParse(lead.notes);
+                          const asesorIdDoc = leadNotesDoc.credit_flow_context?.asesor_id || lead.assigned_advisor_id || lead.asesor_banco_id;
+                          if (asesorIdDoc) {
+                            const { data: asesorDoc } = await supabase.client
+                              .from('team_members').select('*').eq('id', asesorIdDoc).maybeSingle();
+                            if (asesorDoc) {
+                              await enviarMensajeTeamMember(supabase, meta, asesorDoc,
+                                `📋 *DOCUMENTOS COMPLETOS*\n\n👤 *${lead.name || 'Lead'}*\n📱 ${lead.phone ? formatPhoneForDisplay(lead.phone) : 'Sin tel'}\n\n¡Todos los documentos para crédito hipotecario recibidos!\nRevisa y continúa con el proceso.`,
+                                { tipoMensaje: 'alerta_lead', guardarPending: true, pendingKey: 'pending_alerta_lead' }
+                              );
+                            }
+                          }
+                        }
+
+                        console.log(`📋 Document collection: ${docName} received for lead ${lead.id} (${updated.completionPct}%)`);
+                        return new Response('OK', { status: 200 });
+                      }
+                    }
+                  } catch (docCollErr) {
+                    console.warn('⚠️ Error en DocumentCollectionService:', docCollErr);
+                    // Fall through to desperfecto handler
                   }
                 }
               } catch (imgErr) {
@@ -1222,6 +1273,15 @@ export default {
               }
             } catch (locErr) {
               console.error('Error guardando ubicación:', locErr);
+            }
+
+            // ═══ LOCATION SERVICE: Verificar si está en zona Zacatecas ═══
+            if (lat && lon) {
+              const locationService = new LocationService();
+              if (!locationService.isInZacatecasArea(lat, lon)) {
+                console.log(`📍 Ubicación fuera de zona Zacatecas (${lat}, ${lon})`);
+                // Still show developments but mention they're far
+              }
             }
 
             // ═══ HAVERSINE: Calcular distancia a cada desarrollo ═══
@@ -1525,6 +1585,87 @@ export default {
             }
           }
           // ═══ FIN CAROUSEL QUICK REPLY ═══
+
+          // ═══ SLOT SCHEDULING REPLY: Handle slot_* list replies ═══
+          if (buttonPayloadRaw.startsWith('slot_')) {
+            try {
+              const { SlotSchedulingService } = await import('./services/slotSchedulingService');
+              const slotService = new SlotSchedulingService();
+              const slotParsed = slotService.parseSlotId(buttonPayloadRaw);
+
+              if (slotParsed) {
+                // Look up the lead
+                const { data: slotLead } = await supabase.client
+                  .from('leads')
+                  .select('id, name, phone, status, assigned_to, property_interest, notes')
+                  .eq('phone', from)
+                  .single();
+
+                if (slotLead) {
+                  const { AppointmentSchedulingService } = await import('./services/appointmentSchedulingService');
+                  const { CalendarService: CalSvc } = await import('./services/calendar');
+                  const slotCalendar = new CalSvc(
+                    tenant.config.googleServiceAccountEmail || env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+                    tenant.config.googlePrivateKey || env.GOOGLE_PRIVATE_KEY,
+                    tenant.config.googleCalendarId || env.GOOGLE_CALENDAR_ID
+                  );
+                  const appointmentService = new AppointmentSchedulingService(supabase, slotCalendar);
+
+                  // Get team members for vendedor assignment
+                  const { data: slotTeamMembers } = await supabase.client
+                    .from('team_members')
+                    .select('id, name, phone, role, active')
+                    .eq('active', true);
+
+                  const vendedorSlot = slotTeamMembers?.find((t: any) => t.id === slotLead.assigned_to) ||
+                                   slotTeamMembers?.find((t: any) => t.role === 'vendedor' && t.active);
+
+                  const desarrollo = slotLead.property_interest || 'Por definir';
+
+                  // Parse slot time: "10:00" → hora=10, ampm=am; "14:00" → hora=2, ampm=pm
+                  const slotHourNum = parseInt(slotParsed.time.split(':')[0]);
+                  const slotAmpm = slotHourNum >= 12 ? 'pm' : 'am';
+                  const slotHour12 = slotHourNum > 12 ? slotHourNum - 12 : (slotHourNum === 0 ? 12 : slotHourNum);
+                  const slotMinutes = slotParsed.time.split(':')[1] || '00';
+
+                  const citaResult = await appointmentService.agendarCitaConSeleccion(
+                    slotLead,
+                    slotParsed.date,  // ISO date string
+                    String(slotHour12),
+                    slotAmpm,
+                    vendedorSlot || { id: '', name: 'Sin asignar', role: 'vendedor' },
+                    slotMinutes,
+                    desarrollo
+                  );
+
+                  if (citaResult.success) {
+                    await meta.sendWhatsAppMessage(from,
+                      `✅ *¡Cita agendada!*\n\n` +
+                      `📅 ${citaResult.fecha}\n` +
+                      `🕐 ${citaResult.hora}\n` +
+                      `🏠 ${desarrollo}\n\n` +
+                      `Te esperamos. Si necesitas cambiar algo, escribe *reagendar* o *cancelar cita*.`
+                    );
+                  } else {
+                    await meta.sendWhatsAppMessage(from,
+                      citaResult.error || '⚠️ No pude agendar la cita. ¿Podrías darme la fecha y hora que prefieres?'
+                    );
+                  }
+
+                  // Clear pending_slot_selection
+                  const slotNotes = typeof slotLead.notes === 'object' ? slotLead.notes : {};
+                  delete slotNotes.pending_slot_selection;
+                  await supabase.client.from('leads').update({ notes: slotNotes }).eq('id', slotLead.id);
+
+                  return new Response('OK', { status: 200 });
+                }
+              }
+            } catch (slotErr) {
+              console.error('Error processing slot selection:', slotErr);
+              // Fall through to normal message handling
+            }
+          }
+          // ═══ FIN SLOT SCHEDULING REPLY ═══
 
           // ═══ RECURSO QUICK REPLY: Handle recurso_gps_*, recurso_brochure_*, recurso_video_*, recurso_3d_* ═══
           if (buttonPayloadRaw.startsWith('recurso_')) {
@@ -2744,6 +2885,18 @@ export default {
       } catch (e) {
         console.error('❌ Error verificando leads sin contactar:', e);
       }
+
+      // ═══════════════════════════════════════════════════════════
+      // AUTO-ESCALACIÓN: Reasignar leads sin respuesta del vendedor
+      // Solo horario laboral 9-19
+      // ═══════════════════════════════════════════════════════════
+      if (mexicoHour >= 9 && mexicoHour <= 19) {
+        try {
+          await autoEscalationCheck(supabase, meta, env.SARA_CACHE);
+        } catch (e) {
+          console.error('❌ Error en auto-escalation:', e);
+        }
+      }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -3731,6 +3884,14 @@ export default {
     if (mexicoHour === 9 && isFirstRunOfHour && dayOfWeek >= 1 && dayOfWeek <= 6) {
       await safeCron('activarCadenciasAutomaticas', () => activarCadenciasAutomaticas(supabase, meta, env));
     }
+
+    // BRIEFS PRE-VISITA: Cada 2 min L-S 8am-8pm MX
+    if (dayOfWeek >= 1 && dayOfWeek <= 6 && mexicoHour >= 8 && mexicoHour <= 20) {
+      await safeCron('enviarBriefsPreVisita', () => enviarBriefsPreVisita(supabase, meta));
+    }
+
+    // PLAYBOOKS OBJECIONES: Cada 2 min (24/7, el servicio maneja timing)
+    await safeCron('ejecutarPlaybooksObjeciones', () => ejecutarPlaybooksObjeciones(supabase, meta));
 
     // BRIDGES - Verificar bridges por expirar (cada 2 min)
     await safeCron('verificarBridgesPorExpirar', () => verificarBridgesPorExpirar(supabase, meta));

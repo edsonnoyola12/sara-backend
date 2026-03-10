@@ -399,6 +399,16 @@ export class CEOCommandsService {
       return { action: 'call_handler', handlerName: 'reporteLlamadas' };
     }
 
+    // ═══ VELOCIDAD DEL FUNNEL ═══
+    if (msgLower === 'velocidad' || msgLower === 'velocity' || msgLower === 'funnel velocity') {
+      return { action: 'call_handler', handlerName: 'velocidadFunnel' };
+    }
+
+    // ═══ ATRIBUCIÓN DE INGRESOS / ROAS ═══
+    if (msgLower === 'atribucion' || msgLower === 'atribución' || msgLower === 'roas' || msgLower === 'roi') {
+      return { action: 'call_handler', handlerName: 'atribucionIngresos' };
+    }
+
     // ═══ OBSERVABILIDAD ═══
     if (msgLower === 'observabilidad' || msgLower === 'observability' || msgLower === 'obs' || msgLower === 'crons' || msgLower === 'metricas') {
       return { action: 'call_handler', handlerName: 'observabilidad' };

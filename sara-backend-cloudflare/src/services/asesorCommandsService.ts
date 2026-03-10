@@ -1,5 +1,6 @@
 import { SupabaseService } from './supabase';
 import { formatPhoneForDisplay } from '../handlers/whatsapp-utils';
+import { DocumentCollectionService } from './documentCollectionService';
 
 interface CommandResult {
   action: 'send_message' | 'call_handler' | 'not_recognized';
@@ -516,8 +517,22 @@ export class AsesorCommandsService {
     // Sincronizar con mortgage_applications (para CRM)
     await this.syncMortgageApplication(lead, 'documents_pending', asesorId, nombreAsesor);
 
+    // Initialize document checklist if not already done
+    const docServicePedir = new DocumentCollectionService(this.supabase);
+    try {
+      await docServicePedir.initializeChecklist(lead.id);
+    } catch (docInitErr) {
+      console.warn('⚠️ Error initializing doc checklist:', docInitErr);
+    }
+
     const nombreCorto = lead.name?.split(' ')[0] || 'Lead';
-    const mensajeParaLead = `¡Hola ${nombreCorto}! 👋
+
+    // Use DocumentCollectionService for the message if available
+    let mensajeParaLead: string;
+    try {
+      mensajeParaLead = docServicePedir.generateChecklistMessage(lead.name || 'Cliente');
+    } catch {
+      mensajeParaLead = `¡Hola ${nombreCorto}! 👋
 
 Tu asesor *${nombreAsesor}* está avanzando con tu trámite de crédito 🏠
 
@@ -533,6 +548,7 @@ Para continuar, necesitamos los siguientes documentos:
 📸 Puedes enviarlos como *foto* o *PDF* por este chat.
 
 ¿Tienes alguna duda sobre los documentos? 🤔`;
+    }
 
     // Buscar vendedor asignado para notificarle (usar assigned_to como fallback)
     const notes = this.safeParseNotes(lead.notes);
@@ -1000,13 +1016,12 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
 
       let msg = `📄 *Documentos Pendientes, ${nombreAsesor}*\n━━━━━━━━━━━━━━━━━━━━\n\n`;
 
+      const docService = new DocumentCollectionService(this.supabase);
+
       for (const sol of solicitudes) {
         const diasEsperando = sol.docs_requested_at
           ? Math.floor((Date.now() - new Date(sol.docs_requested_at).getTime()) / (1000 * 60 * 60 * 24))
           : 0;
-
-        const docsRecibidos = sol.documents_received || [];
-        const docsFaltantes = this.getDocumentosFaltantes(docsRecibidos);
 
         const emoji = diasEsperando > 3 ? '🔴' : diasEsperando > 1 ? '🟡' : '🟢';
 
@@ -1014,8 +1029,32 @@ Si tienes preguntas, tu asesor está disponible para orientarte.
         msg += `   📱 ${formatPhoneForDisplay(sol.lead_phone)}\n`;
         msg += `   ⏱️ Esperando hace ${diasEsperando} día${diasEsperando !== 1 ? 's' : ''}\n`;
 
-        if (docsFaltantes.length > 0) {
-          msg += `   📋 Faltan: ${docsFaltantes.slice(0, 3).join(', ')}${docsFaltantes.length > 3 ? '...' : ''}\n`;
+        // Try DocumentCollectionService checklist first (more accurate)
+        let usedChecklist = false;
+        if (sol.lead_id) {
+          try {
+            const checklist = await docService.getChecklistStatus(sol.lead_id);
+            if (checklist) {
+              const filledBlocks = Math.round((checklist.completionPct / 100) * 10);
+              const emptyBlocks = 10 - filledBlocks;
+              const bar = '█'.repeat(filledBlocks) + '░'.repeat(emptyBlocks);
+              msg += `   📊 ${checklist.completionPct}% ${bar}\n`;
+              if (checklist.missing.length > 0) {
+                const { MORTGAGE_DOCUMENTS } = await import('./documentCollectionService');
+                const missingNames = checklist.missing.map(id => MORTGAGE_DOCUMENTS.find(d => d.id === id)?.name || id);
+                msg += `   📋 Faltan: ${missingNames.slice(0, 3).join(', ')}${missingNames.length > 3 ? ` (+${missingNames.length - 3})` : ''}\n`;
+              }
+              usedChecklist = true;
+            }
+          } catch { /* fallback to legacy */ }
+        }
+
+        if (!usedChecklist) {
+          const docsRecibidos = sol.documents_received || [];
+          const docsFaltantes = this.getDocumentosFaltantes(docsRecibidos);
+          if (docsFaltantes.length > 0) {
+            msg += `   📋 Faltan: ${docsFaltantes.slice(0, 3).join(', ')}${docsFaltantes.length > 3 ? '...' : ''}\n`;
+          }
         }
         msg += `\n`;
       }

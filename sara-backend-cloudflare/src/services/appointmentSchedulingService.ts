@@ -4,6 +4,7 @@ import { parseCancelarCitaCommand, parseReagendarCommand, formatearFechaLegible,
 import { parseFechaISO, parseHoraISO } from '../handlers/dateParser';
 import { parseHora } from '../utils/vendedorParsers';
 import { findLeadByName } from '../handlers/whatsapp-utils';
+import { FunnelVelocityService } from './funnelVelocityService';
 
 interface CancelarResult {
   success?: boolean;
@@ -910,10 +911,15 @@ agendar ${nombreLead} mañana 4pm`;
       }
 
       // Actualizar status del lead a 'scheduled'
+      const oldStatusVelocity = lead.status || 'new';
       await this.supabase.client
         .from('leads')
         .update({ status: 'scheduled', updated_at: new Date().toISOString() })
         .eq('id', lead.id);
+
+      // Track funnel velocity
+      const velocityServiceTrack = new FunnelVelocityService(this.supabase);
+      await velocityServiceTrack.recordTransition(lead.id, oldStatusVelocity, 'scheduled', 'appointment_created').catch(e => console.error('Velocity tracking error:', e));
 
       return {
         success: true,
@@ -1112,10 +1118,15 @@ agendar ${nombreLead} mañana 4pm`;
       }
 
       // Actualizar status del lead a 'scheduled'
+      const oldStatusVelocity = lead.status || 'new';
       await this.supabase.client
         .from('leads')
         .update({ status: 'scheduled', updated_at: new Date().toISOString() })
         .eq('id', lead.id);
+
+      // Track funnel velocity
+      const velocityServiceTrack = new FunnelVelocityService(this.supabase);
+      await velocityServiceTrack.recordTransition(lead.id, oldStatusVelocity, 'scheduled', 'appointment_created').catch(e => console.error('Velocity tracking error:', e));
 
       return {
         success: true,

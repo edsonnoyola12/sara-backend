@@ -15,6 +15,8 @@ import { VendorCommandsService } from '../services/vendorCommandsService';
 import { BridgeService } from '../services/bridgeService';
 import { OfferTrackingService } from '../services/offerTrackingService';
 import { createSLAMonitoring } from '../services/slaMonitoringService';
+import { FunnelVelocityService } from '../services/funnelVelocityService';
+import { RevenueAttributionService } from '../services/revenueAttributionService';
 
 // ═══════════════════════════════════════════════════════════════
 // HANDLE CEO MESSAGE (entry point)
@@ -712,6 +714,16 @@ export async function executeCEOHandler(ctx: HandlerContext, handler: any, from:
       // ━━━ TRACKING DE OFERTAS ━━━
       case 'trackingOfertas':
         await ceoTrackingOfertas(ctx, handler, from, nombreCEO);
+        break;
+
+      // ━━━ VELOCIDAD DEL FUNNEL ━━━
+      case 'velocidadFunnel':
+        await ceoVelocidadFunnel(ctx, from);
+        break;
+
+      // ━━━ ATRIBUCIÓN DE INGRESOS ━━━
+      case 'atribucionIngresos':
+        await ceoAtribucionIngresos(ctx, from);
         break;
 
       default:
@@ -1881,5 +1893,37 @@ export async function ceoVerLead(ctx: HandlerContext, handler: any, from: string
     } catch (e) {
       console.error('❌ Error en ceoVerLead:', e);
       await ctx.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al buscar lead.`);
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CEO VELOCIDAD DEL FUNNEL
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function ceoVelocidadFunnel(ctx: HandlerContext, from: string): Promise<void> {
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+    try {
+      const velocityService = new FunnelVelocityService(ctx.supabase);
+      const report = await velocityService.calculateVelocity('month');
+      const formatted = velocityService.formatVelocityReport(report);
+      await ctx.meta.sendWhatsAppMessage(cleanPhone, formatted);
+    } catch (e) {
+      console.error('❌ Error en ceoVelocidadFunnel:', e);
+      await ctx.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al generar reporte de velocidad.`);
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CEO ATRIBUCIÓN DE INGRESOS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+async function ceoAtribucionIngresos(ctx: HandlerContext, from: string): Promise<void> {
+    const cleanPhone = from.replace('whatsapp:', '').replace('+', '');
+    try {
+      const attrService = new RevenueAttributionService(ctx.supabase);
+      const report = await attrService.getAttributionReport('month');
+      const formatted = attrService.formatAttributionReport(report);
+      await ctx.meta.sendWhatsAppMessage(cleanPhone, formatted);
+    } catch (e) {
+      console.error('❌ Error en ceoAtribucionIngresos:', e);
+      await ctx.meta.sendWhatsAppMessage(cleanPhone, `❌ Error al generar reporte de atribución.`);
     }
 }

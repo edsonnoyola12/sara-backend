@@ -25,6 +25,8 @@ import { CalendarService } from '../services/calendar';
 import { enviarMensajeTeamMember } from '../utils/teamMessaging';
 import { enviarMensajeLead } from '../utils/leadMessaging';
 import { logErrorToDB } from './healthCheck';
+import { AutoEscalationService } from '../services/autoEscalationService';
+import { VisitPrepBriefService } from '../services/visitPrepBriefService';
 
 // ═══════════════════════════════════════════════════════════════
 // ALERTAS DE LEADS FRÍOS - Diario 10am L-V
@@ -2473,5 +2475,105 @@ export async function alertarChurnCritico(supabase: SupabaseService, meta: MetaW
   } catch (e) {
     console.error('Error en alertarChurnCritico:', e);
     await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'alertarChurnCritico', stack: (e as Error).stack });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BRIEFS PRE-VISITA - Enviar brief 30 min antes de cita
+// CRON cada 2 min, horario laboral
+// ═══════════════════════════════════════════════════════════════
+export async function enviarBriefsPreVisita(supabase: SupabaseService, meta: MetaWhatsAppService): Promise<void> {
+  try {
+    console.log('📋 Verificando citas próximas para briefs pre-visita...');
+
+    const now = new Date();
+    const in25min = new Date(now.getTime() + 25 * 60000);
+    const in35min = new Date(now.getTime() + 35 * 60000);
+
+    // Get today's date and tomorrow's (in case the window crosses midnight)
+    const todayStr = in25min.toISOString().split('T')[0];
+    const tomorrowStr = in35min.toISOString().split('T')[0];
+
+    // Query appointments scheduled for today/tomorrow that are confirmed/scheduled
+    const { data: appointments, error } = await supabase.client
+      .from('appointments')
+      .select('id, lead_id, scheduled_date, scheduled_time, development, team_member_id, notes, status')
+      .in('status', ['scheduled', 'confirmed'])
+      .in('scheduled_date', todayStr === tomorrowStr ? [todayStr] : [todayStr, tomorrowStr])
+      .not('scheduled_time', 'is', null)
+      .limit(20);
+
+    if (error || !appointments || appointments.length === 0) {
+      if (error) console.error('❌ Error buscando citas para briefs:', error.message);
+      return;
+    }
+
+    let briefsEnviados = 0;
+
+    for (const appt of appointments) {
+      try {
+        // Parse appointment datetime
+        const apptDateTime = new Date(`${appt.scheduled_date}T${appt.scheduled_time}`);
+        if (isNaN(apptDateTime.getTime())) continue;
+
+        // Check if appointment is within the 25-35 min window
+        if (apptDateTime < in25min || apptDateTime > in35min) continue;
+
+        // Check if brief already sent (in appointment notes)
+        const apptNotes = typeof appt.notes === 'object' ? (appt.notes || {}) : {};
+        if (apptNotes.visit_brief_sent) continue;
+
+        // Get vendedor
+        if (!appt.team_member_id) continue;
+        const { data: vendedor } = await supabase.client
+          .from('team_members')
+          .select('id, name, phone')
+          .eq('id', appt.team_member_id)
+          .maybeSingle();
+
+        if (!vendedor?.phone) continue;
+
+        // Generate brief
+        const briefService = new VisitPrepBriefService(supabase);
+        const brief = await briefService.generateBrief(appt.lead_id, appt.id);
+
+        // Send to vendedor via enviarMensajeTeamMember (24h safe)
+        await enviarMensajeTeamMember(supabase, meta, vendedor, brief, {
+          tipoMensaje: 'alerta_lead',
+          guardarPending: true,
+          pendingKey: 'pending_briefing'
+        });
+
+        // Mark as sent (mark-before-send would be ideal, but brief generation is the expensive part)
+        await supabase.client
+          .from('appointments')
+          .update({ notes: { ...apptNotes, visit_brief_sent: new Date().toISOString() } })
+          .eq('id', appt.id);
+
+        briefsEnviados++;
+        console.log(`📋 Brief pre-visita enviado a ${vendedor.name} para cita ${appt.id}`);
+      } catch (apptErr) {
+        console.error(`❌ Error procesando brief para cita ${appt.id}:`, apptErr);
+      }
+    }
+
+    if (briefsEnviados > 0) {
+      console.log(`📋 ${briefsEnviados} briefs pre-visita enviados`);
+    }
+  } catch (e) {
+    console.error('Error en enviarBriefsPreVisita:', e);
+    await logErrorToDB(supabase, 'cron_error', (e as Error).message || String(e), { severity: 'error', source: 'enviarBriefsPreVisita', stack: (e as Error).stack });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// AUTO-ESCALACIÓN - Reasignar leads sin respuesta del vendedor
+// CRON cada 2 min, horario laboral (9-19)
+// ═══════════════════════════════════════════════════════════════
+export async function autoEscalationCheck(supabase: SupabaseService, meta: MetaWhatsAppService, kvCache: KVNamespace): Promise<void> {
+  const service = new AutoEscalationService(supabase, meta, kvCache);
+  const result = await service.checkAndEscalate();
+  if (result.reassigned > 0 || result.escalatedToCEO > 0) {
+    console.log(`🔄 Auto-escalation: ${result.reassigned} reassigned, ${result.escalatedToCEO} escalated to CEO`);
   }
 }
