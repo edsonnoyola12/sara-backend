@@ -364,7 +364,7 @@ npx wrangler deploy      # Re-deploy
 | Retell.ai | ACTIVADO — 9 tools, inbound +524923860066, flag unificado KV |
 | Inteligencia | Intent tagging, buyer readiness scoring, churn prediction, mortgage recovery |
 | Checklist | `/checklist` — 15 verificaciones producción (DB, precios, WA, Retell, IA, KV, multi-tenant, SaaS tables) |
-| Watchdogs | Mensual (día 1 8am: retry precios), Semanal (lunes 7am: health check completo) → WhatsApp alert |
+| Monitoring | Pipeline probe 8:05AM diario (8 checks sintéticos), reporte diario 7PM (Edson+Oscar), alerta real-time >5 err/h, health monitor cada 5min, watchdogs mensual+semanal |
 | Alberca | NINGÚN desarrollo tiene alberca (fact validator + 5 hardcoded mentions removed session 91) |
 | Multi-tenant | ✅ RLS + tenant_id en 38 tablas + 4 SaaS tables + signup→login→JWT E2E + CRON multi-tenant loop + per-tenant rate limiting |
 | SaaS APIs | Signup, Login/JWT, Onboarding (4 pasos + WA credential verify), Admin, Billing (Stripe), Usage, Invitations |
