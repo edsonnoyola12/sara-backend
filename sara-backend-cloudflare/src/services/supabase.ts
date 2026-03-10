@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { SANTA_RITA_TENANT_ID } from '../middleware/tenant';
+import { incrementMetric, checkPlanLimit } from './usageTrackingService';
 
 export class SupabaseService {
   public client: any;
@@ -24,9 +25,7 @@ export class SupabaseService {
       await this.client.rpc('set_tenant', { tid: this.tenantId });
       this.tenantSet = true;
     } catch (err: any) {
-      // If set_tenant RPC doesn't exist yet (pre-migration), log and continue
-      // This ensures backward compatibility during rollout
-      console.warn('⚠️ set_tenant RPC not available (pre-migration?), continuing without RLS:', err?.message);
+      console.error('❌ set_tenant RPC failed:', err?.message);
       this.tenantSet = false;
     }
   }
@@ -42,6 +41,13 @@ export class SupabaseService {
   }
 
   async createLead(lead: any) {
+    // Check plan limit (warn but don't block — can't lose leads)
+    try {
+      const { allowed, current, limit } = await checkPlanLimit(this, 'leads_count');
+      if (!allowed) {
+        console.warn(`⚠️ PLAN LIMIT: Tenant ${this.tenantId} exceeded leads limit (${current}/${limit}). Lead still created.`);
+      }
+    } catch {}
     console.log('📝 Creando lead:', lead);
     const { data, error } = await this.client.from('leads').insert([lead]).select().single();
 
@@ -51,6 +57,8 @@ export class SupabaseService {
     }
 
     console.log('✅ Lead creado:', data);
+    // Increment SaaS usage (non-blocking)
+    incrementMetric(this, 'leads_count').catch(() => {});
     return data;
   }
 

@@ -661,20 +661,34 @@ Atendemos de Lunes a Viernes 9am-6pm y Sábados 9am-2pm 😊`,
 
           // Crear mortgage_application
           if (asesor?.id) {
-            const { error: mortgageError } = await this.supabase.client
+            // Check if mortgage already exists for this lead, then update or insert
+            const { data: existingMortgage } = await this.supabase.client
               .from('mortgage_applications')
-              .upsert({
-                lead_id: leadId,
-                lead_name: context.lead_name,
-                lead_phone: context.lead_phone,
-                assigned_advisor_id: asesor.id,
-                monthly_income: context.ingreso_mensual || 0,
-                down_payment: context.enganche || 0,
-                bank: context.banco_preferido || 'Por definir',
-                status: 'pending',
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              }, { onConflict: 'lead_id' });
+              .select('id')
+              .eq('lead_id', leadId)
+              .limit(1)
+              .maybeSingle();
+
+            const mortgageData = {
+              lead_id: leadId,
+              lead_name: context.lead_name,
+              lead_phone: context.lead_phone,
+              assigned_advisor_id: asesor.id,
+              monthly_income: context.ingreso_mensual || 0,
+              down_payment: context.enganche || 0,
+              bank: context.banco_preferido || 'Por definir',
+              status: 'pending',
+              updated_at: new Date().toISOString()
+            };
+
+            const { error: mortgageError } = existingMortgage
+              ? await this.supabase.client
+                  .from('mortgage_applications')
+                  .update(mortgageData)
+                  .eq('id', existingMortgage.id)
+              : await this.supabase.client
+                  .from('mortgage_applications')
+                  .insert({ ...mortgageData, created_at: new Date().toISOString() });
             if (mortgageError) {
               // CRÉDITO EN LIMBO FIX: Log error para que no desaparezca silenciosamente
               console.error(`❌ Error creando mortgage_application para lead ${leadId}:`, mortgageError);

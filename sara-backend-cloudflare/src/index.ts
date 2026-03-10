@@ -275,7 +275,18 @@ async function checkRateLimit(request: Request, env: Env, requestId: string, max
 
   const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For') || 'unknown';
   const endpoint = url.pathname.split('?')[0];
-  const key = `ratelimit:${ip}:${endpoint}`;
+  // Rate limit by IP + endpoint. For API routes, also include tenant from JWT to isolate tenants.
+  let tenantSuffix = '';
+  if (authHeader && authHeader !== env.API_SECRET) {
+    try {
+      const parts = authHeader.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1]));
+        if (payload.tenantId) tenantSuffix = `:${payload.tenantId}`;
+      }
+    } catch {}
+  }
+  const key = `ratelimit:${ip}${tenantSuffix}:${endpoint}`;
   const limit = maxRequests;
   const windowSeconds = 60;
 
@@ -401,6 +412,15 @@ function requiresAuth(pathname: string): boolean {
     /^\/api\/send-surveys/,                  // Enviar encuestas (CRM)
     /^\/api\/error-logs/,                    // Error logs (CRM Sistema)
     /^\/api\/sla/,                           // SLA Monitoring (CRM)
+    /^\/api\/plans$/,                        // SaaS plans (public)
+    /^\/api\/signup$/,                       // SaaS signup (public)
+    /^\/api\/invitations\/accept$/,          // Accept invitation (public)
+    /^\/api\/billing\/webhook$/,             // Stripe webhook (public)
+    /^\/api\/onboarding/,                    // SaaS onboarding (JWT auth in handler)
+    /^\/api\/billing/,                       // SaaS billing (JWT auth in handler)
+    /^\/api\/usage/,                         // SaaS usage (JWT auth in handler)
+    /^\/api\/invitations/,                   // SaaS invitations (JWT auth in handler)
+    /^\/api\/admin\//,                       // SaaS admin (JWT auth in handler)
   ];
 
   for (const pattern of crmPublicPatterns) {
@@ -648,7 +668,7 @@ export default {
 
     const supabase = new SupabaseService(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
 
-    // Resolve tenant for API requests (Phase 1: defaults to Santa Rita)
+    // Resolve tenant for API requests (via X-Tenant-ID header or default Santa Rita)
     if (url.pathname.startsWith('/api/')) {
       const apiTenant = await resolveTenantFromRequest(request, supabase);
       await supabase.setTenant(apiTenant.tenantId);
@@ -1077,13 +1097,25 @@ export default {
           // ═══ FIN DEDUPLICACIÓN ═══
 
           const claude = new ClaudeService(env.ANTHROPIC_API_KEY);
-          const meta = await createMetaWithTracking(env, supabase);
-          const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
 
-          // Resolve tenant from webhook phone_number_id
+          // Resolve tenant FIRST, then create per-tenant services
           const phoneNumberId = value?.metadata?.phone_number_id || env.META_PHONE_NUMBER_ID;
           const tenant = await resolveTenantFromWebhook(phoneNumberId, supabase);
           await supabase.setTenant(tenant.tenantId);
+
+          // Block expired trial tenants — don't process messages
+          if (tenant.plan === 'expired') {
+            console.warn(`⚠️ Tenant ${tenant.name} trial expired — skipping webhook processing`);
+            return new Response('OK', { status: 200 });
+          }
+
+          // Use tenant config for Meta/Calendar (falls back to env vars if not configured)
+          const meta = await createMetaWithTracking(env, supabase, tenant.config);
+          const calendar = new CalendarService(
+            tenant.config.googleServiceAccountEmail || env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+            tenant.config.googlePrivateKey || env.GOOGLE_PRIVATE_KEY,
+            tenant.config.googleCalendarId || env.GOOGLE_CALENDAR_ID
+          );
 
           const handler = new WhatsAppHandler(supabase, claude, meta as any, calendar, meta, tenant);
 
@@ -2247,9 +2279,10 @@ export default {
         // Solo procesar si hay cambios (no sync inicial)
         if (resourceState === 'exists' || resourceState === 'update') {
           console.log('📅 Procesando cambios de Google Calendar...');
+          // TODO Phase 3b: resolve tenant from calendar webhook (e.g. by channel_id or calendar_id)
           const calendar = new CalendarService(env.GOOGLE_SERVICE_ACCOUNT_EMAIL, env.GOOGLE_PRIVATE_KEY, env.GOOGLE_CALENDAR_ID);
           const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
-          
+
           // Obtener eventos de las últimas 24 horas y próximos 30 días
           const now = new Date();
           const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -2742,13 +2775,23 @@ export default {
 
     const supabase = new SupabaseService(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
 
-    // Set tenant for CRON (Phase 1: always Santa Rita)
+    // Resolve ALL active tenants for CRON processing
     const cronTenants = await resolveTenantsForCron(supabase);
-    const cronTenant = cronTenants[0];
+    console.log(`🏢 CRON: Processing ${cronTenants.length} active tenant(s)`);
+
+    for (let tenantIdx = 0; tenantIdx < cronTenants.length; tenantIdx++) {
+    const cronTenant = cronTenants[tenantIdx];
     await supabase.setTenant(cronTenant.tenantId);
+    console.log(`\n🏢 [${tenantIdx + 1}/${cronTenants.length}] Processing tenant: ${cronTenant.name} (${cronTenant.tenantId})`);
 
     try {
-    const meta = await createMetaWithTracking(env, supabase);
+    // Use tenant config for Meta/Calendar (falls back to env vars if not configured)
+    const meta = await createMetaWithTracking(env, supabase, cronTenant.config);
+    const cronCalendar = new CalendarService(
+      cronTenant.config.googleServiceAccountEmail || env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      cronTenant.config.googlePrivateKey || env.GOOGLE_PRIVATE_KEY,
+      cronTenant.config.googleCalendarId || env.GOOGLE_CALENDAR_ID
+    );
 
     const now = new Date();
 
@@ -4126,30 +4169,37 @@ export default {
     await cronTracker.persist(supabase);
     const cronSummary = cronTracker.getSummary();
     if (cronSummary.failCount > 0) {
-      console.warn(`⚠️ CRON run: ${cronSummary.failCount}/${cronSummary.tasks.length} tasks failed (${cronSummary.totalDuration_ms}ms)`);
+      console.warn(`⚠️ CRON [${cronTenant.name}]: ${cronSummary.failCount}/${cronSummary.tasks.length} tasks failed (${cronSummary.totalDuration_ms}ms)`);
     } else {
-      console.log(`✅ CRON run: ${cronSummary.tasks.length} tasks OK (${cronSummary.totalDuration_ms}ms)`);
+      console.log(`✅ CRON [${cronTenant.name}]: ${cronSummary.tasks.length} tasks OK (${cronSummary.totalDuration_ms}ms)`);
     }
 
     } catch (error) {
-      // Capturar errores de cron en Sentry
+      // Per-tenant error handling — log but continue to next tenant
+      console.error(`❌ Error en cron job para tenant ${cronTenant.name}:`, error);
       sentry.captureException(error, {
         cron: event.cron,
+        tenant: cronTenant.tenantId,
         scheduled_time: new Date(event.scheduledTime).toISOString()
       });
-      console.error('❌ Error en cron job:', error);
 
-      // Persist to error_logs
       try {
         await logErrorToDB(supabase, 'cron_error', error instanceof Error ? error.message : String(error), {
           severity: 'critical',
           source: `cron:${event.cron}`,
           stack: error instanceof Error ? error.stack : undefined,
-          context: { cron: event.cron, scheduled_time: new Date(event.scheduledTime).toISOString() }
+          context: { cron: event.cron, tenant: cronTenant.tenantId, scheduled_time: new Date(event.scheduledTime).toISOString() }
         });
       } catch (logErr) { console.error('⚠️ CRON error logging to DB failed:', logErr); }
 
-      throw error; // Re-throw para que Cloudflare lo registre
+      // Continue to next tenant instead of crashing
+      if (tenantIdx < cronTenants.length - 1) {
+        console.log(`⏭️ Continuing to next tenant after error...`);
+        continue;
+      }
     }
+    } // End of tenant loop
+
+    console.log(`\n═══ CRON COMPLETE: Processed ${cronTenants.length} tenant(s) ═══`);
   },
 };

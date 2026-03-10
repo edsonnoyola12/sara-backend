@@ -1,6 +1,6 @@
 # SARA CRM - Referencia para Claude Code
 
-> Última actualización: 2026-03-09 (Sesión 89)
+> Última actualización: 2026-03-10 (Sesión 91)
 > Historial detallado de cambios: `docs/CHANGELOG.md`
 
 ---
@@ -312,14 +312,22 @@ npx wrangler tail --format=pretty           # Logs en tiempo real
 | `/test-retell-e2e?api_key=Y` | E2E Retell (25 tests) |
 | `/test-resilience-e2e?api_key=Y` | E2E Resilience (12 tests) |
 | `/test-carousel?phone=X&segment=Y&api_key=Z` | Carousel template |
-| `/checklist?api_key=Z` | Pre-flight checklist (13 checks: DB, precios, WA, Retell, IA, KV) |
+| `/checklist?api_key=Z` | Pre-flight checklist (15 checks: DB, precios, WA, Retell, IA, KV, multi-tenant) |
 | `/run-price-increase?api_key=Z&force=1` | Forzar incremento mensual +0.5% |
 | `/run-health-monitor?api_key=Z` | Forzar health monitor |
 | `/run-backup?api_key=Z` | Forzar backup R2 |
 | `/api/leads`, `/api/team-members`, `/api/properties`, `/api/appointments` | APIs CRM (auth) |
 | `/api/referrals`, `/api/referrals/stats` | APIs referral program (auth) |
+| `/api/signup` | SaaS: Crear tenant + admin (público) |
+| `/api/auth/login`, `/api/auth/me`, `/api/auth/refresh` | SaaS: JWT auth |
+| `/api/onboarding/*` | SaaS: Onboarding 4 pasos (JWT) |
+| `/api/onboarding/whatsapp/verify` | SaaS: Validar credenciales WA contra Meta API (JWT) |
+| `/api/admin/tenant`, `/api/admin/users` | SaaS: Admin settings (JWT) |
+| `/api/billing/*` | SaaS: Stripe checkout/portal (JWT) |
+| `/api/usage`, `/api/usage/summary` | SaaS: Métricas de uso (JWT) |
+| `/api/invitations` | SaaS: Team invitations (JWT) |
 
-**Auth:** `Authorization: Bearer <API_SECRET>` o `?api_key=<API_SECRET>`
+**Auth:** `Authorization: Bearer <API_SECRET>` o `?api_key=<API_SECRET>` o JWT token (SaaS)
 
 ---
 
@@ -345,7 +353,7 @@ npx wrangler deploy      # Re-deploy
 
 | Métrica | Valor |
 |---------|-------|
-| Tests | 1685 (42 archivos) |
+| Tests | 1686 (42 archivos) |
 | Servicios | 97+ |
 | Comandos verificados | 342/342 (4 roles) |
 | CRONs activos | 32+ |
@@ -355,8 +363,11 @@ npx wrangler deploy      # Re-deploy
 | WhatsApp UX | CTA buttons, reactions, contact cards |
 | Retell.ai | ACTIVADO — 9 tools, inbound +524923860066, flag unificado KV |
 | Inteligencia | Intent tagging, buyer readiness scoring, churn prediction, mortgage recovery |
-| Checklist | `/checklist` — 13 verificaciones producción (DB, precios, WA, Retell, IA, KV, fact validator) |
+| Checklist | `/checklist` — 15 verificaciones producción (DB, precios, WA, Retell, IA, KV, multi-tenant, SaaS tables) |
 | Watchdogs | Mensual (día 1 8am: retry precios), Semanal (lunes 7am: health check completo) → WhatsApp alert |
-| Alberca | NINGÚN desarrollo tiene alberca (fact validator corrige automáticamente) |
-| Resilience | Retry queue (backoff exponencial), mark-before-send, cache invalidation, AI fallback, KV dedup, fetch timeouts, atomic writes, error persistence, double-booking prevention, CRON overlap dedup |
+| Alberca | NINGÚN desarrollo tiene alberca (fact validator + 5 hardcoded mentions removed session 91) |
+| Multi-tenant | ✅ RLS + tenant_id en 38 tablas + 4 SaaS tables + signup→login→JWT E2E + CRON multi-tenant loop + per-tenant rate limiting |
+| SaaS APIs | Signup, Login/JWT, Onboarding (4 pasos + WA credential verify), Admin, Billing (Stripe), Usage, Invitations |
+| Trial/Billing | Trial expiration enforcement (webhook + API + CRON), plan downgrade on Stripe cancellation, message limit enforcement |
+| Resilience | Retry queue (backoff exponencial), mark-before-send, cache invalidation, AI fallback, KV dedup, fetch timeouts, atomic writes, error persistence, double-booking prevention, CRON overlap dedup, per-tenant error isolation |
 | Integraciones | Meta/WhatsApp ✅, Supabase ✅, Cloudflare ✅, Google Calendar ✅, Veo 3 ✅, Retell ✅ |

@@ -169,11 +169,11 @@ describe('Development vs Model Registry', () => {
       }
     });
 
-    it('should have only Andes with alberca', () => {
+    it('should have NO development with alberca', () => {
       const withPool = Object.entries(DEVELOPMENTS)
         .filter(([_, info]) => info.amenities.includes('alberca'))
         .map(([name]) => name);
-      expect(withPool).toEqual(['Andes']);
+      expect(withPool).toEqual([]);
     });
 
     it('getDevelopmentInfo should return correct zone', () => {

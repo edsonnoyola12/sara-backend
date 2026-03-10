@@ -2735,7 +2735,7 @@ export async function aplicarPreciosProgramados(supabase: SupabaseService, meta:
     // Notificar al CEO/Admin con info PRECISA
     const { data: admins } = await supabase.client
       .from('team_members')
-      .select('phone')
+      .select('*')
       .in('role', ['ceo', 'admin'])
       .eq('active', true);
 

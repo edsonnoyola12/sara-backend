@@ -2,9 +2,21 @@ import { MetaWhatsAppService } from '../services/meta-whatsapp';
 import { SupabaseService } from '../services/supabase';
 import { createMessageTrackingService } from '../services/messageTrackingService';
 import { enqueueFailedMessage } from '../services/retryQueueService';
+import { TenantConfig } from '../middleware/tenant';
+import { incrementMetric, checkMessageLimit } from '../services/usageTrackingService';
 
-export async function createMetaWithTracking(env: any, supabase: SupabaseService): Promise<MetaWhatsAppService> {
-  const meta = new MetaWhatsAppService(env.META_PHONE_NUMBER_ID, env.META_ACCESS_TOKEN);
+/**
+ * Create Meta service using tenant config (preferred) with env fallback.
+ * If tenantConfig has WhatsApp credentials, those are used; otherwise env vars.
+ */
+export async function createMetaWithTracking(
+  env: any,
+  supabase: SupabaseService,
+  tenantConfig?: TenantConfig
+): Promise<MetaWhatsAppService> {
+  const phoneNumberId = tenantConfig?.whatsappPhoneNumberId || env.META_PHONE_NUMBER_ID;
+  const accessToken = tenantConfig?.whatsappAccessToken || env.META_ACCESS_TOKEN;
+  const meta = new MetaWhatsAppService(phoneNumberId, accessToken);
 
   // Pre-cargar team member phones para auto-detectar recipientType
   const { data: teamMembers } = await supabase.client
@@ -35,6 +47,21 @@ export async function createMetaWithTracking(env: any, supabase: SupabaseService
       categoria: data.categoria,
       contenido: data.contenido
     });
+
+    // Increment SaaS usage metric (non-blocking, fire-and-forget)
+    incrementMetric(supabase, 'messages_sent').catch(() => {});
+  });
+
+  // Check message limit before each send (uses 5min cache to avoid DB spam)
+  meta.setPreSendCheck(async () => {
+    const limitResult = await checkMessageLimit(supabase, env?.SARA_CACHE);
+    if (!limitResult.allowed) {
+      console.warn(`⚠️ MESSAGE LIMIT EXCEEDED: Tenant ${supabase.getTenantId()} at ${limitResult.current}/${limitResult.limit} (${limitResult.percentage}%)`);
+    }
+    if (limitResult.warning && limitResult.allowed) {
+      console.warn(`⚠️ MESSAGE LIMIT WARNING: Tenant ${supabase.getTenantId()} at ${limitResult.percentage}% (${limitResult.current}/${limitResult.limit})`);
+    }
+    return limitResult;
   });
 
   // Configurar callback para mensajes fallidos → retry queue

@@ -57,7 +57,7 @@ export const DEVELOPMENTS: Record<string, DevelopmentInfo> = {
     zone: 'guadalupe',
     type: 'casas',
     models: ['Laurel', 'Dalia', 'Gardenia', 'Lavanda'],
-    amenities: ['alberca', 'área de juegos', 'áreas verdes', 'CCTV', 'vigilancia 24/7', 'acceso controlado', 'pet-friendly'],
+    amenities: ['área de juegos', 'áreas verdes', 'CCTV', 'vigilancia 24/7', 'acceso controlado', 'pet-friendly'],
     carouselSegment: 'economico',
   },
   'Alpes': {

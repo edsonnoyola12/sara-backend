@@ -53,16 +53,16 @@ function validateSARAResponse(response: string, context: {
     }
   }
 
-  // REGLA 3: Alberca - SOLO Priv. Andes tiene
+  // REGLA 3: Alberca - NINGÚN desarrollo tiene alberca
   if (context.preguntaPorAlberca) {
-    const desarrollosSinAlberca = ['monte verde', 'distrito falco', 'los encinos', 'miravalle', 'alpes'];
-    for (const desarrollo of desarrollosSinAlberca) {
+    const todosDesarrollos = ['monte verde', 'distrito falco', 'los encinos', 'miravalle', 'alpes', 'andes'];
+    for (const desarrollo of todosDesarrollos) {
       if (respLower.includes(desarrollo) && respLower.includes('alberca') &&
-          !respLower.includes('no tiene alberca') && !respLower.includes('sin alberca')) {
-        // Verificar si está diciendo incorrectamente que tiene alberca
+          !respLower.includes('no tiene alberca') && !respLower.includes('sin alberca') &&
+          !respLower.includes('no cuenta con alberca') && !respLower.includes('ninguno')) {
         const regex = new RegExp(`${desarrollo}.*tiene.*alberca|${desarrollo}.*con.*alberca`, 'i');
         if (regex.test(response)) {
-          errors.push(`Error Alberca: dice que ${desarrollo} tiene alberca (SOLO Andes tiene)`);
+          errors.push(`Error Alberca: dice que ${desarrollo} tiene alberca (NINGUNO tiene)`);
         }
       }
     }
@@ -211,7 +211,7 @@ describe('AI Response Validation', () => {
     });
   });
 
-  describe('Alberca (solo Andes)', () => {
+  describe('Alberca (NINGUNO tiene)', () => {
     it('detecta error si dice que Falco tiene alberca', () => {
       const result = validateSARAResponse(
         'Distrito Falco tiene alberca y vigilancia 24/7',
@@ -221,9 +221,18 @@ describe('AI Response Validation', () => {
       expect(result.errors[0]).toContain('Error Alberca');
     });
 
-    it('acepta respuesta correcta mencionando Andes', () => {
+    it('detecta error si dice que Andes tiene alberca', () => {
       const result = validateSARAResponse(
-        'Solo Priv. Andes tiene alberca. Casas desde $1.5M',
+        'Priv. Andes tiene alberca. Casas desde $1.5M',
+        { preguntaPorAlberca: true }
+      );
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('Error Alberca');
+    });
+
+    it('acepta respuesta que niega alberca correctamente', () => {
+      const result = validateSARAResponse(
+        'Por el momento ninguno de nuestros desarrollos cuenta con alberca, pero tenemos excelentes amenidades.',
         { preguntaPorAlberca: true }
       );
       expect(result.valid).toBe(true);
@@ -379,7 +388,7 @@ describe('AI Response Integration (mock)', () => {
   const mockResponses = {
     saludo: '¡Hola! Soy SARA de Grupo Santa Rita 🏠 Tenemos casas increíbles desde $1.5M. ¿Buscas 2 o 3 recámaras?',
     monteVerde: 'Monte Verde tiene 5 modelos: Acacia ($1.5M), Eucalipto ($1.9M), Olivo ($2.0M), Fresno ($2.4M), Fresno 2 ($2.6M). ¿Cuál te interesa?',
-    alberca: '¡Sí tenemos desarrollo con alberca! Priv. Andes es nuestro único fraccionamiento con ALBERCA. ¿Te gustaría visitarlo?',
+    alberca: 'Por el momento ninguno de nuestros desarrollos cuenta con alberca, pero tenemos excelentes amenidades como áreas verdes, juegos infantiles, vigilancia 24/7 y más. ¿Qué zona te interesa?',
     nogal: 'Citadella del Nogal tiene Villa Campelo ($452,250) y Villa Galiano ($552,750). ¿Qué día te gustaría visitarlos?',
     renta: 'En Santa Rita solo vendemos casas, no rentamos. Pero la mensualidad puede ser similar a una renta. ¿Cuál es tu presupuesto?',
     noInteresa: 'Entiendo. Solo una pregunta: ¿rentas o ya tienes casa? Muchos que rentaban ahora tienen su casa propia.',

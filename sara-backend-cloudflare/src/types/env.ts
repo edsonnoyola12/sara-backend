@@ -52,6 +52,10 @@ export interface Env {
   RETELL_AGENT_ID?: string;
   RETELL_PHONE_NUMBER?: string;
 
+  // ── Stripe (Billing) ──
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+
   // ── Video ──
   VEO_API_KEY?: string;
   HEYGEN_API_KEY?: string;

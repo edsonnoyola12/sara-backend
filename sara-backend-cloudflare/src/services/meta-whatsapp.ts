@@ -136,6 +136,7 @@ export class MetaWhatsAppService {
   private failedMessageCallback?: FailedMessageCallback;
   private rateLimitEnqueueCallback?: RateLimitEnqueueCallback;
   private windowClosedCallback?: WindowClosedCallback;
+  private preSendCheck?: () => Promise<{ allowed: boolean; current: number; limit: number; warning: boolean; percentage: number }>;
   private kvNamespace?: KVNamespace;
   private adminPhone: string = DEFAULT_ADMIN_PHONE;
 
@@ -207,6 +208,19 @@ export class MetaWhatsAppService {
 
   setWindowClosedCallback(callback: WindowClosedCallback): void {
     this.windowClosedCallback = callback;
+  }
+
+  setPreSendCheck(check: () => Promise<{ allowed: boolean; current: number; limit: number; warning: boolean; percentage: number }>): void {
+    this.preSendCheck = check;
+  }
+
+  /** Check message limits. Returns true if allowed. Non-blocking — logs but doesn't throw. */
+  async isWithinMessageLimit(): Promise<boolean> {
+    if (!this.preSendCheck) return true;
+    try {
+      const result = await this.preSendCheck();
+      return result.allowed;
+    } catch { return true; }
   }
 
   /**

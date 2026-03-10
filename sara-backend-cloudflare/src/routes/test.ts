@@ -4424,7 +4424,33 @@ Mensaje: ${mensaje}`;
         }
       });
 
-      // ── 13. Environment: variables críticas ──
+      // ── 13. Multi-tenant: tablas y RPC ──
+      await runCheck('Multi-tenant: tenants + RLS', async () => {
+        try {
+          const { data: tenants, error: tErr } = await supabase.client.from('tenants').select('id, slug, active').eq('active', true);
+          if (tErr) return { ok: false, detail: `tenants query error: ${tErr.message}` };
+          if (!tenants?.length) return { ok: false, detail: 'No active tenants found' };
+
+          // Verify set_tenant RPC works
+          const { error: rpcErr } = await supabase.client.rpc('set_tenant', { tid: '00000000-0000-0000-0000-000000000001' });
+          if (rpcErr) return { ok: false, detail: `set_tenant RPC error: ${rpcErr.message}` };
+
+          // Check SaaS tables exist
+          const saasTables = ['auth_users', 'billing_events', 'invitations', 'usage_metrics'];
+          const missing: string[] = [];
+          for (const tbl of saasTables) {
+            const { error } = await supabase.client.from(tbl).select('id').limit(1);
+            if (error && error.code !== 'PGRST116') missing.push(tbl);
+          }
+          if (missing.length > 0) return { ok: false, detail: `SaaS tables missing: ${missing.join(', ')}` };
+
+          return { ok: true, detail: `${tenants.length} tenant(s) activo(s), RPC OK, 4 SaaS tables OK` };
+        } catch (e: any) {
+          return { ok: false, detail: `Multi-tenant error: ${e.message}` };
+        }
+      });
+
+      // ── 14. Environment: variables críticas ──
       await runCheck('Env: Variables críticas', async () => {
         const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'META_ACCESS_TOKEN', 'META_PHONE_NUMBER_ID', 'ANTHROPIC_API_KEY', 'API_SECRET'];
         const missing = required.filter(k => !(env as any)[k]);

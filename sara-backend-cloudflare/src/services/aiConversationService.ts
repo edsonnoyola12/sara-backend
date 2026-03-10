@@ -2216,7 +2216,7 @@ Casi todos nuestros desarrollos son pet-friendly:
 • Monte Verde ✅
 • Los Encinos ✅
 • Miravalle ✅
-• Andes ✅ (además tiene alberca 🏊)
+• Andes ✅
 
 ⚠️ Solo Distrito Falco NO permite mascotas.
 
@@ -2307,7 +2307,7 @@ Tengo brochures completos con fotos, planos y precios de cada desarrollo.
 • Monte Verde (desde $${AIConversationService.precioMinDesarrollo(properties, 'Monte Verde')})
 • Los Encinos (desde $${AIConversationService.precioMinDesarrollo(properties, 'Los Encinos')})
 • Distrito Falco (desde $${AIConversationService.precioMinDesarrollo(properties, 'Distrito Falco')})
-• Andes (desde $${AIConversationService.precioMinDesarrollo(properties, 'Andes')}, con alberca 🏊)
+• Andes (desde $${AIConversationService.precioMinDesarrollo(properties, 'Andes')})
 • Miravalle (desde $${AIConversationService.precioMinDesarrollo(properties, 'Miravalle')})
 • Paseo Colorines (desde $${AIConversationService.precioMinDesarrollo(properties, 'Paseo Colorines')})
 
@@ -3214,8 +3214,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
       const ubicacion = conUbicacion
         ? (devName.includes('Falco') || devName.includes('Andes') || devName.includes('Alpes') ? ' (Guadalupe)' : ' (Zacatecas)')
         : '';
-      const extra = devName.includes('Andes') ? ', con alberca 🏊' : '';
-      result.push(`🏡 *${devName}* - Desde ${desde}${ubicacion}${extra}`);
+      result.push(`🏡 *${devName}* - Desde ${desde}${ubicacion}`);
     }
 
     return result.join('\n');
@@ -3241,8 +3240,7 @@ Tenemos casas increíbles desde $1.6 millones con financiamiento.
         .map((p: any) => Number(p.price_equipped || p.price));
       if (precios.length === 0) continue;
       const desde = `$${(Math.min(...precios) / 1000000).toFixed(1)}M`;
-      const extra = devName.includes('Andes') ? ', con alberca 🏊' : '';
-      result.push(`• ${devName} (desde ${desde}${extra})`);
+      result.push(`• ${devName} (desde ${desde})`);
     }
 
     return result.join('\n');
