@@ -1103,9 +1103,30 @@ export default {
           const tenant = await resolveTenantFromWebhook(phoneNumberId, supabase);
           await supabase.setTenant(tenant.tenantId);
 
-          // Block expired trial tenants — don't process messages
+          // Block expired trial tenants — but ALWAYS create the lead first (never lose a lead)
           if (tenant.plan === 'expired') {
-            console.warn(`⚠️ Tenant ${tenant.name} trial expired — skipping webhook processing`);
+            console.warn(`⚠️ Tenant ${tenant.name} trial expired — saving lead then blocking`);
+            // Still create the lead so it's not lost
+            try {
+              const expiredCleanPhone = from.replace(/\D/g, '');
+              const { data: existingLead } = await supabase.client
+                .from('leads')
+                .select('id')
+                .like('phone', '%' + expiredCleanPhone.slice(-10))
+                .limit(1)
+                .maybeSingle();
+              if (!existingLead) {
+                await supabase.client.from('leads').insert({
+                  phone: expiredCleanPhone,
+                  status: 'new',
+                  score: 0,
+                  notes: { source: 'expired_trial_capture', original_message: text?.substring(0, 500) || '[media]' }
+                });
+                console.log(`📝 Lead saved despite expired trial: ${expiredCleanPhone}`);
+              }
+            } catch (e) {
+              console.error('❌ Failed to save lead for expired trial:', e);
+            }
             return new Response('OK', { status: 200 });
           }
 
@@ -1133,6 +1154,34 @@ export default {
           // El servicio BusinessHoursService sigue disponible para otros usos
           // (ej: coordinadores, reportes) pero NO interrumpe respuestas a leads.
           // ═══ FIN AVISO FUERA DE HORARIO ═══
+
+          // ═══ GARANTÍA DE CREACIÓN DE LEAD ═══
+          // CRITICAL: Ensure lead exists BEFORE any message-type branching
+          // This prevents losing leads who send stickers, images, docs, or audio as first message
+          if (!teamMember) {
+            try {
+              const cleanPhoneForLead = from.replace(/\D/g, '');
+              const digits = cleanPhoneForLead.slice(-10);
+              const { data: existingLead } = await supabase.client
+                .from('leads')
+                .select('id')
+                .like('phone', '%' + digits)
+                .limit(1)
+                .maybeSingle();
+              if (!existingLead) {
+                // Import and use lead management to create lead with round-robin
+                const { LeadManagementService } = await import('./services/leadManagementService');
+                const leadMgmt = new LeadManagementService(supabase, env.SARA_CACHE);
+                const { lead: newLead } = await leadMgmt.getOrCreateLead(cleanPhoneForLead, profileName);
+                if (newLead) {
+                  console.log(`📝 Lead pre-created for non-text message: ${newLead.id} (${messageType})`);
+                }
+              }
+            } catch (leadErr) {
+              console.error('⚠️ Pre-create lead failed (non-blocking):', leadErr);
+            }
+          }
+          // ═══ FIN GARANTÍA DE CREACIÓN DE LEAD ═══
 
           // ═══ MANEJO DE MENSAJES VACÍOS / WHITESPACE ═══
           // Si el mensaje es puramente de texto pero vacío o solo whitespace, ignorar

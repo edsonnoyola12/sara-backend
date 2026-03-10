@@ -136,7 +136,7 @@ export class LeadManagementService {
     const vendedorId = await this.getVendedorRoundRobin(cachedTeamMembers);
     console.log(`📝 Nuevo lead → vendedor ${vendedorId} (round-robin)`);
 
-    const { data: newLead } = await this.supabase.client
+    const { data: newLead, error: insertError } = await this.supabase.client
       .from('leads')
       .insert({
         phone,
@@ -146,6 +146,23 @@ export class LeadManagementService {
       })
       .select()
       .single();
+
+    if (insertError || !newLead) {
+      console.error(`🚨 CRITICAL: Lead insert FAILED for ${phone}:`, insertError?.message);
+      // Retry once with minimal data
+      const { data: retryLead, error: retryError } = await this.supabase.client
+        .from('leads')
+        .insert({ phone, status: 'new', score: 0 })
+        .select()
+        .single();
+      if (retryError || !retryLead) {
+        console.error(`🚨 CRITICAL: Lead insert RETRY FAILED for ${phone}:`, retryError?.message);
+        // Return a minimal lead object so the message still gets processed
+        // The lead will be created on next message via getOrCreateLead
+        return { lead: { id: 'temp-' + Date.now(), phone, status: 'new', score: 0, name: null, notes: {} } as any, isNew: true, assignedVendedorId: vendedorId };
+      }
+      return { lead: retryLead, isNew: true, assignedVendedorId: vendedorId };
+    }
 
     // ═══ DEDUP CHECK: Flag potential duplicates (non-blocking) ═══
     if (newLead) {

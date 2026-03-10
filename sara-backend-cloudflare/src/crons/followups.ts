@@ -1291,18 +1291,29 @@ export async function verificarReengagement(supabase: SupabaseService, meta: Met
         });
         console.log(`   ✅ Alerta enviada a ${vendedor.name}: ${leadsVendedor.length} leads (via enviarMensajeTeamMember)`);
 
-        // Marcar que ya se alertó hoy para estos leads
+        // Marcar que ya se alertó hoy para estos leads (FRESH read to avoid JSONB race condition)
         const hoyStr = ahora.toISOString().split('T')[0];
         for (const lead of leadsVendedor) {
-          await supabase.client
-            .from('leads')
-            .update({
-              notes: {
-                ...lead.notes,
-                reengagement_alert_sent: hoyStr
-              }
-            })
-            .eq('id', lead.id);
+          try {
+            // Re-read notes fresh to avoid overwriting concurrent changes
+            const { data: freshLead } = await supabase.client
+              .from('leads')
+              .select('notes')
+              .eq('id', lead.id)
+              .maybeSingle();
+            const freshNotes = typeof freshLead?.notes === 'object' ? freshLead.notes : {};
+            await supabase.client
+              .from('leads')
+              .update({
+                notes: {
+                  ...freshNotes,
+                  reengagement_alert_sent: hoyStr
+                }
+              })
+              .eq('id', lead.id);
+          } catch (noteErr) {
+            console.error(`⚠️ Failed to update reengagement flag for ${lead.id}:`, noteErr);
+          }
         }
 
       } catch (err) {
@@ -1667,10 +1678,20 @@ export async function seguimientoPostVenta(supabase: SupabaseService, meta: Meta
         etapaNueva = 3;
       }
 
-      // Enviar mensaje si corresponde
+      // Enviar mensaje si corresponde (post-venta leads have closed 24h window — use template fallback)
       if (mensaje) {
         try {
-          await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+          // Try free-form first, fall back to template if 24h window is closed
+          try {
+            await meta.sendWhatsAppMessage(cliente.phone, mensaje);
+          } catch (windowErr: any) {
+            // 24h window likely closed — use seguimiento_lead template
+            console.log(`   ⚠️ Free-form failed for post-venta (24h window), using template: ${windowErr?.message?.substring(0, 80)}`);
+            const templateComponents = [
+              { type: 'body', parameters: [{ type: 'text', text: nombreCliente }] }
+            ];
+            await meta.sendTemplate(cliente.phone, 'seguimiento_lead', 'es_MX', templateComponents);
+          }
           console.log(`   ✅ Post-venta etapa ${etapaNueva} enviado a ${cliente.name || cliente.phone}`);
 
           // Actualizar notas del cliente + guardar contexto para respuesta
@@ -1988,7 +2009,8 @@ export async function seguimientoCredito(supabase: SupabaseService, meta: MetaWh
         .select('id, status')
         .eq('lead_id', lead.id)
         .neq('status', 'cancelled')
-        .single();
+        .limit(1)
+        .maybeSingle();
 
       // Si ya tiene solicitud activa, no enviar
       if (solicitud) {
@@ -2333,11 +2355,26 @@ export async function reminderDocumentosCredito(supabase: SupabaseService, meta:
         `¿Necesitas ayuda con algo? Estoy aquí para apoyarte. 🏡`;
 
       try {
-        await meta.sendWhatsAppMessage(phoneLimpio, mensaje);
+        // Try free-form first, fall back to template if 24h window closed
+        try {
+          await meta.sendWhatsAppMessage(phoneLimpio, mensaje);
+        } catch (windowErr: any) {
+          console.log(`   ⚠️ Docs reminder free-form failed (24h window), using template`);
+          const templateComponents = [
+            { type: 'body', parameters: [{ type: 'text', text: nombre }] }
+          ];
+          await meta.sendTemplate(phoneLimpio, 'seguimiento_lead', 'es_MX', templateComponents);
+        }
 
-        // Actualizar notas
+        // Actualizar notas (fresh read to avoid JSONB race)
+        const { data: freshLead } = await supabase.client
+          .from('leads')
+          .select('notes')
+          .eq('id', lead.id)
+          .maybeSingle();
+        const freshNotes = typeof freshLead?.notes === 'object' ? freshLead.notes : {};
         const notasActualizadas = {
-          ...notas,
+          ...freshNotes,
           docs_reminder_sent: hoyStr,
           ultimo_docs_reminder: ahora.toISOString()
         };

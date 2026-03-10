@@ -2424,30 +2424,31 @@ export async function alertarChurnCritico(supabase: SupabaseService, meta: MetaW
     for (const lead of leads) {
       if (alertasEnviadas >= 5) break;
 
-      const notas = typeof lead.notes === 'object' ? lead.notes : {};
-      const churnRisk = (notas as any)?.churn_risk;
+      try {
+        const notas = typeof lead.notes === 'object' ? lead.notes : {};
+        const churnRisk = (notas as any)?.churn_risk;
 
-      if (!churnRisk || (churnRisk.label !== 'critical' && churnRisk.label !== 'at_risk')) continue;
+        if (!churnRisk || (churnRisk.label !== 'critical' && churnRisk.label !== 'at_risk')) continue;
 
-      // No alertar si ya se alertó en últimas 48h
-      const ultimaAlerta = (notas as any)?.churn_alert_sent;
-      if (ultimaAlerta && ultimaAlerta > hace48h) continue;
+        // No alertar si ya se alertó en últimas 48h
+        const ultimaAlerta = (notas as any)?.churn_alert_sent;
+        if (ultimaAlerta && ultimaAlerta > hace48h) continue;
 
-      if (!lead.assigned_to) continue;
+        if (!lead.assigned_to) continue;
 
-      const { data: vendedor } = await supabase.client
-        .from('team_members')
-        .select('id, name, phone')
-        .eq('id', lead.assigned_to)
-        .single();
+        const { data: vendedor } = await supabase.client
+          .from('team_members')
+          .select('id, name, phone')
+          .eq('id', lead.assigned_to)
+          .maybeSingle();
 
-      if (!vendedor?.phone) continue;
+        if (!vendedor?.phone) continue;
 
-      const nombreLead = lead.name || 'Sin nombre';
-      const razones = Array.isArray(churnRisk.reasons) ? churnRisk.reasons.join(', ') : '';
-      const emoji = churnRisk.label === 'critical' ? '🚨' : '⚠️';
+        const nombreLead = lead.name || 'Sin nombre';
+        const razones = Array.isArray(churnRisk.reasons) ? churnRisk.reasons.join(', ') : '';
+        const emoji = churnRisk.label === 'critical' ? '🚨' : '⚠️';
 
-      const alertaMsg = `${emoji} *LEAD EN RIESGO: ${nombreLead}*
+        const alertaMsg = `${emoji} *LEAD EN RIESGO: ${nombreLead}*
 
 📊 Riesgo: *${churnRisk.label.toUpperCase()}* (${churnRisk.score}/100)
 📋 Razones: ${razones}
@@ -2455,19 +2456,25 @@ export async function alertarChurnCritico(supabase: SupabaseService, meta: MetaW
 💡 Contacta hoy para evitar perder este lead.
 📞 Responde: bridge ${nombreLead.split(' ')[0]}`;
 
-      await enviarMensajeTeamMember(supabase, meta, vendedor, alertaMsg, {
-        tipoMensaje: 'alerta_lead',
-        pendingKey: 'pending_alerta_lead'
-      });
+        await enviarMensajeTeamMember(supabase, meta, vendedor, alertaMsg, {
+          tipoMensaje: 'alerta_lead',
+          pendingKey: 'pending_alerta_lead'
+        });
 
-      // Mark alert sent
-      await supabase.client
-        .from('leads')
-        .update({ notes: { ...notas, churn_alert_sent: ahora.toISOString() } })
-        .eq('id', lead.id);
+        // Mark alert sent (fresh read to avoid JSONB race)
+        const { data: freshLead } = await supabase.client
+          .from('leads').select('notes').eq('id', lead.id).maybeSingle();
+        const freshNotes = typeof freshLead?.notes === 'object' ? freshLead.notes : {};
+        await supabase.client
+          .from('leads')
+          .update({ notes: { ...freshNotes, churn_alert_sent: ahora.toISOString() } })
+          .eq('id', lead.id);
 
-      alertasEnviadas++;
-      console.log(`${emoji} Alerta churn enviada a ${vendedor.name} por ${nombreLead} (${churnRisk.label})`);
+        alertasEnviadas++;
+        console.log(`${emoji} Alerta churn enviada a ${vendedor.name} por ${nombreLead} (${churnRisk.label})`);
+      } catch (churnErr) {
+        console.error(`❌ Error en alerta churn para ${lead.name || lead.id}:`, churnErr);
+      }
     }
 
     console.log(`⚠️ Alertas churn completadas: ${alertasEnviadas} enviadas`);

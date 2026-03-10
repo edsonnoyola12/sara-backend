@@ -1,6 +1,6 @@
 # SARA CRM - Referencia para Claude Code
 
-> Última actualización: 2026-03-10 (Sesión 91)
+> Última actualización: 2026-03-10 (Sesión 92)
 > Historial detallado de cambios: `docs/CHANGELOG.md`
 
 ---
@@ -369,5 +369,6 @@ npx wrangler deploy      # Re-deploy
 | Multi-tenant | ✅ RLS + tenant_id en 38 tablas + 4 SaaS tables + signup→login→JWT E2E + CRON multi-tenant loop + per-tenant rate limiting |
 | SaaS APIs | Signup, Login/JWT, Onboarding (4 pasos + WA credential verify), Admin, Billing (Stripe), Usage, Invitations |
 | Trial/Billing | Trial expiration enforcement (webhook + API + CRON), plan downgrade on Stripe cancellation, message limit enforcement |
-| Resilience | Retry queue (backoff exponencial), mark-before-send, cache invalidation, AI fallback, KV dedup, fetch timeouts, atomic writes, error persistence, double-booking prevention, CRON overlap dedup, per-tenant error isolation |
+| Zero Lead Loss | Lead pre-creation before message-type branching, insert retry+fallback, expired trial lead capture, template fallback for closed 24h windows |
+| Resilience | Retry queue (backoff exponencial), mark-before-send, cache invalidation, AI fallback, KV dedup, fetch timeouts, atomic writes, error persistence, double-booking prevention, CRON overlap dedup, per-tenant error isolation, JSONB fresh-read before write, per-iteration try/catch in CRON loops |
 | Integraciones | Meta/WhatsApp ✅, Supabase ✅, Cloudflare ✅, Google Calendar ✅, Veo 3 ✅, Retell ✅ |

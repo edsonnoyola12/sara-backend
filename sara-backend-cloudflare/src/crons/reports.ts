@@ -1151,8 +1151,8 @@ export async function enviarEncuestasPostCita(supabase: SupabaseService, meta: M
       return;
     }
 
-    // Batch prefetch: obtener todas las encuestas ya enviadas para las citas de hoy (evita N+1 queries)
-    const citaIds = citasCompletadas.map(c => c.id).filter(Boolean);
+    // Batch prefetch: obtener todas las encuestas ya enviadas para las citas elegibles (evita N+1 queries)
+    const citaIds = citasParaEncuesta.map(c => c.id).filter(Boolean);
     const { data: encuestasExistentes } = citaIds.length > 0
       ? await supabase.client
           .from('surveys')
@@ -1162,7 +1162,7 @@ export async function enviarEncuestasPostCita(supabase: SupabaseService, meta: M
       : { data: [] };
     const encuestaEnviadaSet = new Set((encuestasExistentes || []).map(e => e.appointment_id));
 
-    for (const cita of citasCompletadas) {
+    for (const cita of citasParaEncuesta) {
       const lead = cita.leads as any;
       const vendedor = cita.team_members as any;
       if (!lead?.phone) continue;
@@ -1241,7 +1241,8 @@ export async function enviarEncuestasNPS(supabase: SupabaseService, meta: MetaWh
         .select('id')
         .eq('lead_id', lead.id)
         .eq('survey_type', 'nps')
-        .single();
+        .limit(1)
+        .maybeSingle();
 
       if (encuestaExistente) continue;
 
@@ -1337,12 +1338,28 @@ export async function procesarRespuestaEncuesta(supabase: SupabaseService, phone
         if (respuesta === 4) {
           const { data: admins } = await supabase.client
             .from('team_members')
-            .select('phone')
+            .select('*')
             .eq('role', 'admin')
             .eq('active', true);
 
-          // Notificación asíncrona - no esperamos
           console.error(`⚠️ Encuesta negativa de ${encuesta.lead_name} sobre ${encuesta.vendedor_name}`);
+          if (admins && admins.length > 0) {
+            const alertMsg = `🚨 *Encuesta negativa*\n\n` +
+              `Cliente: *${encuesta.lead_name}*\n` +
+              `Vendedor: *${encuesta.vendedor_name || 'N/A'}*\n` +
+              `Calificación: *Mala* ❌\n\n` +
+              `Se requiere seguimiento inmediato.`;
+            for (const admin of admins) {
+              try {
+                await enviarMensajeTeamMember(supabase, meta, admin, alertMsg, {
+                  tipoMensaje: 'alerta_sistema',
+                  pendingKey: 'pending_alerta_encuesta'
+                });
+              } catch (adminErr) {
+                console.error(`❌ Failed to notify admin ${admin.name}:`, adminErr);
+              }
+            }
+          }
         }
 
         return respuestas[respuesta];
